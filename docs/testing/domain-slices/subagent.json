@@ -84,13 +84,18 @@
     "packages/shared/src/__tests__/subagent.test.ts",
     "packages/shared/src/__tests__/workflow.test.ts",
     "packages/shared/src/__tests__/workflow-viz-protocol.test.ts",
-    "packages/shared/src/__tests__/virtual-session-id.test.ts"
+    "packages/shared/src/__tests__/virtual-session-id.test.ts",
+    "packages/shared/src/__tests__/protocol-subagent-stream.test.ts",
+    "packages/runtime/src/infra/subagent-model-gateway.test.ts"
   ],
   "sharedBy": {},
   "contracts": [
     {
       "carrier": "packages/subagent-core/src/shared/run-vocabulary.ts",
-      "on": ["session-manager", "pending-notifications"],
+      "on": [
+        "session-manager",
+        "pending-notifications"
+      ],
       "note": "SETTLEMENT_REASONS 双源对齐（extension-protocol/pending-entries.ts ↔ subagent-core/run-vocabulary.ts，CONTEXT.md 明言）：结清词表改动 → session-manager 债权/watch 桥与 pending-notifications 域联动"
     }
   ],

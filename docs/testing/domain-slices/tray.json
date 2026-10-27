@@ -1,16 +1,25 @@
 {
   "name": "tray",
-  "summary": "任务托盘（tray widget / native 桶 / 后台任务详情面板）",
+  "summary": "任务托盘（tray widget / native 桶 / 后台任务详情面板，W2-B 冻结 3 挂载件；后台任务全链本体在 uncategorized 池待扩域 base-tool-enhance，见其 pendingDomains 注记）",
   "layers": [
     "renderer"
   ],
-  "scope": {},
-  "tests": [],
+  "scope": {
+    "renderer": [
+      "packages/renderer/src/components/panel/tray/**",
+      "packages/renderer/src/lib/background-task-bucket.ts"
+    ]
+  },
+  "tests": [
+    "packages/renderer/src/__tests__/components/background-task-detail-panel.test.ts",
+    "packages/renderer/src/__tests__/panel/tray/tray-native-bundle.test.ts",
+    "packages/renderer/src/components/panel/tray/__tests__/tray-widget-bundle.test.ts"
+  ],
   "sharedBy": {},
   "contracts": [],
   "e2eRules": [],
   "w2bMountCompat": {
     "mountSource": "docs/testing/domain-map.json",
-    "status": "pending"
+    "status": "enforced"
   }
 }

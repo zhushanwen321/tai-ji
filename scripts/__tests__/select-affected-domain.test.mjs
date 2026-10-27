@@ -187,11 +187,11 @@ describe('真实注册表烟测（防注册表与脚本结构漂移无信号）'
     }
   })
 
-  it('W2-B 14 域全部携带前向兼容声明（批 A 骨架态 = pending）', () => {
+  it('W2-B 14 域全部携带前向兼容声明（批 B/C/D 注册完成后 = enforced）', () => {
     const { slices } = loadRegistry()
     const byName = new Map(slices.map((s) => [s.name, s]))
     for (const name of W2B_14) {
-      expect(byName.get(name)?.w2bMountCompat?.status, name).toBe('pending')
+      expect(byName.get(name)?.w2bMountCompat?.status, name).toBe('enforced')
     }
   })
 

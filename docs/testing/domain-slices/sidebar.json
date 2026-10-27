@@ -1,16 +1,35 @@
 {
   "name": "sidebar",
-  "summary": "侧栏与会话列表（renderer）",
+  "summary": "侧栏与会话列表（renderer sidebar 容器/useSidebar 族/sidebar store；W2-B 冻结 8 挂载件，含 shell/ 目录下的 sidebar-resize-handle）",
   "layers": [
     "renderer"
   ],
-  "scope": {},
-  "tests": [],
+  "scope": {
+    "renderer": [
+      "packages/renderer/src/components/sidebar/**",
+      "packages/renderer/src/composables/features/sidebar/**",
+      "packages/renderer/src/stores/sidebar.ts"
+    ]
+  },
+  "tests": [
+    "packages/renderer/src/__tests__/shell/sidebar-resize-handle.test.ts",
+    "packages/renderer/src/__tests__/sidebar/force-quit-queue-recovery.test.ts",
+    "packages/renderer/src/__tests__/sidebar/session-item-message-count.test.ts",
+    "packages/renderer/src/__tests__/sidebar/session-item-quote.test.ts",
+    "packages/renderer/src/__tests__/sidebar/session-list-bundle.test.ts",
+    "packages/renderer/src/__tests__/sidebar/sidebar-misc-bundle.test.ts",
+    "packages/renderer/src/__tests__/sidebar/sidebar-mount-bundle.test.ts",
+    "packages/renderer/src/__tests__/sidebar/sidebar-session-bundle.test.ts",
+    "packages/renderer/src/components/sidebar/__tests__/**",
+    "packages/renderer/src/__tests__/composables/useSidebar.test.ts",
+    "packages/renderer/src/__tests__/useSidebar-delete-cleanup.test.ts",
+    "packages/renderer/src/__tests__/composables/sidebar-actions-bundle.test.ts"
+  ],
   "sharedBy": {},
   "contracts": [],
   "e2eRules": [],
   "w2bMountCompat": {
     "mountSource": "docs/testing/domain-map.json",
-    "status": "pending"
+    "status": "enforced"
   }
 }

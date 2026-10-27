@@ -24,7 +24,8 @@
   "tests": [
     "packages/runtime/src/services/git/**",
     "packages/runtime/src/infra/system/git-head-watcher.test.ts",
-    "packages/runtime/test/git-file-bundle.test.ts"
+    "packages/runtime/test/git-file-bundle.test.ts",
+    "packages/runtime/test/new-task/new-task-bundle.test.ts"
   ],
   "sharedBy": {},
   "contracts": [],

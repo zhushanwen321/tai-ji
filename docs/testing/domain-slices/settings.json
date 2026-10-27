@@ -32,7 +32,8 @@
     "packages/renderer/src/__tests__/provider-builtin-ui.test.ts",
     "packages/renderer/src/components/settings/**",
     "packages/ui/src/features/settings/**",
-    "packages/core/src/domain/settings/**"
+    "packages/core/src/domain/settings/**",
+    "packages/renderer/src/composables/shell/__tests__/useSettingsShell.test.ts"
   ],
   "sharedBy": {},
   "contracts": [],

@@ -9,10 +9,18 @@
     "sharedBy": "本域 tests 中跨域混合文件的注记：'文件精确路径' → 内含域数组。owner 唯一、触发集合可多：混合 bundle owner 归 uncategorized 并在此注记内含域，select-affected-domain 按注记多域命中，run-domain-tests 按反查并入各域执行清单",
     "contracts": "点对点契约：[{ \"carrier\": 路径或 glob, \"on\": [对侧域名], \"note\": 说明 }]。carrier = 契约载体（必须被本域 scope 覆盖，check 校验）；on = 本域受影响时附加触发的对侧域（选择器做闭包，宁多跑不漏跑）",
     "e2eRules": "可选交叉引用 docs/testing/e2e-map.json 的 rule id（填了才校验存在性，不强制逐域填）",
-    "w2bMountCompat": "仅 W2-B 14 域携带：{ mountSource, status }。status=pending 表示切片未填（tests 为空，交叉核对挂起）；status=enforced 表示已填（tests 非空且 domain-map 同名域 files ⊆ tests 展开，由 check 强制）。两态与 tests 空非空不一致 = 红灯"
+    "w2bMountCompat": "仅 W2-B 14 域携带：{ mountSource, status }。status=pending 表示切片未填（tests 为空，交叉核对挂起）；status=enforced 表示已填（tests 非空且 domain-map 同名域 files ⊆ tests 展开，由 check 强制）。两态与 tests 空非空不一致 = 红灯",
+    "pendingDomains": "仅 uncategorized 池可携带：待扩域聚簇注记（聚簇名 → 说明）。整包进池的扩展包/横切功能按簇登记，立新城时整簇迁出并下调基线"
   },
-  "broadcastCarriers": [],
-  "uncategorizedBaseline": null,
-  "coverageEnforced": false,
-  "batchNote": "broadcastCarriers（基础层广播载体：extension-protocol protocol.ts / markers.ts / pending-entries.ts / state-machine 源码 / core transport 基座等）、uncategorizedBaseline（棘轮上限，只降不升）、coverageEnforced（未覆盖清单 = 0 的硬验收开关）由批 D 填充与启用；批 A 只立结构。"
+  "broadcastCarriers": [
+    "packages/extension-protocol/src/index.ts",
+    "packages/extension-protocol/src/core/**",
+    "packages/extension-protocol/src/pending-entries.ts",
+    "packages/state-machine/src/**",
+    "packages/core/src/transport/**"
+  ],
+  "uncategorizedBaseline": 161,
+  "coverageEnforced": true,
+  "version": 1,
+  "maintenance": "维护说明：① 新增测试文件产生登记义务——pre-commit 2f-4 跑 select-affected-domain --staged 拦未归域文件，归入所属域 tests（整目录可用 <prefix>/** glob）或 uncategorized 精确清单；② uncategorized 棘轮只降不升——check 校验展开数 ≤ uncategorizedBaseline，缩趋手段 = 按内含域拆注 sharedBy / 归 host/foundation / 按 pendingDomains 注记整簇立新城迁出（新城建立 = 新建 <域>.json + uncategorized 删对应条目 + 下调基线）；③ coverageEnforced 置 true 前提 = --uncovered 清零（当前 9 件为批 B/C 域归属残量，见 wave4-batchD 报告）；④ W2-B 14 域已全部 enforced，domain-map.json 冻结不变，两表一致性由 check 交叉核对。"
 }

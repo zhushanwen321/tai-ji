@@ -37,6 +37,5 @@
       "note": "tts 设置页源码属本域触发范围，但 use-tts-enabled.test.ts 归属批 B settings 域（settings 树整树收编）；改 tts 页面源码需联跑 settings 域补齐该测试（超集方向，不漏）"
     }
   ],
-  "contracts": [],
   "e2eRules": []
 }

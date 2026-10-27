@@ -153,17 +153,34 @@
     "packages/shared/src/__tests__/protocol-create-idempotency.test.ts",
     "packages/shared/src/__tests__/protocol-rolling-restart.test.ts",
     "packages/shared/src/__tests__/protocol-revoke.test.ts",
-    "packages/shared/src/__tests__/revoke-restore.test.ts"
+    "packages/shared/src/__tests__/revoke-restore.test.ts",
+    "packages/runtime/src/transport/__tests__/session-message-handler-delivery.test.ts",
+    "packages/renderer/src/composables/effects/__tests__/useCompletionNotify.test.ts",
+    "packages/renderer/src/composables/effects/__tests__/useMessageEffects.test.ts",
+    "packages/renderer/src/composables/effects/__tests__/stream-sound-bundle.test.ts",
+    "packages/renderer/src/__tests__/composables/useForkActions.test.ts"
   ],
   "sharedBy": {
-    "packages/runtime/src/services/session/__tests__/session-model-bundle.test.ts": ["provider"],
-    "packages/runtime/test/session-lifecycle-preset.test.ts": ["preset"],
-    "packages/runtime/test/session-scanner-preset.test.ts": ["preset"]
+    "packages/runtime/src/services/session/__tests__/session-model-bundle.test.ts": [
+      "provider"
+    ],
+    "packages/runtime/test/session-lifecycle-preset.test.ts": [
+      "preset"
+    ],
+    "packages/runtime/test/session-scanner-preset.test.ts": [
+      "preset"
+    ],
+    "packages/renderer/src/composables/effects/__tests__/useMessageEffects.test.ts": [
+      "subagent"
+    ]
   },
   "contracts": [
     {
       "carrier": "packages/runtime/src/services/session/session-records.ts",
-      "on": ["subagent", "plan"],
+      "on": [
+        "subagent",
+        "plan"
+      ],
       "note": "record 派生视图链：subagent/workflow/plan 的 entry 经 session-records 派生扫描与 events-projection 分发；改派生通道登记口时对侧域联动"
     }
   ],

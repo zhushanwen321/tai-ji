@@ -798,6 +798,50 @@ if echo "$STAGED_FILES" | grep -qE "^docs/testing/domain-map\.json$|^packages/(r
 fi
 
 # ============================================================================
+# 2f-4. 功能域切片注册表健康度 + 新增文件归域门禁（round6 wave4 域垂直切分）
+#     scripts/check-domain-slices.mjs：docs/testing/domain-slices/ 是全域切片
+#     SSOT（登记即归属；38 域 = 35 功能域 + foundation/host/uncategorized 三池），
+#     消费方 = select-affected-domain.mjs（改动→受影响域）与 run-domain-tests.mjs
+#     （域触发执行）。本块两道检查：
+#     ① 注册表健康度（死 glob / 双归属 / W2-B 交叉核对 / uncategorized 棘轮 /
+#        sharedBy 与 contracts 一致性）——staged 命中注册表或三脚本时触发；
+#     ② 新增文件归域门禁 select-affected-domain --staged——无条件运行（e2e 防漏
+#        门禁同款：staged 新增测试文件但漏改注册表的形态，靠「注册表被 staged」
+#        条件拦不住；watched roots 全集只存在于脚本内推导，bash 侧复刻目录判断
+#        必然漂移成第二份事实源；非看护文件提交脚本零命中静默通过）。
+#     复用 SKIP_CODE_RULES_CHECK 开关（wave4 接线裁决，与 2f/2f-2/2f-3 一致）。
+# ============================================================================
+
+if echo "$STAGED_FILES" | grep -qE "^docs/testing/domain-slices/|^scripts/(select-affected-domain|check-domain-slices|run-domain-tests)\.mjs$"; then
+    print_section "[功能域切片注册表健康度检查]"
+    if [ "$SKIP_CODE_RULES_CHECK" != "1" ]; then
+        if [ ! -f "scripts/check-domain-slices.mjs" ]; then
+            echo -e "${RED}[ERROR] 找不到 scripts/check-domain-slices.mjs（检查脚本被删除）${NC}"
+            exit 1
+        fi
+        if ! node scripts/check-domain-slices.mjs; then
+            echo -e "${RED}[ERROR] 域切片注册表检查未通过——域触发清单已漂移，按上方 ✗ 明细修复后重试${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${YELLOW}[SKIP] 功能域切片注册表健康度检查已跳过${NC}"
+    fi
+fi
+
+if [ "$SKIP_CODE_RULES_CHECK" != "1" ]; then
+    if [ ! -f "scripts/select-affected-domain.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/select-affected-domain.mjs（检查脚本被删除）${NC}"
+        exit 1
+    fi
+    if ! node scripts/select-affected-domain.mjs --staged; then
+        echo -e "${RED}[ERROR] 域切片防漏登记未通过——按上方明细将新增/改名文件归入所属域 tests（docs/testing/domain-slices/<域>.json）或登记 uncategorized 后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+fi
+
+# ============================================================================
 # 2g. review-fix-loop 双实现锁步检查
 #     scripts/check-rfl-parity.mjs：review+fix 循环有两份实现（pi 内置
 #     packages/subagent-core/workflows/review-fix-loop-utils.cjs / zcode 原生
