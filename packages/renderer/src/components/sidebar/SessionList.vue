@@ -491,9 +491,9 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
 })
 provide('sessionItemEsc', escCount)
 
-/** 后代 SessionItem 删除确认态登记槽（§6.7 后行档聚合谓词的读点来源）：
+/** 后代 SessionItem 删除确认态登记槽（modal-surface-registry spec §6.7 后行档聚合谓词的读点来源）：
  *  每个 SessionItem 把自己的 confirming ref 注入本集合，卸载即撤。聚合谓词直读各 ref 当前值
- *  （动作时刻新鲜度），不经 escCount 反向推导——广播计数器单调递增、非状态本体（§6.7 禁绑）。 */
+ *  （动作时刻新鲜度），不经 escCount 反向推导——广播计数器单调递增、非状态本体（modal-surface-registry spec §6.7 禁绑）。 */
 const itemConfirmingSet = new Set<Ref<boolean>>()
 provide('sessionItemConfirmingSet', itemConfirmingSet)
 
@@ -627,7 +627,7 @@ useEventListener(window, 'pointerdown', (e: PointerEvent) => {
   folderConfirmingCwd.value = null
 })
 
-/** 删除确认态聚合谓词（§6.7 后行档开合态绑定源 = 确认态本体）：
+/** 删除确认态聚合谓词（modal-surface-registry spec §6.7 后行档开合态绑定源 = 确认态本体）：
  *  N 个 SessionItem 后代确认态 与 folderConfirmingCwd。任一确认态开着 ⇒ 入聚合让位族
  *  （yieldsEsc=true，见 modal-surface-registry 登记表），编排器 Esc 不动作、由本组件 escCount
  *  链路清确认态——一次 Esc 只清确认不动容器，第二次 Esc 才走层级序。 */
