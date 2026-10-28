@@ -1,5 +1,11 @@
 # @zhushanwen/pi-session-manager
 
+## 0.6.3
+
+### Patch Changes
+
+- 3107549df: chore: refresh dependency range (triggered by @zhushanwen/extension-protocol@0.24.0 → @zhushanwen/extension-protocol@0.25.0, @zhushanwen/pi-delivery-port@0.3.0 → @zhushanwen/pi-delivery-port@0.3.1)
+
 ## 0.6.2
 
 ### Patch Changes

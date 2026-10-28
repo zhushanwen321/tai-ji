@@ -1,5 +1,11 @@
 # @zhushanwen/pi-subagent-workflow
 
+## 10.2.1
+
+### Patch Changes
+
+- 3107549df: Follow the snake_case tool rename (`workflow_script`) in the tool definition and model-facing prompt cross-references.
+
 ## 10.2.0
 
 ### Minor Changes

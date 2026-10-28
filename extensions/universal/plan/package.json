@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-plan",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "Lightweight plan mode for Pi coding agent",
   "type": "module",
   "main": "index.ts",

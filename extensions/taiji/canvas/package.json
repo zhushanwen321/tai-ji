@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-canvas",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "description": "Problem-solving canvas toolface for pi: six deferred canvas_* tools bridging the agent to the taiji runtime CanvasService via the CANVAS_MARKER select channel (problem-solve-canvas)",
   "type": "module",
   "main": "index.ts",
