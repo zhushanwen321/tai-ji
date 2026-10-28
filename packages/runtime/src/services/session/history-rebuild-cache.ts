@@ -10,8 +10,7 @@
  * renderer 无 append 入口可用；runtime 是唯一持有「上次重建结果」的层。
  *
  * 生命周期（D6-1）：
- * - 写入：getHistory 每次成功重建后（全量与增量路径都写；B8 起单条目字节帽 32MB，
- *   超限不入缓存——「缓存从未存在」退化，见 HistoryRebuildCache 类注释）
+ * - 写入：getHistory 每次成功重建后（全量与增量路径都写）
  * - 读取：getHistory 命中时走 getEntries(since=lastLeafId) 增量（空增量 = 缓存新鲜）
  * - 清除：SessionHistoryReader.onSessionDisposed（Facade removeSessionEntry 第 ⑤ 步直调，
  *   与 traceSync/projection/records 并列；session 删除 + pi 进程退出两条路汇聚点）
@@ -65,50 +64,21 @@ export interface HistoryRebuildCacheEntry {
 const HISTORY_CACHE_MAX_SESSIONS = 8
 
 /**
- * 单条目字节帽 = 32MB（B8，memory-leak-remediation §3.3-B8 候选 A）。语义对齐
- * READ_PRECHECK_MAX_BYTES（shared SSOT，同为 32MB）——超过该量级的 session 本就走
- * 离线分块路径，不值得整份驻留缓存；超限条目不入缓存（「缓存从未存在」退化：下次
- * getHistory 全量重建，行为等价于从未命中缓存）。量级口径 = 全量 Message[] 逐条
- * Buffer.byteLength(JSON.stringify(m)) 求和（estimateMessagesBytes，与
- * applyHistoryBudgetWindow 的预算字节同源）。
- */
-// eslint-disable-next-line no-magic-numbers -- 设计标定阈值（对齐 READ_PRECHECK_MAX_BYTES），校准依据见上方 JSDoc
-const HISTORY_CACHE_MAX_ENTRY_BYTES = 32 * 1024 * 1024
-
-/**
- * 估算全量 Message[] 的序列化字节（B8 字节帽量级口径）：逐条求和（与
- * selectTurnWindowStart 的预算字节同源——近 wire reply 实际体积，images base64
- * 等大字段如实计入）。分条求和而非整串 JSON.stringify：避免单次巨串分配，且与既有
- * 预算窗口代码逐条口径一致。
- */
-function estimateMessagesBytes(messages: Message[]): number {
-  let bytes = 0
-  for (const m of messages) {
-    bytes += Buffer.byteLength(JSON.stringify(m), 'utf-8')
-  }
-  return bytes
-}
-
-/**
  * per-session 重建缓存（LRU，Map 插入序实现）。
  *
  * LRU 语义：get/set 命中时把 key 移到 Map 尾部（delete + set），超帽驱逐 Map 头部
  * （最久未访问）。与 renderer chat store 的 LRU 窗口对齐——被 renderer 驱逐的 session
  * 下次重进走全量重建，等价于「缓存从未存在」，行为退化为现状。
  *
- * 字节帽（B8，memory-leak-remediation §3.3-B8 候选 A）：条目写入前量全量 Message[]
- * 序列化字节，超 32MB 不入缓存。缓存基线**始终存完整活跃路径派生视图**（message-revoke
- * U6a 起全量重建经 leafId 裁剪后落缓存——基线是「未切预算窗的完整活跃路径」，非全文件，
- * 被撤分支不进基线；增量合并正确性依赖——不采用候选 B「缓存也切预算窗」的否决理由：
- * 增量基线错位 = 会话内容错乱），故字节维度只能整条目取舍，不做窗口化。
+ * 缓存基线**始终存完整活跃路径派生视图**（message-revoke U6a 起全量重建经 leafId 裁剪后
+ * 落缓存——基线是「未切预算窗的完整活跃路径」，非全文件，被撤分支不进基线），不切预算窗
+ * （增量基线错位 = 会话内容错乱），字节维度不做窗口化、不做取舍。
  */
 export class HistoryRebuildCache {
   private readonly entries = new Map<string, HistoryRebuildCacheEntry>()
 
   constructor(
     private readonly maxSessions = HISTORY_CACHE_MAX_SESSIONS,
-    /** 单条目字节帽（B8；构造参数注入便于测试，对齐 B7 ring 预算注入范式）。 */
-    private readonly maxEntryBytes = HISTORY_CACHE_MAX_ENTRY_BYTES,
   ) {}
 
   /** 取缓存并刷新 LRU 位置。无缓存返回 undefined。 */
@@ -122,22 +92,9 @@ export class HistoryRebuildCache {
   }
 
   /**
-   * 写入/覆盖缓存条目。两道帽：
-   * 1. 单条目字节帽（B8-A）——set 前量全量 Message[] 序列化字节，超 maxEntryBytes
-   *    不入缓存并摘除既有条目（「缓存从未存在」退化：该 session 每次 getHistory 全量
-   *    重建）。摘除旧条目防「冻结基线」——历史 append-only 只增不减，保留旧条目会让
-   *    增量 delta 从旧叶子无界增长，退化不如全量重建。
-   * 2. 容量帽 LRU——超 maxSessions 驱逐最久未访问的 session 条目（原有行为）。
+   * 写入/覆盖缓存条目。容量帽 LRU——超 maxSessions 驱逐最久未访问的 session 条目。
    */
   set(sessionId: string, entry: HistoryRebuildCacheEntry): void {
-    const bytes = estimateMessagesBytes(entry.messages)
-    if (bytes > this.maxEntryBytes) {
-      console.warn(
-        `[history-rebuild-cache] entry exceeds byte cap, skipping cache (sessionId=${sessionId}: ${bytes} > ${this.maxEntryBytes} bytes), session degrades to full rebuild per getHistory`,
-      )
-      this.entries.delete(sessionId)
-      return
-    }
     if (this.entries.has(sessionId)) this.entries.delete(sessionId)
     this.entries.set(sessionId, entry)
     while (this.entries.size > this.maxSessions) {
@@ -378,8 +335,7 @@ export class SessionHistoryReader {
   private readonly inflightGetHistory = new Map<string, Promise<HistoryWindowResult>>()
 
   /**
-   * @param historyCache 缓存实例注入（B8 测试缝：字节帽/容量帽可注入，对齐 B7 ring
-   * 「预算构造参数注入」范式）；缺省默认帽（8 session / 32MB 单条目）。
+   * @param historyCache 缓存实例注入（测试缝：容量帽可注入）；缺省默认帽（8 session）。
    */
   constructor(private readonly deps: SessionHistoryReaderDeps, historyCache?: HistoryRebuildCache) {
     this.historyCache = historyCache ?? new HistoryRebuildCache()
