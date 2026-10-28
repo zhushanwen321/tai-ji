@@ -24,12 +24,15 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import type { Project, ProjectCommandReply, ProjectLoadReply } from '@taiji/shared'
+import { DEFAULT_PROJECT_ID } from '@taiji/shared'
 import { project as projectApi } from '@/api'
 import { isDefaultProjectOf } from '@/composables/logic/project-session'
 import i18n from '@/i18n'
 import { useToast } from '@/composables/useToast'
 
-export const DEFAULT_PROJECT_ID = 'proj-default'
+// 默认项目 id 领域常量：SSOT = @taiji/shared/project（跨包禁止手抄字面量）。此处 re-export
+// 维持 renderer 消费方经 @/stores/project 的既有导入路径（SessionList 等，消费点免改）。
+export { DEFAULT_PROJECT_ID }
 
 /** project 加载状态机 4 值词表（§6.5：idle 初始未加载 / loading 在途 / loaded 成功 / failed 失败）。 */
 export type ProjectLoadState = 'idle' | 'loading' | 'loaded' | 'failed'
