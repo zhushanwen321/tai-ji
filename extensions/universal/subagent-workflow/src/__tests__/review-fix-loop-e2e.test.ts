@@ -1382,7 +1382,7 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
       expect(result.error).toBeUndefined();
       const outcome = assertScriptOutcome(result.scriptResult);
       expect(outcome.terminated).toBe("aggregator-failure");
-      expect(outcome.message).toContain("suggestion=3, suggestion_ids=0");
+      expect(outcome.message).toContain("aggregator suggestion 台账缺陷（reported=3, ids=0）");
       expect(outcome.message).toContain("恢复动作");
       expect(outcome.message).toContain("suggestion_ids");
 
@@ -1429,7 +1429,7 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
       expect(result.error).toBeUndefined();
       const outcome = assertScriptOutcome(result.scriptResult);
       expect(outcome.terminated).toBe("aggregator-failure");
-      expect(outcome.message).toContain("suggestion=3, suggestion_ids=1");
+      expect(outcome.message).toContain("reported=3, ids=1");
       expect(outcome.message).toContain("恢复动作");
 
       const { kinds } = runner.stats();
