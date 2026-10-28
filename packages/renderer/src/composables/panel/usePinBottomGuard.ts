@@ -15,9 +15,10 @@
  *   不对用户阅读静止态发声（滚动条拖拽场景结构性不误报）；
  * - isStreaming 判读指引：流式中（isStreaming=true）双超阈值按真实跟随失效上报——收敛期
  *   恒在 force 后窗口内，窗口外的流式持续 gap 无合法瞬态解释（设计 v5）；
- * - follow 频率计数器（P-no-loop，校准 r1 补齐）：滑动 1s 窗口内 follow 原语执行
- *   >60 次 → warn（RO → follow → scrollToIndex → 内容高度变化 → RO 观察循环的唯一机器
- *   检测层）；沿触发——持续超限只报一次，回落后再超限再报；
+ * - follow 频率计数器（P-no-loop）：滑动 1s 窗口内 follow 原语执行 >60 次 → warn——触发链
+ *   逐帧自激的唯一机器检测层（正常形态下流式跟随走数据信号通路帧内合并每帧至多 1 次 +
+ *   RO 兜底支 debounce 窗尾每窗至多 1 次，均不超限）；沿触发——持续超限只报一次，回落后
+ *   再超限再报；
  * - import.meta.env.DEV 门控：生产构建原样透传 follow API，零运行时开销（同构先例
  *   useConstantHeightAssert）。
  *
@@ -131,9 +132,10 @@ export function usePinBottomGuard(deps: PinBottomGuardDeps): FollowApi {
   }
 
   /**
-   * P-no-loop 观察循环检测（§4.5 判据载体）：滑动 1s 窗口计数 follow 原语执行次数，
-   * 超 60 次/s（rAF 帧率上限，恒超即「RO → follow → 内容高度变化 → RO」自激）→ warn。
-   * 沿触发：超限态只报一次，窗口滑出回落后再超限再报——持续循环不会被 60 次/s 刷屏淹没。
+   * P-no-loop 频率检测（触发链逐帧自激的唯一机器检测层）：滑动 1s 窗口计数 follow 原语
+   * 执行次数，超 60 次/s（rAF 帧率上限）→ warn。正常形态下触发链不会超限：流式跟随走
+   * 数据信号通路经 followFromRo 帧内合并（每帧至多 1 次），RO 兜底支经 debounce 窗尾
+   * 触发（每窗至多 1 次）。沿触发：超限态只报一次，窗口滑出回落后再超限再报。
    */
   const followTimestamps: number[] = []
   let loopActive = false
@@ -149,9 +151,11 @@ export function usePinBottomGuard(deps: PinBottomGuardDeps): FollowApi {
     if (looping && !loopActive) {
       loopActive = true
       console.warn(
-        `[pin-bottom-guard] follow 频率异常：${FOLLOW_RATE_WINDOW_MS}ms 内 follow 次数=${followTimestamps.length}` +
-          ` > ${FOLLOW_RATE_LIMIT}——疑似 RO 兜底网观察循环（RO → follow → scrollToIndex → 内容高度变化 → RO）。` +
-          '👉 处置：P-no-loop 降级路径（100ms 防抖 / 收窄观察目标）。',
+        `[pin-bottom-guard] follow 频率异常（P-no-loop）：${FOLLOW_RATE_WINDOW_MS}ms 内 follow 次数=${followTimestamps.length}` +
+          ` > ${FOLLOW_RATE_LIMIT}（rAF 帧率上限，恒超即触发链逐帧自激）。` +
+          '正常形态：流式跟随经数据信号通路帧内合并（每帧至多 1 次）、RO 兜底支 debounce 窗尾触发（每窗至多 1 次），两者均不超限；' +
+          '本检测安静 = follow 频率在帧率预算内。' +
+          '超限排查：是否存在绕过帧内合并的高频 follow 调用源（useMessageStreamFollowTriggers.ts）。',
       )
     } else if (!looping) {
       loopActive = false
