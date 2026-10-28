@@ -13,7 +13,7 @@
 // chip 短词表，映射纯函数单点 ./thinking-levels（值域权威 shared PI_THINKING_LEVELS，
 // A-03 禁手写）；非段值（off/minimal/xhigh）四段全不选中（aria-selected 全 false，
 // roving tabindex 锚首段保键盘可达），段外原值经 chip 短词 + offSegmentHint 提示行标注。
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button, Sheet, SegmentedControl } from '@taiji/ui'
 import type { ModelInfo } from '@taiji/shared'
@@ -43,8 +43,13 @@ const { t } = useI18n()
 
 const models = ref<ModelInfo[]>([])
 
+// 退订句柄：onMounted 注册、onBeforeUnmount 配对调用——events 通道是多订阅者集合，
+// 丢弃退订函数会在组件卸载重挂（App.vue 根级 v-if 切换）后累积持有已卸载组件闭包的
+// 死 handler（注册/退订配对纪律；turn-observation.ts onMounted 赋句柄 + 卸载清理同构）
+let unsubscribeModels: (() => void) | null = null
+
 onMounted(() => {
-  void subscribeModels((list) => {
+  unsubscribeModels = subscribeModels((list) => {
     models.value = list
   })
   fetchModels()
@@ -55,6 +60,11 @@ onMounted(() => {
       // 清单拉取失败降级：列表空态（辅助流不拖垮核心，§7.4）；订阅帧后到仍会填充
       console.warn('[ModelSheet] model.list fetch failed:', e)
     })
+})
+
+onBeforeUnmount(() => {
+  unsubscribeModels?.()
+  unsubscribeModels = null
 })
 
 /** 当前会话的权威值（响应式读状态层；undefined = 显式未知） */

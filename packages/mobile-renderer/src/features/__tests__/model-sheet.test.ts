@@ -127,6 +127,18 @@ describe('ModelSheet（§7.2 F9：liveState 复合串比对呈现面）', () => 
     expect(bodyEl('model-sheet-model-mock-a')!.textContent).not.toContain(tOf('mobile.model.current'))
     wrapper.unmount()
   })
+
+  it('卸载时退订 model.list 广播（注册/退订配对：丢弃退订函数会在 events 通道累积已卸载组件的死 handler）', async () => {
+    // 退订函数 mock 为 spy，锁定 onBeforeUnmount 配对调用（不删订阅泄漏回归）
+    const unsub = vi.fn()
+    subscribeModelsMock.mockImplementation(() => unsub)
+    const wrapper = await mountSheet()
+
+    expect(subscribeModelsMock).toHaveBeenCalledTimes(1)
+    expect(unsub).not.toHaveBeenCalled()
+    wrapper.unmount()
+    expect(unsub).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('ModelSheet 思考档段控（§7.2：非段值不点亮段选中态）', () => {
