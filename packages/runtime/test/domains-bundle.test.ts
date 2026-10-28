@@ -5981,19 +5981,18 @@ describe('skill-dir-config buildDirConfigs', () => {
   })
 
   it('preset 全部未启用时，按 scope 分组追加（project preset 在前，global preset 在后）', () => {
-    // PRESET_SKILL_DIRS = ['~/.pi/agent/skills'(g), '~/.agents/skills'(g), '.agents/skills'(p)]
-    // （claude 已移出预设，2026-09：preset 成员恒在 UI 重挂导致 claude 行无法真正删除）
+    // PRESET_SKILL_DIRS = ['~/.agents/skills'(g), '.agents/skills'(p)]
+    // （claude 已移出预设 2026-09；~/.pi/agent/skills 已移出预设 2026-10——taiji/pi 数据隔离）
     const configs = buildDirConfigs(PRESET_SKILL_DIRS, { projectPaths: [], globalPaths: [] })
     expect(configs).toHaveLength(PRESET_SKILL_DIRS.length)
     expect(configs.every(c => c.enabled === false)).toBe(true)
-    // project preset（'.agents/skills'）在前，global preset（前两个）在后，各自内层按 preset 固定顺序
+    // project preset（'.agents/skills'）在前，global preset（'~/.agents/skills'）在后
     expect(configs.map(c => c.path)).toEqual([
       '.agents/skills',
-      '~/.pi/agent/skills',
       '~/.agents/skills',
     ])
     expect(configs.find(c => c.path === '.agents/skills')!.scope).toBe('project')
-    expect(configs.find(c => c.path === '~/.pi/agent/skills')!.scope).toBe('global')
+    expect(configs.find(c => c.path === '~/.agents/skills')!.scope).toBe('global')
   })
 
   it('discovery 启用顺序保留（= 用户拖拽优先级，靠前覆盖靠后）', () => {
@@ -6022,7 +6021,7 @@ describe('skill-dir-config buildDirConfigs', () => {
     expect(enabled[1]).toEqual({ path: tmpRealDir, enabled: true, scope: 'global' })
     // 之后是 project preset 未启用（'.agents/skills'），再 global preset 未启用
     const disabled = configs.filter(c => !c.enabled)
-    expect(disabled.map(c => c.path)).toEqual(['.agents/skills', '~/.pi/agent/skills', '~/.agents/skills'])
+    expect(disabled.map(c => c.path)).toEqual(['.agents/skills', '~/.agents/skills'])
   })
 
   it('agent preset 结构对称（PRESET_AGENT_DIRS）', () => {
@@ -6125,12 +6124,12 @@ describe('discovery-store setSkillDirs 脏数据写入过滤（v2 SkillDirConfig
     expect(getSkillDirs()).toEqual(['.agents/skills', realDir, '~/.agents/skills'])
   })
 
-  it('文件缺失（ENOENT）→ 读回落到默认态：preset 全勾（pi + taiji，无 claude）', () => {
-    // 新装 / 首启：discovery.json 不存在时，UI 打开即见 pi+taiji 目录默认勾选，无需手动配置。
+  it('文件缺失（ENOENT）→ 读回落到默认态：preset 全勾（.agents 约定，无 claude/pi）', () => {
+    // 新装 / 首启：discovery.json 不存在时，UI 打开即见 .agents 约定目录默认勾选，无需手动配置。
     setDiscoveryPath(join(discoveryTmpDir, 'nonexistent', 'discovery.json'))
     const scopes = getSkillPathScopes()
     expect(scopes.projectPaths).toEqual(['.agents/skills'])
-    expect(scopes.globalPaths).toEqual(['~/.pi/agent/skills', '~/.agents/skills'])
+    expect(scopes.globalPaths).toEqual(['~/.agents/skills'])
     // agent / extension 同构默认勾选
     expect(getAgentPathScopes().globalPaths).toContain('~/.pi/agent/agents')
     expect(getExtensionPathScopes().projectPaths).toEqual(['.pi/extensions', '.taiji/extensions'])

@@ -170,16 +170,19 @@ export const MAX_WS_PAYLOAD_BYTES: number = 16 * 1024 * 1024
  * （~/.taiji/...）不在此列（UI 另行只读展示）。preset 成员豁免 existsSync 脏数据过滤
  * ——推荐候选语义，启用后即使此机器不存在也要保留（防 UI 消失回归）。
  *
- * [默认勾选] 全部 preset 成员默认勾选（DEFAULT_DISCOVERY_CONFIG，pi + taiji 相关路径）：
+ * [默认勾选] 全部 preset 成员默认勾选（DEFAULT_DISCOVERY_CONFIG，.agents 约定路径）：
  * 用户打开设置页即见已勾选态，无需手动配置。preset 即「默认启用集合」，新增成员时
  * 须同步评估 DEFAULT_DISCOVERY_CONFIG。
  *
  * [历史] 2026-09：移除 ~/.claude/skills / ~/.claude/agents 预设候选。原因：preset 成员
  * 恒在 UI 重挂（buildDirConfigs 未启用也会补回），导致用户「删除 claude 行」后重新出现、
  * 无法真正移除；且 claude 目录非本产品默认扫描范围。用户仍可手动「添加路径」加入。
+ *
+ * [历史] 2026-10：移除 ~/.pi/agent/skills 预设候选。原因：taiji 与 pi 数据隔离
+ * （架构约定 #1 taiji/pi 数据隔离），taiji 不默认扫 pi 原生用户目录。用户仍可手动
+ * 「添加路径」加入。
  */
 export const PRESET_SKILL_DIRS = [
-  '~/.pi/agent/skills',
   '~/.agents/skills',
   '.agents/skills',
 ] as const
