@@ -96,7 +96,6 @@
         :scroll-ref="scrollEl ?? undefined"
         :key="props.sessionId"
         @scroll="onVirtuaScroll"
-        @scroll-end="onVirtuaScrollEnd"
       >
         <!-- slot 内容注意：禁止在 <template #default> 内放任何注释/文本节点！
              virtua 的 item key 提取要求 slot 返回恰好 1 个 vnode（P(): e.length===1 才取 e[0].key），
@@ -458,7 +457,6 @@ function onEditStateChange(payload: { editing: boolean; turnKey: string }): void
 const { pinnedIndexes } = useStreamingPin({
   // [u5] streamItems 基准（keepMounted 下标空间 = :data，索引一致性硬约束见 streamItems 注释）
   items: streamItems,
-  sessionId: () => props.sessionId,
   editingTurnKey,
 })
 
@@ -481,9 +479,8 @@ const { stickToBottom, showJumpButton, onScroll, onWheel, onTouchStart, onTouchM
 // [D3/D5] 跟随触发编排（触发语义见 useMessageStreamFollowTriggers 头注释）：[F1] 提交序号
 // 递增强制回底；[F2] RO/条数 watch 喂脱离态几何快照（guard 在原语内聚）。
 const { contentWrapEl, tailEl, tailHeight } = useMessageStreamFollowTriggers({
-  messages: currentMessages,
+  renderItems,
   submitSeq: () => chat.getSubmitSeq(props.sessionId),
-  lastRenderTurn,
   scrollEl,
   followIfStuck,
   notifyRoActivity,
@@ -512,9 +509,9 @@ provide(
 )
 
 /**
- * [cw wave w3] virta scroll 事件聚合 handler（IF7 @scrollEnd 用于 showJumpButton 稳定判定）。
+ * [cw wave w3] virtua scroll 事件聚合 handler。
  * - onScroll(offset) 复合判据维护 stickToBottom（INVAR-M4-2′：用户上滑翻 false，写入回声不误判）
- * - rail.updateActiveTurnIndex 用 virta findItemIndex(scrollOffset) 精确定位当前项
+ * - rail.updateActiveTurnIndex 用 virtua findItemIndex(scrollOffset) 精确定位当前项
  */
 function onVirtuaScroll(offset: number): void {
   onScroll(offset)
@@ -523,9 +520,6 @@ function onVirtuaScroll(offset: number): void {
   // 切 session 的 scrollTop clamp 回声（offset≈0）时长滚到底尚未落地，stickToBottom 仍为
   // true，不会白拉一页历史；isPrepend 保位把插入后的 offset 抬到阈值以上，天然节流。
   onScrollOffset(offset, !stickToBottom.value)
-}
-function onVirtuaScrollEnd(): void {
-  // design.md IF7 预留：showJumpButton 稳定判定（virta @scrollEnd 触发，目前 showJumpButton 已是 computed，留空 no-op）
 }
 
 // [D5 force 内联] 挂载即滚到底（force=true，不受 guard）；store watch / RO

@@ -37,8 +37,10 @@ export interface UseStreamingPinOptions {
    *  pinnedIndexes 是 virtua :keep-mounted 的下标空间，必须与 :data 同一数组基准；
    *  本模块只消费 turn 项（kind==='turn' 窄化）与 items.length，notice 项天然兼容。 */
   items: ComputedRef<ReadonlyArray<RenderItem | SkillNoticeStreamItem>>
-  /** 当前 session id getter（捕获跨 session 切换，streaming→streaming 时强制重钉，M3） */
-  sessionId: () => string
+  /** 当前 session id getter（捕获跨 session 切换，streaming→streaming 时强制重钉，M3）。
+   *  可选：实现经 computed 派生（[PR#116 review M3]）后本成员已无消费方，仅存量调用点
+   *  尚在传入；待接口退役清理。 */
+  sessionId?: () => string
   /** 编辑中的 turn 身份（turnStableId，null 表示无编辑），用于 virtua 多项固定挂载。
    *  不持久持有位置快照：索引由 pinnedIndexes 每次从当前 items 反查（[pin-identity D1]）。 */
   editingTurnKey?: ComputedRef<string | null> | Ref<string | null>
