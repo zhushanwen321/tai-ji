@@ -67,8 +67,10 @@ function buildLongText() {
   return `${intro}\n\n\`\`\`js\n${lines.join('\n')}\n\`\`\``
 }
 
-/** 页内 rAF 采样器：每帧记录滚动几何（帧粒度 = 「两帧」判据的原生分辨率）。 */
-const SAMPLER_INSTALL_FN = `() => {
+/** 页内 rAF 采样器：每帧记录滚动几何（帧粒度 = 「两帧」判据的原生分辨率）。
+ * 真实函数形态传入 evaluate——本仓 Playwright 版本对「字符串函数表达式」不自动调用
+ * （实测返回 undefined，与 readMetrics 同款坑）。 */
+const SAMPLER_INSTALL_FN = () => {
   if (window.__followSampler) return false
   window.__followSamples = []
   const tick = () => {
@@ -83,14 +85,14 @@ const SAMPLER_INSTALL_FN = `() => {
   window.__followSampler = tick
   window.__followRaf = requestAnimationFrame(tick)
   return true
-}`
-const SAMPLER_FETCH_FN = `() => ({ count: (window.__followSamples ?? []).length, samples: window.__followSamples ?? [] })`
-const SAMPLER_STOP_FN = `() => {
+}
+const SAMPLER_FETCH_FN = () => ({ count: (window.__followSamples ?? []).length, samples: window.__followSamples ?? [] })
+const SAMPLER_STOP_FN = () => {
   if (window.__followRaf) cancelAnimationFrame(window.__followRaf)
   window.__followRaf = null
   window.__followSampler = null
   return (window.__followSamples ?? []).length
-}`
+}
 
 export const meta = {
   id: 'follow-blindzone-converge',
