@@ -138,9 +138,6 @@ export async function run(ctx) {
     if (!sid) throw new Error(`session.create 未返回 sessionId：${JSON.stringify(created).slice(0, 200)}`)
     await protocol.subscribe(sid)
     await ui.click('css=.session-item', { timeoutMs: 30_000 })
-    // 几何采样前置：滚动容器（.message-stream）挂载完成才装采样器（rAF 采样对 null 跳帧，
-    // 容器不在时 samples 恒空 = 机械性失败——挂载后再装，杜绝空采）
-    await ui.expectVisible('css=.message-stream', { timeoutMs: 30_000 })
     ev.step({ step: 'ui.activate', channel: 'A', exitCode: 0, stats: { sid, debounceMs: debounce.ms, debounceSource: debounce.source, convergeLimitMs: Number(limitMs.toFixed(1)) } })
 
     // ── 装采样器（send 前）→ 发起带代码块的长回合 ──────────────────────────
@@ -150,6 +147,9 @@ export async function run(ctx) {
     const since = protocol.events.length
     await protocol.send(sid, '请输出一段以代码块结尾的说明')
     await ui.expectVisible('css=.stop-btn', { timeoutMs: 30_000 })
+    // 采样前置：MessageStream 随首条消息渲染（Panel.vue 在消息非空时才挂载——空会话阶段
+    // .message-stream 不存在），rAF 采样对 null 跳帧，容器渲染后开始记录
+    await ui.expectVisible('css=.message-stream', { timeoutMs: 30_000 })
     const end1 = await protocol.waitTurnEnd(sid, { since, timeoutMs: 120_000 })
     const completeAt = end1.at
     ev.assert('B: 代码块回合正常收尾', end1.type === 'message.complete' && end1.ok, {

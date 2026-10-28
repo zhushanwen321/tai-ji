@@ -130,8 +130,6 @@ export async function run(ctx) {
     if (!sid) throw new Error(`session.create 未返回 sessionId：${JSON.stringify(created).slice(0, 200)}`)
     await protocol.subscribe(sid)
     await ui.click('css=.session-item', { timeoutMs: 30_000 })
-    // 几何采样前置：滚动容器（.message-stream）挂载完成才进入后续 evaluate 度量
-    await ui.expectVisible('css=.message-stream', { timeoutMs: 30_000 })
     ev.step({ step: 'ui.activate', channel: 'A', exitCode: 0, stats: { sid } })
 
     // ── 历史铺垫：21 轮短消息（A6 截断窗口前置：>20 轮）────────────────────
@@ -147,11 +145,16 @@ export async function run(ctx) {
     const since = protocol.events.length
     await protocol.send(sid, '请开始长输出')
     await ui.expectVisible('css=.stop-btn', { timeoutMs: 30_000 })
+    // 几何采样前置：MessageStream 随首条消息渲染（Panel.vue 在消息非空时才挂载——
+    // 空会话阶段 .message-stream 不存在），后续 evaluate 滚动几何度量依赖它在场
+    await ui.expectVisible('css=.message-stream', { timeoutMs: 30_000 })
     ev.step({ step: 'chat.send', channel: 'B', exitCode: 0, stats: { sid, streaming: true } })
 
     // ══ A4 前半：滚轮脱离 → 胶囊浮现 → 点胶囊回底恢复跟随 ══
     await hoverStream()
     await page.mouse.wheel(0, -600)
+    // 等滚轮惯性滚动结束再取基线（wheel 后立即采样会把惯性位移算进 |ΔscrollTop|）
+    await new Promise((r) => setTimeout(r, 600))
     const det0 = await metrics()
     await new Promise((r) => setTimeout(r, 1200))
     const det1 = await metrics()
@@ -171,9 +174,10 @@ export async function run(ctx) {
     ev.step({ step: 'a4.pill.visible', channel: 'A', exitCode: 0, stats: {} })
 
     await ui.click('css=button[title="回到最新"]', { timeoutMs: 10_000 })
-    // 回底 + 恢复跟随：轮询 distance ≤40，随后 2s 内持续贴底（流式仍在增长）
+    // 回底 + 恢复跟随：轮询 distance ≤40（smooth 滚动收敛历史长距离——实测 ~3500px 需 6-8s，
+    // 轮询按 10s 预算），随后 2s 内持续贴底（流式仍在增长）
     let backBottom = null
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 40; i++) {
       backBottom = await metrics()
       if (backBottom && backBottom.d <= BOTTOM_THRESHOLD) break
       await new Promise((r) => setTimeout(r, 250))
