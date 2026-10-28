@@ -793,7 +793,7 @@ pi extension 包与 subagent engine 包的 package.json 顶层命名空间键（
 taiji Plugin 的 package.json 清单键（`packages/plugin-sdk` 类型契约）：`"taijiPlugin": { manifestVersion, main, activationEvents, trustLevel, source, permissions, engines? }`，其中 `engines: { 'taiji': <版本> }` 声明兼容的宿主。字段细则见 [built-in-plugin-guide.md](plugins/built-in-plugin-guide.md)。**近形防混淆**：与上一条「宿主元数据键 `"taiji"`」是两个不同契约层面——裸 `"taiji"` 键（extension/engine 包宿主元数据）≠ `taijiPlugin` 键（Plugin 系统插件清单）；脚手架入口 `packages/create-taiji-plugin`。
 
 ### Composer 工具条
-composer（Panel zone ④）内底部的展示型工具带（`packages/renderer/src/components/panel/Composer.vue`）：指标聚合按钮（`ComposerMetricsAggregate`，hover 弹聚合页——容量（`ContextCapacityCard`，`context.update` 通道）+ 速度 t/s + 缓存命中率 + TTFT 首字延迟（首字延迟 = 请求发出 → 首个输出 token 到达，p50 聚合））、模型切换（`ModelSelectPopover`）、思考档位（`ThinkingLevelPopover`）、发送位四态（send/stop/queue/spinner）。renderer 内置组件。
+composer（Panel zone ④）内底部的展示型工具带（`packages/renderer/src/components/panel/Composer.vue`）：指标聚合按钮（`ComposerMetricsAggregate`，hover 弹聚合页——容量（`ContextCapacityCard`，`context.update` 通道）+ 速度 t/s + 缓存命中率 + TTFT 首字延迟（首字延迟 = 请求发出 → 首个输出 token 到达）；速度与 TTFT 两卡的窗口口径 = **五量分布矩阵**（平均 / P50 / P99 / 最大 / 最小 × 今日 / 7 天 / 30 天，逐请求样本聚合，`GenStatsDistribution`），「本次」为单样本单列不参与分布）、模型切换（`ModelSelectPopover`）、思考档位（`ThinkingLevelPopover`）、发送位四态（send/stop/queue/spinner）。renderer 内置组件。
 
 > **命中率归因降噪（2026-09-19）**：缓存命中率 `current` 是「本会话最近一次 LLM 请求」的单样本口径，任何一次 total miss 都会显示 0%。已知成因的 0%（会话首请求 `cold-start` / 空闲超 5min provider TTL `idle-expiry` / compaction 后前缀重建 `context-rewrite`）改为渲染成因文案（`cacheRatio.currentMiss`，中性色 + 浮层说明行），未知成因的 0%（如服务端淘汰）**保留原值三档色**——降噪只覆盖预期内 miss，不吞真信号；provider 从未上报 cache 字段时命中率为「无数据」（null，显示「—」）而非 0%。
 

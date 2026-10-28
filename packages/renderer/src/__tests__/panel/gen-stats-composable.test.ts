@@ -146,8 +146,14 @@ describe('帧 handler：写入分区与 model 校验兜底', () => {
     expect(host.gen.current.value?.speed.current).toBe(35)
     expect(host.gen.current.value?.cacheRatio.current).toBe(91)
     expect(host.gen.current.value?.model).toBe('m1')
-    // useGenStats 零改动（帧本体直存分区）→ frame.ttft 随帧自动透传，null 编码不打折扣
-    expect(host.gen.current.value?.ttft).toEqual({ current: 820, day: 900, d7: 1100, d30: 1300 })
+    // useGenStats 零改动（帧本体直存分区）→ frame.ttft 随帧自动透传（含五量分布），
+    // null 编码不打折扣
+    expect(host.gen.current.value?.ttft).toEqual({
+      current: 820,
+      day: { avg: 900, p50: 820, p99: 2400, max: 2400, min: 640 },
+      d7: { avg: 1100, p50: 1100, p99: 1300, max: 1300, min: 800 },
+      d30: { avg: 1100, p50: 1100, p99: 1300, max: 1300, min: 800 },
+    })
   })
 
   it('帧内 model 与 renderer 当前 modelId 不匹配 → 仍落地（A4/S18 纯显示：归属权威在 runtime 推帧侧）', async () => {

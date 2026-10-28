@@ -6,7 +6,15 @@ set -euo pipefail
 # 检查失败原则：任何非 0 退出都输出（不管从哪个 exit 点）
 trap '[ $? -ne 0 ] && echo "[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。" >&2' EXIT
 
-REPO="zhushanwen321/tai-ji"
+# 仓库标识从 github remote 一手推导（本仓唯一远端，AGENTS.md git 规范）——不硬编码
+# slug，仓库迁移/改名后脚本零改动；remote 缺失时 fail-fast 而非拼出空 --repo
+# （管道尾 || true 不可省：set -e + pipefail 下 remote 缺失会使本赋值行静默退出，
+#   且 git 报错已被 2>/dev/null 吞掉，下方 -z 守卫的显式报错分支将不可达）
+REPO="$(git remote get-url github 2>/dev/null | sed -E 's#.*[:/]([^/]+/[^/.]+)(\.git)?/?$#\1#' || true)"
+if [[ -z "$REPO" ]]; then
+    echo "ERROR: 无法从 github remote 推导仓库标识——先确认 git remote get-url github 可用" >&2
+    exit 2
+fi
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WS_ROOT="${WS_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 GITHUB_REMOTE="github"

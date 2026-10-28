@@ -428,13 +428,14 @@ export type {
   QuotaFetchFailureReason,
   QuotaFetchOutcome,
   QuotaFetcherConfig,
-  QuotaWorkspaceNormalizeResult,
+  QuotaParamNormalize,
+  QuotaParamNormalizeResult,
   // 凭证来源与 configure payload（D3/§7.1，coding-plan-quota-config-ux）
   QuotaCredentialSource,
   QuotaConfigurePayload,
 } from './quota-types'
-export { extractQuotaWorkspaceId, normalizeQuotaWorkspaceUrl, normalizeCookieHeader, resolveQuotaCredentialSource, supportsExclusiveCredential, formatQuotaPct, QUOTA_PCT_DECIMALS } from './quota-types'
-export type { QuotaPreset } from './quota-presets'
+export { extractQuotaWorkspaceId, normalizeQuotaParamValue, normalizeCookieHeader, resolveQuotaCredentialSource, supportsExclusiveCredential, formatQuotaPct, QUOTA_PCT_DECIMALS } from './quota-types'
+export type { QuotaPreset, QuotaParamSpec } from './quota-presets'
 export { QUOTA_PRESETS, isQuotaPreset, matchQuotaPreset, resolveQuotaPresets } from './quota-presets'
 // 语音合成朗读（TTS）契约类型（ai-voice-tts 设计 §7.1/§7.3；协议载荷形状 SSOT，纯类型无 node 依赖）
 export type {
@@ -547,7 +548,7 @@ export { LAUNCH_RESULT_STATUSES, UPDATE_STALE_RELEASE } from './update'
 export type { UsageMetrics, UsageRow, UsageStatsResult } from './usage-stats'
 // Composer 生成指标类型 SSOT（帧 session.stats_update /
 // RPC session.getGenStats 的 type→payload 登记在 protocol.ts，形状经 GenStatsFrame 引用防漂移）
-export type { GenStatsSpeed, GenStatsCacheRatio, GenStatsCacheMiss, GenStatsTtft, GenStatsFrame } from './gen-stats'
+export type { GenStatsDistribution, GenStatsSpeed, GenStatsCacheRatio, GenStatsCacheMiss, GenStatsTtft, GenStatsFrame } from './gen-stats'
 // 迁移功能（从其他 agent 迁移配置）类型
 export type {
   ProviderSource,

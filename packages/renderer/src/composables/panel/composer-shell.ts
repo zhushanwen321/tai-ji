@@ -218,9 +218,12 @@ function createSendPhaseDerived(deps: {
    * [HISTORICAL] 前身四态 'queue'（bash/settling+bash → 时钟角标排队按钮）随 D5 内容驱动
    * 双形态退役：排队语义改由发送按钮 + 角标承载（有内容时按判定集合叠加）。
    */
+  /** 排队语义集合（[D5] 角标判定与 sendButtonState 的 stop 档共用：回合进行中 ∨ 压缩中；bash 不参与）。 */
+  const queueingPhase = computed(() => isActiveTurn.value || effectivePhase.value.compacting)
+
   const sendButtonState = computed<'send' | 'stop'>(() => {
     if (deps.hasInput.value) return 'send'
-    return isActiveTurn.value || effectivePhase.value.compacting ? 'stop' : 'send'
+    return queueingPhase.value ? 'stop' : 'send'
   })
 
   /**
@@ -232,7 +235,7 @@ function createSendPhaseDerived(deps: {
    */
   const sendButtonBadge = computed(() => {
     if (!deps.hasInput.value) return false
-    return isActiveTurn.value || effectivePhase.value.compacting
+    return queueingPhase.value
   })
 
   /**

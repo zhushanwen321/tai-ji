@@ -33,9 +33,23 @@ composer 右下工具带（`Composer.vue` composer-bar）已展示生成指标�
 - `GenStatsTriggers.vue`（已退役，现行宿主 = `GenStatsTtftCard` 于指标聚合页）在现有速度触发器**左侧**插入 TTFT 触发器（组件内顺序：TTFT · 速度 · 缓存），沿用同一条 `v-if="sessionId"` landing 隐藏判据、同一套 HoverCard 结构。
 - 触发器文本：`ttftMs < 1000` → `820ms`；`≥ 1000` → `1.2s`（1 位小数，去尾 0）；null → `—`（灰）。等宽数字，不加图标。
 - 三档语义色（延迟反向指标）：`< 1500ms` success · `1500–3000ms` warn · `> 3000ms` danger；null 恒中性灰。阈值为**初值**（有 cacheRatio 三档色先例，无历史校准源），重审触发 = 用户反馈显示档位与体感系统性不符（同速度口径 D1 重审模式）。
-- 浮层（hover，与速度浮层同构）：head = 「首字延迟 TTFT」+ 模型名；2×2 四行 = 本次 / 今日 p50 / 近 7 天 p50 / 近 30 天 p50；无帧显「暂无数据」；**有帧但值全 null 时行值显 `—`（两态区分，同构速度浮层）**；底部口径 note。
-- i18n：zh/en 双侧新增 `panel.context.genStatsTtftTitle` / `genStatsTtftNote` / `genStatsTtftDay`（「今日 p50（此模型）」）/ `genStatsTtftD7` / `genStatsTtftD30`——**不复用** `genStatsDay`（「今日均值」与 p50 中位数语义矛盾）。
-- testid：`genstats-ttft-value`（触发器）、`genstats-ttft-popover`（浮层）。
+- 浮层（hover，与速度浮层同构）：head = 「首字延迟 TTFT」+ 模型名；无帧显「暂无数据」。
+- **[2026-10-24 分布矩阵改造]** 窗口展示由「今日/7 天/30 天 各一行、只给 p50」改为
+  **五量分布矩阵**：5 列统计量（平均 / P50 / P99 / 最大 / 最小）× 3 行窗口（今日 / 7 天 / 30 天），
+  矩阵本体 = `GenStatsDistributionGrid`（速度卡共用，量纲经 `formatValue` 注入；矩阵自身零 i18n
+  依赖）。「本次」为单样本、不存在分布，**单列一行置于矩阵上方**而非塞进表格（塞进去会与
+  「今日 P50」并列，读起来像同列对比）。有帧但窗口无样本时五格皆 `—`。
+  动机：只给 p50 时「中位数看着正常、每百次卡一次几秒」这种体感完全不可见——单值聚合量在
+  重尾分布下必然撒谎，五个量并置才能同时读到典型值（P50）与尾部（P99/最大）。
+  P99 用**最近秩**（不插值）：样本不足 100 次时 P99 恒等于最大值，如实呈现不造不存在的数。
+- i18n：`genStatsTtftTitle` / `genStatsTtftNote` 保留；统计量列头与窗口行头改为**共用键**
+  `genStatsCol{Avg,P50,P99,P99Note,Max,Min}` / `genStatsWindow{Day,D7,D30}`（速度卡同用，
+  两卡措辞不再各写一份）。[HISTORICAL] 原 `genStatsTtftDay/D7/D30`（「今日 p50（此模型）」）
+  随矩阵退役——「今日均值」与 p50 中位数的语义矛盾问题由「窗口名与统计量名分离成两维」结构性消解。
+- testid：`genstats-ttft-popover`（浮层）、`genstats-ttft-current`（本次值）、
+  `genstats-ttft-dist-{row}-{col}` / `genstats-ttft-dist-row|column`（矩阵；**前缀带指标名**，
+  同页两颗矩阵共用 testid 会静默串台）。[HISTORICAL] 触发器 testid `genstats-ttft-value`
+  随平铺触发器形态退役（2026-10-08），TTFT 现行宿主 = 聚合页卡。
 
 ### 3.2 锚点与采样（runtime）
 
@@ -51,12 +65,23 @@ composer 右下工具带（`Composer.vue` composer-bar）已展示生成指标�
 
 - `gen-stats-store.ts` 新增文件 `<dataDir>/gen-stats/ttft/<safe-model>.json`（与 `speed/` `cache-ratio/` 同款日文件布局、append-only、atomicWrite）。
 - 记录类型 `TtftRecord = [ttftMs: number]`（单元素组，入 `GenStatsRecord` 联合）。**校验签名必须参数化**：`isValidRecord` / `readDayRecords` 现硬编码 `RECORD_TUPLE_LENGTH = 2`（gen-stats-store.ts:80,201-208），单元素组会被 `filter(isValidRecord)` 整批当畸形丢弃 → ttft 聚合恒空静默失效。改法 = 四处签名同步参数化/泛型化：① store 侧 `isValidRecord` / `readDayRecords` 加期望元组长度参数（speed/cache 传 2，**默认 2 校验强度对既有文件不变**；ttft 传 1）；② service 侧 `gen-stats-service.ts:121` `entriesSince` 返回 `Array<[number, number]>`（含内部 `as` 断言）与 `:252` `appendRecord(entry: [number, number])` 硬类型二元组——改**泛型 T 进 T 出**（`entriesSince<T>(...): T[]` 调用点显式 `<SpeedRecord>` / `<TtftRecord>`，避免联合→窄化把既有聚合调用点撞新编译错；`appendRecord(entry: GenStatsRecord)`），**禁止 `as` 绕过**（掩盖 ttft 单元素组类型冲突）。双向单测钉住：ttft 单元素组过校验不被丢 + speed/cache 单元素畸形条目仍被丢。[HISTORICAL] 初稿「读写共用通路无需改签名」经主审 P0-11 / 影响面审 P0-12 证伪。（[已落地] 终态：常量已改名 PAIR_/TTFT_RECORD_TUPLE_LENGTH，entriesSince/appendRecord 已泛型化无 as——见 impl-plan U3 deviation）
-- 聚合 `aggregateTtft(records): number | null` = **p50 中位数**（四舍五入整数 ms）。空记录 → null。不用均值：TTFT 重尾，偶发慢请求会拉飞均值；本管道既有加权均值口径（速度 tokens/duration、命中率 read/prompt）不适用于延迟。`current` = 本会话最近一次样本原值（不聚合）。
+- 聚合 `aggregateTtftDistribution(records): GenStatsDistribution` = **五量分布**（avg / p50 / p99 / max / min，全部四舍五入整数 ms）。空记录 → 五字段全 null（禁 0 充数）。p50 偶数样本取双中位均值（与旧口径一致便于对照），p99 走最近秩。`current` = 本会话最近一次样本原值（不经窗口聚合，实现上走 `summarizeDistribution([单条]).p50` 统一口径）。
+  **[2026-10-24 分布矩阵改造]** 原口径 `aggregateTtft` 只返回 p50 单值。单值的副作用是尾部体感
+  不可见（中位数正常但 p99 数秒），故扩为五量；均值仍在表内但不再是唯一读法，两者刻意并存
+  （重尾下均值与中位数背离本身就是信息）。速度侧同步改造：`aggregateSpeedDistribution` 先
+  逐样本算 output÷duration×1000 再汇总，**[HISTORICAL] 取代原「窗口总量加权平均」**
+  （Σtokens÷Σduration×1000——该口径按耗时分摊权重、长请求主导，极慢短请求几乎不可见）。
+  两口径数学上不等（等权均值 vs 时长加权均值），新值低于旧值属口径变更而非 bug；
+  磁盘格式零变化，旧样本无需迁移（分布是对同一批原始 tuple 的另一组算法）。
 - `GenStatsService.recordSample`：`ttftMs != null` 才写 ttft 文件（逐字段独立判定，与 speed/cache 解耦——durationMs 缺失不影响 ttft 落盘，反之亦然）；per-session current 槽新增 `entry.ttft`（modelKey 校验同 speed 槽）；`composeFrame` 组装 `ttft: { current, day, d7, d30 }`（窗口 cutoff 复用 `rollingWindowCutoff` / `WINDOW_DAYS` 现有常量）。
 
 ### 3.4 协议（shared）
 
-- `packages/shared/src/gen-stats.ts`：新增 `GenStatsTtft { current: number | null; day: number | null; d7: number | null; d30: number | null }`；`GenStatsFrame` 追加 `ttft: GenStatsTtft`。
+- `packages/shared/src/gen-stats.ts`：新增 `GenStatsTtft`；`GenStatsFrame` 追加 `ttft: GenStatsTtft`。
+  **[2026-10-24 分布矩阵改造]** day/d7/d30 类型由 `number | null` 改为 `GenStatsDistribution`
+  （`{ avg, p50, p99, max, min }`，各 `number | null`，五量同生共死）；`GenStatsSpeed` 的
+  day/d7/d30 同批改为该类型；`GenStatsCacheRatio.day` 保持 `number | null`（命中率是总量加权
+  口径，不分位）。`current` 三侧仍为 `number | null`（本会话最近一次样本，单值）。
 - `session.stats_update` payload 与 `session.getGenStats` reply 均 = `GenStatsFrame`，自动携带；`gen-stats.test.ts` 编译期断言（AssertExact keys）同步增行。
 - `GenStatsSample`（runtime types.ts）追加 `ttftMs: number | null`。
 

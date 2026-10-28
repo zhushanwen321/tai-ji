@@ -1,5 +1,11 @@
 # @zhushanwen/subagent-engine-sdk
 
+## 0.12.0
+
+### Minor Changes
+
+- da658a786: AgentOutcome gains additive promptDisposition and observations fields.
+
 ## 0.11.0
 
 ### Minor Changes

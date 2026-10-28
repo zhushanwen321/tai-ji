@@ -281,10 +281,9 @@ export function evictSessionWithVirtual(sessionId: string, deps: LruEvictDeps): 
  * 循环内替换 .value 不影响迭代安全，行为与快照拷贝版一致。
  */
 function evictDerivedPartitions(sid: string, deps: LruEvictDeps): void {
-  // W4a 键统一：owner = sid 本身（btw 线 session id 即 pi 真实 id，无前缀翻译层）。
-  const owner = sid
+  // W4a 键统一：owner 即 sid 本身（btw 线 session id 即 pi 真实 id，无前缀翻译层）。
   for (const virtualKey of deps.messagesValue().keys()) {
-    if (isVirtualKeyOf(virtualKey, owner)) {
+    if (isVirtualKeyOf(virtualKey, sid)) {
       deps.deleteMessageKey(virtualKey)
       sessionLastAccessed.delete(virtualKey)
     }

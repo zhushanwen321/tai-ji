@@ -16,7 +16,8 @@
 import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync, chmodSync } from 'node:fs'
 import { join } from 'node:path'
 import type { NormalizedQuotaRow, ProviderQuotaFetcher, QuotaAuthKind, QuotaCredentialSource, QuotaConfigurePayload, QuotaFetchFailureReason, QuotaFetcherConfig } from '@taiji/shared'
-import { matchQuotaPreset, normalizeCookieHeader, normalizeQuotaWorkspaceUrl, resolveQuotaCredentialSource, supportsExclusiveCredential } from '@taiji/shared'
+import { matchQuotaPreset, normalizeCookieHeader, resolveQuotaCredentialSource, supportsExclusiveCredential } from '@taiji/shared'
+import { mapLegacyWorkspaceParams, normalizeQuotaParams, paramSpecsForFetcher, resolveParamsValue } from './quota-params.js'
 import { getQuotaFetcher, listQuotaPresets } from './quota-providers/index.js'
 import { QuotaCache } from './quota-cache.js'
 import { getProviderConfig } from '../infra/pi/pi-provider-store.js'
@@ -274,7 +275,7 @@ export class QuotaService {
    *
    * 单 payload 对象签名（§7.1 契约收敛）：可选键缺省 = 不变（persist 继承链）。
    * cookie 空字符串 = 清除（写入 cookieSet=false）；apiKey 空字符串 = 清除专属 key；
-   * workspace 接受完整 URL 或裸 wrk_ id（归一化为规范 URL 存储，P1-1），空串 = 清除，
+   * params 逐键三态（string = 归一化写入；null = 清除该键；键缺省 = 不动），空串按清除语义，
    * 非法输入返回 ok:false（不发请求可区分 not_configured）。
    *
    * 三段顺序（§7.3 改动 2「删除与写入的顺序重排」）：全部校验与计算 → persist →
@@ -297,18 +298,18 @@ export class QuotaService {
     const { providerId } = payload
 
     // ── 第一段：全部校验与计算（零物理副作用）──
-    // workspace / cookie 归一化与 cookieSet/apiKeySet 三态计算统一在 resolveConfigureInputs
+    // params / cookie 归一化与 cookieSet/apiKeySet 三态计算统一在 resolveConfigureInputs
     // （metrics：configure 圈复杂度门 ≤15；行为与内联版本逐字等价）
     const resolved = this.resolveConfigureInputs(payload)
     if (!resolved.ok) return { ok: false, error: resolved.error }
-    const { normalizedWorkspace, normalizedCookie, cookieSet, apiKeySet } = resolved.inputs
+    const { normalizedParams, normalizedCookie, cookieSet, apiKeySet } = resolved.inputs
     // 改动 4：fetcher 变更检测锚点——必须在 persist 之前读（persist 落盘后再读已是新值）
     const prevFetcher = this.readQuotaFallback(providerId)?.fetcher
 
     // ── 第二段：persist（provider 存在性检查在 modify 回调内，见 persistQuotaConfig）──
     // 持久化 quota 配置到 config/providers.json
-    // （fetcher/enabled/cookieSet/apiKeySet/credentialSource/workspace）
-    const persistOk = await this.persistQuotaConfig(payload, cookieSet, apiKeySet, normalizedWorkspace)
+    // （fetcher/enabled/cookieSet/apiKeySet/credentialSource/params）
+    const persistOk = await this.persistQuotaConfig(payload, cookieSet, apiKeySet, normalizedParams)
     if (!persistOk) {
       return { ok: false, error: 'failed to persist quota config' }
     }
@@ -424,8 +425,9 @@ export class QuotaService {
 
   /**
    * configure 第一阶段：全部校验与纯计算（零物理副作用）。
-   * - workspace 归一化校验（D1-1/P1-1）：非法输入 fail-fast（不落半成品配置），错误范围
-   *   返回给调用方（renderer 已本地预校验，此处是直接 RPC 调用者的防线）；
+   * - params 归一化校验（D1-1/P1-1，2026-10 泛化）：逐键按 preset 声明的 param spec
+   *   归一化分流，非法输入 fail-fast（不落半成品配置），错误范围返回给调用方
+   *   （renderer 已本地预校验，此处是直接 RPC 调用者的防线）；
    * - cookie 入站归一化（SG-10）：wire 不信任，renderer 预检仅为第一道防线；
    * - cookieSet/apiKeySet 三态：true = 本次写入，false = 本次清除，undefined = 本次不动。
    * 独立成方法压 configure 圈复杂度（metrics 门 ≤15），行为与内联版本逐字等价。
@@ -433,20 +435,20 @@ export class QuotaService {
   private resolveConfigureInputs(payload: QuotaConfigurePayload): {
     ok: true
     inputs: {
-      normalizedWorkspace: string | null | undefined
+      normalizedParams: Record<string, string | null> | undefined
       normalizedCookie: string | undefined
       cookieSet: boolean | undefined
       apiKeySet: boolean | undefined
     }
   } | { ok: false; error: string } {
-    let normalizedWorkspace: string | null | undefined
-    if (payload.workspace !== undefined) {
-      // 归一化分流按目标 fetcher：payload 显式值优先（同次提交 fetcher+workspace），
-      // 缺省回落既存配置（只更新 workspace 的部分提交按既存类型校验）
+    let normalizedParams: Record<string, string | null> | undefined
+    if (payload.params !== undefined) {
+      // 归一化分流按目标 fetcher 的 param spec：payload 显式值优先（同次提交 fetcher+params），
+      // 缺省回落既存配置（只更新 params 的部分提交按既存类型校验）
       const targetFetcher = payload.fetcher ?? this.readQuotaFallback(payload.providerId)?.fetcher
-      const wsResult = this.normalizeWorkspaceInput(payload.providerId, payload.workspace, targetFetcher)
-      if ('error' in wsResult) return { ok: false, error: wsResult.error }
-      normalizedWorkspace = wsResult.value
+      const paramResult = this.normalizeParamsInput(payload.providerId, payload.params, targetFetcher)
+      if ('error' in paramResult) return { ok: false, error: paramResult.error }
+      normalizedParams = paramResult.value
     }
     const cookieResult = this.normalizeCookieInput(payload.cookie)
     if ('error' in cookieResult) {
@@ -456,7 +458,7 @@ export class QuotaService {
     return {
       ok: true,
       inputs: {
-        normalizedWorkspace,
+        normalizedParams,
         normalizedCookie: cookieResult.value,
         cookieSet: cookieResult.value !== undefined ? cookieResult.value !== '' : undefined,
         apiKeySet: payload.apiKey !== undefined ? payload.apiKey !== '' : undefined,
@@ -482,26 +484,24 @@ export class QuotaService {
   }
 
   /**
-   * configure 阶段 helper 之四：workspace 输入归一化（D1-1/P1-1）。
-   * 空字符串 = 清除（value:null，恢复未配置态，查询报 not_configured）；裸 id
-   * 归一化为规范 URL 存储（P1-1）；非法输入返回 error 文案（调用方 fail-fast）。
-   * 归一化规则按目标 fetcher 分流（normalizeQuotaWorkspaceUrl）：opencode 与
-   * opendesign 的 workspace 形态/域白名单不同。fetcher 取 payload 显式值，缺省
-   * 读既存配置（configure 只传 workspace 不传 fetcher 的部分更新也按既存类型校验）。
+   * configure 阶段 helper 之四：params 输入归一化（委托纯函数 quota-params.ts——
+   * spec 查找 + 逐键分流 + 日志点都在彼处，本方法只做 fetcher 上下文解析）。
    */
-  private normalizeWorkspaceInput(
+  private normalizeParamsInput(
     providerId: string,
-    workspace: string,
+    params: Record<string, string | null>,
     fetcherId?: string,
-  ): { value: string | null } | { error: string } {
-    const trimmed = workspace.trim()
-    if (!trimmed) return { value: null }
-    const normalized = normalizeQuotaWorkspaceUrl(trimmed, fetcherId)
-    if (!normalized.ok) {
-      logger.warn('[quota] invalid workspace input', { providerId, error: normalized.error })
-      return { error: normalized.error }
-    }
-    return { value: normalized.url }
+  ): { value: Record<string, string | null> } | { error: string } {
+    const specs = paramSpecsForFetcher(fetcherId, listQuotaPresets())
+    return normalizeQuotaParams(providerId, params, specs)
+  }
+
+  /**
+   * fetch 侧 params 解析（读兼容，委托 mapLegacyWorkspaceParams）：extras params 优先；
+   * 旧版 workspace 单字段映射为 params.workspaceUrl。双读回退后仍无 = undefined。
+   */
+  private resolveParamsForFetch(providerId: string): Record<string, string> | undefined {
+    return mapLegacyWorkspaceParams(this.readQuotaFallback(providerId))
   }
 
   /**
@@ -519,8 +519,8 @@ export class QuotaService {
     payload: QuotaConfigurePayload,
     cookieSet: boolean | undefined,
     apiKeySet: boolean | undefined,
-    /** undefined = 本次不动 workspace；null = 清除；string = 归一化 URL 写入 */
-    workspace: string | null | undefined,
+    /** undefined = 本次不动 params；Record = 逐键三态（null = 清除该键，string = 写入） */
+    params: Record<string, string | null> | undefined,
   ): Promise<boolean> {
     const { providerId } = payload
     if (!this.extrasStore) {
@@ -538,7 +538,7 @@ export class QuotaService {
         // readiness 因「¬typeChanged ∧ cookieSet」判齐备 → 复用被删 provider 的旧 Cookie
         // （M5-05 缺口重开）。放回调内与 delete 争同一临界区，回调抛错则整个写入被跳过。
         if (!this.providerExists(providerId)) throw new ProviderGoneError(providerId)
-        // workspace 三态（对齐 apiKeySet 的「本次明确传入才动」语义，清除态显式落 undefined）
+        // params 逐键三态（对齐 apiKeySet 的「本次明确传入才动」语义，清除态显式删键）
         const existingQuota = current?.quota
         return {
           ...current,
@@ -565,7 +565,7 @@ export class QuotaService {
               existingQuota?.credentialSource,
               legacyQuota?.credentialSource,
             ),
-            workspace: QuotaService.resolveWorkspaceValue(workspace, existingQuota, legacyQuota),
+            params: resolveParamsValue(params, existingQuota, legacyQuota),
           },
         }
       })
@@ -583,20 +583,6 @@ export class QuotaService {
    */
   private static inheritQuotaField<T>(next: T | undefined, current: T | undefined, legacy: T | undefined): T | undefined {
     return next ?? current ?? legacy
-  }
-
-  /**
-   * workspace 三态继承：undefined = 本次不动（继承既有值）；null = 清除（落 undefined）；
-   * string = 归一化 URL 写入。与 apiKeySet 的「本次明确传入才动」语义对齐。
-   */
-  private static resolveWorkspaceValue(
-    workspace: string | null | undefined,
-    current: ProviderExtras['quota'] | undefined,
-    legacyQuota: ProviderExtras['quota'] | undefined,
-  ): string | undefined {
-    if (workspace === undefined) return current?.workspace ?? legacyQuota?.workspace
-    if (workspace === null) return undefined
-    return workspace
   }
 
   /**
@@ -654,10 +640,11 @@ export class QuotaService {
     }
 
     try {
-      // D1-2：per-provider 只读配置注入（首期仅 workspaceUrl——资源维度 fetcher 的
-      // workspace 归一化地址，经 readQuotaFallback 双读 providers.json/models.json 旧值）
+      // D1-2：per-provider 只读配置注入（用户维度隔离参数——资源维度 fetcher 的
+      // workspace 规范 URL 等；经 readQuotaFallback 双读 providers.json/models.json 旧值，
+      // 旧版 workspace 单字段由 resolveParamsForFetch 映射为 params.workspaceUrl）
       const config: QuotaFetcherConfig = {
-        workspaceUrl: this.readQuotaFallback(providerId)?.workspace,
+        quotaParams: this.resolveParamsForFetch(providerId),
       }
       const outcome = await fetcher.fetchQuota(resolved.credential, resolved.kind, config)
 

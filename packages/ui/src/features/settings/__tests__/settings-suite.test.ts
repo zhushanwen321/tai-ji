@@ -433,11 +433,11 @@ function arrangeCookieMissing(missing: ReadinessMissing[]): void {
   quota.view.value.readiness = { ready: false, missing }
 }
 
-/** 布置 cookie 类（opencode-go 资源维度类型）+ workspace 必填 + 指定 missing 键 */
+/** 布置 cookie 类（opencode-go 资源维度类型）+ 必填 param（workspaceUrl）+ 指定 missing 键 */
 function arrangeCookieWorkspaceMissing(missing: ReadinessMissing[]): void {
   quota.view.value.credential.form = 'cookie'
   quota.view.value.type.selected = 'opencode-go'
-  quota.view.value.workspace.required = true
+  quota.view.value.params = [{ key: 'workspaceUrl', label: 'Workspace 地址', required: true }]
   quota.view.value.readiness = { ready: false, missing }
 }
 
@@ -449,11 +449,11 @@ function arrangeExclusiveKeyInvalid(): void {
   quota.view.value.readiness = { ready: false, missing: ['apiKey'] }
 }
 
-/** 断言三键字段级提示（cookie / apiKey / workspace）均不渲染（'type' 在 §7.4 白名单外，结构性无文案） */
+/** 断言三键字段级提示（cookie / apiKey / param）均不渲染（'type' 在 §7.4 白名单外，结构性无文案） */
 function expectNoFieldHints(w: ReturnType<typeof mount>): void {
   expect(w.find('[data-testid="quota-missing-cookie"]').exists()).toBe(false)
   expect(w.find('[data-testid="quota-missing-apikey"]').exists()).toBe(false)
-  expect(w.find('[data-testid="quota-missing-workspace"]').exists()).toBe(false)
+  expect(w.find('[data-testid^="quota-missing-param-"]').exists()).toBe(false)
 }
 
 /** 断言未选类型态的首屏说明：类型下拉仍在 + quotaTypeFirstHint 一句文案（D8 与探针③同形态） */
@@ -483,7 +483,7 @@ describe('① D8 未选类型态：只渲染下拉 + 一句说明', () => {
     expect(wrapper.find('[data-testid="quota-enabled-switch"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="quota-cookie-block"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="quota-credential-source"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="quota-workspace-block"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid^="quota-param-block-"]').exists()).toBe(false)
     expect(wrapper.find(SAVE_TEST).exists()).toBe(false)
     expect(wrapper.find('[data-testid="quota-result"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="quota-error"]').exists()).toBe(false)
@@ -562,26 +562,26 @@ describe('② D1 齐备性门控：唯一按钮「保存并测试」的置灰矩
     expect(wrapper.find('[data-testid="quota-missing-cookie"]').exists()).toBe(false)
   })
 
-  it('missing=["workspace"]（资源维度类型）→ workspace 输入下方渲染 quotaMissingWorkspace 提示', async () => {
-    arrangeCookieWorkspaceMissing(['workspace'])
+  it('missing=["param"]（资源维度类型）→ 参数输入下方渲染 quotaMissingParam 提示', async () => {
+    arrangeCookieWorkspaceMissing(['param'])
     wrapper = mountSection()
     await flushPromises()
 
-    const hint = wrapper.find('[data-testid="quota-missing-workspace"]')
+    const hint = wrapper.find('[data-testid="quota-missing-param-workspaceUrl"]')
     expect(hint.exists()).toBe(true)
-    expect(hint.text()).toBe('settings.providerEdit.quotaMissingWorkspace')
+    expect(hint.text()).toBe('settings.providerEdit.quotaMissingParam')
   })
 
   it('missing 同时含多键 → 逐键各渲染自己的提示（不写兜底循环，§7.4 显式白名单）', async () => {
-    arrangeCookieWorkspaceMissing(['cookie', 'workspace'])
+    arrangeCookieWorkspaceMissing(['cookie', 'param'])
     wrapper = mountSection()
     await flushPromises()
 
     expect(wrapper.find('[data-testid="quota-missing-cookie"]').text()).toBe(
       'settings.providerEdit.quotaMissingCookie',
     )
-    expect(wrapper.find('[data-testid="quota-missing-workspace"]').text()).toBe(
-      'settings.providerEdit.quotaMissingWorkspace',
+    expect(wrapper.find('[data-testid="quota-missing-param-workspaceUrl"]').text()).toBe(
+      'settings.providerEdit.quotaMissingParam',
     )
   })
 
@@ -872,7 +872,7 @@ describe('⑤b §7.4 徽标取值与 readiness 同源（磁盘标记不参与，
     // 复现 D5 的核心场景：已保存 MiMo cookie，用户把类型改成 opencode-go（同为 cookie 类）后
     // 旧 cookie 归属失效 → readiness 报 ['cookie']。徽标唯一来源是 readiness.missing；若改回读
     // 磁盘标记就会与下方「这里必须填」提示同屏矛盾（S7 反例）。
-    arrangeCookieWorkspaceMissing(['cookie', 'workspace'])
+    arrangeCookieWorkspaceMissing(['cookie', 'param'])
     wrapper = mountSection()
     await flushPromises()
 
@@ -898,17 +898,17 @@ describe('⑤b §7.4 徽标取值与 readiness 同源（磁盘标记不参与，
     )
   })
 
-  it('反向：missing 含 workspace（草稿被清空）→ 徽标「必填」（D13 屏幕即真相）', async () => {
-    arrangeCookieWorkspaceMissing(['workspace'])
-    quota.draft.value.workspace = ''
+  it('反向：missing 含 param（草稿被清空）→ 徽标「必填」（D13 屏幕即真相）', async () => {
+    arrangeCookieWorkspaceMissing(['param'])
+    quota.draft.value.params = { workspaceUrl: '' }
     wrapper = mountSection()
     await flushPromises()
 
-    const wsBlock = wrapper.find('[data-testid="quota-workspace-block"]')
+    const wsBlock = wrapper.find('[data-testid="quota-param-block-workspaceUrl"]')
     expect(wsBlock.text()).toContain('settings.providerEdit.quotaRequiredBadge')
     expect(wsBlock.text()).not.toContain('settings.providerEdit.quotaConfiguredBadge')
-    expect(wrapper.find('[data-testid="quota-missing-workspace"]').text()).toBe(
-      'settings.providerEdit.quotaMissingWorkspace',
+    expect(wrapper.find('[data-testid="quota-missing-param-workspaceUrl"]').text()).toBe(
+      'settings.providerEdit.quotaMissingParam',
     )
   })
 })
@@ -1091,7 +1091,7 @@ describe('⑦ D2 保存与测试合一：点击单按钮触发 module saveAndTes
   })
 })
 
-// ══ 附带保留：B-3 双轨窗口 + 失败态折叠 + workspace 块 ═══════════════════════
+// ══ 附带保留：B-3 双轨窗口 + 失败态折叠 + 用户维度参数块 ═══════════════════════
 
 describe('B-3 额度显示双轨（used/limit + pct）', () => {
   it('成功态窗口行显示千分位绝对量 + pct 双轨', async () => {
@@ -1193,23 +1193,23 @@ describe('B-3 失败态「查看上次成功数据」折叠', () => {
   })
 })
 
-describe('workspace 地址块（required 条件渲染 + 输入直写草稿）', () => {
-  it('cookie 类 + workspace.required → 渲染块；输入直写 draft.workspace', async () => {
-    arrangeCookieWorkspaceMissing(['workspace'])
+describe('用户维度参数块（spec 列表条件渲染 + 输入直写草稿）', () => {
+  it('cookie 类 + params spec → 渲染块；输入直写 draft.params[key]', async () => {
+    arrangeCookieWorkspaceMissing(['param'])
     wrapper = mountSection()
     await flushPromises()
 
-    expect(wrapper.find('[data-testid="quota-workspace-block"]').exists()).toBe(true)
-    await wrapper.find('[data-testid="quota-workspace-input"]').setValue('wrk_123')
-    expect(quota.draft.value.workspace).toBe('wrk_123')
+    expect(wrapper.find('[data-testid="quota-param-block-workspaceUrl"]').exists()).toBe(true)
+    await wrapper.find('[data-testid="quota-param-input-workspaceUrl"]').setValue('wrk_123')
+    expect(quota.draft.value.params.workspaceUrl).toBe('wrk_123')
   })
 
-  it('workspace.required=false → 不渲染 workspace 块', async () => {
+  it('params 为空数组（账号维度 fetcher）→ 不渲染参数块', async () => {
     quota.view.value.credential.form = 'cookie'
-    quota.view.value.workspace.required = false
+    quota.view.value.params = []
     wrapper = mountSection()
     await flushPromises()
-    expect(wrapper.find('[data-testid="quota-workspace-block"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid^="quota-param-block-"]').exists()).toBe(false)
   })
 })
 

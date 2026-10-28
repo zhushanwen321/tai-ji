@@ -45,17 +45,22 @@ function retryRulesExtConfigPath(): string {
 
 // ───────────────────────── 读侧 ─────────────────────────
 
+/** 空集 ext-config（缺失/坏 JSON/形状非法的统一默认；三处同型字面量单一来源）。 */
+function emptyRetryRulesExtConfig(): RetryRulesExtConfig {
+  return { version: 1, customRules: [], effectiveRules: [] }
+}
+
 /** 读 ext-config 文件（缺失/坏 JSON/形状非法 → 默认空集 + warn；读侧不抛错，network-proxy 同款）。 */
 export function readRetryRulesExtConfig(): RetryRulesExtConfig {
   const path = retryRulesExtConfigPath()
   try {
     if (!existsSync(path)) {
-      return { version: 1, customRules: [], effectiveRules: [] }
+      return emptyRetryRulesExtConfig()
     }
     const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'))
     if (!isRetryRulesExtConfig(parsed)) {
       logger.warn('[retry-rules] ext-config failed shape guard, treating as empty', { path })
-      return { version: 1, customRules: [], effectiveRules: [] }
+      return emptyRetryRulesExtConfig()
     }
     return parsed
   } catch (e) {
@@ -63,7 +68,7 @@ export function readRetryRulesExtConfig(): RetryRulesExtConfig {
       path,
       error: e instanceof Error ? e.message : String(e),
     })
-    return { version: 1, customRules: [], effectiveRules: [] }
+    return emptyRetryRulesExtConfig()
   }
 }
 
@@ -84,7 +89,8 @@ function remoteRulesNormalized(): RetryableErrorRule[] {
  * 'remote'；新 id 追加，source 'remote'）——settings 预设展示与 effectiveRules 合并共用。
  */
 export function getBuiltinRetryRules(): RetryableErrorRule[] {
-  return mergeRetryRules(RETRY_RULES_BASELINE, remoteRulesNormalized(), [])
+  // 空自定义层 = 内置层合并视图（computeEffectiveRules 的零参形态）。
+  return computeEffectiveRules([])
 }
 
 // ───────────────────────── 写侧（唯一写方） ─────────────────────────

@@ -302,12 +302,11 @@ function finalizeAttemptAssistant(messages: MessageEffectContext['messages'], si
     return {
       ...m,
       status: 'complete' as const,
-      content: m.content,
       toolCalls: m.toolCalls?.map((tc) =>
         tc.status !== 'running' ? tc : { ...tc, status: 'end_not_received' as const, endTime: now },
       ),
       // 产出结束时刻补写（与 finalizeStreamingMessage 的非 error 分支对齐；已写过则幂等不动）
-      ...(m.role === 'assistant' && m.endedAt === undefined ? { endedAt: now } : {}),
+      ...(m.endedAt === undefined ? { endedAt: now } : {}),
     }
   })
   commitMessages(messages, sid, next)
@@ -589,8 +588,9 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
       // （生产实例 P3a 重复思考的伴随防御——重复投递的 start 造出第二段逐字相同思考；
       // GLM 空思考条目轮的定稿前可见窗口由定稿重建收敛，本条只缩小窗口，正确性不依赖它）。
       // fallback 随机 id 恒不在场，查重天然不影响缺省分支。
-      if ((m.thinking ?? []).some((t) => t.id === blockId)) return undefined
-      const thinking = [...(m.thinking ?? []), { id: blockId, content: '', collapsed: true, startTime: Date.now() }]
+      const prevThinking = m.thinking ?? []
+      if (prevThinking.some((t) => t.id === blockId)) return undefined
+      const thinking = [...prevThinking, { id: blockId, content: '', collapsed: true, startTime: Date.now() }]
       // push 到 contentBlocks（refId 复用 blockId，防两处分别 randomUUID 断链）。
       // 按 contentIndex 有序插入（§11 检查点 3），无 index 时退化为 append。
       const contentBlocks = insertContentBlockByIndex(m.contentBlocks ?? [], { type: 'thinking', refId: blockId, ...(contentIndex !== undefined ? { contentIndex } : {}) } satisfies ContentBlock)

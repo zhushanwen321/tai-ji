@@ -25,6 +25,7 @@ import { getLogger } from "../../core/logger.ts";
 import { JsonlEventStream } from "../../shared/jsonl-event-stream.ts";
 import { ALL_RUN_OUTCOMES, RUN_EVENTS_SUFFIX, RUN_EVENT_TYPES } from "../../shared/run-vocabulary.ts";
 import type {
+  ModelOverrideEvent,
   RunEventJournal,
   RunSettledEvent,
   WorkflowModelOverride,
@@ -405,16 +406,25 @@ export async function scanRunEvents(runId: string, journalDir?: string): Promise
  * 尾向扫描首条命中即返回（与 findLatestRunResumed 同款手写循环——findLast 属
  * ES2023 lib，本包 target ES2022）。
  */
+/** 尾向扫描首条指定类型事件（下方两读侧函数共用的机械循环；findLast 属 ES2023 lib，本包 target ES2022）。 */
+function lastEventOfType<T extends WorkflowRunEvent>(
+  events: readonly WorkflowRunEvent[],
+  type: T["type"],
+): T | undefined {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i]!;
+    // 判别联合按运行时 type 收窄到 T：TS 无法对泛型 type 参数做字面量收窄，此转型安全。
+    if (event.type === type) return event as T;
+  }
+  return undefined;
+}
+
 export function latestModelOverride(
   events: readonly WorkflowRunEvent[],
 ): WorkflowModelOverride | undefined {
-  for (let i = events.length - 1; i >= 0; i -= 1) {
-    const event = events[i]!;
-    if (event.type === "model-override") {
-      return { model: event.model, ...(event.thinkingLevel !== undefined ? { thinkingLevel: event.thinkingLevel } : {}), ts: event.ts };
-    }
-  }
-  return undefined;
+  const event = lastEventOfType<ModelOverrideEvent>(events, "model-override");
+  if (!event) return undefined;
+  return { model: event.model, ...(event.thinkingLevel !== undefined ? { thinkingLevel: event.thinkingLevel } : {}), ts: event.ts };
 }
 
 /**
@@ -429,9 +439,5 @@ export function latestModelOverride(
 export function findRunSettledEvent(
   events: readonly WorkflowRunEvent[],
 ): RunSettledEvent | undefined {
-  for (let i = events.length - 1; i >= 0; i -= 1) {
-    const event = events[i]!;
-    if (event.type === "run-settled") return event;
-  }
-  return undefined;
+  return lastEventOfType<RunSettledEvent>(events, "run-settled");
 }

@@ -17,6 +17,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { SubagentRecord } from '@taiji/shared'
 import { SUBAGENT_OUTCOME_PLACEHOLDER } from '@taiji/shared'
+import { CONTROL_ENV_ROOT_SESSION_ID, CONTROL_ENV_SOCKET } from '@zhushanwen/subagent-engine-sdk'
 import { DEFAULT_SUBAGENT_ENGINE, extractRecordEngine, readEngineSubagentHistory, disposeRuntimeEngineClients, resetRuntimeEngineWiringForTests, setRuntimeDiscoveryOptionsForTests } from '../services/session/subagent-engine-history.js'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
@@ -238,6 +239,12 @@ beforeAll(() => {
   setEnv('TAIJI_AGENT_DATA_DIR', dataDir)
   setEnv('FAKE_SPAWN_LOG', spawnLog)
   setEnv('TAIJI_AGENT_ENGINE_NODE', undefined)
+  // 托管态隔离：TaiJi 托管 env（runtime 注入的 control env）下跑测会让协议客户端误选
+  // runtime transport——引擎改由外层 runtime spawn，FAKE_* env 丢失（read 恒成功、spawn
+  // 日志缺席、FAKE_READ_MODE=error 不生效）。本套件锚定本地 spawn 语义（fake 引擎由
+  // 测试进程直启），剥除 control env（键名 = SDK 单源常量）；standalone 态剥除为 no-op。
+  setEnv(CONTROL_ENV_SOCKET, undefined)
+  setEnv(CONTROL_ENV_ROOT_SESSION_ID, undefined)
 })
 
 afterEach(() => {

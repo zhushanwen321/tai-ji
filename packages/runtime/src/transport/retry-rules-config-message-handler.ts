@@ -15,13 +15,17 @@ import { getBuiltinRetryRules, readRetryRulesExtConfig, setRetryRulesCustom } fr
 export class RetryRulesConfigMessageHandler {
   constructor(private ctx: SettingsHandlerContext) {}
 
+  /** 读合并视图：内置层（基线 ⊕ 远程，source 标注）+ 用户盘上态（ext-config customRules 段）。 */
+  private readView() {
+    return { builtinRules: getBuiltinRetryRules(), customRules: readRetryRulesExtConfig().customRules }
+  }
+
   /** 处理重试规则域消息；不匹配返回 false（由 SettingsMessageHandler 继续路由）。 */
   async handle(msg: ClientMessage, ws: WsType): Promise<boolean> {
     switch (msg.type) {
       case 'config.getRetryRules': {
-        // 读合并视图：内置层（基线 ⊕ 远程，source 标注）+ 用户盘上态（ext-config customRules 段）。
         // 文件缺失/坏形状在读侧回落空集（warn 留痕），不抛错。
-        const view = { builtinRules: getBuiltinRetryRules(), customRules: readRetryRulesExtConfig().customRules }
+        const view = this.readView()
         this.ctx.reply(ws, msg.id, 'config.retryRules', view)
         return true
       }
@@ -35,7 +39,7 @@ export class RetryRulesConfigMessageHandler {
           this.ctx.sendError(ws, 'set_retry_rules_failed', result.errors.join('；'), msg.id)
           return true
         }
-        const view = { builtinRules: getBuiltinRetryRules(), customRules: readRetryRulesExtConfig().customRules }
+        const view = this.readView()
         this.ctx.reply(ws, msg.id, 'config.retryRules', view)
         this.ctx.broadcast({
           type: 'config.retryRules',

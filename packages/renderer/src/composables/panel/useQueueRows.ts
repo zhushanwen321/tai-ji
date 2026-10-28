@@ -208,33 +208,31 @@ export function useQueueRows(
     deps.beginEdit(clientUuid)
   }
 
-  async function onRetryEntry(clientUuid: string): Promise<void> {
+  /** 批量重报（单条 / 全部失败两入口共用：sid 守卫 + RPC + 失败 toast 三件套）。 */
+  async function resyncDeliveryIds(ids: string[]): Promise<void> {
     const sid = sessionId.value
     if (!sid) return
     try {
-      // 单条重报：去重 anchor 在 runtime（终态判重记录 + transcript 预检），已投递的条目
-      // 在 reply.deduped 命中并经随后到达的 session.delivery 快照帧从队列区隐去——renderer
-      // 不本地改派生视图（单源）。
-      await delivery.resyncDelivery(sid, [clientUuid])
+      await delivery.resyncDelivery(sid, ids)
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       toast.error(t('panel.queueBubble.retryFailed', { msg }))
     }
   }
 
+  async function onRetryEntry(clientUuid: string): Promise<void> {
+    // 单条重报：去重 anchor 在 runtime（终态判重记录 + transcript 预检），已投递的条目
+    // 在 reply.deduped 命中并经随后到达的 session.delivery 快照帧从队列区隐去——renderer
+    // 不本地改派生视图（单源）。
+    await resyncDeliveryIds([clientUuid])
+  }
+
   async function onRetryAllFailed(): Promise<void> {
-    const sid = sessionId.value
-    if (!sid) return
     const failedIds = rows.value.filter((r) => r.state === 'failed').map((r) => r.clientUuid)
     if (failedIds.length === 0) return
-    try {
-      // 批量重报一次 RPC（Q5）：ids 按显示序传入（= failed 组内帧序），runtime requeue
-      // 按传入相对序插队首 → 出站序 = 传入序（消除逐条重试在同出站窗口积压时的倒排）。
-      await delivery.resyncDelivery(sid, failedIds)
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      toast.error(t('panel.queueBubble.retryFailed', { msg }))
-    }
+    // 批量重报一次 RPC（Q5）：ids 按显示序传入（= failed 组内帧序），runtime requeue
+    // 按传入相对序插队首 → 出站序 = 传入序（消除逐条重试在同出站窗口积压时的倒排）。
+    await resyncDeliveryIds(failedIds)
   }
 
   return {

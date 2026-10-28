@@ -1174,7 +1174,7 @@
     },
     {
       "id": "E2E-PIPE-01",
-      "summary": "review-pipeline 工程门脚本组：quality-gates（typecheck 三处 + coverage/metrics 聚合 + 盲区判定）/ changeset-check（check_changeset 唯一实装）/ cross-branch-overlap（兄弟线 diff 交集）单测锁 + pr-pre-merge 一体化脚本 + skill-data-dir（gate 产物目录解析单一出口）；单测层极端形态静态检查 + CI 慢用例门禁自测",
+      "summary": "review-pipeline 工程门脚本组：quality-gates（typecheck 三处 + coverage/metrics 聚合 + 盲区判定）/ changeset-check（check_changeset 唯一实装）/ cross-branch-overlap（兄弟线 diff 交集）单测锁 + pr-pre-merge 一体化脚本 + skill-data-dir（gate 产物目录解析单一出口）；单测层极端形态静态检查 + CI 慢用例门禁自测；测试族清单单一登记（test-suites SUITES）+ 对账器（ci.yml 命令/孤儿测试双向红灯，CI Invariants 与 pre-commit 双接线）+ quality-gates gate5 快速守卫族执行面",
       "scope": [
         "scripts/quality-gates.mjs",
         "scripts/changeset-check.mjs",
@@ -1183,7 +1183,11 @@
         "scripts/skill-data-dir.mjs",
         "scripts/check-slow-tests.mjs",
         "scripts/__tests__/check-slow-tests.test.mjs",
-        ".githooks/check-test-extremes.mjs"
+        ".githooks/check-test-extremes.mjs",
+        "scripts/test-suites.mjs",
+        "scripts/check-test-suite-wiring.mjs",
+        "scripts/lib/ci-yaml-runs.mjs",
+        "scripts/__tests__/check-test-suite-wiring.test.mjs"
       ],
       "layer": "L1",
       "assets": [
@@ -1226,6 +1230,18 @@
         {
           "kind": "spec",
           "ref": "scripts/__tests__/check-slow-tests.test.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/test-suites.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/check-test-suite-wiring.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/check-test-suite-wiring.test.mjs"
         }
       ],
       "trigger": "on-diff",
@@ -2938,6 +2954,7 @@
         "scripts/merge/**",
         "scripts/__tests__/merge-gate.test.mjs",
         "scripts/__tests__/merge-state.test.mjs",
+        "scripts/__tests__/merge-sync.test.mjs",
         "scripts/__tests__/merge-wait-for-ci.test.mjs"
       ],
       "layer": "L1",
@@ -2957,6 +2974,10 @@
         {
           "kind": "spec",
           "ref": "scripts/__tests__/merge-state.test.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/merge-sync.test.mjs"
         },
         {
           "kind": "spec",
@@ -2981,20 +3002,42 @@
       ],
       "trigger": "on-diff",
       "serial": false,
-      "run": "pnpm exec vitest run scripts/__tests__/merge-gate.test.mjs scripts/__tests__/merge-state.test.mjs scripts/__tests__/merge-wait-for-ci.test.mjs",
+      "run": "pnpm exec vitest run scripts/__tests__/merge-gate.test.mjs scripts/__tests__/merge-state.test.mjs scripts/__tests__/merge-sync.test.mjs scripts/__tests__/merge-wait-for-ci.test.mjs",
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "merge skill 判定承载脚本（pr-merge/wait-for-ci 的 Node 实装 + lib）迁入仓库后的登记：真实运行形态 = merge skill 薄壳经 main worktree 调起（.agents/skills/merge/scripts 同名 .sh），本表 run = 零 token fixture 回归（79 用例）；CI 固定环节 = ci.yml「Test - scripts guards」步骤同批文件"
     },
     {
+      "id": "E2E-REPO-01",
+      "summary": "仓库标识（slug）字面量对账：脚本域内 zhushanwen321/tai-ji 只允许出现在登记白名单（repo.mjs / _lib/repo.sh / runtime 常量镜像两处），其余脚本一律从单一来源取值（Node import DEFAULT_REPO / shell git remote 推导）——仓库改名漏改即红（xyz-agent→tai-ji 教训）",
+      "scope": [
+        "scripts/merge/lib/repo.mjs",
+        "scripts/__tests__/check-repo-literal.test.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/check-repo-literal.test.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "pnpm exec vitest run scripts/__tests__/check-repo-literal.test.mjs",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "发现 12 修复（2026-10-26 merge 流程架构审查）：白名单带理由登记在测试文件 ALLOW；CI 固定环节 = ci.yml「Test - scripts guards」步骤同批文件"
+    },
+    {
       "id": "E2E-CHANGESET-01",
-      "summary": "changeset 声明包合法性双防线：pre-commit staged 拦截 + Gate-1a.5/dev-merge gates 无条件 fail 方向——private/ignore 包声明永不生效（纯 private 被 version 静默跳过残留、混合声明阻断 version）",
+      "summary": "changeset 声明包合法性双防线：pre-commit staged 拦截 + Gate-1a.5/dev-merge gates 无条件 fail 方向——private/ignore 包声明永不生效（纯 private 被 version 静默跳过残留、混合声明阻断 version）；包枚举出口 versionable-packages.mjs（workspace globs + config.ignore 单一 CLI，check-version-changes.sh / apply-version.sh / changeset-check 方向① 三处消费，四份平行枚举归一）",
       "scope": [
         "scripts/changeset-versionable.mjs",
         "scripts/changeset-check.mjs",
         ".githooks/check_changeset_packages.mjs",
         "scripts/__tests__/changeset-versionable.test.mjs",
-        "scripts/__tests__/changeset-check.test.mjs"
+        "scripts/__tests__/changeset-check.test.mjs",
+        "scripts/versionable-packages.mjs"
       ],
       "layer": "L1",
       "assets": [
@@ -3017,6 +3060,10 @@
         {
           "kind": "spec",
           "ref": "scripts/__tests__/changeset-check.test.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/versionable-packages.mjs"
         }
       ],
       "trigger": "on-diff",
@@ -5558,6 +5605,31 @@
       "owner": "apps/electron",
       "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
       "note": "R2 态 + E2E 档（与同文件的 E2E-INTEG-53 同资产不同档：53 走 TAIJI_TEST_INTEGRATION 随 CI test-main job 常驻，本条门控 = TAIJI_E2E_UPDATER、CI 不设该 env 故不跑，升级脚本本体 diff 命中或手动跑）。覆盖 = 文件内全部 mac 真链段（端到端 / 中断注入 / 磁盘满 P10，E2E env 下跑整个文件；同文件 linux mv 段与 mock 段不受本 env 影响——linux 段随 53 的集成门控）；run 命令唯一正确入口 = test:main script（同 53）。断言本质 = 升级脚本对真实 DMG / 磁盘卷 / bash 的组合行为（含 P10 的 S4 ditto 落 staging 撞 ENOSPC 失败路径，四断言一条不减）；serial=真 的理由 = 真 hdiutil/ditto/bash 子进程 + 挂载点生命周期，重执行用例 3-30s。档位语义登记 = docs/TEST-STRATEGY.md「集成测试门控约定」节 E2E 档段。"
+    },
+    {
+      "id": "E2E-NPM-01",
+      "summary": "npm registry 版本上线探测脚本（merge 4N.5 单点）：pkg@ver 拆分 / scoped 名 URL 编码 / 重试循环（延迟后 200 通过、超限记最后状态码、网络异常归一为可重试信号）/ 全量串行与超限判断材料输出——注入 fetch/sleep 零等待单测锁",
+      "scope": [
+        "scripts/probe-registry.mjs",
+        "scripts/__tests__/probe-registry.test.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/probe-registry.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/probe-registry.test.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "pnpm exec vitest run scripts/__tests__/probe-registry.test.mjs",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R1 态：真实运行 = 发布验证阶段（merge 技能 4N.5）对 npm 版本端点逐包探测（重试 60s×6、单次 20s 超时；超限输出「传播延迟 vs 真失败」判断材料，逐包 200 底线不变）；判定语义由注入式单测零 token 锁定"
     }
   ]
 }

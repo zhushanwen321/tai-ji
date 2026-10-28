@@ -8,8 +8,9 @@
  *
  * 消费方：.githooks/check_changeset_packages.mjs（pre-commit，staged 文件）与
  * scripts/changeset-check.mjs（Gate-1a.5 / dev-merge gates，磁盘全量）。禁止在消费方
- * 复制判定逻辑。apply-version.sh 的 --changed 守卫是独立实现（bash 内嵌、传参通道），
- * 语义相同，未收敛——改动本判定时须连带核对该脚本 isVersionable。
+ * 复制判定逻辑。包枚举消费方（check-version-changes.sh / apply-version.sh /
+ * changeset-check 方向①）已全部收敛到 scripts/versionable-packages.mjs 单一出口，
+ * 无平行实现需连带核对。
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'

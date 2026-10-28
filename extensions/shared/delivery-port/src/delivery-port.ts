@@ -328,7 +328,7 @@ function createCollectFace(deps: CollectFaceDeps): CollectFace {
   ): Omit<CollectedEntry, "id"> {
     return {
       type: pending.registerTypes.get(key),
-      outcome: pending.unregisterSettlements.get(key) ?? pending.unregisterStatus.get(key),
+      outcome: unregisterOutcomeOf(pending, key),
       content: rec.payload.content,
       details: rec.payload.details,
     };
@@ -352,7 +352,12 @@ function createCollectFace(deps: CollectFaceDeps): CollectFace {
    *   曾注册集的补集。不登记等待集（防空等到 timeout 挂死）、不虚构终态；工具侧
    *   读本态组装 errors（不再伪装 waiting——端口是唯一未知判定点，词表诚实表达）。
    */
-  function collectArm(keys: string[]): CollectSnapshot {
+  /** 注销 key 的 outcome（结清视图优先——权威通道 resolveSettlementReason；legacy status 兜底）。 */
+function unregisterOutcomeOf(pending: PendingBaseline, key: string) {
+  return pending.unregisterSettlements.get(key) ?? pending.unregisterStatus.get(key);
+}
+
+function collectArm(keys: string[]): CollectSnapshot {
     if (deps.isDisposed()) throw new Error("collectArm on disposed delivery port");
     const pending = scanPendingBaseline(host.readSessionEntries());
     const snapshot: CollectSnapshot = [];
@@ -371,7 +376,7 @@ function createCollectFace(deps: CollectFaceDeps): CollectFace {
           state: "unregistered-no-entry",
           entry: {
             type: pending.registerTypes.get(key),
-            outcome: pending.unregisterSettlements.get(key) ?? pending.unregisterStatus.get(key),
+            outcome: unregisterOutcomeOf(pending, key),
             note: UNREGISTERED_NO_ENTRY_NOTE,
           },
         });

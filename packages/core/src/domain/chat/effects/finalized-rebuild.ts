@@ -132,10 +132,11 @@ function finalizeRebuiltMessage(
   const entryMs = toMs(entry.timestamp)
   // 中断呈现随载荷覆写退役：error 文案（断连兜底）与载荷全文并存会双显；status 按规则 2
   // 正常路径不动（streaming 保持到回合末尾统一收尾——sealed guard 依赖）。
-  const restored = target.status === 'streaming' ? target : { ...target, error: undefined }
+  const stillStreaming = target.status === 'streaming'
+  const restored = stillStreaming ? target : { ...target, error: undefined }
   return {
     ...restored,
-    status: target.status === 'streaming' ? 'streaming' : 'complete',
+    status: stillStreaming ? 'streaming' : 'complete',
     content: acc.textContent,
     contentBlocks: acc.contentBlocks,
     thinking: rebuiltThinking.length > 0 ? rebuiltThinking : undefined,

@@ -1,5 +1,11 @@
 # @zhushanwen/extension-protocol
 
+## 0.24.0
+
+### Minor Changes
+
+- da658a786: Add pending-entry settlement outcome fields (outcome fill rule unified across snapshot and backfill channels) and the shared PERMISSION_APPROVAL_TITLE marker constant.
+
 ## 0.23.0
 
 ### Minor Changes

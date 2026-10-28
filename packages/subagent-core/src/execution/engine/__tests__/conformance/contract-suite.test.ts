@@ -28,6 +28,7 @@ import type { RunContext } from "../../port.ts";
 import type { AgentEvent, EngineHandle, ProbeReport } from "../../types.ts";
 import { eventsToSessionView } from "../../common/journal-replay.ts";
 import { JournalWriter } from "../../common/event-journal.ts";
+import { localSpawnEnv } from "../local-spawn-env.ts";
 import { FAKE_CAPABILITIES } from "./fake-engine-capabilities.ts";
 
 const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), "__fixtures__", "engine-protocol");
@@ -73,7 +74,7 @@ describe("conformance C4：abort 行为（协议黑盒：cancel 帧 + 引擎收�
       hostVersion: "w10-c4-abort",
       dataDir,
       envPrefixes: [],
-      baseEnv: { ...process.env, FAKE_PROTOCOL_FIXTURE: FIXTURE, FAKE_RUN_HANG: "1" },
+      baseEnv: localSpawnEnv({ FAKE_PROTOCOL_FIXTURE: FIXTURE, FAKE_RUN_HANG: "1" }),
     });
     const engine = new RemoteEngine({
       engineId: "fake",
@@ -175,7 +176,7 @@ describe("conformance C1：probe 形状（协议黑盒：RemoteEngine × fake �
       hostVersion: "w10-c1-probe",
       dataDir,
       envPrefixes: [],
-      baseEnv: { ...process.env, FAKE_PROTOCOL_FIXTURE: FIXTURE, ...extraEnv },
+      baseEnv: localSpawnEnv({ FAKE_PROTOCOL_FIXTURE: FIXTURE, ...extraEnv }),
     });
     return new RemoteEngine({
       engineId: "fake",
@@ -270,7 +271,7 @@ describe("conformance C5：read 降级链（协议黑盒 + reducer 等价性）"
       hostVersion: "w10-c5",
       dataDir,
       envPrefixes: [],
-      baseEnv: { ...process.env, FAKE_PROTOCOL_FIXTURE: FIXTURE },
+      baseEnv: localSpawnEnv({ FAKE_PROTOCOL_FIXTURE: FIXTURE }),
     });
     const engine = new RemoteEngine({
       engineId: "fake",
@@ -297,7 +298,7 @@ describe("conformance C5：read 降级链（协议黑盒 + reducer 等价性）"
       hostVersion: "w10-c5",
       dataDir,
       envPrefixes: [],
-      baseEnv: { ...process.env, FAKE_PROTOCOL_FIXTURE: FIXTURE, FAKE_PROTOCOL_ERROR: "unknown_method" },
+      baseEnv: localSpawnEnv({ FAKE_PROTOCOL_FIXTURE: FIXTURE, FAKE_PROTOCOL_ERROR: "unknown_method" }),
     });
     try {
       await client.ensureConnected();
@@ -383,13 +384,12 @@ describe("[W6/D5 前置闸] 引擎进程被 SIGTERM → run 终态 failed（禁 
       hostVersion: "w6-engine-crash",
       dataDir,
       envPrefixes: [],
-      baseEnv: {
-        ...process.env,
+      baseEnv: localSpawnEnv({
         FAKE_PROTOCOL_FIXTURE: FIXTURE,
         FAKE_PID_FILE: pidFile,
         FAKE_RUN_STDERR_HANG: "1",
         FAKE_STDERR_SAMPLE: STDERR_SAMPLE,
-      },
+      }),
     });
   }
 

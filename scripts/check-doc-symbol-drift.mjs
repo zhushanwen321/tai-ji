@@ -48,7 +48,7 @@
  * git staged，无 staged 源码文件时零扫描。import 消费导出纯函数不触发主流程）
  */
 import { createRequire } from 'node:module'
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, lstatSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawnSync } from 'node:child_process'
@@ -366,7 +366,7 @@ const COMMENT_REF_SRC_EXTS = new Set(['.ts', '.tsx', '.mts', '.cts', '.mjs', '.c
 
 /** 全仓扫描（staged 含 .md 删除时触发）按目录名剪枝：依赖/产物/本地档案，无注释检查语义。
  *  .zcode 为 workflow 引擎工作区（agents 手工维护子目录除外，gitignored 产物目录不进扫描）。 */
-const FULL_SCAN_PRUNE_DIRS = new Set(['node_modules', '.git', 'dist', 'dist.bundle', 'coverage', 'test-results', 'playwright-report', '.taiji-harness', 'resources', '.zcode'])
+const FULL_SCAN_PRUNE_DIRS = new Set(['node_modules', '.git', 'dist', 'dist.bundle', 'coverage', 'test-results', 'playwright-report', '.taiji-harness', 'resources', '.zcode', '.tmp', '.agents'])
 
 /** Form A：docs/ 仓库相对引用。左边界断言防 URL 中缀误配（github.com/docs/x），
  *  与第二检查 REPO_PATH_RE 同口径。 */
@@ -521,7 +521,10 @@ function collectAllSourceFiles(skipped) {
       const full = path.join(abs, name)
       const relChild = rel ? `${rel}/${name}` : name
       let st
-      try { st = statSync(full) } catch { skipped.files++; continue }
+      try { st = lstatSync(full) } catch { skipped.files++; continue }
+      // 不跟符号链接：worktree 内 .agents → workspace 根共享实体（脱离 git 跟踪），
+      // 扫描域 = 本仓内容，链接目标的文件不属检查对象
+      if (st.isSymbolicLink()) continue
       if (st.isDirectory()) walk(full, relChild)
       else if (COMMENT_REF_SRC_EXTS.has(path.extname(name))) out.push({ rel: relChild, abs: full })
     }

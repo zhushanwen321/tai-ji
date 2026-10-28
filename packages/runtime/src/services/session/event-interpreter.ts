@@ -172,6 +172,17 @@ const BOOLEAN_DIMENSION_PATCHES: Partial<Record<SessionOccupancyTransition, Part
  * 本函数降级为原语的内部机制（合并 + 去重 + state-topic 广播路径），不再被挂点直调。
  * OccupancyPublisher 取 IMessageBus 的结构化窄视图（只依赖 publish，test mock 友好）。
  */
+/** session.occupancy 帧载荷（wire 形态单一来源：update 与 announce 两站点共用）。 */
+function occupancyFramePayload(sessionId: string, occupancy: SessionOccupancy) {
+  return {
+    sessionId,
+    turn: occupancy.turn,
+    compacting: occupancy.compacting,
+    bash: occupancy.bash,
+    handingOff: occupancy.handingOff,
+  }
+}
+
 export function updateSessionOccupancy(
   session: Pick<IManagedSessionView, 'id' | 'occupancy'>,
   publish: { publish(sessionId: string, msg: ServerMessage): void } | null | undefined,
@@ -186,16 +197,7 @@ export function updateSessionOccupancy(
     && prev.handingOff === next.handingOff
   ) return
   session.occupancy = next
-  publish?.publish(session.id, {
-    type: 'session.occupancy',
-    payload: {
-      sessionId: session.id,
-      turn: next.turn,
-      compacting: next.compacting,
-      bash: next.bash,
-      handingOff: next.handingOff,
-    },
-  })
+  publish?.publish(session.id, { type: 'session.occupancy', payload: occupancyFramePayload(session.id, next) })
 }
 
 /**
@@ -210,16 +212,7 @@ export function announceSessionOccupancy(
   publish: { publish(sessionId: string, msg: ServerMessage): void } | null | undefined,
 ): void {
   const current = session.occupancy ?? IDLE_SESSION_OCCUPANCY
-  publish?.publish(session.id, {
-    type: 'session.occupancy',
-    payload: {
-      sessionId: session.id,
-      turn: current.turn,
-      compacting: current.compacting,
-      bash: current.bash,
-      handingOff: current.handingOff,
-    },
-  })
+  publish?.publish(session.id, { type: 'session.occupancy', payload: occupancyFramePayload(session.id, current) })
 }
 
 /**

@@ -806,7 +806,10 @@ export class WorkflowDispatch {
       // （中性）。宿主在此改判 harness.timeout（结清 failed + 展示失败档），引擎收条
       // 事实保持原样。timeoutMs 显式传入才生效（本点只改分类不改超时语义）。
       const timeoutFailure = hostTimeoutFailureCause(runSignal.signal.reason, outcome);
-      if (timeoutFailure !== undefined && yieldsToTimeoutFact(result.failure)) {
+      // result.failure 与 wfResult.failure 同源 outcome.failure（同一引用，其间 outcome 不变），
+      // 判定算一次两处复用。
+      const timeoutApplies = timeoutFailure !== undefined && yieldsToTimeoutFact(result.failure);
+      if (timeoutApplies) {
         result.failure = timeoutFailure;
       }
       // D7 收尾（origin 分支在 settleOneShotOutcome 函数顶部；aborted 判外部 signal
@@ -815,7 +818,7 @@ export class WorkflowDispatch {
       const wfResult = outcomeToWorkflowResult(outcome);
       // [§3.3.9/§3.3.6] 宿主超时分类同步覆盖回脚本结果（call.result.failure → run 终局
       // 成员交付结算 failedMembers[].cause 的点拼数据源，与 record 结算同判同词）。
-      if (timeoutFailure !== undefined && yieldsToTimeoutFact(wfResult.failure)) {
+      if (timeoutApplies) {
         wfResult.failure = timeoutFailure;
       }
       return wfResult;

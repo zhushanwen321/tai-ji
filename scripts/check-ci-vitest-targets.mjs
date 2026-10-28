@@ -31,6 +31,10 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawnSync } from 'node:child_process'
+import { extractRunValues } from './lib/ci-yaml-runs.mjs'
+
+// 再导出维持既有测试导入路径（scripts/__tests__/check-ci-vitest-targets.test.mjs）
+export { extractRunValues }
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const DEFAULT_CI_YML = join(ROOT, '.github/workflows/ci.yml')
@@ -46,42 +50,6 @@ export function stripGithubTemplates(text) {
   return text.replace(/\$\{\{[^}]*\}\}/g, '')
 }
 
-/**
- * 从 ci.yml 文本提取全部 run 值（命令文本），返回 [{ line, cmd }]。
- * 覆盖单行 `run: <cmd>` 与块 `run: |` / `run: >`（收集缩进大于声明行的后续行，
- * 按行拼接）。行号 1-based，供违规定位。
- */
-export function extractRunValues(yamlText) {
-  const lines = yamlText.split('\n')
-  const runs = []
-  const DECL_RE = /^(\s*)(?:-\s+)?run:\s*(.*)$/
-  for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].match(DECL_RE)
-    if (!m) continue
-    const indent = m[1].length
-    const rhs = m[2].trim()
-    if (/^[|>][+-]?$/.test(rhs)) {
-      const parts = []
-      let j = i + 1
-      while (j < lines.length) {
-        const l = lines[j]
-        if (l.trim() === '') {
-          j++
-          continue
-        }
-        const lead = l.match(/^\s*/)[0].length
-        if (lead <= indent) break
-        parts.push(l.trim())
-        j++
-      }
-      runs.push({ line: i + 1, cmd: parts.join(' && ') })
-      i = j - 1
-    } else {
-      runs.push({ line: i + 1, cmd: rhs })
-    }
-  }
-  return runs
-}
 
 /** 解析 pnpm-workspace.yaml 的 packages globs → [{ base, glob }]（仅一级 /* 形态） */
 export function parseWorkspaceGlobs(yamlText) {

@@ -83,8 +83,19 @@ function makeDeps(overrides = {}) {
 }
 
 describe('parseGateArgs', () => {
-  it('默认 side = pr-cr-fix', () => {
-    expect(parseGateArgs([])).toEqual({ side: 'pr-cr-fix', base: null, json: false })
+  it('默认 side = pr-cr-fix（only=null 全跑）', () => {
+    expect(parseGateArgs([])).toEqual({ side: 'pr-cr-fix', base: null, json: false, only: null })
+  })
+  it('--only 组过滤：合法列表解析、未知组与缺值 fail-fast', () => {
+    expect(parseGateArgs(['--only', 'typecheck,test']).only).toEqual(['typecheck', 'test'])
+    expect(parseGateArgs(['--only', 'typecheck, test']).only).toEqual(['typecheck', 'test'])
+    expect(() => parseGateArgs(['--only', 'bogus'])).toThrow('--only')
+    expect(() => parseGateArgs(['--only'])).toThrow('--only')
+  })
+  it('--only 纯分隔符（, / ,, / 空白）解析为空组列表 → 报用法错误（防零门执行的「无检查即绿」）', () => {
+    expect(() => parseGateArgs(['--only', ','])).toThrow('至少需要一个有效组名')
+    expect(() => parseGateArgs(['--only', ',,'])).toThrow('至少需要一个有效组名')
+    expect(() => parseGateArgs(['--only', ' , '])).toThrow('至少需要一个有效组名')
   })
   it('接受 --side dev-merge 与 --base', () => {
     expect(parseGateArgs(['--side', 'dev-merge', '--base', 'dev-0.10.4', '--json']).side).toBe('dev-merge')
@@ -162,7 +173,7 @@ describe('子进程命令构建（py 参数侧锚点）', () => {
 })
 
 describe('runGates 聚合编排（fake 子进程，不真跑重型命令）', () => {
-  it('全绿 → exitCode 0，六个 gate 全 PASS', async () => {
+  it('全绿 → exitCode 0，全部 gate PASS（typecheck×4 + coverage/blindspot/metrics + 快速守卫族×4）', async () => {
     const { exitCode, result } = await runGates(makeDeps(), { side: 'pr-cr-fix', base: null })
     expect(exitCode).toBe(0)
     expect(result.verdict).toBe('pass')
@@ -174,9 +185,39 @@ describe('runGates 聚合编排（fake 子进程，不真跑重型命令）', ()
       'coverage-gate',
       'coverage-blindspot',
       'metrics-gate',
+      'test-suite:taste-lint',
+      'test-suite:resources-plugins',
+      'test-suite:builtin-ext-bundle',
+      'test-suite:scripts-guards',
     ])
     expect(result.gates.every((g) => g.status === 'PASS')).toBe(true)
   })
+  it('--only typecheck,test → 只跑指定门组；py 实体缺失不再 fail-fast、base 不解析（merge 阶段 1 调用形态）', async () => {
+    const deps = makeDeps({ exists: () => false }) // py 实体全缺
+    const { exitCode, result } = await runGates(deps, { side: 'pr-cr-fix', base: null, only: ['typecheck', 'test'] })
+    expect(exitCode).toBe(0)
+    expect(result.verdict).toBe('pass')
+    expect(result.base).toBeNull()
+    expect(result.gates.map((g) => g.name)).toEqual([
+      'typecheck:extensions',
+      'typecheck:runtime',
+      'typecheck:renderer',
+      'typecheck:mobile-renderer',
+      'test-suite:taste-lint',
+      'test-suite:resources-plugins',
+      'test-suite:builtin-ext-bundle',
+      'test-suite:scripts-guards',
+    ])
+  })
+
+  it('--only 含 coverage 时 py 实体缺失保持 fail-fast（exit 2，不白跑）', async () => {
+    const deps = makeDeps({ exists: () => false })
+    const { exitCode, result } = await runGates(deps, { side: 'pr-cr-fix', base: null, only: ['typecheck', 'coverage'] })
+    expect(exitCode).toBe(2)
+    expect(result.verdict).toBe('error')
+    expect(result.gates).toEqual([])
+  })
+
   it('typecheck 一处 FAIL → exitCode 1，其余门照跑', async () => {
     const deps = makeDeps({
       exec: (cmd, args, cwd) => {
@@ -451,5 +492,76 @@ describe('acquireGateLock：互斥获取 / 幂等释放 / 无主偷锁三通道 
       release()
       expect(existsSync(lockPath)).toBe(false)
     })
+  })
+})
+
+describe('gate 5 test-suite：快速守卫测试族（SUITES 单一登记的执行面）', () => {
+  it('buildSuiteSteps：devGate 族展开为 needs + args（命令与 SUITES.cmd 一致）', async () => {
+    const m = await import('../quality-gates.mjs')
+    const steps = m.buildSuiteSteps()
+    expect(steps.map((s) => s.name)).toEqual([
+      'test-suite:taste-lint',
+      'test-suite:resources-plugins',
+      'test-suite:builtin-ext-bundle',
+      'test-suite:scripts-guards',
+    ])
+    const bundle = steps.find((s) => s.name === 'test-suite:builtin-ext-bundle')
+    expect(bundle.needs).toEqual([['bash', 'scripts/prepare-builtin-extensions.sh']])
+    expect(bundle.args[0]).toBe('pnpm')
+    expect(bundle.args).toContain('scripts/__tests__/builtin-ext-bundle.test.mjs')
+  })
+
+  it('全部命令 exit 0 → 每族 PASS，needs 先于本体执行', async () => {
+    const m = await import('../quality-gates.mjs')
+    const calls = []
+    const deps = {
+      exec: (cmd, args) => {
+        calls.push([cmd, ...args].join(' '))
+        return { status: 0, stdout: '', stderr: '' }
+      },
+    }
+    const gates = []
+    m.runTestSuiteGate(deps, gates)
+    expect(gates.every((g) => g.status === 'PASS')).toBe(true)
+    expect(gates).toHaveLength(4)
+    // builtin-ext-bundle：prepare 前置先跑，vitest 本体后跑
+    const prepIdx = calls.findIndex((c) => c.includes('prepare-builtin-extensions.sh'))
+    const vitIdx = calls.findIndex((c) => c.includes('builtin-ext-bundle.test.mjs'))
+    expect(prepIdx).toBeGreaterThanOrEqual(0)
+    expect(vitIdx).toBeGreaterThan(prepIdx)
+  })
+
+  it('前置失败 → 该族 FAIL 且不跑本体；本体失败 → FAIL 带 detail', async () => {
+    const m = await import('../quality-gates.mjs')
+    const deps = {
+      exec: (cmd, args) => {
+        const joined = [cmd, ...args].join(' ')
+        if (joined.includes('prepare-builtin-extensions.sh')) return { status: 1, stdout: '', stderr: 'staged 残留' }
+        if (joined.includes('test:taste-lint')) return { status: 1, stdout: '', stderr: 'rule case failed' }
+        return { status: 0, stdout: '', stderr: '' }
+      },
+    }
+    const gates = []
+    m.runTestSuiteGate(deps, gates)
+    const byName = Object.fromEntries(gates.map((g) => [g.name, g]))
+    expect(byName['test-suite:builtin-ext-bundle'].status).toBe('FAIL')
+    expect(byName['test-suite:builtin-ext-bundle'].detail).toContain('prepare-builtin-extensions.sh')
+    expect(byName['test-suite:taste-lint'].status).toBe('FAIL')
+    expect(byName['test-suite:taste-lint'].detail).toContain('rule case failed')
+    expect(byName['test-suite:scripts-guards'].status).toBe('PASS')
+  })
+
+  it('spawn 失败（status null + error）→ FAIL 且 detail 含命令名与恢复动作（非哑 FAIL，同 typecheck 门实发形态）', async () => {
+    const m = await import('../quality-gates.mjs')
+    const deps = {
+      exec: (cmd) => (cmd === 'pnpm' ? { status: null, stdout: '', stderr: '', error: new Error('spawn pnpm ENOENT') } : { status: 0, stdout: '', stderr: '' }),
+    }
+    const gates = []
+    m.runTestSuiteGate(deps, gates)
+    const tl = gates.find((g) => g.name === 'test-suite:taste-lint')
+    expect(tl.status).toBe('FAIL')
+    expect(tl.detail).toContain('pnpm')
+    expect(tl.detail).toContain('PATH')
+    expect(tl.detail).toContain('spawn pnpm ENOENT')
   })
 })

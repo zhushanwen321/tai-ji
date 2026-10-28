@@ -1,5 +1,11 @@
 # @zhushanwen/pi-permission
 
+## 1.6.6
+
+### Patch Changes
+
+- da658a786: Single-source the approval card title from extension-protocol's PERMISSION_APPROVAL_TITLE constant (identical value, no behavior change).
+
 ## 1.6.5
 
 ### Patch Changes

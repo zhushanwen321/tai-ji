@@ -199,9 +199,10 @@ export const HIDDEN_ALLOWLIST = new Map([
   ['packages/renderer/src/components/canvas/canvas-display.ts:232', 'canvas 布局 opts.hidden 属性访问'],
   // renderer 扩展宿主桥的插件条目 hidden（帧面透传）
   ['packages/renderer/src/composables/shell/useExtensionHostBridge.ts:267', '插件 headerAction 运行时镜像 hidden（扩展宿主桥透传；256→267 随插件化分支合并漂移）'],
-  // locale 键（设置页「注册但不可达」开关的字面键名；1393/1392→1394/1393 随插件化分支合并漂移）
-  ['packages/ui/src/locale/en-US/settings.ts:1394', 'locale 键 hidden（设置项字面键名，非会话语义）'],
-  ['packages/ui/src/locale/zh-CN/settings.ts:1393', 'locale 键 hidden（设置项字面键名，非会话语义）'],
+  // locale 键（设置页「注册但不可达」开关的字面键名；dev 登记 1394/1393、main 登记 1392/1390，
+  // 合并后实测 1393/1391——dev 插件化分支漂移与 main stepfun i18n 键替换/genstats locale 编辑漂移叠加）
+  ['packages/ui/src/locale/en-US/settings.ts:1393', 'locale 键 hidden（设置项字面键名，非会话语义）'],
+  ['packages/ui/src/locale/zh-CN/settings.ts:1391', 'locale 键 hidden（设置项字面键名，非会话语义）'],
 ])
 
 // ─────────────────────────────────────────────────────────────────────────────

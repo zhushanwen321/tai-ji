@@ -192,7 +192,7 @@ let PanelContainerCtor: (typeof import('@/components/workspace/PanelContainer.vu
 
 beforeAll(async () => {
   PanelContainerCtor = (await import('@/components/workspace/PanelContainer.vue')).default
-})
+}, 60_000) // 整图首载 junit 实测 13s+，coverage 并发负载下更慢——默认 10s hook 超时必炸（gate-suite 3 轮红根因）
 
 async function mountContainer() {
   return mount(PanelContainerCtor, {

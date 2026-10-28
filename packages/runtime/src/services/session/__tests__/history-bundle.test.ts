@@ -7,6 +7,7 @@ import { countSessionMessagesInFile } from '../session-message-count.js';
 import type { IManagedSessionView } from '../types.js';
 import { HISTORY_BUDGET, type CrashJournalEvent, type Message, type SessionSummary } from '@taiji/shared';
 import { createZcodeEngine, registerZcodeEngine, routeEngine } from '@zhushanwen/subagent-core';
+import { CONTROL_ENV_ROOT_SESSION_ID, CONTROL_ENV_SOCKET } from '@zhushanwen/subagent-engine-sdk';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -963,9 +964,16 @@ afterEach(() => {
 // 指向 Electron 主二进制）会把 hostKindOf 嗅探到 pi-extension 分支——用主二进制当
 // node 执行器 spawn fake CLI，进程立即 exit 0 → engine_crashed。测试恒用 standalone
 // 语义（PATH node），剥这两个 env（afterAll 经 savedEnv 恢复）。
+// 托管态隔离：TaiJi 托管 env（runtime 注入的 control env）下跑测会让协议客户端误选
+// runtime transport——引擎改由外层 runtime spawn，L0 注入发生在 runtime 进程（其自身
+// 数据根），deps.engineDataDir 的显式值到不了子进程 env，envEcho 断言必失败。本套件
+// 锚定本地 spawn 语义（fake 引擎由测试进程直启），剥除 control env（键名 = SDK 单源
+// 常量）；standalone 态剥除为 no-op。
 beforeAll(() => {
   setEnv('TAIJI_AGENT_ENGINE_NODE', undefined)
   setEnv('TAIJI_AGENT_ENGINE_ROOTS', undefined)
+  setEnv(CONTROL_ENV_SOCKET, undefined)
+  setEnv(CONTROL_ENV_ROOT_SESSION_ID, undefined)
 })
 // cliPath 直接以文件形态被 EngineClient spawn——需要可执行位（运行时自愈，
 // 不改 repo 内文件 mode；协议测试文件的拷贝路径已单独 chmod）。

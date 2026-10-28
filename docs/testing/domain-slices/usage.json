@@ -14,6 +14,7 @@
       "packages/runtime/src/services/quota-cache.ts",
       "packages/runtime/src/services/quota-auto-enable.ts",
       "packages/runtime/src/services/quota-providers/**",
+      "packages/runtime/src/services/quota-params.ts",
       "packages/runtime/src/services/session/gen-stats-service.ts",
       "packages/runtime/src/services/session/gen-stats-store.ts",
       "packages/runtime/src/services/session/event-interpreter-gen-stats.ts",

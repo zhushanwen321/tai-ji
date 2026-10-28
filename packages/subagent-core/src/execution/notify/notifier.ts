@@ -261,6 +261,15 @@ export const ROUND_REPLY_RECOVERY_TAIL =
  *   ④ 正常轮空正文：「本轮完成，无文本输出」（UC-15 空值语义——不告警不谎报）；
  *   ⑤ 正常轮：结果正文（多轮与 one-shot 同形）。
  */
+/** 取消族轮判据（事实优先：failure 分类 user = 取消；迁移期回落 = 旧引擎 aborted 停因无分类事实）。
+ *  轮应答取消支与 transcript 指针判读共用，防两份手写判据漂移。 */
+function isCancelledLikeRound(record: BgNotifyRecord): boolean {
+  return (
+    record.lastRoundFailure?.class === "user" ||
+    (record.lastRoundFailure === undefined && record.lastRoundStopReason === "aborted")
+  );
+}
+
 function buildRoundReplyContent(record: BgNotifyRecord): string {
   const agent = record.agent;
   const id = record.id;
@@ -268,9 +277,7 @@ function buildRoundReplyContent(record: BgNotifyRecord): string {
   const failure = record.lastRoundFailure;
   // [§3.3.1 取消支判据事实优先] 有 failure 事实时以分类为准（user = 取消族，其余
   // class = 失败轮）；仅旧引擎 aborted 停因而无分类事实时回落取消文案（迁移期回落）。
-  const isCancelledRound =
-    failure?.class === "user" ||
-    (failure === undefined && record.lastRoundStopReason === "aborted");
+  const isCancelledRound = isCancelledLikeRound(record);
   if (record.lastRoundDisposition === "handled") {
     // ① 被接管（§3.3.1 第三形态：回执层成功 + 轮终事实词——引擎未执行，无成败）
     return `Subagent "${agent}" (${id})${roundLabel} was taken over by an extension before the engine ran it (prompt disposition: handled) — the round never executed; re-dispatch if the work is still needed.${transcriptTail(record)}`;
@@ -303,13 +310,10 @@ function buildRoundReplyContent(record: BgNotifyRecord): string {
 }
 
 /** transcript 指针行（cancelled/gc-failed 不追加的对齐判据同样适用于轮应答——
- *  中止/接管轮无成功结果可读，指针无意义；失败/正常轮追加。取消判据与
- *  buildRoundReplyContent 的取消支同口径——事实优先，迁移期回落 aborted 停因）。 */
+ *  中止/接管轮无成功结果可读，指针无意义；失败/正常轮追加）。取消判据 =
+ *  isCancelledLikeRound（与 buildRoundReplyContent 同源）＋接管轮。 */
 function transcriptTail(record: BgNotifyRecord): string {
-  const cancelledLike =
-    record.lastRoundFailure?.class === "user" ||
-    (record.lastRoundFailure === undefined && record.lastRoundStopReason === "aborted") ||
-    record.lastRoundDisposition === "handled";
+  const cancelledLike = isCancelledLikeRound(record) || record.lastRoundDisposition === "handled";
   return !cancelledLike && record.sessionFile ? `\n\nFull transcript: ${record.sessionFile}` : "";
 }
 

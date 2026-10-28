@@ -79,6 +79,7 @@ import {
   setHostUiRequestEndpoint,
 } from "../../host/host-ui-endpoint.ts";
 import { waitFor } from "./helpers/wait-for.ts";
+import { localSpawnEnv } from "../../__tests__/local-spawn-env.ts";
 
 // ── 来源区块：engine-client.test.ts ────────────────────────────────────────────────
 describe("engine-client", () => {
@@ -1069,6 +1070,10 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
       hostKind: "test",
       dataDir,
       envPrefixes: [],
+      // 本地 spawn env（剥除宿主托管 control env——见 local-spawn-env.ts 头注）：缺省
+      // 回落 process.env，托管态跑测会误选 runtime transport（引擎由外层 runtime spawn，
+      // abort/杀链语义全部换位）。
+      baseEnv: localSpawnEnv(),
       ...clientOverrides,
     });
     const engine = new RemoteEngine({
