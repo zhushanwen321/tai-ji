@@ -11,7 +11,8 @@
  * - D5 聚合降噪：window-onerror + 无堆栈 + 固定 RO loop 告警文本 → 窗内聚合计数、窗尾一条
  *   含次数的汇总（fake timers 驱动）；未命中 / 同文本带堆栈的真错误逐条转发不变
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/boot/error-reporter.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=app-shell npx vitest run src/__tests__/boot/error-reporter.test.ts
+ *（本文件登记在 domain-map.json app-shell 域，默认档被排除、须域档触发；整域入口：node scripts/run-domain-tests.mjs app-shell）
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createApp, defineComponent, h } from 'vue'
