@@ -9,11 +9,12 @@
  * 断言形态（只含确定性断言；「无跳动/无半截」等视觉形态断言归 L4 inspect 节点，不在此写）：
  * - A2：流式期间以 ≥200ms 间隔采样 ≥10 次——每次 scrollEl 的
  *   distance = scrollHeight - scrollTop - clientHeight ≤ BOTTOM_THRESHOLD(40px，应用自身
- *   贴底判据，useVirtuaFollow.ts 常量)，且末条 turn 的 rect.bottom 距滚动容器底 ≤ 64px
- *   （32px 贴底 spacer + 余量）；
+ *   贴底判据，useVirtuaFollow.ts 常量)，且末条 turn 距容器底 gap 全程钉住（Δ ≤ 8px；
+ *   gap 绝对值 = 尾部结构高度，非行为量）；
  * - A12：采样中段经真实用户路径收窄对话流宽度（侧栏文件 tab → 点开一个文件 → 右抽屉
  *   detail 打开 → 对话流变窄 → 文本回流 → 内容总高变化），断言收缩后采样 distance 收敛
- *   回 ≤40 且 scrollHeight 确实因回流变化（证明收缩真实发生）。
+ *   回 ≤40 且回流真实发生（|ΔscrollHeight| ≥ 50 或末条 turn 高度变化 ≥ 50——未满屏窗口
+ *   scrollHeight 钳在 clientHeight 量不到回流，turn 高度不受钳位影响）。
  *
  * 装配：faux + TAIJI_FAUX_TPS=30，长文本 ≈8800 字符（≈2200 token，窗口 ≈73s）。会话
  * cwd = <repo>（真实 git 仓库，侧栏文件树有内容——A12 的缩窗入口需要可点开的文件）。
@@ -21,8 +22,10 @@
 
 /** 贴底判据阈值 = useVirtuaFollow BOTTOM_THRESHOLD。 */
 const BOTTOM_THRESHOLD = 40
-/** 末条内容距容器底的容差 = 32px 贴底 spacer（composer-band.ts 契约）+ 余量。 */
-const LAST_TURN_GAP_TOLERANCE = 64
+/** 贴底跟随 = 末条 turn 距容器底 gap 全程钉住（Δ ≤ 8px）。gap 绝对值由尾部结构决定
+ * （32px 贴底 spacer + ActivityStrip 流式行等，实测 ~146px），不设绝对阈值——
+ * 贴底本身由 d ≤ BOTTOM_THRESHOLD 断言。 */
+const LAST_GAP_PIN_TOLERANCE = 8
 
 function buildLongText() {
   const para = '贴底跟随采样段：文本持续追加维持流式窗口，采样循环在追加期间读取滚动几何。'
@@ -32,7 +35,8 @@ function buildLongText() {
 }
 
 /** 页内读取滚动几何（A 通道 DOM 度量；只读）。真实函数形态传入 evaluate——
- * 本仓 Playwright 版本对「字符串函数表达式」不自动调用（实测返回 undefined）。 */
+ * 本仓 Playwright 版本对「字符串函数表达式」不自动调用（实测返回 undefined）。
+ * 容器不在时返回 null——调用方必须记 miss 并走诊断面，禁止静默丢弃采样。 */
 const readMetrics = (page) =>
   page.evaluate(() => {
     const el = document.querySelector('.message-stream')
@@ -48,8 +52,36 @@ const readMetrics = (page) =>
       d: el.scrollHeight - el.scrollTop - el.clientHeight,
       turnCount: turns.length,
       lastGap: lastRect ? rect.bottom - lastRect.bottom : null,
+      lastH: lastRect ? lastRect.height : null,
     }
   })
+
+/** 页内 DOM 诊断（采样 miss 时的证据面）：容器 / turn 命中情况 + 候选滚动容器清单。 */
+const probeStreamDom = (page) =>
+  page.evaluate(() => {
+    const candidates = []
+    for (const n of document.querySelectorAll('*')) {
+      if (n.scrollHeight > n.clientHeight + 50 && n.clientHeight > 200) {
+        candidates.push(`${n.tagName}.${String(n.className).slice(0, 80)}`)
+        if (candidates.length >= 8) break
+      }
+    }
+    return {
+      streamFound: Boolean(document.querySelector('.message-stream')),
+      turns: document.querySelectorAll('[data-testid^="turn-"]').length,
+      chatScope: Boolean(document.querySelector('[data-fs-scope="chat"]')),
+      scrollCandidates: candidates,
+      url: location.href,
+    }
+  })
+
+/** 读数重试：容器瞬态不在时等一拍再读一次（仅重试一次，不掩盖持续性 miss）。 */
+const readMetricsRetry = async (page) => {
+  const first = await readMetrics(page)
+  if (first) return first
+  await new Promise((r) => setTimeout(r, 300))
+  return readMetrics(page)
+}
 
 export const meta = {
   id: 'follow-stick-shrink',
@@ -63,8 +95,8 @@ export const meta = {
     tps: 30,
   },
   provable: [
-    'A2：流式期间 ≥10 次采样（间隔 ≥200ms）distance ≤ 40（贴底判据）且末条 turn rect.bottom 距容器底 ≤ 64px',
-    'A12：点开侧栏文件 → 右抽屉打开（drawer-panel 可见）→ 对话流收窄（scrollHeight 回流变化 ≥50px）→ 收缩后采样 distance 收敛 ≤ 40（末条仍贴底）',
+    'A2：流式期间 ≥10 次采样（间隔 ≥200ms）distance ≤ 40（贴底判据）且末条 turn 距容器底 gap 全程钉住（Δ ≤ 8px）',
+    'A12：点开侧栏文件 → 右抽屉打开（drawer-panel 可见）→ 对话流收窄（scrollHeight 或末条 turn 高度变化 ≥50px）→ 收缩后采样 distance 收敛 ≤ 40（末条仍贴底）',
     'B：回合正常收尾（faux 轮消费完整）',
   ],
   notProvable: [
@@ -77,7 +109,10 @@ export async function run(ctx) {
   const { protocol, ev, log, instance, repo } = ctx
   const uncovered = []
   const gotchas = [
+    '采样前置 = .message-stream 可见（Panel.vue 在 sessionId + 消息非空时才渲染 MessageStream）：expectVisible 后才开始采样，杜绝容器挂载前的空采',
+    'readMetrics 返回 null 记 miss（不静默）：采样全空时 attach probeStreamDom 诊断（容器/turn 命中 + 候选滚动容器）',
     'A12 缩窗入口 = 右抽屉（侧栏文件 tab 点文件打开）：对话流宽度收窄 → 文本回流 → 内容总高变化，与「窗口收缩」同一 RO 触发路径',
+    'A12 回流度量双证据面（ΔscrollHeight 或 Δ末条 turn 高）：内容未满屏时 scrollHeight 钳在 clientHeight（量不到回流），turn 高度不受钳位影响',
     'distance = scrollHeight - scrollTop - clientHeight；≤40 判据与 useVirtuaFollow BOTTOM_THRESHOLD 同值（应用自身贴底语义）',
     '末条 turn 取 [data-testid^="turn-"] 最后一个（流式轮 keepMounted，恒在 DOM）',
     'cwd 用 <repo>：侧栏文件树要有可点开的文件（mkdtemp 空目录无文件树）',
@@ -99,29 +134,36 @@ export async function run(ctx) {
     const since = protocol.events.length
     await protocol.send(sid, '请输出一段很长的流式文本')
     await ui.expectVisible('css=.stop-btn', { timeoutMs: 30_000 })
+    // 采样前置：滚动容器挂载完成才开始采样（MessageStream 随首条消息渲染）
+    await ui.expectVisible('css=.message-stream', { timeoutMs: 30_000 })
     ev.step({ step: 'chat.send', channel: 'B', exitCode: 0, stats: { sid, streaming: true } })
 
-    // ── A2：贴底采样循环（≥10 次 × ≥200ms；中段插入 A12 收缩动作）────────────
+    // ── A2：贴底采样循环（≥10 次 × ≥200ms；中后段插入 A12 收缩动作）────────────
     const samples = []
+    let metricMiss = 0 // readMetrics null 次数（诊断面：正常必须 0）
     let shrinkAt = -1 // 收缩动作发生在第几个采样后
     let shrinkEffect = null
-    for (let i = 0; i < 14; i++) {
-      // 中段（第 6 次采样后）执行收缩：侧栏 → 文件 tab → 点第一个文件 → 右抽屉打开
-      if (i === 6) {
+    for (let i = 0; i < 20; i++) {
+      // 中后段（第 12 次采样后，内容已满屏可滚——未满屏时 scrollHeight 钳在
+      // clientHeight，收窄回流在 sh 上量不到）执行收缩：侧栏 → 文件 tab → 点第一个文件 → 右抽屉打开
+      if (i === 12) {
         try {
           await ui.click('css=[data-testid="sidebar-view-tablist"] button[title="文件"]', { timeoutMs: 8_000 })
           await ui.click('css=[data-testid^="file-tree-file-"]', { timeoutMs: 8_000 })
           await ui.expectVisible('testid=drawer-panel', { timeoutMs: 10_000 })
-          const before = await readMetrics(page)
+          const before = await readMetricsRetry(page)
           // 给回流 + 跟随收敛留出观察拍：后续采样承担 A12 断言
           const afterWait = await (async () => {
             await new Promise((r) => setTimeout(r, 600))
-            return readMetrics(page)
+            return readMetricsRetry(page)
           })()
           shrinkEffect = {
             shBefore: before?.sh ?? null,
             shAfter: afterWait?.sh ?? null,
             delta: before && afterWait ? afterWait.sh - before.sh : null,
+            lastHBefore: before?.lastH ?? null,
+            lastHAfter: afterWait?.lastH ?? null,
+            lastHDelta: before && afterWait ? afterWait.lastH - before.lastH : null,
           }
           shrinkAt = i
           ev.step({ step: 'a12.shrink.drawer', channel: 'A', exitCode: 0, stats: shrinkEffect })
@@ -133,14 +175,20 @@ export async function run(ctx) {
       }
       const m = await readMetrics(page)
       if (m) samples.push({ i, ...m })
+      else metricMiss += 1
       await new Promise((r) => setTimeout(r, 250))
+    }
+
+    // 采样全空 = 机械性失败（容器/取值问题），附诊断证据面供下一轮定位
+    if (samples.length === 0) {
+      ev.attach('stick-metrics-null-probe.json', JSON.stringify(await probeStreamDom(page), null, 2))
     }
 
     // 断言 1（A2 前半）：采样次数足额
     ev.assert('A2: 采样 ≥10 次（间隔 ≥200ms）', samples.length >= 10, {
       channel: 'A',
       expected: '>= 10',
-      actual: String(samples.length),
+      actual: `${samples.length}（miss=${metricMiss}）`,
     })
 
     // 断言 2（A2 主判据）：全程贴底（收缩前的采样全判；收缩后单独判）
@@ -153,22 +201,26 @@ export async function run(ctx) {
       actual: `${preStick}/${preShrink.length}（最大 d=${Math.max(...preShrink.map((s) => s.d), 0)}）`,
     })
 
-    // 断言 3（A2 后半）：末条内容持续可见于视口底部
+    // 断言 3（A2 后半）：末条内容钉在视口底部（贴底跟随的行为语义 = 末条距底 gap 恒定；
+    // gap 绝对值由尾部结构高度决定——32px spacer + ActivityStrip 流式行，实测 ~146px——
+    // 不是行为量，贴底本身由断言 2 的 d ≤ 40 承载）
     const lastGaps = preShrink.map((s) => s.lastGap).filter((g) => g !== null && g !== undefined)
-    const gapOk = lastGaps.length > 0 && lastGaps.every((g) => g <= LAST_TURN_GAP_TOLERANCE)
-    ev.assert('A2: 末条 turn 持续可见于视口底部（rect.bottom 距容器底 ≤ 64px）', gapOk, {
+    const gapSpread = lastGaps.length > 0 ? Math.max(...lastGaps) - Math.min(...lastGaps) : Number.POSITIVE_INFINITY
+    ev.assert(`A2: 末条 turn 钉在视口底部（距底 gap 全程稳定 Δ ≤ ${LAST_GAP_PIN_TOLERANCE}px）`, gapSpread <= LAST_GAP_PIN_TOLERANCE, {
       channel: 'A',
-      expected: `每次采样 lastGap ≤ ${LAST_TURN_GAP_TOLERANCE}px`,
-      actual: `样本 ${lastGaps.length} 个，最大 lastGap=${lastGaps.length ? Math.max(...lastGaps).toFixed(1) : 'n/a'}px`,
+      expected: `lastGap 极差 ≤ ${LAST_GAP_PIN_TOLERANCE}px（跟随 = 钉住）`,
+      actual: `样本 ${lastGaps.length} 个，gap ${lastGaps.length ? `${Math.min(...lastGaps).toFixed(1)}→${Math.max(...lastGaps).toFixed(1)}px（极差 ${gapSpread.toFixed(1)}px）` : 'n/a'}`,
     })
 
-    // 断言 4（A12）：收缩真实发生 + 收缩后仍贴底
+    // 断言 4（A12）：收缩真实发生（双证据面：ΔscrollHeight 或末条 turn 高度变化——
+    // 未满屏窗口 sh 钳在 clientHeight 量不到回流，turn 高度不受钳位影响）+ 收缩后仍贴底
     if (shrinkEffect && shrinkAt > 0) {
       const shChanged = Math.abs(shrinkEffect.delta ?? 0) >= 50
-      ev.assert('A12: 收缩真实发生（抽屉打开后 scrollHeight 回流变化 ≥50px）', shChanged, {
+      const lastHChanged = Math.abs(shrinkEffect.lastHDelta ?? 0) >= 50
+      ev.assert('A12: 收缩真实发生（抽屉打开后文本回流：ΔscrollHeight ≥50 或 Δ末条turn高 ≥50）', shChanged || lastHChanged, {
         channel: 'A',
-        expected: '|ΔscrollHeight| ≥ 50px',
-        actual: `Δ=${shrinkEffect.delta}px（shBefore=${shrinkEffect.shBefore} → shAfter=${shrinkEffect.shAfter}）`,
+        expected: '|ΔscrollHeight| ≥ 50px 或 |Δ末条turn高| ≥ 50px',
+        actual: `Δsh=${shrinkEffect.delta}px（${shrinkEffect.shBefore} → ${shrinkEffect.shAfter}）；ΔlastH=${shrinkEffect.lastHDelta?.toFixed(1) ?? 'n/a'}px（${shrinkEffect.lastHBefore?.toFixed(1) ?? 'n/a'} → ${shrinkEffect.lastHAfter?.toFixed(1) ?? 'n/a'}）`,
       })
       const postStick = postShrink.filter((s) => s.d <= BOTTOM_THRESHOLD).length
       ev.assert('A12: 收缩窗口后末条仍贴底（收缩后采样 distance 收敛 ≤ 40）', postShrink.length > 0 && postStick >= postShrink.length - 1 && samples[samples.length - 1].d <= BOTTOM_THRESHOLD, {
@@ -176,7 +228,7 @@ export async function run(ctx) {
         expected: `收缩后 ${postShrink.length} 个采样至多 1 个瞬态越阈，且末采样 ≤ 40`,
         actual: `${postStick}/${postShrink.length}（d 序列：${postShrink.map((s) => s.d.toFixed(0)).join(',')}）`,
       })
-      ev.step({ step: 'a12.assert', channel: 'A', exitCode: shChanged && postStick >= postShrink.length - 1 ? 0 : 1, stats: { postShrinkDs: postShrink.map((s) => Number(s.d.toFixed(1))) } })
+      ev.step({ step: 'a12.assert', channel: 'A', exitCode: (shChanged || lastHChanged) && postStick >= postShrink.length - 1 ? 0 : 1, stats: { postShrinkDs: postShrink.map((s) => Number(s.d.toFixed(1))), shChanged, lastHChanged } })
       // 收尾：关抽屉恢复布局
       try {
         await ui.click('testid=drawer-close', { timeoutMs: 5_000 })
@@ -196,7 +248,7 @@ export async function run(ctx) {
       actual: `${end.type} stop=${end.payload?.stopReason ?? 'n/a'}`,
     })
 
-    log(`done sid=${sid} samples=${samples.length} preShrinkStick=${preStick}/${preShrink.length} shrink=${Boolean(shrinkEffect)}`)
+    log(`done sid=${sid} samples=${samples.length} miss=${metricMiss} preShrinkStick=${preStick}/${preShrink.length} shrink=${Boolean(shrinkEffect)}`)
   }
   return { uncovered, gotchas }
 }

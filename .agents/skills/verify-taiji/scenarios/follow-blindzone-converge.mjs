@@ -138,6 +138,9 @@ export async function run(ctx) {
     if (!sid) throw new Error(`session.create 未返回 sessionId：${JSON.stringify(created).slice(0, 200)}`)
     await protocol.subscribe(sid)
     await ui.click('css=.session-item', { timeoutMs: 30_000 })
+    // 几何采样前置：滚动容器（.message-stream）挂载完成才装采样器（rAF 采样对 null 跳帧，
+    // 容器不在时 samples 恒空 = 机械性失败——挂载后再装，杜绝空采）
+    await ui.expectVisible('css=.message-stream', { timeoutMs: 30_000 })
     ev.step({ step: 'ui.activate', channel: 'A', exitCode: 0, stats: { sid, debounceMs: debounce.ms, debounceSource: debounce.source, convergeLimitMs: Number(limitMs.toFixed(1)) } })
 
     // ── 装采样器（send 前）→ 发起带代码块的长回合 ──────────────────────────

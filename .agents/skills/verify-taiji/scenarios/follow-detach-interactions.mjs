@@ -130,6 +130,8 @@ export async function run(ctx) {
     if (!sid) throw new Error(`session.create 未返回 sessionId：${JSON.stringify(created).slice(0, 200)}`)
     await protocol.subscribe(sid)
     await ui.click('css=.session-item', { timeoutMs: 30_000 })
+    // 几何采样前置：滚动容器（.message-stream）挂载完成才进入后续 evaluate 度量
+    await ui.expectVisible('css=.message-stream', { timeoutMs: 30_000 })
     ev.step({ step: 'ui.activate', channel: 'A', exitCode: 0, stats: { sid } })
 
     // ── 历史铺垫：21 轮短消息（A6 截断窗口前置：>20 轮）────────────────────
