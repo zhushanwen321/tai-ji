@@ -39,7 +39,7 @@ export const VID_RESOLVABLE_RPC: ReadonlySet<string> = new Set([
   'git.stage',
   'git.unstage',
   'git.commit',
-  'git.create',
+  'git.createBranch',
   'git.checkout',
   // `/` slash 命令候选（pi getCommands，宿主进程同源）
   'session.getCommands',

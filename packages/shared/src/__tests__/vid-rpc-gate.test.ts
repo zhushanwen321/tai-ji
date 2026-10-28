@@ -7,11 +7,15 @@
  * 另有 virtual-session-id.test.ts 覆盖。
  */
 import { describe, it, expect, afterEach } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   gateVidRpcSessionId,
   registerVidOwnerResolver,
   VidRpcRejectedError,
   VID_RPC_REJECTED_CODE,
+  VID_RESOLVABLE_RPC,
   __clearVidOwnerResolverForTest,
 } from '../vid-rpc-gate'
 import { subagentVirtualId, agentCallVirtualId } from '../virtual-session-id'
@@ -79,5 +83,31 @@ describe('gateVidRpcSessionId — 未登记方法 fail-fast 拒绝', () => {
         expect(err.message).toContain('VID_RESOLVABLE_RPC')
       }
     }
+  })
+})
+
+// ── 清单对齐（防悬空登记）：VID_RESOLVABLE_RPC 成员必须是 ClientMessageMap 的合法 key ──
+// 悬空登记 = 清单条目与任何真实 wire 方法名都不匹配（typo，或协议演化后方法名被删/改名）：
+// 门对该方法的 vid 自动解析永不生效，调用方拿不到「已解析为归属会话」的行为，防护静默失效。
+// 形态沿用 protocol.test.ts 的源码区段提取（TS interface 无运行时枚举，读 protocol.ts 源文本
+// 是唯一不引入手抄 key 清单的运行时校验途径）。
+const PROTOCOL_SOURCE = readFileSync(resolve(fileURLToPath(import.meta.url), '..', '..', 'protocol.ts'), 'utf8')
+
+/** 提取 ClientMessageMap 声明区段（到首个行首 `}`；嵌套类型体的 `}` 均有缩进不命中）。 */
+function extractClientMessageMapBlock(): string {
+  const anchor = 'export interface ClientMessageMap {'
+  const anchorIdx = PROTOCOL_SOURCE.indexOf(anchor)
+  if (anchorIdx === -1) throw new Error('protocol.ts 未找到锚点 "export interface ClientMessageMap {"——声明位置变动，请同步本测试')
+  const endIdx = PROTOCOL_SOURCE.indexOf('\n}', anchorIdx)
+  if (endIdx === -1) throw new Error('protocol.ts ClientMessageMap 区段未找到结束标记')
+  return PROTOCOL_SOURCE.slice(anchorIdx, endIdx)
+}
+
+describe('VID_RESOLVABLE_RPC 清单对齐（防悬空登记）', () => {
+  it('每个成员都是 ClientMessageMap 的合法 key（typo / 方法名删除时本用例显式红）', () => {
+    const block = extractClientMessageMapBlock()
+    // interface 成员键形态：`  'file.read': { ... }`（引号键 + 冒号；注释行不含此形态）
+    const stale = [...VID_RESOLVABLE_RPC].filter((m) => !new RegExp(`^[ \\t]*'${m.replace(/[.]/g, '\\.')}':`, 'm').test(block))
+    expect(stale, '以下登记项不是 ClientMessageMap 的 key（悬空登记，门防护静默失效）').toEqual([])
   })
 })

@@ -19,7 +19,7 @@
  * abort：调 api.chat.abort（方法存在，中断流转 DEFERRED G-025）。
  */
 import type { Segment, ServerMessage, ServerMessageUnion, CompactErrorCode, MessageBlockedCode, Message } from '@taiji/shared'
-import { segmentsToPrompt, restoreRevokedDraft, markerLiteral, MESSAGE_BLOCKED_CODE } from '@taiji/shared'
+import { segmentsToPrompt, restoreRevokedDraft, markerLiteral, MESSAGE_BLOCKED_CODE, VID_RPC_REJECTED_CODE } from '@taiji/shared'
 import {
   subscribeSession,
   clearSubscription,
@@ -123,6 +123,17 @@ function isTransportLevelFailure(e: unknown, classifiedCodes: readonly string[])
   const code = (e as { code?: unknown } | null)?.code
   if (typeof code !== 'string') return true
   return !classifiedCodes.includes(code)
+}
+
+/**
+ * vid RPC 门拒绝判别（shared VidRpcRejectedError 同步 throw 原样穿透为 rejected promise，
+ * code 契约见 vid-rpc-gate.ts）：vid 到达动作类 RPC（编辑重发 / 撤回等）被 transport
+ * command 入口 fail-fast。UI 层已按视图形态裁剪入口（UserBubble vid 裁剪），本判别是
+ * 防御纵深——catch 后给 vidViewReadonly 专属文案（快照只读指引），不落通用失败文案
+ * （sendFailed / revokeFailed 会误导为可重试的网络故障）。
+ */
+function isVidRpcRejected(e: unknown): boolean {
+  return (e as { code?: unknown } | null)?.code === VID_RPC_REJECTED_CODE
 }
 
 /** compact RPC 的已分类码集合（词表 SSOT = shared CompactErrorCode）。 */
@@ -509,6 +520,11 @@ async function handleRevokeMessage(
   try {
     reply = await deps.chatApi.revokeMessage(sid, targetId)
   } catch (e) {
+    // vid 门拒绝（防御纵深——按钮层已裁剪撤回入口，理论不可达）：专属文案指引回主会话
+    if (isVidRpcRejected(e)) {
+      deps.toast.error(deps.t('composable.vidViewReadonly'))
+      return
+    }
     const msg = toErrorMessage(e)
     deps.toast.error(deps.t('composable.revokeFailed', { msg }))
     return
@@ -1451,8 +1467,13 @@ export function createUseChat(deps: UseChatDeps) {
     } catch (e) {
       // [W2] 错误处理策略与 send/followUp/abort 对齐：不 throw（消费侧 Turn.vue submitEdit
       // 无 try/catch，throw 只会变 unhandled rejection）。错误呈现同 send 的分类码路由
-      // （D4-2）：message_blocked（hook 否决）= runtime 已广播错误气泡，抑制 toast；
+      //（D4-2）：message_blocked（hook 否决）= runtime 已广播错误气泡，抑制 toast；
       // transport 级保守 toast 兜底。
+      // vid 门拒绝（防御纵深——按钮层已裁剪编辑入口，理论不可达）：专属文案指引回主会话。
+      if (isVidRpcRejected(e)) {
+        deps.toast.error(deps.t('composable.vidViewReadonly'))
+        return false
+      }
       if (isTransportLevelFailure(e, [BLOCKED_CLASSIFIED_CODE])) {
         const msg = toErrorMessage(e)
         deps.toast.error(deps.t('composable.sendFailed', { msg }))

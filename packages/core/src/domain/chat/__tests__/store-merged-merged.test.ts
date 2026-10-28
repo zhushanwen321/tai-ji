@@ -10,7 +10,7 @@
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { effectScope, nextTick, toRaw } from 'vue'
-import { textToSegments, type Segment, type ServerMessage, type Message, segmentsToText } from '@taiji/shared'
+import { textToSegments, type Segment, type ServerMessage, type Message, segmentsToText, subagentVirtualId, VidRpcRejectedError } from '@taiji/shared'
 import { createChatStore } from '../store'
 import { createUseChat, resetChatModuleStateForTest, type UseChatDeps, EXTENSION_COMMAND_ERROR_RATE_LIMIT_MS } from '../useChat'
 import { type SessionLiveStateLike, type SessionStoreLike, type UseChatDeps as UseChatDepsTypes } from '../use-chat-types'
@@ -1703,6 +1703,25 @@ describe("useChat", () => {
       expect(f.toast.error).toHaveBeenCalledTimes(1)
       f.dispose()
     })
+
+    // [vid-view-readonly] vid 门拒绝（防御纵深）：UI 层已裁剪 vid 视图编辑入口（UserBubble
+    // isVidView），理论不可达——catch 到 VidRpcRejectedError（真实 error 形态，transport
+    // command 入口同步 throw 穿透）时给 vidViewReadonly 专属文案，不落 sendFailed 通用文案。
+    it('editAndResend：vid 门拒绝（session_vid_rejected）→ vidViewReadonly 专属文案', async () => {
+      const f = makeFixture()
+      const vid = subagentVirtualId('sb-main', 'sb-sub')
+      await f.useChat.send(vid, textToSegments('old'))
+      const userMsgId = f.chatStore.getMessages(vid).find((m) => m.role === 'user')!.id
+      f.emit(vid, msg(vid, 'message.message_start', { messageId: 'a1' }))
+      f.emit(vid, msg(vid, 'message.complete', { stopReason: 'end_turn' }))
+      f.chatApi.submitDelivery.mockRejectedValueOnce(
+        new VidRpcRejectedError('delivery.submit', vid, 'unregistered'),
+      )
+      await expect(f.useChat.editAndResend(vid, userMsgId, textToSegments('edited'))).resolves.toBe(false)
+      expect(f.toast.error).toHaveBeenCalledTimes(1)
+      expect(f.toast.error).toHaveBeenCalledWith('composable.vidViewReadonly')
+      f.dispose()
+    })
   })
 
   describe('恢复窗口过渡态的 message_start 收尾 gate（crash-resilience T4 回流修复）', () => {
@@ -1961,6 +1980,21 @@ describe("useChat", () => {
       f.chatApi.revokeMessage.mockRejectedValueOnce(new Error('ws down'))
       await expect(f.useChat.revokeMessage('sr6', 'entry-4')).resolves.toBeUndefined()
       expect(f.toast.error).toHaveBeenCalledWith('composable.revokeFailed:{"msg":"ws down"}')
+      f.dispose()
+    })
+
+    // [vid-view-readonly] vid 门拒绝（防御纵深）：UI 层已裁剪 vid 视图撤回入口（UserBubble
+    // isVidView——isActive(vid) 恒 false 使置灰判据失效），理论不可达——catch 到
+    // VidRpcRejectedError（真实 error 形态）时给 vidViewReadonly 专属文案，不落 revokeFailed。
+    it('vid 门拒绝（session_vid_rejected）→ vidViewReadonly 专属文案（不 throw）', async () => {
+      const f = makeFixture()
+      const vid = subagentVirtualId('sr-main', 'sr-sub')
+      f.chatApi.revokeMessage.mockRejectedValueOnce(
+        new VidRpcRejectedError('session.revokeMessage', vid, 'unregistered'),
+      )
+      await expect(f.useChat.revokeMessage(vid, 'entry-4')).resolves.toBeUndefined()
+      expect(f.toast.error).toHaveBeenCalledTimes(1)
+      expect(f.toast.error).toHaveBeenCalledWith('composable.vidViewReadonly')
       f.dispose()
     })
 

@@ -1,5 +1,9 @@
 export default {
   sendFailed: 'Failed to send message: {msg}',
+  // vid RPC gate rejection (session_vid_rejected): subagent/agentcall snapshot views are
+  // read-only; action RPCs (edit-resend / revoke) are rejected by the vid gate — point the
+  // user back to the main session view instead of a generic failure toast.
+  vidViewReadonly: 'This view is a read-only snapshot; perform this action in the main session view',
   nextTurnSendFailed: 'Failed to send next turn: {msg}',
   compactFailed: 'Failed to compact: {msg}',
   bashFailed: 'Failed to run bash: {msg}',

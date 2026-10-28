@@ -142,6 +142,42 @@ describe('W4TC3: UserBubble 展示态', () => {
   })
 })
 
+// ── [vid-view-readonly] vid 视图（subagent/agentcall 快照）动作入口裁剪 ──
+// vid 只做前端路由 key，编辑重发 / 撤回是动作类 RPC，会被 shared vid RPC 门拒绝——入口裁剪
+// 在 UserBubble 单点完成（isVidView 谓词 import 自 shared）；复制是本地动作保留。
+// 编辑按钮无专属 testid，按 title 定位（vitest.setup 的 t mock 返回 key 本身）。
+describe('[vid-view-readonly] UserBubble vid 视图动作裁剪', () => {
+  it.each([
+    ['subagent 三段式 vid', 'subagent:main-1:sub-1'],
+    ['agentcall 两段式 vid', 'agentcall:acs-1'],
+  ])('%s → 编辑/撤回按钮不渲染，仅剩复制', (_label, vid) => {
+    const wrapper = mountBubble({ sessionId: vid, canEdit: true, isSessionEditable: false })
+    const actions = wrapper.find('[data-testid="user-bubble-actions"]')
+    expect(actions.exists()).toBe(true)
+    expect(actions.find('button[title="panel.message.editReplace"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="msg-revoke-button"]').exists()).toBe(false)
+    expect(actions.findAll('button')).toHaveLength(1) // 仅复制
+  })
+
+  it('真实 id（canEdit=true 非活跃）→ 三按钮照常渲染（对照）', () => {
+    const wrapper = mountBubble({ sessionId: 's1', canEdit: true, isSessionEditable: false })
+    const actions = wrapper.find('[data-testid="user-bubble-actions"]')
+    expect(actions.find('button[title="panel.message.editReplace"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="msg-revoke-button"]').exists()).toBe(true)
+    expect(actions.findAll('button')).toHaveLength(3)
+  })
+
+  it('编辑中 sessionId 变为 vid → 编辑器不再渲染（防御一致性：isVidView 参与 isEditingThisUser）', async () => {
+    const wrapper = mountBubble({ sessionId: 's1', canEdit: true, isSessionEditable: false })
+    // 真实 id：编辑按钮可见可点 → 进入编辑态（回退路径 = 原生 textarea）
+    await wrapper.find('button[title="panel.message.editReplace"]').trigger('click')
+    expect(wrapper.find('textarea').exists()).toBe(true)
+    // sessionId 切为 vid（编辑置位残留的极端序列）：编辑器必须消失，展示态气泡回归
+    await wrapper.setProps({ sessionId: 'subagent:main-1:sub-1' })
+    expect(wrapper.find('textarea').exists()).toBe(false)
+  })
+})
+
 // ── [user-bubble-edit-composer] hover actions 摆位：气泡下方流内固定槽位（2026-10 用户裁决）──
 // 原形态 = absolute bottom-0 right-0 钉在气泡右下角**内侧**（压气泡内容）；现形态 = 气泡行
 // 之后的常驻流内行（mt-1 + h-6），显隐仍走 opacity 零布局跳动。

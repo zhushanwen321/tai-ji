@@ -87,6 +87,7 @@
     "packages/shared/src/__tests__/workflow-viz-protocol.test.ts",
     "packages/shared/src/__tests__/virtual-session-id.test.ts",
     "packages/shared/src/__tests__/vid-rpc-gate.test.ts",
+    "packages/runtime/src/transport/__tests__/server-vid-guard.test.ts",
     "packages/shared/src/__tests__/protocol-subagent-stream.test.ts",
     "packages/runtime/src/infra/subagent-model-gateway.test.ts"
   ],

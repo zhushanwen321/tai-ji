@@ -1,5 +1,8 @@
 export default {
   sendFailed: '消息发送失败：{msg}',
+  // vid RPC 门拒绝（session_vid_rejected）：subagent/agentcall 快照视图只读，动作类 RPC
+  //（编辑重发/撤回）被门拒绝——专属文案指引回主会话视图，不落通用失败文案。
+  vidViewReadonly: '当前视图为会话快照，该操作仅支持在主会话视图执行',
   nextTurnSendFailed: '下轮消息发送失败：{msg}',
   compactFailed: '压缩失败：{msg}',
   bashFailed: 'Bash 执行失败：{msg}',
