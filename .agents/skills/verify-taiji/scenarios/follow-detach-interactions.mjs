@@ -309,31 +309,27 @@ export async function run(ctx) {
     ev.step({ step: 'a6.precondition', channel: 'A', exitCode: barReachable ? 0 : 1, stats: { barReachable } })
 
     if (barReachable) {
-      // 真实用户路径：脱离态滚到顶部（截断条可见才点得到）——必须先到顶再采 before 再点击：
-      // ui.click 的 Playwright scrollIntoView 会把视口拉到顶部（按钮在 sticky 顶区），若 before
-      // 采在脱离位、click 又滚顶，before/after 之间混入工具位移，:shift 度量即被污染
+      // 脱离 + 上滑两屏，脱离位采 before；点击用 force（跳过 Playwright actionability 的
+      // scrollIntoView——按钮在 sticky 顶区，标准 click 会先把视口滚到顶，污染 before/after
+      // 之间的视口位置，:shift 度量即失真）。按钮在场性由 barReachable（截断条可见）保证。
       await hoverStream()
-      for (let i = 0; i < 12; i++) {
-        await page.mouse.wheel(0, -400)
-        await new Promise((r) => setTimeout(r, 300))
-        const m5 = await metrics()
-        if (m5 && m5.st === 0) break
-      }
+      await page.mouse.wheel(0, -600)
+      await page.mouse.wheel(0, -600)
       await new Promise((r) => setTimeout(r, 400))
       const anchor = await readTopTurn(page)
       const before = await metrics()
-      ev.assert('A6: 翻页锚点成立（视口已到顶、截断条在场、脱离态）', Boolean(anchor && before && before.st === 0), {
+      ev.assert('A6: 翻页锚点成立（脱离态视口顶有可见 turn）', Boolean(anchor && before && before.d > BOTTOM_THRESHOLD), {
         channel: 'A',
-        expected: '视口顶到顶（st=0）且视口顶存在可见 turn',
+        expected: '脱离态且视口顶存在可见 turn',
         actual: anchor ? `st=${before?.st.toFixed(0)} d=${before?.d.toFixed(0)} top=${anchor.text.slice(0, 20)}` : '未找到可见 turn',
       })
-      let triggeredBy = 'click'
+      let triggeredBy = 'force-click'
       try {
-        await ui.click('testid=load-more-history', { timeoutMs: 6_000 })
+        await page.locator('[data-testid="load-more-history"]').first().click({ force: true, timeout: 6_000 })
       } catch {
         // 触顶自动续载可能抢先触发（scrollIntoView 到顶 + 已脱离）：同一 handleLoadMore 通路
-        triggeredBy = 'auto-at-top（scrollIntoView 触顶 + 已脱离，防重入 guard 单一）'
-        log('load-more 点击被自动续载抢先（按钮已 loading/detached），按同一通路继续')
+        triggeredBy = 'auto-at-top（按钮 loading/detached，按同一通路继续）'
+        log('load-more 点击被自动续载抢先，按同一通路继续')
       }
       // 等翻页完成：截断条收敛消失（22 轮 < 2 页 → 翻完后 truncated=false）且 scrollHeight 增长
       const after = await (async () => {
