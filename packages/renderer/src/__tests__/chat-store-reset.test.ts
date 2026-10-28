@@ -183,7 +183,8 @@ describe('chat store message.complete 多 assistant 气泡收尾', () => {
   // 只收尾最后一条，前面的 toolCall 气泡永远 streaming——内部状态机不一致，影响后续定位逻辑。
   // 修复后 message.complete 收尾所有 status==='streaming' 的 assistant。usage 不由 complete
   // 回填（chat-flow-consistency D3 规则 5 退役回合级覆盖），per-message usage 由
-  // message_end(assistant) 帧载荷承担（同款锚见 fg5-message-stream.test.ts）。
+  // message_end(assistant) 帧载荷承担（同款锚见 __tests__/root-node.test.ts 的
+  // fg5-message-stream 合并节「FG5 chat store 块类型扩展」）。
   it('message.complete 收尾所有 streaming assistant 气泡（不只最后一条）', () => {
     const store = useChatStore()
     const sid = 'multi'
@@ -418,7 +419,8 @@ describe('chat store 瞬态状态收尾（W3：finalizeAllStreaming 应全收尾
     // 读写 API 本身），本用例前提（queue_update 能置 queueStates）结构性不成立。
     // 断言范围保留「帧到达不产生任何瞬态」：messages 与 retry 分区零写入。
     // 替代覆盖：内核派生视图随 session 销毁/disposeSession 清理（core clearDeliveryProjection，
-    // 见 core chat __tests__/effects-delivery-receipt.test.ts）+ 本文件其余瞬态收尾用例。
+    // 见 core chat __tests__/store-merged-merged.test.ts 的 useChat 合并节「disposeSession 清派生
+    // 视图」用例）+ 本文件其余瞬态收尾用例。
     const store = useChatStore()
     const sid = 's-queue'
     store.applyMessageEvent(sid, {

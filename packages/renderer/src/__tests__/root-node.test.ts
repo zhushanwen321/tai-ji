@@ -978,9 +978,11 @@ describe('FG5 chat store 块类型扩展', () => {
    *   countDrained/drainN）；
    * - 投递入流改由「送达回执（message_end(user) 裸标记 id 精确匹配）+ reducer 通路」承担
    *   （替代计数 FIFO 文本匹配——重复文本/跨类型误配面从机制上消除）。
-   * 覆盖去向：core chat __tests__/effects-delivery-receipt.test.ts（回执命中/幂等/direct 豁免）
-   * + __tests__/useChat.test.ts（session.delivery 帧消费与 morph）+ renderer 队列区新用例
-   * （__tests__/panel/queue-bubble-s8.test.ts / __tests__/composables/panel/use-queue-rows.test.ts）。
+   * 覆盖去向：core chat __tests__/effect-types.test.ts 的 effects-delivery-receipt 合并节
+   * （回执命中/幂等/direct 豁免）+ core chat __tests__/store-merged-merged.test.ts 的 useChat
+   * 合并节（session.delivery 帧消费与 morph）+ renderer 队列区新用例（__tests__/panel/
+   * session-trace/trace-inspector.test.ts 的 queue-bubble-s8 合并节 / __tests__/composables/
+   * queue-detail-bundle.test.ts 的 use-queue-rows 合并节）。
    */
   it('queue_update 不再写 store（帧降级为内核内部回执：零快照、零 pendingBuffer 消费）', () => {
     const store = useChatStore()
