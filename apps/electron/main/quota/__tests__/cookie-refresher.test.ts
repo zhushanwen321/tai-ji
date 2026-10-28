@@ -78,6 +78,8 @@ const fake = vi.hoisted(() => {
     }
     async loadURL(url: string): Promise<void> {
       state.loadUrls.push(url)
+      // 用例可覆写为 reject（驱动 ERR_ABORTED / 加载故障分支）；缺省成功加载
+      if (state.loadUrlImpl) return state.loadUrlImpl(url, this)
       this.webContents.url = url
     }
     show(): void {
@@ -111,6 +113,8 @@ const fake = vi.hoisted(() => {
   const state = {
     /** executeJavaScript 实现（beforeEach 重置 401，用例覆写驱动成功/悬置）。 */
     execImpl: (async () => 401) as (expr: string) => Promise<unknown>,
+    /** loadURL 覆写（缺省 null = 成功加载并落 url；用例 reject 驱动 ABORTED 分支）。 */
+    loadUrlImpl: null as null | ((url: string, win: FakeBrowserWindow) => Promise<void>),
     loadUrls: [] as string[],
     partitions,
     handlers,
@@ -170,6 +174,7 @@ beforeEach(() => {
   tmpDir = mkdtempSync(join(tmpdir(), 'quota-cookie-refresher-test-'))
   fake.FakeBrowserWindow.instances = []
   fake.state.loadUrls = []
+  fake.state.loadUrlImpl = null
   fake.state.partitionNames = []
   fake.state.partitions.clear()
   fake.state.execImpl = async () => 401
@@ -361,6 +366,35 @@ describe('refreshQuotaCookie：API 轮询成功路径', () => {
     // 无关域被过滤；'name=value; name2=value2' 手贴格式（顺序按 cookies.get 返回序）
     expect(written).toBe('sid=token-1; uid=42')
     expect(statSync(cookiePath('p-export')).mode & 0o777).toBe(0o600)
+  })
+})
+
+describe('refreshQuotaCookie：loadURL 中断处理', () => {
+  it('ERR_ABORTED(-3)（SSO 链页面自导航打断初始加载）→ 放行进轮询，API 200 仍成功', async () => {
+    fake.state.loadUrlImpl = async (url, win) => {
+      // 复现真机形态：平台页 JS 跳 genLoginUrl 打断 loadURL（Electron 以 ABORTED reject）
+      win.webContents.url = `${url}/api/v1/genLoginUrl`
+      throw Object.assign(new Error(`ERR_ABORTED (-3) loading '${url}'`), { code: -3 })
+    }
+    const result = refreshQuotaCookie({ fetcherId: 'mimo', providerId: 'p-aborted' }, { dataDir: () => tmpDir })
+    const win = await windowOf(result)
+    makeReady(win)
+
+    expect(await result).toEqual({ ok: true, cookieWritten: true })
+    expect(win.destroyed).toBe(true)
+  })
+
+  it('非 ABORTED 加载故障（DNS 解析失败）→ 仍立即失败并携带 page load failed 文案', async () => {
+    fake.state.loadUrlImpl = async () => {
+      throw Object.assign(new Error('ERR_NAME_NOT_RESOLVED (-105)'), { code: -105 })
+    }
+    const result = await refreshQuotaCookie(
+      { fetcherId: 'mimo', providerId: 'p-dns' },
+      { dataDir: () => tmpDir },
+    )
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain('page load failed')
+    expect(result.error).toContain('ERR_NAME_NOT_RESOLVED')
   })
 })
 

@@ -107,7 +107,12 @@ async function runRefresh(input: QuotaRefreshInput, deps: QuotaRefreshDeps): Pro
       // loadURL resolve 即主文档加载完成（含 SSO 服务端跳转链），此后页面可执行 JS
       await win.loadURL(target.pageUrl)
     } catch (err) {
-      return { ok: false, cookieWritten: false, error: `page load failed: ${errorMessage(err)}` }
+      // ERR_ABORTED(-3) 不是失败：平台页 JS 发现未登录会主动导航到登录链
+      // （如 xiaomimimo 的 genLoginUrl → account.xiaomi.com），打断初始加载。
+      // SSO 跳转/登录页检测/超时全部由轮询承载，这里只拦真正的加载故障
+      if (!isAbortedNavigation(err)) {
+        return { ok: false, cookieWritten: false, error: `page load failed: ${errorMessage(err)}` }
+      }
     }
     const polled = await pollUntilApiOk(win, target)
     if (!polled.ok) return { ok: false, cookieWritten: false, error: polled.error }
@@ -225,6 +230,13 @@ function safeGetUrl(win: BrowserWindow): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** loadURL 的 ERR_ABORTED(-3)：页面 JS 发起的新导航打断了初始加载（SSO 链标准形态）。 */
+function isAbortedNavigation(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  const code = (err as { code?: unknown }).code
+  return code === -3 || /ERR_ABORTED/.test(err.message)
 }
 
 // ── 导出写回（partition → secrets 文件）──────────────────────────────────────
