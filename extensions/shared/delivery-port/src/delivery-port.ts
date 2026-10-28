@@ -334,6 +334,11 @@ function createCollectFace(deps: CollectFaceDeps): CollectFace {
     };
   }
 
+  /** 注销 key 的 outcome（结清视图优先——权威通道 resolveSettlementReason；legacy status 兜底）。 */
+  function unregisterOutcomeOf(pending: PendingBaseline, key: string) {
+    return pending.unregisterSettlements.get(key) ?? pending.unregisterStatus.get(key);
+  }
+
   /**
    * 登记在途等待集 + 对每个 key 按五态判据定态（同步段：JS 单线程内无交错窗口，
    * 与 deliver 分流读同一等待集——I3 等待集原子性）。
@@ -352,12 +357,7 @@ function createCollectFace(deps: CollectFaceDeps): CollectFace {
    *   曾注册集的补集。不登记等待集（防空等到 timeout 挂死）、不虚构终态；工具侧
    *   读本态组装 errors（不再伪装 waiting——端口是唯一未知判定点，词表诚实表达）。
    */
-  /** 注销 key 的 outcome（结清视图优先——权威通道 resolveSettlementReason；legacy status 兜底）。 */
-function unregisterOutcomeOf(pending: PendingBaseline, key: string) {
-  return pending.unregisterSettlements.get(key) ?? pending.unregisterStatus.get(key);
-}
-
-function collectArm(keys: string[]): CollectSnapshot {
+  function collectArm(keys: string[]): CollectSnapshot {
     if (deps.isDisposed()) throw new Error("collectArm on disposed delivery port");
     const pending = scanPendingBaseline(host.readSessionEntries());
     const snapshot: CollectSnapshot = [];
