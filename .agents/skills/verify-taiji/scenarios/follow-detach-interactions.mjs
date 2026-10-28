@@ -41,41 +41,45 @@ function buildFauxResponses() {
   return [...history, { text: buildLongText(), stopReason: 'stop' }, { text: '好的，已按你的选择继续。', stopReason: 'stop' }]
 }
 
-/** 页内读取滚动几何。 */
-const METRICS_FN = `() => {
-  const el = document.querySelector('.message-stream')
-  if (!el) return null
-  return { st: el.scrollTop, sh: el.scrollHeight, ch: el.clientHeight, d: el.scrollHeight - el.scrollTop - el.clientHeight }
-}`
+/** 页内读取滚动几何。真实函数形态传入 evaluate——本仓 Playwright 版本对「字符串函数
+ * 表达式」不自动调用（实测返回 undefined），以下三个页内度量同理。 */
+const readMetrics = (page) =>
+  page.evaluate(() => {
+    const el = document.querySelector('.message-stream')
+    if (!el) return null
+    return { st: el.scrollTop, sh: el.scrollHeight, ch: el.clientHeight, d: el.scrollHeight - el.scrollTop - el.clientHeight }
+  })
 
 /** 页内读取「视口内最顶部可见 turn」的文本指纹与内容系坐标（contentY 与 scrollTop 无关）。 */
-const TOP_TURN_FN = `() => {
-  const el = document.querySelector('.message-stream')
-  if (!el) return null
-  const rect = el.getBoundingClientRect()
-  for (const t of document.querySelectorAll('[data-testid^="turn-"]')) {
-    const r = t.getBoundingClientRect()
-    if (r.bottom > rect.top + 8 && r.top < rect.bottom) {
-      return { text: (t.textContent ?? '').replace(/\\s+/g, ' ').slice(0, 60), contentY: r.top - rect.top + el.scrollTop }
+const readTopTurn = (page) =>
+  page.evaluate(() => {
+    const el = document.querySelector('.message-stream')
+    if (!el) return null
+    const rect = el.getBoundingClientRect()
+    for (const t of document.querySelectorAll('[data-testid^="turn-"]')) {
+      const r = t.getBoundingClientRect()
+      if (r.bottom > rect.top + 8 && r.top < rect.bottom) {
+        return { text: (t.textContent ?? '').replace(/\s+/g, ' ').slice(0, 60), contentY: r.top - rect.top + el.scrollTop }
+      }
     }
-  }
-  return null
-}`
+    return null
+  })
 
 /** 按 contentY 复查某文本指纹 turn 的位置（翻页补偿断言用）。 */
-const FIND_TURN_FN = `(needle) => {
-  const el = document.querySelector('.message-stream')
-  if (!el) return null
-  const rect = el.getBoundingClientRect()
-  for (const t of document.querySelectorAll('[data-testid^="turn-"]')) {
-    const norm = (t.textContent ?? '').replace(/\\s+/g, ' ')
-    if (norm.includes(needle)) {
-      const r = t.getBoundingClientRect()
-      return { contentY: r.top - rect.top + el.scrollTop, visible: r.bottom > rect.top && r.top < rect.bottom }
+const findTurnByNeedle = (page, needle) =>
+  page.evaluate((n) => {
+    const el = document.querySelector('.message-stream')
+    if (!el) return null
+    const rect = el.getBoundingClientRect()
+    for (const t of document.querySelectorAll('[data-testid^="turn-"]')) {
+      const norm = (t.textContent ?? '').replace(/\s+/g, ' ')
+      if (norm.includes(n)) {
+        const r = t.getBoundingClientRect()
+        return { contentY: r.top - rect.top + el.scrollTop, visible: r.bottom > rect.top && r.top < rect.bottom }
+      }
     }
-  }
-  return null
-}`
+    return null
+  }, needle)
 
 export const meta = {
   id: 'follow-detach-interactions',
@@ -113,7 +117,7 @@ export async function run(ctx) {
 
   const ui = ctx.ui
   const page = await instance.page()
-  const metrics = () => page.evaluate(METRICS_FN)
+  const metrics = () => readMetrics(page)
   /** 滚轮注入前把鼠标移回对话流中心（点击胶囊/输入后鼠标位置会漂移）。 */
   const hoverStream = async () => {
     await page.locator('.message-stream').first().hover()
@@ -288,7 +292,7 @@ export async function run(ctx) {
       await page.mouse.wheel(0, -600)
       await page.mouse.wheel(0, -600)
       await new Promise((r) => setTimeout(r, 400))
-      const anchor = await page.evaluate(TOP_TURN_FN)
+      const anchor = await readTopTurn(page)
       const before = await metrics()
       ev.assert('A6: 翻页锚点成立（脱离态视口顶有可见 turn）', Boolean(anchor && before && before.d > BOTTOM_THRESHOLD), {
         channel: 'A',
@@ -317,7 +321,7 @@ export async function run(ctx) {
         expected: 'ΔscrollHeight ≥ 100px（更早 turn 前插）',
         actual: before && after ? `Δsh=${after.sh - before.sh} triggeredBy=${triggeredBy}` : 'metrics null',
       })
-      const anchorAfter = anchor ? await page.evaluate(FIND_TURN_FN, anchor.text) : null
+      const anchorAfter = anchor ? await findTurnByNeedle(page, anchor.text) : null
       const delta = anchor && anchorAfter ? Math.abs(anchorAfter.contentY - anchor.contentY) : null
       ev.assert('A6: 已视内容不跳（锚 turn contentY 位移 ≤40px，virtua :shift 保位）', delta !== null && delta <= 40, {
         channel: 'A',

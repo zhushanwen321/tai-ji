@@ -31,21 +31,25 @@ function buildLongText() {
   return text
 }
 
-/** 页内读取滚动几何（A 通道 DOM 度量；只读）。 */
-const METRICS_FN = `() => {
-  const el = document.querySelector('.message-stream')
-  if (!el) return null
-  const rect = el.getBoundingClientRect()
-  const turns = [...document.querySelectorAll('[data-testid^="turn-"]')]
-  const last = turns[turns.length - 1] ?? null
-  const lastRect = last ? last.getBoundingClientRect() : null
-  return {
-    st: el.scrollTop, sh: el.scrollHeight, ch: el.clientHeight,
-    d: el.scrollHeight - el.scrollTop - el.clientHeight,
-    turnCount: turns.length,
-    lastGap: lastRect ? rect.bottom - lastRect.bottom : null,
-  }
-}`
+/** 页内读取滚动几何（A 通道 DOM 度量；只读）。真实函数形态传入 evaluate——
+ * 本仓 Playwright 版本对「字符串函数表达式」不自动调用（实测返回 undefined）。 */
+const readMetrics = (page) =>
+  page.evaluate(() => {
+    const el = document.querySelector('.message-stream')
+    if (!el) return null
+    const rect = el.getBoundingClientRect()
+    const turns = [...document.querySelectorAll('[data-testid^="turn-"]')]
+    const last = turns[turns.length - 1] ?? null
+    const lastRect = last ? last.getBoundingClientRect() : null
+    return {
+      st: el.scrollTop,
+      sh: el.scrollHeight,
+      ch: el.clientHeight,
+      d: el.scrollHeight - el.scrollTop - el.clientHeight,
+      turnCount: turns.length,
+      lastGap: lastRect ? rect.bottom - lastRect.bottom : null,
+    }
+  })
 
 export const meta = {
   id: 'follow-stick-shrink',
@@ -108,11 +112,11 @@ export async function run(ctx) {
           await ui.click('css=[data-testid="sidebar-view-tablist"] button[title="文件"]', { timeoutMs: 8_000 })
           await ui.click('css=[data-testid^="file-tree-file-"]', { timeoutMs: 8_000 })
           await ui.expectVisible('testid=drawer-panel', { timeoutMs: 10_000 })
-          const before = await page.evaluate(METRICS_FN)
+          const before = await readMetrics(page)
           // 给回流 + 跟随收敛留出观察拍：后续采样承担 A12 断言
           const afterWait = await (async () => {
             await new Promise((r) => setTimeout(r, 600))
-            return page.evaluate(METRICS_FN)
+            return readMetrics(page)
           })()
           shrinkEffect = {
             shBefore: before?.sh ?? null,
@@ -127,7 +131,7 @@ export async function run(ctx) {
           ev.step({ step: 'a12.shrink.drawer', channel: 'A', exitCode: 1, stats: { error: String(e?.message ?? e).slice(0, 200) } })
         }
       }
-      const m = await page.evaluate(METRICS_FN)
+      const m = await readMetrics(page)
       if (m) samples.push({ i, ...m })
       await new Promise((r) => setTimeout(r, 250))
     }
