@@ -50,7 +50,7 @@ const readMetrics = (page) =>
     return { st: el.scrollTop, sh: el.scrollHeight, ch: el.clientHeight, d: el.scrollHeight - el.scrollTop - el.clientHeight }
   })
 
-/** 页内读取「视口内最顶部可见 turn」的文本指纹与内容系坐标（contentY 与 scrollTop 无关）。 */
+/** 页内读取「视口内最顶部可见 turn」的文本指纹（视口系对比用）。 */
 const readTopTurn = (page) =>
   page.evaluate(() => {
     const el = document.querySelector('.message-stream')
@@ -59,27 +59,11 @@ const readTopTurn = (page) =>
     for (const t of document.querySelectorAll('[data-testid^="turn-"]')) {
       const r = t.getBoundingClientRect()
       if (r.bottom > rect.top + 8 && r.top < rect.bottom) {
-        return { text: (t.textContent ?? '').replace(/\s+/g, ' ').slice(0, 60), contentY: r.top - rect.top + el.scrollTop }
+        return { text: (t.textContent ?? '').replace(/\s+/g, ' ').slice(0, 60) }
       }
     }
     return null
   })
-
-/** 按 contentY 复查某文本指纹 turn 的位置（翻页补偿断言用）。 */
-const findTurnByNeedle = (page, needle) =>
-  page.evaluate((n) => {
-    const el = document.querySelector('.message-stream')
-    if (!el) return null
-    const rect = el.getBoundingClientRect()
-    for (const t of document.querySelectorAll('[data-testid^="turn-"]')) {
-      const norm = (t.textContent ?? '').replace(/\s+/g, ' ')
-      if (norm.includes(n)) {
-        const r = t.getBoundingClientRect()
-        return { contentY: r.top - rect.top + el.scrollTop, visible: r.bottom > rect.top && r.top < rect.bottom }
-      }
-    }
-    return null
-  }, needle)
 
 export const meta = {
   id: 'follow-detach-interactions',
@@ -325,17 +309,23 @@ export async function run(ctx) {
     ev.step({ step: 'a6.precondition', channel: 'A', exitCode: barReachable ? 0 : 1, stats: { barReachable } })
 
     if (barReachable) {
-      // 脱离 + 上滑两屏，取视口顶可见 turn 做锚（contentY 与滚动位置无关）
+      // 真实用户路径：脱离态滚到顶部（截断条可见才点得到）——必须先到顶再采 before 再点击：
+      // ui.click 的 Playwright scrollIntoView 会把视口拉到顶部（按钮在 sticky 顶区），若 before
+      // 采在脱离位、click 又滚顶，before/after 之间混入工具位移，:shift 度量即被污染
       await hoverStream()
-      await page.mouse.wheel(0, -600)
-      await page.mouse.wheel(0, -600)
+      for (let i = 0; i < 12; i++) {
+        await page.mouse.wheel(0, -400)
+        await new Promise((r) => setTimeout(r, 300))
+        const m5 = await metrics()
+        if (m5 && m5.st === 0) break
+      }
       await new Promise((r) => setTimeout(r, 400))
       const anchor = await readTopTurn(page)
       const before = await metrics()
-      ev.assert('A6: 翻页锚点成立（脱离态视口顶有可见 turn）', Boolean(anchor && before && before.d > BOTTOM_THRESHOLD), {
+      ev.assert('A6: 翻页锚点成立（视口已到顶、截断条在场、脱离态）', Boolean(anchor && before && before.st === 0), {
         channel: 'A',
-        expected: '脱离态且视口顶存在可见 turn',
-        actual: anchor ? `text=${anchor.text.slice(0, 24)} contentY=${anchor.contentY.toFixed(0)} d=${before?.d.toFixed(0)}` : '未找到可见 turn',
+        expected: '视口顶到顶（st=0）且视口顶存在可见 turn',
+        actual: anchor ? `st=${before?.st.toFixed(0)} d=${before?.d.toFixed(0)} top=${anchor.text.slice(0, 20)}` : '未找到可见 turn',
       })
       let triggeredBy = 'click'
       try {
@@ -359,24 +349,15 @@ export async function run(ctx) {
         expected: 'ΔscrollHeight ≥ 100px（更早 turn 前插）',
         actual: before && after ? `Δsh=${after.sh - before.sh} triggeredBy=${triggeredBy}` : 'metrics null',
       })
-      let anchorAfter = anchor ? await findTurnByNeedle(page, anchor.text) : null
-      if (!anchorAfter && anchor) {
-        // 锚 turn 被虚拟化卸载（前插把已视内容推出挂载窗口）：向下滚回使其重新挂载再测——
-        // contentY 是内容系坐标（与视口位置无关），二次滚动不改变测量语义
-        await hoverStream()
-        for (let i = 0; i < 6 && !anchorAfter; i++) {
-          await page.mouse.wheel(0, 600)
-          await new Promise((r) => setTimeout(r, 250))
-          anchorAfter = await findTurnByNeedle(page, anchor.text)
-        }
-      }
-      const delta = anchor && anchorAfter ? Math.abs(anchorAfter.contentY - anchor.contentY) : null
-      ev.assert('A6: 已视内容不跳（锚 turn contentY 位移 ≤40px，virtua :shift 保位）', delta !== null && delta <= 40, {
+      // 已视内容不跳（:shift 保位的源码语义 = 按列表末尾保位，useLoadMoreHistory.ts P-paging：
+      // prepend 不把视口往下推）→ 度量 = 翻页前后距底距离 d 不变（插入项全在视口上方）
+      const shiftDelta = before && after ? Math.abs(after.d - before.d) : null
+      ev.assert('A6: 已视内容不跳（:shift 按末尾保位：翻页前后距底距离 d 不变 ±40px）', shiftDelta !== null && shiftDelta <= 40, {
         channel: 'A',
-        expected: '|ΔcontentY| ≤ 40px',
-        actual: delta === null ? '锚 turn 翻页后未找到' : `Δ=${delta.toFixed(1)}px（${anchor.contentY.toFixed(0)} → ${anchorAfter.contentY.toFixed(0)}）`,
+        expected: '|Δdistance| ≤ 40px（前插不改视口与末尾的相对位置）',
+        actual: shiftDelta === null ? 'metrics null' : `before.d=${before?.d.toFixed(0)} after.d=${after?.d.toFixed(0)} Δ=${shiftDelta.toFixed(1)}px`,
       })
-      ev.step({ step: 'a6.loadmore', channel: 'A', exitCode: shGrew && delta !== null && delta <= 40 ? 0 : 1, stats: { triggeredBy, shGrew, anchorDelta: delta } })
+      ev.step({ step: 'a6.loadmore', channel: 'A', exitCode: shGrew && shiftDelta !== null && shiftDelta <= 40 ? 0 : 1, stats: { triggeredBy, shGrew, shiftDelta } })
     }
 
     // ══ A9：脱离态 composer 逐字输入发送 → 即回底（S8）══
