@@ -4,7 +4,9 @@
  * 覆盖（任务验收条款）：
  * - 导航白名单 / 登录页判定 / cookie 域过滤三个纯函数的边界
  * - 种 cookie：secrets 文件存在 → cookies.set 逐对种入；文件缺失 → 零种入
- * - API 轮询成功路径：200 → 导出目标域 cookie 写回 secrets 文件（内容 + 0600 权限断言）
+ * - API 轮询成功路径：200 → 导出目标域 cookie 串随返回值回传 + secrets 文件零写入
+ *   断言（main 不落盘——单写方 = runtime QuotaService，renderer 走 quota.configure
+ *   保存链落盘）
  * - 登录页转可见路径：登录页停留 5s → win.show() + 超时放宽 120s；登录完成恢复成功
  * - 超时失败路径：15s 无 200 → ok:false；转可见后 120s 未登录 → 放宽超时生效
  * - 同 provider 重入去重：返回同一 Promise、只开一个窗口
@@ -12,7 +14,7 @@
  *
  * electron mock：BrowserWindow / session.fromPartition 为 EventEmitter 假件
  * （window-factory.test.ts 的 MockBrowserWindow + log-retention-ipc.test.ts 的
- * ipcMain.handle 捕获两形态合用）；真实文件 IO（secrets 读写）落 mkdtemp tmpdir
+ * ipcMain.handle 捕获两形态合用）；真实文件 IO（secrets 种入读取）落 mkdtemp tmpdir
  * （fs-guard 生效中），dataDir 经 deps 注入。
  *
  * 异步时序约定：BrowserWindow 在 seedCookies 完成后的微任务里创建，用例统一经
@@ -21,7 +23,7 @@
  * 运行：cd apps/electron/main && npx vitest run quota/__tests__/cookie-refresher.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, statSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -296,12 +298,15 @@ describe('isTargetCookieDomain（导出域过滤）', () => {
 // ── 集成路径（mock electron + 真实 secrets 文件 IO）──────────────────────────
 
 describe('refreshQuotaCookie：种 cookie', () => {
-  it('secrets 文件存在：逐对种入 partition（url = pageUrl origin）', async () => {
+  it('secrets 文件存在：逐对种入 partition（url = pageUrl origin），且种入文件保持原样（main 只读）', async () => {
     mkdirSync(join(tmpDir, 'secrets'), { recursive: true })
     writeFileSync(cookiePath('p-seed'), 'a=1; b=2')
 
     const { result } = await refreshAndReady('p-seed')
-    expect(await result).toEqual({ ok: true, cookieWritten: true })
+    // 导出串 = 种入对 + 服务端续期后的新会话 cookie（jar 按种入序 + seedSessionCookie 追加序）
+    expect(await result).toEqual({ ok: true, cookie: 'a=1; b=2; sid=refreshed' })
+    // main 不落盘：种入源文件内容不被导出串覆盖（单写方 = runtime）
+    expect(readFileSync(cookiePath('p-seed'), 'utf-8')).toBe('a=1; b=2')
 
     const ses = fake.state.partitions.get('persist:quota-p-seed')
     expect(ses, 'partition 应为 persist:quota-<providerId>').toBeDefined()
@@ -311,9 +316,12 @@ describe('refreshQuotaCookie：种 cookie', () => {
     ])
   })
 
-  it('secrets 文件缺失：零种入（partition 历史登录态自效）', async () => {
+  it('secrets 文件缺失：零种入（partition 历史登录态自效），导出串照常回传且不建 secrets 目录', async () => {
     const { result } = await refreshAndReady('p-noseed')
-    expect(await result).toEqual({ ok: true, cookieWritten: true })
+    expect(await result).toEqual({ ok: true, cookie: 'sid=refreshed' })
+    // main 不落盘：不创建 secrets 目录 / cookie 文件
+    expect(existsSync(join(tmpDir, 'secrets'))).toBe(false)
+    expect(existsSync(cookiePath('p-noseed'))).toBe(false)
     // setCalls 只可能来自种入路径（成功路径导出走 get），缺失时必须为空
     const ses = fake.state.partitions.get('persist:quota-p-noseed')
     expect(ses!.cookies.setCalls).toEqual([])
@@ -321,9 +329,9 @@ describe('refreshQuotaCookie：种 cookie', () => {
 })
 
 describe('refreshQuotaCookie：API 轮询成功路径', () => {
-  it('200 → 导出写回 + 窗口形态（隐藏 / 双隔离 / persist session）+ 弹窗 deny + destroy 收尾', async () => {
+  it('200 → 导出串回传 + 窗口形态（隐藏 / 双隔离 / persist session）+ 弹窗 deny + destroy 收尾', async () => {
     const { result, win } = await refreshAndReady('p-ok')
-    expect(await result).toEqual({ ok: true, cookieWritten: true })
+    expect(await result).toEqual({ ok: true, cookie: 'sid=refreshed' })
 
     const options = win.options as {
       show?: boolean
@@ -345,7 +353,7 @@ describe('refreshQuotaCookie：API 轮询成功路径', () => {
     expect(win.shown).toBe(false)
   })
 
-  it('写回内容只含目标域 cookie，格式与手贴一致 + 0600 权限', async () => {
+  it('导出串只含目标域 cookie，格式与手贴一致；secrets 文件零写入（main 不落盘）', async () => {
     // partition 预置历史登录态：目标域域 cookie + host-only + 无关域各一枚
     const cookies = new fake.FakeCookies()
     fake.state.partitions.set('persist:quota-p-export', { cookies })
@@ -361,14 +369,12 @@ describe('refreshQuotaCookie：API 轮询成功路径', () => {
     )
     makeApiOk(await windowOf(result))
 
-    expect(await result).toEqual({ ok: true, cookieWritten: true })
-    const written = readFileSync(cookiePath('p-export'), 'utf-8')
     // 无关域被过滤；'name=value; name2=value2' 手贴格式（顺序按 cookies.get 返回序）
-    expect(written).toBe('sid=token-1; uid=42')
-    expect(statSync(cookiePath('p-export')).mode & 0o777).toBe(0o600)
+    expect(await result).toEqual({ ok: true, cookie: 'sid=token-1; uid=42' })
+    expect(existsSync(cookiePath('p-export'))).toBe(false)
   })
 
-  it('stepfun：POST 端点探测带 method/body，200 → 成功写回目标域 cookie', async () => {
+  it('stepfun：POST 端点探测带 method/body，200 → 导出串只含目标域 cookie', async () => {
     const STEPFUN = getQuotaRefreshTarget('stepfun')!
     expect(STEPFUN.apiMethod).toBe('POST')
 
@@ -385,10 +391,10 @@ describe('refreshQuotaCookie：API 轮询成功路径', () => {
     const win = await windowOf(result)
     win.webContents.url = 'https://platform.stepfun.com/account-overview'
 
-    expect(await result).toEqual({ ok: true, cookieWritten: true })
+    expect(await result).toEqual({ ok: true, cookie: 'Oasis-Token=sf-refreshed' })
     // 探测表达式 = POST + 静态 body（connect RPC 端点 GET 回 405，必须同方法探测）
     expect(exprs[0]).toContain(`fetch(${JSON.stringify(STEPFUN.apiUrl)},{method:'POST`,)
-    expect(readFileSync(cookiePath('p-stepfun'), 'utf-8')).toBe('Oasis-Token=sf-refreshed')
+    expect(existsSync(cookiePath('p-stepfun'))).toBe(false)
   })
 })
 
@@ -403,7 +409,7 @@ describe('refreshQuotaCookie：loadURL 中断处理', () => {
     const win = await windowOf(result)
     makeReady(win)
 
-    expect(await result).toEqual({ ok: true, cookieWritten: true })
+    expect(await result).toEqual({ ok: true, cookie: 'sid=refreshed' })
     expect(win.destroyed).toBe(true)
   })
 
@@ -416,6 +422,7 @@ describe('refreshQuotaCookie：loadURL 中断处理', () => {
       { dataDir: () => tmpDir },
     )
     expect(result.ok).toBe(false)
+    expect(result.cookie).toBeUndefined()
     expect(result.error).toContain('page load failed')
     expect(result.error).toContain('ERR_NAME_NOT_RESOLVED')
   })
@@ -448,7 +455,7 @@ describe('refreshQuotaCookie：登录页转可见路径', () => {
       // 用户完成登录：跳回 console + API 放行 + 服务端种会话 cookie；再推进一轮让轮询取到新状态
       makeReady(win)
       await vi.advanceTimersByTimeAsync(2_000)
-      expect(await result).toEqual({ ok: true, cookieWritten: true })
+      expect(await result).toEqual({ ok: true, cookie: 'sid=refreshed' })
       expect(win.destroyed).toBe(true)
     } finally {
       vi.useRealTimers()
@@ -472,7 +479,7 @@ describe('refreshQuotaCookie：登录页转可见路径', () => {
 
       makeReady(win)
       await vi.advanceTimersByTimeAsync(2_000)
-      expect(await result).toEqual({ ok: true, cookieWritten: true })
+      expect(await result).toEqual({ ok: true, cookie: 'sid=refreshed' })
     } finally {
       vi.useRealTimers()
     }
@@ -493,7 +500,7 @@ describe('refreshQuotaCookie：超时失败路径', () => {
       await vi.advanceTimersByTimeAsync(20_000)
       const settled = await result
       expect(settled.ok).toBe(false)
-      expect(settled.cookieWritten).toBe(false)
+      expect(settled.cookie).toBeUndefined()
       expect(settled.error).toContain('timed out')
       expect(win.destroyed).toBe(true)
       expect(win.shown).toBe(false)
@@ -554,18 +561,18 @@ describe('refreshQuotaCookie：同 provider 重入去重', () => {
     seedSessionCookie()
     releaseStatus(200)
     const [r1, r2] = await Promise.all([p1, p2])
-    expect(r1).toEqual({ ok: true, cookieWritten: true })
+    expect(r1).toEqual({ ok: true, cookie: 'sid=refreshed' })
     expect(r2).toEqual(r1)
     expect(win.destroyed).toBe(true)
   })
 
   it('在途结束后同 provider 再刷新 → 重新执行（inflight Map 收尾清除）', async () => {
     const first = await refreshAndReady('p-again')
-    expect(await first.result).toEqual({ ok: true, cookieWritten: true })
+    expect(await first.result).toEqual({ ok: true, cookie: 'sid=refreshed' })
     expect(fake.FakeBrowserWindow.instances).toHaveLength(1)
 
     const second = await refreshAndReady('p-again')
-    expect(await second.result).toEqual({ ok: true, cookieWritten: true })
+    expect(await second.result).toEqual({ ok: true, cookie: 'sid=refreshed' })
     expect(fake.FakeBrowserWindow.instances).toHaveLength(2)
   })
 })
@@ -610,16 +617,16 @@ describe('quota:refresh-cookie IPC', () => {
     expect([...fake.state.handlers.keys()].filter((c) => c === QUOTA_REFRESH_COOKIE)).toHaveLength(1)
   })
 
-  it('合法 payload 转发刷新器（成功路径）', async () => {
+  it('合法 payload 转发刷新器（成功路径，导出串随返回值回传）', async () => {
     registerQuotaCookieRefreshHandler()
     const handler = fake.state.handlers.get(QUOTA_REFRESH_COOKIE)!
 
     const invoke = handler(undefined, { fetcherId: 'mimo', providerId: 'p-ipc' }) as Promise<{
       ok: boolean
-      cookieWritten: boolean
+      cookie?: string
     }>
     makeReady(await windowOf(invoke))
-    expect(await invoke).toEqual({ ok: true, cookieWritten: true })
+    expect(await invoke).toEqual({ ok: true, cookie: 'sid=refreshed' })
   })
 
   it('非法 payload reject：空字段 / 非对象 / 不在册 fetcherId，且不触达刷新器', async () => {
@@ -629,6 +636,8 @@ describe('quota:refresh-cookie IPC', () => {
     await expect(handler(undefined, { fetcherId: 'mimo', providerId: '' })).rejects.toThrow(/invalid payload/)
     await expect(handler(undefined, 'mimo')).rejects.toThrow(/invalid payload/)
     await expect(handler(undefined, { fetcherId: 'zhipu', providerId: 'p' })).rejects.toThrow(/invalid payload/)
+    // providerId 含路径分隔符（形态白名单拒绝，不进刷新流程）
+    await expect(handler(undefined, { fetcherId: 'mimo', providerId: '../evil' })).rejects.toThrow(/invalid payload/)
     // 均未开窗口（校验前置）
     expect(fake.FakeBrowserWindow.instances).toHaveLength(0)
   })
@@ -636,10 +645,17 @@ describe('quota:refresh-cookie IPC', () => {
   it('isValidQuotaRefreshCookiePayload 纯函数边界', () => {
     expect(isValidQuotaRefreshCookiePayload({ fetcherId: 'mimo', providerId: 'p' })).toBe(true)
     expect(isValidQuotaRefreshCookiePayload({ fetcherId: 'opencode-go', providerId: 'p' })).toBe(true)
+    expect(isValidQuotaRefreshCookiePayload({ fetcherId: 'mimo', providerId: 'my-zhipu' })).toBe(true)
     expect(isValidQuotaRefreshCookiePayload(null)).toBe(false)
     expect(isValidQuotaRefreshCookiePayload(undefined)).toBe(false)
     expect(isValidQuotaRefreshCookiePayload({ fetcherId: 1, providerId: 'p' })).toBe(false)
     // 在册 QUOTA_PRESETS 但无刷新目标（api-key 类）：拒绝
     expect(isValidQuotaRefreshCookiePayload({ fetcherId: 'minimax', providerId: 'p' })).toBe(false)
+    // providerId 形态白名单：含路径分隔符（join 会把写盘路径移出 secrets 目录）→ 拒绝
+    expect(isValidQuotaRefreshCookiePayload({ fetcherId: 'mimo', providerId: '../evil' })).toBe(false)
+    expect(isValidQuotaRefreshCookiePayload({ fetcherId: 'mimo', providerId: 'a/b' })).toBe(false)
+    expect(isValidQuotaRefreshCookiePayload({ fetcherId: 'mimo', providerId: 'a\\b' })).toBe(false)
+    // 首字符非字母数字（点开头的隐藏文件形态）→ 拒绝
+    expect(isValidQuotaRefreshCookiePayload({ fetcherId: 'mimo', providerId: '.hidden' })).toBe(false)
   })
 })
