@@ -9,7 +9,8 @@
  * - result ok / fail → 状态文案分别取 i18n key / module 透传 error
  *
  * 用户维度参数区（2026-10 泛化，原 workspace 单框）：view.params 逐项渲染 +
- * 输入经 setParamDraft 写 draft.params（reka 宽联合载荷的字符串收窄）。
+ * 输入经 setParamDraft 写 draft.params（reka 宽联合载荷的字符串收窄）；
+ * 缺口提示 / 徽标按 key 判定（per-key，只挂真正缺的那个框）。
  *
  * module 实例经 makeQuotaModuleStub（@taiji/core/testing）注入——契约漂移在桩工厂
  * 侧变编译错误；i18n 经包 vitest.setup mock（t 返回 key）。
@@ -101,7 +102,7 @@ describe('CodingPlanSection 用户维度参数区（2026-10 泛化）', () => {
     return { wrapper, module }
   }
 
-  it('view.params 多项 → 按 key 逐项渲染 label / placeholder / helpText；missing 含 param → 必填提示', async () => {
+  it('view.params 多项 → 按 key 逐项渲染 label / placeholder / helpText；草稿空的必填项渲染必填提示', async () => {
     const { wrapper } = mountWithParams(
       [
         { key: 'workspace', label: '工作区', placeholder: '输入工作区 ID', helpText: '帮助文字', required: true },
@@ -118,9 +119,32 @@ describe('CodingPlanSection 用户维度参数区（2026-10 泛化）', () => {
     expect(block.text()).toContain('帮助文字')
     const input = wrapper.find('[data-testid="quota-param-input-workspace"]')
     expect(input.attributes('placeholder')).toBe('输入工作区 ID')
-    // missing 含 'param' → 每个 param 块渲染必填提示（i18n key，t mock 返回 key）
+    // 两个 param 草稿均为空 → 各自框下渲染必填提示（per-key 判定；i18n key，t mock 返回 key）
     expect(wrapper.find('[data-testid="quota-missing-param-workspace"]').text())
       .toContain('settings.providerEdit.quotaMissingParam')
+  })
+
+  it('多必填参数部分缺失 → 缺口提示 / 徽标按 key 定位（只挂真正缺的那个框）', async () => {
+    const { wrapper, module } = mountWithParams(
+      [
+        { key: 'workspace', label: '工作区', required: true },
+        { key: 'orgId', label: '组织', required: true },
+      ],
+      ['param'],
+    )
+    module.draft.value.params = { workspace: 'ws-1' }
+    await wrapper.vm.$nextTick()
+
+    // workspace 已填：无缺口提示，徽标「已配置」
+    expect(wrapper.find('[data-testid="quota-missing-param-workspace"]').exists()).toBe(false)
+    const wsBlock = wrapper.find('[data-testid="quota-param-block-workspace"]')
+    expect(wsBlock.text()).toContain('settings.providerEdit.quotaConfiguredBadge')
+    expect(wsBlock.text()).not.toContain('settings.providerEdit.quotaRequiredBadge')
+    // orgId 仍空：缺口提示与「必填」徽标都挂在 orgId 框下，不蔓延到已填的框
+    expect(wrapper.find('[data-testid="quota-missing-param-orgId"]').text())
+      .toContain('settings.providerEdit.quotaMissingParam')
+    expect(wrapper.find('[data-testid="quota-param-block-orgId"]').text())
+      .toContain('settings.providerEdit.quotaRequiredBadge')
   })
 
   it('param 输入 → setParamDraft 写入 draft.params（字符串通过，保留既有键）', async () => {

@@ -17,7 +17,9 @@
  * - 类型 / 凭证 / Workspace 是草稿，经 saveAndTest 一次点击提交（D2/D5）；
  *   开关退化为纯配置位、即时落盘（D4）
  * - 密文字段（cookie / 专属 Key）取「草稿 ∨ 已保存」并集，明文 Workspace 只看草稿（D13）
- * - readiness 是「保存并测试」按钮禁用状态的唯一依据，也是字段徽标 / 提示的唯一真相源（D1）
+ * - readiness 是「保存并测试」按钮禁用状态的唯一依据，也是字段徽标 / 提示的唯一真相源
+ *   （D1；param 字段的徽标 / 提示按 key 经 isQuotaParamMissing 判定——missing 的 'param'
+ *   条目不编码 key，判据与 readiness 的 param 检查同源）
  * - 密文输入掩码哨兵：已保存的 cookie / 专属 Key 在输入框显示 QUOTA_SECRET_MASK（D7）
  * - 凭证来源显式化（D3）：UI 显示的选择与 runtime 使用的凭证由同一份持久化数据驱动
  */
@@ -47,8 +49,10 @@ export type QuotaTestStatus = 'idle' | 'loading' | 'success' | 'error'
  *                 「只渲染下拉 + 一句说明」，不渲染按钮，故该值**不配 i18n 文案**，
  *                 只用于让契约自解释。
  * - 'cookie' / 'apiKey' / 'param' : 已选类型下的具体缺口，各配一条 i18n 提示。
- *   'param'（2026-10 泛化，原 'workspace'）= 必填用户维度参数未填（具体键由
- *   view.params[].required 可见，i18n 文案通用化不按键分叉）。
+ *   'param'（2026-10 泛化，原 'workspace'）= 必填用户维度参数未填。条目按键聚合、
+ *   不编码具体 key（生产方按 spec 逐项判空、逐条落 'param'），多必填参数时从 missing
+ *   无法定位缺的是哪个框——字段级提示 / 徽标按 key 判定用 isQuotaParamMissing；
+ *   i18n 文案通用化不按键分叉。
  */
 export type ReadinessMissing = 'type' | 'cookie' | 'apiKey' | 'param'
 
@@ -202,6 +206,20 @@ export interface QuotaParamView {
   helpText?: string
   /** 是否必填（spec.required ?? true）：false 不阻塞 readiness。 */
   required: boolean
+}
+
+/**
+ * 必填用户维度参数的 per-key 缺口判定（字段级提示 / 徽标定位到具体输入框）。
+ *
+ * ReadinessMissing 的 'param' 条目按键聚合、不编码 key，多必填参数时从 missing 无法
+ * 定位缺的是哪个框；UI 按 key 渲染缺口提示 / 徽标时用本函数判定。判据与 readiness
+ * 的 param 检查同源：required ∧ 草稿为空白（D13 屏幕即真相，只看草稿、不看已保存值）。
+ */
+export function isQuotaParamMissing(
+  param: Pick<QuotaParamView, 'key' | 'required'>,
+  paramsDraft: Record<string, string>,
+): boolean {
+  return param.required && (paramsDraft[param.key] ?? '').trim() === ''
 }
 
 /** 测试结果侧（只读） */

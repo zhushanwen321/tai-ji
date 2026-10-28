@@ -73,7 +73,7 @@
       <div v-if="view.credential.form === 'cookie'" class="mt-2" data-testid="quota-cookie-block">
         <Label class="mb-1 block text-[length:var(--text-3xs)] text-neutral-mid">
           Cookie
-          <span class="normal-case text-neutral-dim">· {{ fieldBadgeLabel('cookie') }}</span>
+          <span class="normal-case text-neutral-dim">· {{ fieldBadgeLabel(isMissing('cookie')) }}</span>
         </Label>
         <Textarea
           v-model="draft.cookie"
@@ -143,7 +143,7 @@
         <div v-if="view.credential.exclusiveApplicable && draft.credentialSource === 'exclusive'" class="mt-1.5" data-testid="quota-exclusive-key-block">
           <Label class="mb-1 block text-[length:var(--text-3xs)] text-neutral-mid">
             {{ t('settings.providerEdit.quotaApiKey') }}
-            <span class="normal-case text-neutral-dim">· {{ fieldBadgeLabel('apiKey') }}</span>
+            <span class="normal-case text-neutral-dim">· {{ fieldBadgeLabel(isMissing('apiKey')) }}</span>
           </Label>
           <Input
             v-model="draft.apiKey"
@@ -172,12 +172,13 @@
       </template>
 
       <!-- 用户维度参数（2026-10 泛化，原 workspace 单框；按 preset.params 逐项渲染；
-           明文回显，D13 判定只看草稿） -->
+           明文回显，D13 判定只看草稿。缺口提示 / 徽标按 key 判定（isParamMissing）：
+           多必填参数时只挂真正缺的那个框——missing 的 'param' 条目按键聚合、不编码 key） -->
       <template v-for="param in view.params" :key="param.key">
         <div class="mt-2" :data-testid="`quota-param-block-${param.key}`">
           <Label class="mb-1 block text-[length:var(--text-3xs)] text-neutral-mid">
             {{ param.label }}
-            <span class="normal-case text-neutral-dim">· {{ fieldBadgeLabel('param') }}</span>
+            <span class="normal-case text-neutral-dim">· {{ fieldBadgeLabel(isParamMissing(param)) }}</span>
           </Label>
           <Input
             :model-value="draft.params[param.key] ?? ''"
@@ -187,7 +188,7 @@
             @update:model-value="setParamDraft(param.key, $event)"
           />
           <p
-            v-if="isMissing('param')"
+            v-if="isParamMissing(param)"
             class="mt-1 text-[length:var(--text-3xs)] text-warn"
             :data-testid="`quota-missing-param-${param.key}`"
           >{{ missingHint('param') }}</p>
@@ -290,7 +291,8 @@ import { useI18n } from 'vue-i18n'
 import { formatQuotaTimeAgo } from './format-time-ago'
 
 import type { QuotaCredentialSource } from '@taiji/shared'
-import { QUOTA_SECRET_MASK } from '@taiji/core'
+import { QUOTA_SECRET_MASK, isQuotaParamMissing } from '@taiji/core'
+import type { QuotaParamView } from '@taiji/core'
 import { useQuotaConfigureModule } from '../injection-keys'
 import QuotaWindowList from './QuotaWindowList.vue'
 
@@ -388,9 +390,18 @@ const visibleWindows = computed<VisibleWindow[]>(() => {
 /** 「查看上次成功数据」展开态（B-3 / design §3.4：失败态下旧缓存折叠展示） */
 const showLastSuccess = ref(false)
 
-/** 缺口判定（白名单三键；'type' 已在模板层走 D8 分支，不进入本判定） */
-function isMissing(key: MissingField): boolean {
+/** 缺口判定（cookie / apiKey 直查 readiness.missing；'type' 已在模板层走 D8 分支，不进入本判定） */
+function isMissing(key: 'cookie' | 'apiKey'): boolean {
   return view.value.readiness.missing.includes(key)
+}
+
+/**
+ * 必填 param 的 per-key 缺口判定（判据 SSOT = core isQuotaParamMissing，与 readiness 的
+ * param 检查同源）：missing 的 'param' 条目按键聚合、不编码 key，多必填参数时无法从
+ * missing 定位到框——缺口提示 / 徽标只挂在真正缺的那个输入框下。
+ */
+function isParamMissing(param: QuotaParamView): boolean {
+  return isQuotaParamMissing(param, draft.value.params)
 }
 
 /** 字段级提示文案（显式白名单查 i18n，不写 missing 兜底循环——让「'type' 不配文案」成为结构保证） */
@@ -409,11 +420,10 @@ const exclusiveKeyPlaceholder = computed<string>(() => (isMissing('apiKey')
   : t('settings.providerEdit.quotaApiKeySetPlaceholder')))
 
 /**
- * 字段徽标（「已配置 / 必填」，§7.4 徽标取值规则）。
- *
- * 与字段级提示**同源**：两者都读同一份 readiness.missing。missing 是唯一编码了凭证归属
- * 规则（D5：类型切换后旧 cookie / 旧专属 Key 归属失效）的派生量，因此「不在 missing 里」
- * ⟺「该字段此刻有效」，正是徽标要表达的语义（不是「磁盘上曾存过一份」）。
+ * 字段徽标（「已配置 / 必填」，§7.4 徽标取值规则）。入参 = 缺口判定结果（cookie / 专属
+ * Key 用 isMissing(key)，param 用 isParamMissing(param)），与字段级提示**同源**。
+ * missing 是唯一编码了凭证归属规则（D5：类型切换后旧 cookie / 旧专属 Key 归属失效）的
+ * 派生量，因此「无缺口」⟺「该字段此刻有效」，正是徽标要表达的语义（不是「磁盘上曾存过一份」）。
  * 用磁盘原始标记（provider.quota.cookieSet / provider.quota.apiKeySet）
  * 各自复算会得到第二份真相：类型切换后徽标说「已配置」而下方提示说「必填」（同屏矛盾，S7 反例）。
  * 同源之后「徽标已配置 + 提示必填」结构性不可达，无需再靠调用方自觉。
@@ -421,8 +431,8 @@ const exclusiveKeyPlaceholder = computed<string>(() => (isMissing('apiKey')
  * 「类型未定」（missing 含 'type'）不会走到这里：params 区是 view.type.undetermined 的 v-else，
  * 该态只剩下拉 + 说明，因此「未判定被读成已配置」在结构上不可达（不是靠本函数兜底）。
  */
-function fieldBadgeLabel(key: MissingField): string {
-  return isMissing(key)
+function fieldBadgeLabel(missing: boolean): string {
+  return missing
     ? t('settings.providerEdit.quotaRequiredBadge')
     : t('settings.providerEdit.quotaConfiguredBadge')
 }
