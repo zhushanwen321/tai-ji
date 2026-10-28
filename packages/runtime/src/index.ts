@@ -1415,7 +1415,9 @@ async function main(): Promise<void> {
       const cfg = getProviderConfig(providerId)
       const extras = readExtrasWithFallback(providerExtrasStore, configStore, providerId)
       if (!cfg && !extras?.quota) return undefined
-      return { baseUrl: cfg?.baseUrl, name: cfg?.name, quota: extras?.quota }
+      // pi 的 baseUrl 语义挂 model 级（catalog provider 顶层无 baseUrl）；preset 匹配
+      // 需要 baseUrl——顶层缺失时取首个 model 的 baseUrl 作代表（单 baseUrl provider 全覆盖）
+      return { baseUrl: cfg?.baseUrl ?? cfg?.models?.[0]?.baseUrl, name: cfg?.name, quota: extras?.quota }
     },
     providerExtrasStore,
     providerExists: (providerId) => configService.listProviders().some(p => p.id === providerId),
