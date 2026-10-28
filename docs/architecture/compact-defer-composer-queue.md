@@ -4,6 +4,8 @@
 > 视觉规格基线 = `docs/page-design/compact-defer-queue-spec.html`（用户裁决的方案 2 demo 已入库；落选 demo-1/3 为过程残留，已随 .tmp 清理，不入库）。
 >
 > **现行边界（投递所有权内核，[ADR-0074](../adr/decisions.md)，2026-09-16）**：本文的队列**数据源与记账**层已被内核取代——renderer 本地 defer 队列（`useCompactQueue` 分区、flush / S1 拒绝检测 / 1s 重投 timer / 5 次熔断、`PendingBubble`）整体退役；队列状态载体 = runtime 投递内核的 `session.delivery` 状态帧（core `getDeliveryProjectionRef`），composer 队列区（`QueueBubble`）单源读帧，条目态 = 内核五态（queued / in-flight / delivered / failed / cancelled）+ lane，撤销走 `delivery.cancel`、重试走 `delivery.resync`、forceQuit 回收走 `delivery.drain`。**本文仍有效**：队列区位置与形态基线（composer-box 顶部队列区、行截断、`VISIBLE_MAX` 截断 + 「+N」、hover × 撤销）、「压缩中」通栏活动带（`ActivityStrip` compacting 行 + 副文案计数）；occupancy 驱动展示的口径不变。**失效条款**：§2.1 的双数据源归一规则（defer 行仅渲染未提交条目、已提交 send 条目确认前不可见）随本地队列退役——内核条目从提交起全程可见（queued / in-flight 行）；活动带与队列区计数口径 = `session.delivery` 派生视图中「lane ≠ direct 且 state ≠ delivered」的条目数（过滤唯一定义点 `deliveryQueueEntries`，与队列区行渲染同源）；行内富内容 +N 徽标退役（帧只携带 preview 文本，草稿恢复由 cancel/drain reply 的全文快照承担，ADR-0043）。
+>
+> **测试资产去向（终态同步登记，2026-10-28）**：本文正文单元表与 v2/v3 沿革中的测试文件名为历史时点登记，现状以本条为准——`__tests__/panel/queue-bubble-s8.test.ts` → 已并入 `packages/renderer/src/__tests__/panel/session-trace/trace-inspector.test.ts`（「queue-bubble-s8」来源节）；`__tests__/composables/panel/use-compact-queue.test.ts`（TC5/CD1）与 `use-chat-compacted-flush.test.ts` → 随上文本地 defer 队列机制（入队/flush/S1/timer/熔断）退役整体删除，未改名迁移；队列区行为覆盖现由 `__tests__/panel/composer-compact-queue.test.ts`（u3c 迁移改写，见其头注）承载。
 
 ## 1 背景与目标
 

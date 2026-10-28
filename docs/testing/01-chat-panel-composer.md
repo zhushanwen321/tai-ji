@@ -894,10 +894,10 @@ message.complete {messageId, stopReason:'complete', usage:{inputTokens:1280, out
 
 | 测试文件 | 覆盖 |
 |---------|------|
-| [`__tests__/useChat.test.ts`](../../packages/renderer/src/__tests__/useChat.test.ts) | ensureStreamSubscription 幂等；send 三检查；事件驱动 setStreaming；compact 状态机 |
-| [`__tests__/chat-streaming-reset.test.ts`](../../packages/renderer/src/__tests__/chat-streaming-reset.test.ts) | **规则#3 复位**：error 路径重置 streaming/streamingMessage（否则 UI 卡死） |
-| [`__tests__/fg5-message-stream.test.ts`](../../packages/renderer/src/__tests__/fg5-message-stream.test.ts)（18KB 最全） | applyChunk 全分支：thinking/tool/error/retry/queue/fileChanges；session 隔离；system 消息；历史 fixture |
-| [`__tests__/panel/block-working.test.ts`](../../packages/renderer/src/__tests__/panel/block-working.test.ts) | Block working 态折叠（thinking/tool/end_not_received） |
+| [`__tests__/chat-panel-bundle.test.ts`](../../packages/renderer/src/__tests__/chat-panel-bundle.test.ts)（useChat 合并节） | ensureStreamSubscription 幂等；send 三检查；事件驱动 setStreaming；compact 状态机 |
+| [`__tests__/chat-store-reset.test.ts`](../../packages/renderer/src/__tests__/chat-store-reset.test.ts) | **规则#3 复位**：error 路径重置 streaming/streamingMessage（否则 UI 卡死） |
+| [`__tests__/root-node.test.ts`](../../packages/renderer/src/__tests__/root-node.test.ts)（fg5-message-stream 节） | applyChunk 全分支：thinking/tool/error/retry/queue/fileChanges；session 隔离；system 消息；历史 fixture |
+| [`__tests__/panel/composer-file-popover.test.ts`](../../packages/renderer/src/__tests__/panel/composer-file-popover.test.ts)（block-working 来源节） | Block working 态折叠（thinking/tool/end_not_received） |
 | [`__tests__/panel/turn-working.test.ts`](../../packages/renderer/src/__tests__/panel/turn-working.test.ts) | Turn working 态（完成复位/elapsed 计时/非 working 静态） |
 | [`__tests__/stores/toolcall-anchor.test.ts`](../../packages/renderer/src/__tests__/stores/toolcall-anchor.test.ts) | toolCallId 锚定（findToolCallOwner 乱序无害化） |
 | [`__tests__/effects/use-streaming-pin.test.ts`](../../packages/renderer/src/__tests__/effects/use-streaming-pin.test.ts) + [`__tests__/components/MessageStream-kind.test.ts`](../../packages/renderer/src/__tests__/components/MessageStream-kind.test.ts) | message-stream-editing-pin-identity keepMounted 崩溃回归：streaming pin 恒定 identity（turnStableId 身份固定，virtua keepMounted 下序列变更不崩）/ MessageStream kind 查表分发（三态互斥，防死分支复辟） |
@@ -905,7 +905,7 @@ message.complete {messageId, stopReason:'complete', usage:{inputTokens:1280, out
 
 **运行**：
 ```bash
-cd packages/renderer && npx vitest run src/__tests__/fg5-message-stream.test.ts src/__tests__/useChat.test.ts src/__tests__/chat-streaming-reset.test.ts
+cd packages/renderer && npx vitest run src/__tests__/root-node.test.ts src/__tests__/chat-panel-bundle.test.ts src/__tests__/chat-store-reset.test.ts
 ```
 
 ### 8.2 历史 fixture（`mock/data.ts` fixtureMessages）
@@ -1135,8 +1135,8 @@ expect(m.tableScrollW).toBeLessThanOrEqual(m.hostW + 1)         // 不撑爆宿�
 | compact 压缩 | `/compact` 或自动触发 → compacting/compacted 态 | E2E（需补 testid，当前 composer 压缩态靠 title 锚点） | 高 |
 | fork 会话 | 点 user 气泡编辑 → ForkConfirmModal → fork 新会话 | E2E（需补 Turn/ForkConfirmModal testid） | 中 |
 | editAndResend | 编辑历史 user 消息 → 截断 + 重发 | 集成测试为主（useChat.editAndResend），E2E 需补 testid | 中 |
-| 错误路径 | message.error / stream_error → UI 复位不卡死 | **集成测试必做**（chat-streaming-reset.test.ts 已覆盖），mock 不模拟错误 | 高 |
-| tool 失败流式 | tool_call_end status='error' → 红框 + 强制展开 | 集成测试（block-working.test.ts U8），E2E 用 s1 历史 fixture（CF-5 已覆盖静态态） | 低 |
+| 错误路径 | message.error / stream_error → UI 复位不卡死 | **集成测试必做**（chat-store-reset.test.ts 已覆盖），mock 不模拟错误 | 高 |
+| tool 失败流式 | tool_call_end status='error' → 红框 + 强制展开 | 集成测试（composer-file-popover.test.ts 的 block-working 来源节 U8），E2E 用 s1 历史 fixture（CF-5 已覆盖静态态） | 低 |
 | thinking 完整文本 | 收起态点展开 → 完整 thinking 可见 | E2E（点击「思考」header toggle 后断言全文） | 低 |
 | ChangeSetCard 审查交互 | 用户 Accept/Reject → partially-reviewed/resolved | E2E（需补 ChangeSetCard testid + 审查按钮锚点） | 中 |
 | queue steer/followUp | 流式中发送 → 内核判 lane=steer → 队列条目（in-flight 行）→ 送达回执入流 | E2E（队列区 testid 已备：`queue-bubble` / `queue-item-<uuid>` / `queue-edit-<uuid>`——队列原位编辑见 §3 queue-edit 系条目） | 低 |
@@ -1147,7 +1147,7 @@ expect(m.tableScrollW).toBeLessThanOrEqual(m.hostW + 1)         // 不撑爆宿�
 |------|------|
 | ✅ data-testid 已落地 | turn-*/block-text/tool-block-header/change-set-card/subagent-directive-bubble/pending-bubble-list/load-more-history 等已可用（见 §3 清单）；新增交互侧随组件补，未覆盖处才退回文本/class 锚点 |
 | ⚠️ mock 流式耗时 | 一轮约 3-4 秒。E2E timeout 给 15s，用 `toBeVisible({timeout})` 等终态，禁止固定 sleep |
-| ❌ mock 不模拟失败 | 错误路径（message.error/stream_error）无法 mock E2E 触发，只能单测验证（chat-streaming-reset.test.ts） |
+| ❌ mock 不模拟失败 | 错误路径（message.error/stream_error）无法 mock E2E 触发，只能单测验证（chat-store-reset.test.ts） |
 | ❌ mock 不模拟 WS 断连 | WS 生命周期（断连/重连）只能非 MOCK 测 |
 | ⚠️ turn-meta 文本锚点 | 「工作中」/「已工作」文本可能随 UI 调整变化，不如 testid 稳定 |
 | ⚠️ ChangeSetCard 5 态 | mock 只演示 accumulating→ready，resolved/superseded/partially-reviewed 需手工触发（用户 Accept/Reject） |
@@ -1168,7 +1168,7 @@ expect(m.tableScrollW).toBeLessThanOrEqual(m.hostW + 1)         // 不撑爆宿�
 - 组件源码：MessageStream 容器 [`components/panel/MessageStream.vue`](../../packages/renderer/src/components/panel/MessageStream.vue) / [`message-stream/`](../../packages/renderer/src/components/panel/message-stream/)；Turn/Block/ChangeSetCard/SystemNotice 在 [`packages/ui/src/features/chat/`](../../packages/ui/src/features/chat/)
 - 流式处理：[`domain/chat/chunk-processor.ts`](../../packages/core/src/domain/chat/chunk-processor.ts)（@taiji/core）
 - useChat 真身：[`domain/chat/useChat.ts`](../../packages/core/src/domain/chat/useChat.ts)（@taiji/core；renderer 仅薄壳 [`composables/features/chat/useChat.ts`](../../packages/renderer/src/composables/features/chat/useChat.ts)）
-- 集成测试：[`__tests__/fg5-message-stream.test.ts`](../../packages/renderer/src/__tests__/fg5-message-stream.test.ts)
+- 集成测试：[`__tests__/root-node.test.ts`](../../packages/renderer/src/__tests__/root-node.test.ts)（fg5-message-stream 节）
 - mock 流式：[`transport/mock/run-send-stream.ts`](../../packages/core/src/transport/mock/run-send-stream.ts)（@taiji/core）
 - 发送入口：[01-chat-panel-composer.md](./01-chat-panel-composer.md)（Composer.onSend → chat.send）
 - FileChanges 通道：[ADR-0024](../adr/decisions.md)

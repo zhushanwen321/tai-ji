@@ -558,8 +558,9 @@ describe('createChatStore factory', () => {
     // 且 segments 完整（用户可见行为）」已迁移：queue_update 帧降级为内核内部回执，不再直驱
     // 对话流（D7 队列区数据源 = session.delivery 状态帧单一源），其显示链（submit 乐观气泡 →
     // session.delivery 帧 morph → message_end 标记按原段回填）编排在 useChat 层——用户可见
-    // 行为断言（skill 段引用恒等 + segmentsToText 保真，原判据原样保留）迁至 useChat.test.ts
-    // 「送达回执 → 按序入流」用例；等价性维度见 apply-entry-equivalence.test.ts E5a/E5c。
+    // 行为断言（skill 段引用恒等 + segmentsToText 保真，原判据原样保留）迁至
+    // store-merged-merged.test.ts useChat 合并节「送达回执 → 按序入流」用例；
+    // 等价性维度见 apply-entry-merged.test.ts 的 apply-entry-equivalence 合并节 E5a/E5c。
     // 原退役锁断言（构造 queue_update 帧断言不产生 ref 气泡）已删除：u5a/R1-A5 已把
     // message.queue_update 条目从 ServerMessageType 整体删除（shared/protocol.ts），
     // 「防无设计依据地复活该驱动链」现由协议类型删除承担（tsc 层锁，强于运行时断言）。
