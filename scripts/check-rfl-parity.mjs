@@ -37,6 +37,15 @@
  *  - D4 inheritCarryoverFields / dormantRevivalTitle 的 zcode 侧处置：前者对应物为
  *    zcode 延续合并内联赋值（title 语义差随 D1，severity 语义一致）；后者属 dormant
  *    机制（随 D3 无对应物），登记豁免、无镜像义务。
+ *  - D5 suggestion 台账机制【刻意】：pi 侧 suggestion 条目走 aggregator
+ *    suggestion_ids 独立台账（schema 条目级 + detectSuggestionLedgerDefect 入口
+ *    fail-fast：suggestion>0 而 ids 缺失/条数不足 = 带因重试一次后
+ *    aggregator-failure；终态 suggestion-not-accounted ES3 记账防 suggestion 静默
+ *    遗漏）。zcode 侧无对应物：minor 与 must-fix 同在单一问题清单（severity 词表
+ *    含 minor），「不静默遗漏」由 reconciliation 逐条申报 + clean 轮清单守门
+ *    （残留强制重派追账）承担；「数字-条目一致」仅 prompt 文字约定（条数合计
+ *    须等于 mustFix+suggestion），无机器 fail-fast——两侧问题清单模型不同
+ *    （pi 双通道台账 / zcode 单清单对账），登记豁免、无镜像义务。
  *
  * 退出码：0 = 一致（或 zcode 侧文件不存在 → SKIP）；1 = 结构缺失或行为分歧。
  * 输出 [FIX] 指引：两侧文件路径 + 需要同步的内容。
