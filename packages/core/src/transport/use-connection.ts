@@ -1,51 +1,54 @@
 /**
- * use-connection —— 连接生命周期编排（core 版，架构审计 §10.2 D-1 迁移）。
+ * use-connection —— 连接控制器（core 版，connection-datasync-ssot §6.2/§6.3 重构）。
  *
- * 迁自 renderer composables/useConnection.ts（266 行），保留所有运行时不变量：
- * - init()：发现 runtime 端口 → connect WS（mock 模式走 mock://）
- * - 监听 runtime 重启（onRuntimePort 推新端口 → 断开重连）
- * - visibility 主动重连（切回前台且未连接时用最近 url 重连，不干等指数退避最长 30s）
- * - teardown()：取消全部监听 + 断开
- * - 模块级单例副作用 + initialised/dispatcherInstalled 幂等检查（保持）
+ * 职责：以 runtime 目标快照（RuntimeTargetSnapshot {seq, runtimeId, port, token}，
+ * supervisor 单一权威源）为唯一连接目标来源，维护「期望快照 × 实际连接」两个状态并按
+ * §6.3 裁决表决定连接动作：
+ * - seq ≤ 期望 seq（幂等重复广播 / 拉取响应晚于推送的旧代快照）→ 不动作（重复不拆连、
+ *   旧代丢弃防目标回退）
+ * - seq 更高或期望未建立 + 已认证 → 断旧连新（携新快照凭据）
+ * - seq 更高或期望未建立 + 未认证（等待/连接中）→ 转向新目标重新发起
+ * - init 拉取快照为 null → waiting-runtime 等待态（不发起连接；快照到达——拉取或
+ *   推送——才连接，§6.2「权威目标确认前不连接」）
  *
- * 连接发现收敛（renderer-package-topology §2.4「连接发现策略可插拔」）：形态判定由
- * resolveConnectionMode() 薄谓词单点裁决，首连 init / HMR 重连 / retryRuntime 三处消费
- * 其结果；连接目标解析不进谓词（首连 knownPort→fallback 与 HMR resolveFallbackPort
- * 的目标解析语义不同，各分支原地保留，不伪合并）：
- *   1. mock 形态 → connect('mock://', {auth:'skip'})（跳过握手；URL 仅是 platform
- *      注入 mock factory 的路由标识）
- *   2. 本地形态 → ipc.getRuntimePort()（main 已 spawn）→ connect(localRuntimeUrl(port),
- *      {auth:'token', token})，fallback BASE_PORT + offset（dev 模式 +DEV_PORT_OFFSET）
- *   3. 远程形态（ipc 无值，移动壳）→ connectionProfile.resolve() 注入的连接目标；
- *      未注入时显式失败（fail-fast，不静默降级）——profile 真实实现由移动壳装配注入
+ * 实现顺序约束（§6.2 采用段尾）：init 先安装快照推送监听、后执行快照拉取——消除
+ * 「拉取返回 null 与推送到达」交错间的丢失窗口（推送先到则拉取必非 null，两路汇合于
+ * applyTargetSnapshot 同一裁决入口）。
  *
- * mock 优先于 ipc 存在性的裁决依据（桌面等价性要求）见 resolveConnectionMode 注释。
+ * auth 应答实例核对（§6.1/§6.3）：auth.result ok 且应答 runtimeId ≠ 期望快照
+ * runtimeId = 连到非预期进程 → fail-fast 断开、重拉快照重连；连续 2 次不一致停止自动
+ * 重连置 failed（失败呈现 + 手动重试入口，不无报错挂死）。
  *
- * headless 化改造（core 零 DOM / 零构建环境读取 / 零 renderer import，§10.2）：
- * - visibilityState / addEventListener → visibility 端口（isVisible/onVisibilityChange）
- * - VITE_MOCK/DEV 环境标志 → env 端口（isMock/isDev）
- * - 对话流清理（chat finalize / extension UI pending）→ onRuntimeUnavailable 端口
- * - 入站 dispatcher 经 configureRouteInbound() 安装（缺省直连 transport/api 真实模块，
- *   D3 后壳层不再注入三件套），effects 经端口注入——本文件零 import 任何 store
- *   （renderer useMessageEffects 实现回调，§11.4）
- * - WS 能力复用 core ws-client（同一模块级单例）
+ * auth 拒绝重拉换凭据（§6.3）：本地形态 auth 被拒时重拉快照取新凭据（修现状退避重连
+ * 只复用旧凭据的缺口）；仅本地形态（remote 形态走壳层 D8 凭据重摄，§6.10）。
+ *
+ * 连接目标从第一刻起就是权威快照值（§6.2）——不存在端口公式猜连「抢先连上又被
+ * 自己人拆掉」的时序。
+ *
+ * 迁移沿革（架构审计 §10.2 D-1）与 headless 化端口面（visibility/env/effects 经壳层
+ * 注入，本文件零 DOM / 零构建环境读取 / 零 store import）不变；入站 dispatcher 经
+ * configureRouteInbound() 安装。
  *
  * 依赖方向：use-connection → ws-client + transport/api/pending + coordination/route-inbound
- *   + shared（端口常量）。
+ *   + shared（快照类型）。
  */
 import { watch } from 'vue'
-import type { ServerMessage } from '@taiji/shared'
+import type { RuntimeTargetSnapshot, ServerMessage } from '@taiji/shared'
 import {
   connect,
   disconnect,
   getState,
   isAuthRejectedSuppressed,
+  onAuthAccepted,
   onAuthRejected,
   onMessage,
   onQueueDrop,
   probeAlive,
+  resetAuthRejectionSuppression,
+  scheduleReconnect,
   setFailed,
   setRestarting,
+  setWaitingRuntime,
   type ConnectCredentials,
 } from './ws-client'
 import {
@@ -55,12 +58,11 @@ import {
 import { resubscribeAll } from '../coordination/subscription-state'
 import * as pendingApi from './api/pending'
 import { transportUnavailableError, notDeliveredError } from './errors'
-import { BASE_PORT, DEV_PORT_OFFSET } from '@taiji/shared'
 
 /**
  * 本地形态 runtime WS 地址（renderer-package-topology §2.4「连接发现策略收敛」）。
  * 本函数是连接发现链路上该 URL 形态的唯一拼接点（收敛单点）——新增连接发起路径
- * 一律经 useConnection 的形态分支取得连接目标，禁止在分支外内联重拼。
+ * 一律经连接控制器的快照分支取得连接目标，禁止在分支外内联重拼。
  */
 function localRuntimeUrl(port: number): string {
   return 'ws://localhost:' + port
@@ -100,7 +102,7 @@ export interface ConnectionProfilePort {
  * use-connection 的壳层端口面（D3 收窄后：全部是真随壳变化的端口）。
  *
  * renderer（composables/useConnection.ts 装配点）注入实现：
- * - ipc → lib/ipc（getRuntimePort/getRuntimePortOffset/onRuntimePort/restartRuntime 等）。
+ * - ipc → lib/ipc（getRuntimeTargetSnapshot/onRuntimePort/restartRuntime 等）。
  *   可选字段 = 形态判别的一半（init 收敛点）：有值 = 本地形态，无值 = 远程形态。
  *   electron 装配恒注入（含 VITE_MOCK 构建——mock 由 env.isMock 优先分流，与 ipc 正交）
  * - visibility → visibilityState + visibilitychange 监听（壳层 DOM 实现）
@@ -115,14 +117,19 @@ export interface ConnectionProfilePort {
  */
 export interface ConnectionPorts {
   ipc?: {
-    getRuntimePort(): Promise<number | undefined>
-    getRuntimePortOffset(): Promise<number | undefined>
     /**
-     * 获取当前 runtime 的 WS auth token（S1-W1）。runtime 重启后值刷新（supervisor
-     * 每次 spawn 重新生成）——onRuntimePort 重连路径必须重新调用本方法拿新 token。
+     * 拉取当前连接目标快照（connection-datasync-ssot §6.1 单一权威连接目标）：
+     * {seq, runtimeId, port, token} 并置读取。null = supervisor 尚无目标（runtime 未
+     * 启动）→ 控制器进 waiting-runtime 等待推送；undefined = 无 IPC（web/mock 环境，
+     * 本地形态装配下不发生）。
      */
-    getRuntimeToken(): Promise<string | null | undefined>
-    onRuntimePort(cb: (port: number) => void): () => void
+    getRuntimeTargetSnapshot(): Promise<RuntimeTargetSnapshot | null | undefined>
+    /**
+     * 快照变更通知（§6.3：channel 沿用 runtime-port，载荷升级为快照对象）。4 广播点
+     * （spawn 成功 / 重启成功 / 幂等重播 / 配置变更重启）统一推快照，控制器按 seq
+     * 裁决表消化——重复广播不拆连，新 seq 才迁移目标。
+     */
+    onRuntimePort(cb: (snapshot: RuntimeTargetSnapshot) => void): () => void
     onRuntimeRestarting(cb: () => void): () => void
     onRuntimeFailed(cb: () => void): () => void
     /**
@@ -150,8 +157,8 @@ export interface ConnectionPorts {
   connectionProfile?: ConnectionProfilePort
   /**
    * auth 被拒回调（remote-use D8）：远程形态由 use-connection 注册 ws-client onAuthRejected
-   * 转发至此（移动壳实现 = 落 token 输入视图 + D4 凭据来源分支处置）。本地/mock 形态不注册
-   * 不调用（桌面零回归）；远程形态省略 = 仅置 ws-client 重连抑制位、壳层无 UI 感知。
+   * 转发至此（移动壳实现 = 落 token 输入视图 + D4 凭据来源分支处置）。本地形态不注册
+   * 转发、改走快照重拉换凭据（§6.3，见 installLocalAuthVerification）；mock 形态无拒绝路径。
    */
   onAuthRejected?: () => void
   effects: InboundEffects
@@ -196,17 +203,39 @@ let removeStateWatch: (() => void) | null = null
 let removeQueueDropListener: (() => void) | null = null
 /** visibility 监听的取消函数（teardown 时调用；非空即已安装） */
 let removeVisibilityListener: (() => void) | null = null
-/** auth 拒绝信号监听的取消函数（远程形态注册，D8；teardown 时调用；非空即已安装） */
+/** auth 接受（实例核对）监听的取消函数（本地形态安装；teardown 时调用） */
+let removeAuthAcceptedListener: (() => void) | null = null
+/** 本地形态 auth 拒绝（快照重拉换凭据）监听的取消函数；远程形态的 D8 转发监听见 installAuthRejectionSignal */
+let removeAuthRejectedLocalListener: (() => void) | null = null
+/** 远程形态 auth 拒绝转发监听的取消函数（D8；teardown 时调用；非空即已安装） */
 let removeAuthRejectedListener: (() => void) | null = null
 /**
- * 最近一次 connect 使用的 url + 凭据（W4 visibility 重连复用）。
- * 用户从后台切回前台且未连接时，用此 url/凭据主动重连，不干等 ws-client 指数退避（最长 30s）。
- * 凭据显式复用本模块上次选择的值——ws-client 公开签名已无「保留上次凭据」三态（S4），
- * 重连复用语义由本模块自有簿记承担。null 表示从未连过（此时也无 url 可复用，visibility
- * 不触发重连）。
+ * 最近一次 connect 使用的 url + 凭据（W4 visibility 重连复用；mock/remote 形态的主
+ * 簿记、本地形态的「从未连过」判定输入）。本地形态切前台重连的目标与凭据改从期望快照
+ * 取（§7 副作用归属表），本簿记退居「有无连过」的判定依据。
  */
 let lastConnectedUrl: string | null = null
 let lastCredentials: ConnectCredentials | null = null
+
+// ── 连接控制器状态（connection-datasync-ssot §6.3）────────────────────────
+
+/**
+ * 期望快照：控制器裁决的唯一基准（seq 单调推进，seq 以 supervisor 进程生命周期为界）。
+ * null = 期望未建立（首连拉取前 / 拉取为 null 的等待期）。teardown 复位。
+ */
+let expectedSnapshot: RuntimeTargetSnapshot | null = null
+/**
+ * auth 应答 runtimeId 连续不一致的停止阈值（§6.3：连续 2 次不一致停止自动重连，
+ * 按连接失败呈现原因与重试入口——避免无报错的永久挂死）。
+ */
+const RUNTIME_ID_MISMATCH_STOP_LIMIT = 2
+
+/**
+ * auth 应答 runtimeId 连续不一致计数（§6.3 fail-fast 防护）：每次不一致 +1、一致清零；
+ * 达上限停止自动重连置 failed（「seq ≤ 期望且 runtimeId 变化」等前提失效形态的有界后果——
+ * 最多退化为需手动重试，不静默连错目标、不无报错挂死）。
+ */
+let runtimeIdMismatchStreak = 0
 
 // ── 断连宽限兜底（review findings-confirmation #1.2：纯网络断连零复位缺口）──
 
@@ -278,9 +307,8 @@ export function ensureDispatcher(
 }
 
 /**
- * 连接 WS 并记录 url + 凭据（W4 visibility 重连复用）。
- * 包装 ws-client connect：调前把 url/credentials 存入 lastConnectedUrl/lastCredentials，
- * 供用户切回前台时主动重连（显式复用本模块上次选择的凭据，S4 凭据对象签名）。
+ * 连接 WS 并记录 url + 凭据（W4 visibility 重连复用簿记）。
+ * 包装 ws-client connect：调前把 url/credentials 存入 lastConnectedUrl/lastCredentials。
  */
 function connectWs(url: string, credentials: ConnectCredentials): void {
   lastConnectedUrl = url
@@ -288,31 +316,158 @@ function connectWs(url: string, credentials: ConnectCredentials): void {
   connect(url, credentials)
 }
 
+// ── 快照裁决（§6.3 裁决表——推送与拉取两路汇合的唯一入口）──────────────────
+
 /**
- * 拉取最新 token 后连接（runtime 重启路径专用：supervisor 每次 spawn 重新生成 token，
- * 旧 token 对新 runtime 无效，auth 必失败——必须先 invoke 拿新值）。
- * 仅本地形态调用（token 经 IPC 下发，S1-W1），ipc 由参数显式传入。
- * IPC 拿不到 token（抛错 / null）时降级为空串 token 握手探测（S4 裁决）：本地 runtime
- * 恒配置 token，skip 假设会在握手缺失下假 connected（U1.3 形态）；探测必被拒 → close
- * 走重连链，凭据恢复后由 onRuntimePort 路径重新拉取。重连不被阻断（探测照常发起连接）。
+ * 快照裁决入口（§6.3 五行裁决表）：
+ * - seq ≤ 期望 seq → 不动作（幂等重复广播不拆连；拉取响应晚于推送被消费的旧代快照
+ *   丢弃，防目标回退）。期望未建立时不适用本行（任何快照都是首建立）。
+ * - seq 更高或期望未建立 → 期望推进为新快照：已认证（connected）→ 断旧连新（携新
+ *   凭据）；未认证（waiting-runtime/connecting/reconnecting/disconnected）→ 转向新
+ *   目标重新发起。
+ *
+ * 「断旧连新」与「转向」统一为先 disconnect 再 connect：disconnect 摘除旧 socket 回调
+ * 与退避定时器（connect 的单飞检查会拦截并存连接，「转向」语义必须先清场）；connected
+ * 态 disconnect 触发 stateWatch 的断连汇合分支（pending rejectAll + 宽限 armed），与
+ * 现状 onRuntimePort 断旧连新路径行为一致。
+ *
+ * @returns true = 目标推进且已发起连接动作；false = 幂等/过期快照（不动作）
  */
-async function refreshTokenAndConnect(ipc: RuntimeIpcPorts, url: string): Promise<void> {
-  let token: string | null | undefined
-  try {
-    token = await ipc.getRuntimeToken()
-  } catch (e) {
-    console.warn('[core/use-connection] getRuntimeToken failed, connecting without token:', e)
-    token = undefined
+function applyTargetSnapshot(ipc: RuntimeIpcPorts, snapshot: RuntimeTargetSnapshot): boolean {
+  void ipc // 当前实现未用 ipc（重连目标全部取自快照自身）；保留参数锚定「推送回调与拉取共用此入口」的调用形态
+  if (expectedSnapshot && snapshot.seq <= expectedSnapshot.seq) {
+    return false
   }
-  connectWs(url, typeof token === 'string' ? { auth: 'token', token } : { auth: 'token', token: '' })
+  expectedSnapshot = snapshot
+  disconnect()
+  connectWs(localRuntimeUrl(snapshot.port), { auth: 'token', token: snapshot.token })
+  return true
+}
+
+/**
+ * 拉取快照（容错）：IPC 抛错 / null / undefined 一律归一为 null（等待态输入）。
+ * 拉取失败不抛出——等待推送监听（init 先装）兜底，广播到达即恢复。
+ */
+async function pullSnapshotQuietly(ipc: RuntimeIpcPorts): Promise<RuntimeTargetSnapshot | null> {
+  try {
+    return (await ipc.getRuntimeTargetSnapshot()) ?? null
+  } catch (e) {
+    console.warn('[core/use-connection] getRuntimeTargetSnapshot failed:', e)
+    return null
+  }
+}
+
+/**
+ * 幂等连接确保（HMR 重连路径，§7 副作用归属表：「HMR 重连改为重拉快照连接」）。
+ * 重连是连接状态机的职责、与快照比较正交（§6.3 不采用②）——已连接则不动；未连接
+ * 则重拉快照：拉到更高 seq 按裁决表推进（断旧连新），否则连向当前期望快照目标；
+ * 无目标（拉取 null 且期望未建立）落等待态。
+ */
+async function ensureConnectedToTarget(ipc: RuntimeIpcPorts): Promise<void> {
+  if (getState().value === 'connected') return
+  const pulled = await pullSnapshotQuietly(ipc)
+  if (pulled) applyTargetSnapshot(ipc, pulled)
+  if (getState().value === 'connecting' || getState().value === 'connected') return
+  const target = expectedSnapshot
+  if (target) {
+    connectWs(localRuntimeUrl(target.port), { auth: 'token', token: target.token })
+  } else {
+    setWaitingRuntime()
+  }
+}
+
+// ── auth 应答实例核对 + 拒绝重拉（本地形态，§6.3）─────────────────────────
+
+/**
+ * 实例核对失败处置（onAuthAccepted 回调返回 false 后的异步半边——ws-client 已
+ * disconnect，此处按 streak 决定重连或失败呈现）：
+ * - streak ≥ 2：停止自动重连，setFailed（失败呈现 + 手动重试入口）。
+ * - 重拉快照失败（IPC 不可用）：无从重连，同 setFailed。
+ * - 快照未推进（seq ≤ 期望）：目标未变，重连必再 mismatch，同 setFailed（有界后果，
+ *   最多退化为手动重试）。
+ * - 快照推进：按裁决表转向新目标重连（streak 保留累积，新连接再不一致即达 2）。
+ *
+ * 时序约束：本函数全部置态动作（setFailed / applyTargetSnapshot）必须在 ws-client 的
+ * disconnect()（回调返回 false 分支的同步执行）**之后**——首个 await 之前的同步段不得
+ * 置态，否则 disconnect 的终置 state='disconnected' 会覆盖 failed（onAuthAccepted 回调
+ * 同步段调用本函数，首个 await 是同步/异步半边的分界）。streak ≥ 2 判定与拉取合并：
+ * 多一次只读拉取无害，换取时序正确。
+ */
+async function recoverAfterMismatch(ipc: RuntimeIpcPorts): Promise<void> {
+  const snapshot = await pullSnapshotQuietly(ipc)
+  if (runtimeIdMismatchStreak >= RUNTIME_ID_MISMATCH_STOP_LIMIT || !snapshot) {
+    setFailed()
+    return
+  }
+  if (!applyTargetSnapshot(ipc, snapshot)) {
+    setFailed()
+  }
+}
+
+/**
+ * auth 拒绝重拉换凭据（§6.3：修现状退避重连只复用旧凭据的缺口；仅本地形态）。
+ * 抑制位语义：本地形态注册 onAuthRejected 即武装 ws-client 重连抑制（拒绝 → 退避链
+ * 短路，重连责任移交本控制器）。处置三分支：
+ * - 重拉推进 seq（runtime 已重启换凭据的主形态）→ 断旧连新（applyTargetSnapshot 内
+ *   connect 先于退避链，抑制位在新连接 auth 成功（markConnected）时自然复位。
+ * - 重拉同 seq（凭据未变——拒绝另有原因的异常态）→ 复位抑制位交还退避链 + 确定性重启
+ *   调度（scheduleReconnect；重试必再拒则退避到 MAX_RECONNECT_DURATION_MS 上限置
+ *   failed，行为有界）。
+ * - 重拉失败（IPC 不可用）→ 同上复位 + 重启调度（终态与现状空凭据探测路径一致：必拒 →
+ *   60s 时长上限 failed）。
+ *
+ * 「交还退避链」两分支必须显式重启调度（F1-11）：真实 WS 的 onclose 与本函数的 IPC 回包
+ * 竞速——早到形态（onclose 先至，主形态）下退避链已在抑制期被短路且无定时器残留，复位
+ * 抑制位本身不恢复调度，缺重启调用则连接静默挂 disconnected（无 failed 呈现、无自动恢复，
+ * 直到切前台或重启 runtime）；晚到形态下 socket 未死透，scheduleReconnect 的 socket 死透
+ * 检查 no-op，由 onclose 到达时的调度接力（单定时器覆盖前清旧，无双链）。
+ */
+async function recoverAfterAuthRejection(ipc: RuntimeIpcPorts): Promise<void> {
+  const snapshot = await pullSnapshotQuietly(ipc)
+  if (!snapshot) {
+    console.warn(
+      '[core/use-connection] snapshot re-pull failed after auth rejection; resuming suppressed reconnect chain',
+    )
+    resetAuthRejectionSuppression()
+    scheduleReconnect()
+    return
+  }
+  if (!applyTargetSnapshot(ipc, snapshot)) {
+    resetAuthRejectionSuppression()
+    scheduleReconnect()
+  }
+}
+
+/**
+ * 安装本地形态 auth 信号消费（幂等）：auth 接受核对（fail-fast）+ auth 拒绝重拉换
+ * 凭据。mock 形态无握手、remote 形态走壳层 D8（installAuthRejectionSignal），均不安装。
+ */
+function installLocalAuthVerification(ipc: RuntimeIpcPorts): void {
+  if (removeAuthAcceptedListener && removeAuthRejectedLocalListener) return
+  removeAuthAcceptedListener = onAuthAccepted((info) => {
+    const expected = expectedSnapshot
+    if (!expected || info.runtimeId === expected.runtimeId) {
+      runtimeIdMismatchStreak = 0
+      return true
+    }
+    runtimeIdMismatchStreak++
+    console.error(
+      `[core/use-connection] runtimeId mismatch: connected process reports '${info.runtimeId}' but expected '${expected.runtimeId}' (seq ${expected.seq}) — fail-fast, streak ${runtimeIdMismatchStreak}`,
+    )
+    // 异步半边（拉快照/setFailed）在 ws-client 的 disconnect 之后执行——同步段只计数。
+    void recoverAfterMismatch(ipc)
+    return false
+  })
+  removeAuthRejectedLocalListener = onAuthRejected(() => {
+    void recoverAfterAuthRejection(ipc)
+  })
 }
 
 /**
  * 安装 auth 拒绝信号消费（remote-use D8，远程形态专用，幂等）：ws-client onAuthRejected
  * 单槽注册一次，转发至壳层注入的 ports.onAuthRejected（经 currentPorts 取最新装配——重注入
  * 后转发目标跟随）。注册即武装 ws-client 重连抑制位（拒绝 → 抑制 scheduleReconnect +
- * visibility 两个自动重连触发点）；本地/mock 形态不走本函数 → 抑制位恒不置位 → 桌面重连链
- * 零回归。
+ * visibility 两个自动重连触发点）；本地形态不安装本转发（单槽被快照重拉消费占据）。
  */
 function installAuthRejectionSignal(): void {
   if (removeAuthRejectedListener) return
@@ -363,9 +518,7 @@ type ConnectionMode =
   | { readonly kind: 'remote' }
 
 /**
- * 连接形态薄谓词（renderer-package-topology §2.4「连接发现策略可插拔」的形态判定单点）：
- * 只收「形态判定」本身，不做连接目标解析——首连（knownPort→fallback）与 HMR 重连
- * （resolveFallbackPort）各自的目标解析语义不同，留在消费点原地，不捏进本谓词。
+ * 连接形态薄谓词（renderer-package-topology §2.4「连接发现策略可插拔」的形态判定单点）。
  *
  * mock 优先于 ipc 存在性判别是桌面等价性要求：electron 装配恒注入 ipc（含 VITE_MOCK
  * 构建），若按 ipc 存在性先行会把 mock 构建导入本地分支（连真实 URL 而非 mock://）。
@@ -373,15 +526,6 @@ type ConnectionMode =
 function resolveConnectionMode(ports: ConnectionPorts): ConnectionMode {
   if (ports.env.isMock) return { kind: 'mock' }
   return ports.ipc ? { kind: 'local', ipc: ports.ipc } : { kind: 'remote' }
-}
-
-/** 获取 fallback 端口（考虑 dev 偏移）。仅本地形态调用（ipc 必有）。 */
-async function resolveFallbackPort(ipc: RuntimeIpcPorts, isDev: boolean): Promise<number> {
-  const offset = await ipc.getRuntimePortOffset()
-  if (offset !== undefined) return BASE_PORT + offset
-  // DEV 环境下 runtime 在 BASE_PORT+100，不能 fallback 到 prod 端口
-  if (isDev) return BASE_PORT + DEV_PORT_OFFSET
-  return BASE_PORT
 }
 
 export function useConnection() {
@@ -416,20 +560,32 @@ export function useConnection() {
         // 结构性不可达（connected 必有簿记），检查顺序与现状一致（探活分支沿用同一前提）。
         if (!lastConnectedUrl || !lastCredentials) return
         // 检查 4：auth 拒绝抑制位生效（remote-use D8 全触发点覆盖——退避链在 ws-client
-        // scheduleReconnect 短路，本检查覆盖切前台主动重连）→ 不自动重连，等 token 重试路径。
+        // scheduleReconnect 短路，本检查覆盖切前台主动重连）→ 不自动重连，等 token 重试路径
+        // （本地形态的快照重拉在 recoverAfterAuthRejection 内自行驱动，不经本分支）。
         if (isAuthRejectedSuppressed()) return
+        // 本地形态：凭据从当前期望快照取（§7 副作用归属表「visibility 切前台重连保留，
+        // 凭据改为从连接控制器取当前快照凭据」）——期望快照必有（本分支前提 = 连过，
+        // 本地形态连过 ⇔ 快照已建立；快照若已推进则 connect 的目标正是新快照端口/凭据）。
+        if (resolveConnectionMode(ports).kind === 'local') {
+          if (expectedSnapshot) {
+            connectWs(localRuntimeUrl(expectedSnapshot.port), {
+              auth: 'token',
+              token: expectedSnapshot.token,
+            })
+          }
+          return
+        }
         connectWs(lastConnectedUrl, lastCredentials)
       })
     }
 
     if (initialised) {
-      // HMR 后重连（形态经 resolveConnectionMode 单点裁决；mock 跳过重连现状保持）
+      // HMR 后重连（形态经 resolveConnectionMode 单点裁决；mock 跳过重连现状保持）：
+      // 本地形态改重拉快照（§7：runtime 存活时 supervisor 快照必有值），remote 同走
+      // profile 解析。
       const mode = resolveConnectionMode(ports)
       if (mode.kind === 'local') {
-        await refreshTokenAndConnect(
-          mode.ipc,
-          localRuntimeUrl(await resolveFallbackPort(mode.ipc, ports.env.isDev)),
-        )
+        await ensureConnectedToTarget(mode.ipc)
       } else if (mode.kind === 'remote') {
         // 远程形态：HMR 重连同走 profile 解析（未注入 → 显式失败，同首连）
         await connectRemoteProfile(ports)
@@ -496,9 +652,9 @@ export function useConnection() {
       })
     }
 
-    // ── 连接发现收敛点（renderer-package-topology §2.4 / 连接派生 profile 策略 D4）──
+    // ── 连接发现收敛点（renderer-package-topology §2.4 / connection-datasync-ssot §6.2）──
     // 形态经 resolveConnectionMode 薄谓词单点裁决（mock 优先级依据见其注释），本处只做
-    // 分派消费；目标解析（knownPort→fallback）与下方监听器安装是首连分支自有逻辑，不进谓词。
+    // 分派消费。
     const mode = resolveConnectionMode(ports)
 
     // mock 模式：走 mock，不需要端口发现，也不监听 runtime 崩溃事件（mock 无 runtime 进程）。
@@ -515,14 +671,11 @@ export function useConnection() {
     }
     const ipc = mode.ipc
 
-    // 监听 runtime 端口推送（runtime 重启成功后推新端口 → 断开重连）。
-    // S1-W1：runtime 重启 = supervisor 重新 spawn = token 已刷新，重连前必须重新拉取
-    // （旧 token 对新 runtime 的 auth 必失败 → 1008 → 重连循环直到 failed）。
-    removeRuntimePortListener = ipc.onRuntimePort((newPort) => {
-      if (newPort && state.value !== 'disconnected') {
-        disconnect()
-        void refreshTokenAndConnect(ipc, localRuntimeUrl(newPort))
-      }
+    // §6.2 实现顺序约束：先安装快照推送监听、后执行快照拉取——消除「拉取返回 null 与
+    // 推送到达」交错间的丢失窗口（推送先到则拉取必非 null，两路汇合于 applyTargetSnapshot
+    // 同一裁决入口）。快照推送不再无条件断连（§6.3 裁决表：重复广播不拆连、新 seq 才迁移）。
+    removeRuntimePortListener = ipc.onRuntimePort((snapshot) => {
+      applyTargetSnapshot(ipc, snapshot)
     })
 
     // 监听 runtime 崩溃重启中（主进程正在拉起新实例 → 进 restarting 态，停自动重连）。
@@ -542,14 +695,17 @@ export function useConnection() {
     })
 
     // RD-3#2：runtime 启动失败（boot 的 startAndNotify 失败——binary 缺失/端口占用等）。
-    // 失败后 main 不会自动重试，WS 对 fallback 端口的重试必不可能成功：收到推送即置
-    // failed（用户拿到重试入口），不再干等 60s 重连时长上限。connected 检查防极端误伤：
-    // waitForHealth 超时但 runtime 实际存活时推送与活连接并存，不干扰已建立的连接。
+    // 失败后 main 不会自动重试，无目标可连：收到推送即置 failed（用户拿到重试入口），
+    // 不再干等 60s 重连时长上限。connected 检查防极端误伤：waitForHealth 超时但 runtime
+    // 实际存活时推送与活连接并存，不干扰已建立的连接。
     removeRuntimeErrorListener = ipc.onRuntimeError(() => {
       if (getState().value !== 'connected') {
         setFailed()
       }
     })
+
+    // auth 信号消费（本地形态）：应答 runtimeId 核对 fail-fast + 拒绝重拉换凭据（§6.3）。
+    installLocalAuthVerification(ipc)
 
     // 启动失败真因拉取（boot 竞态兜底）：推送早于本监听安装时（main whenReady 启动失败
     // 先于 renderer 挂载——boot 失败的主形态），推送已丢，init 主动拉取一次。有失败记录
@@ -561,21 +717,43 @@ export function useConnection() {
       return
     }
 
-    // 尝试从主进程获取已知端口（S1-W1：连接前拉 token——auth 握手凭据经 IPC 下发）
-    const knownPort = await ipc.getRuntimePort()
-    if (knownPort) {
-      await refreshTokenAndConnect(ipc, localRuntimeUrl(knownPort))
+    // 首连快照拉取（§6.2）：null = runtime 尚未启动 → waiting-runtime 等待态（不发起
+    // 连接——权威目标确认前不连接、不初始化；快照到达即经 applyTargetSnapshot 连接）。
+    // 拉取本身失败（IPC 抛错）同样落等待态：推送监听已装（顺序约束），广播到达即恢复。
+    const snapshot = await pullSnapshotQuietly(ipc)
+    if (!snapshot) {
+      setWaitingRuntime()
       return
     }
+    applyTargetSnapshot(ipc, snapshot)
+  }
 
-    // Runtime 尚未启动：用 fallback 端口（ws-client 会自动重连，runtime 起来后连上）
-    await refreshTokenAndConnect(ipc, localRuntimeUrl(await resolveFallbackPort(ipc, ports.env.isDev)))
+  /**
+   * waiting-runtime 态手动重试（用户从「正在启动 runtime」屏点重试触发）：主动重拉一次
+   * 目标快照并按 §6.3 裁决表行动——与 init 首连 / HMR 重连同走 ensureConnectedToTarget
+   * 单一入口（拉到快照 → applyTargetSnapshot 发起连接；仍 null → setWaitingRuntime 停留
+   * 等待态）。重试失败不置 failed——failed 语义属连接控制器裁决表（重启用尽 / auth 核对
+   * 失败），快照重拉只是重新触发拉取。背景（F1-13）：supervisor 4 广播点都是启动/重启
+   * 事件、不重播，「初始拉取失败 + 广播已错发」形态下原实现只剩应用重载一条恢复路径。
+   * 非本地形态无快照通道可拉，warn 落日志 no-op（对齐 retryRuntime 体例）。
+   */
+  async function retrySnapshot(): Promise<void> {
+    const ports = requirePorts()
+    if (!ports) return
+    const mode = resolveConnectionMode(ports)
+    if (mode.kind !== 'local') {
+      console.warn(
+        '[core/use-connection] retrySnapshot ignored — target snapshot re-pull requires ConnectionPorts.ipc (local mode)',
+      )
+      return
+    }
+    await ensureConnectedToTarget(mode.ipc)
   }
 
   /**
    * 手动重试（用户从「runtime 不可用」状态条点重试触发）。
    * 委托 IPC runtime-restart → 主进程 supervisor.restartRuntime。
-   * supervisor 重启成功会广播 runtime-port（onRuntimePort 监听自动重连）。
+   * supervisor 重启成功会广播快照（onRuntimePort 监听 → applyTargetSnapshot 迁移目标）。
    */
   async function retryRuntime(): Promise<void> {
     const ports = requirePorts()
@@ -625,7 +803,16 @@ export function useConnection() {
       removeVisibilityListener()
       removeVisibilityListener = null
     }
-    // D8：卸载 auth 拒绝信号监听（与远程分支的注册配对；teardown 后不应再有转发回调）
+    // 本地形态 auth 信号监听卸载（与 installLocalAuthVerification 配对）
+    if (removeAuthAcceptedListener) {
+      removeAuthAcceptedListener()
+      removeAuthAcceptedListener = null
+    }
+    if (removeAuthRejectedLocalListener) {
+      removeAuthRejectedLocalListener()
+      removeAuthRejectedLocalListener = null
+    }
+    // D8：卸载 auth 拒绝信号转发监听（与远程分支的注册配对；teardown 后不应再有转发回调）
     if (removeAuthRejectedListener) {
       removeAuthRejectedListener()
       removeAuthRejectedListener = null
@@ -639,7 +826,9 @@ export function useConnection() {
     initialised = false
     lastConnectedUrl = null
     lastCredentials = null
+    expectedSnapshot = null
+    runtimeIdMismatchStreak = 0
   }
 
-  return { state, init, teardown, retryRuntime }
+  return { state, init, teardown, retryRuntime, retrySnapshot }
 }

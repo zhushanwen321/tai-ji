@@ -35,7 +35,6 @@ import { effectScope, ref, effect } from 'vue';
 const apiCtrl = vi.hoisted(() => ({
   project: {
     load: vi.fn(() => Promise.resolve({ projects: [], activeProjectId: '' })),
-    save: vi.fn(() => Promise.resolve(undefined)),
   },
   chat: {
     getHistory: vi.fn(() => Promise.resolve([])),

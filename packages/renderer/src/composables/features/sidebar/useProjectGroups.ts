@@ -16,10 +16,10 @@
 import { computed, nextTick, ref, type ComponentPublicInstance, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { SessionGroup, SessionSummary } from '@taiji/shared'
-import { sessionsInRuntimeGroupOrder } from '@taiji/core'
+import { isDefaultProjectOf } from '@taiji/shared'
+import { requestDomainSync, sessionsInRuntimeGroupOrder } from '@taiji/core'
 import {
   collectNamedProjectIds,
-  isDefaultProjectOf,
   sessionBelongsToProject,
 } from '@/composables/logic/project-session'
 import { useProjectStore } from '@/stores/project'
@@ -50,11 +50,47 @@ export function useProjectGroups(options: {
   const projectStore = useProjectStore()
 
   /**
+   * 项目分组区呈现形态（connection-datasync-ssot §6.7 三形态，按「是否持有最后已知
+   * 回执数据」降级）：
+   * - 'failed'：project 加载失败——分组区整体替换为失败状态条（原因 + 重试钮）；
+   * - 'loading'：无数据形态（idle，或从未成功加载过的 loading）——渲染加载占位行；
+   * - 'groups'：loaded，或重拉子形态（loaded→loading 的重连边沿重拉，store 已持有
+   *   上一轮回执的项目清单）——正常渲染分组。重拉子形态下 projects 保持最后已知值
+   *   （回执未到不替换），下方切分结果自动等于最后已知分组——「保留最后已知分组、
+   *   不闪占位」由缓存视图的更新时机构造性成立，无需额外缓存。
+   * 「未分组/默认组」这个展示概念只在 loaded 态下由真实项目清单派生（无数据形态不把
+   * 兜底默认表渲染成「只有一个空默认组」——本次事故的可见症状，§6.7 不采用段）。
+   */
+  const projectAreaMode = computed<'groups' | 'loading' | 'failed'>(() => {
+    if (projectStore.loadState === 'failed') return 'failed'
+    if (projectStore.hasReceivedReceipt) return 'groups'
+    return 'loading'
+  })
+
+  /** 编辑入口可用性（§6.9：无有效数据形态禁用、重拉子形态不禁用）——store 判据透出。 */
+  const editingEnabled = computed(() => projectStore.editingEnabled)
+
+  /** 失败状态条重试钮：触发 project 域同步（域同步器编程入口，并发合流保证在途不重复发）。 */
+  function retryProjectLoad(): void {
+    requestDomainSync('project')
+  }
+
+  /**
    * 项目分组列表（R6.2 锚定分组核心派生）：每个 session 恰好落在一个分组，全部项目
    * 并列可见；目录切分保持 runtime cwd 组序（不重排、不归并——多项目同名目录各自展示，
    * 跨项目归并见 spec sidebar §6 待裁决）。
+   *
+   * 切分输入 = projectStore.projects（缓存视图）+ sessions（props 派生）。重拉子形态
+   * 下 projects 未被替换（回执未到），切分结果即「最后已知分组」。
+   *
+   * §6.7 前置条件：项目切分仅在持有有效回执数据时执行（loaded，或 loaded→loading 的
+   * 重拉子形态——判据即 projectAreaMode==='groups'）。无数据形态与 failed 态不派生
+   * 项目分组：「未分组/默认组」这个展示概念只在 loaded 态由真实项目清单派生，不把
+   * 兜底默认表（idle 初值）或上次已知表（failed 态保留在缓存视图里）渲染成分组——
+   * 失败态由状态条整体替换项目分组区，会话本体照常呈现见 degradedZone。
    */
   const projectGroups = computed<ProjectGroupVM[]>(() => {
+    if (projectAreaMode.value !== 'groups') return []
     const namedIds = collectNamedProjectIds(projectStore.projects)
     return projectStore.orderedProjects.map((p) => {
       const isDefault = isDefaultProjectOf(p)
@@ -79,6 +115,22 @@ export function useProjectGroups(options: {
     groups().reduce((sum, g) => sum + g.sessions.length, 0),
   )
 
+  /**
+   * 降级形态的会话本体（§6.7「会话列表本体（目录/分组视图的 cwd 结构，来自 runtime
+   * 会话清单）不受影响正常呈现」）：projectAreaMode !== 'groups' 时项目分组区由
+   * ProjectLoadStatus（失败状态条 / 无数据加载占位行）替换，会话本体按 runtime 会话
+   * 清单的 cwd 目录结构照常呈现。
+   *
+   * 与 projectGroups 的关键差异：不经项目切分——不渲染默认项目头行、不渲染兜底默认表，
+   * 数据源只有 groups()（与 project 域正交，project 加载失败/在途都不影响它可取）。
+   * 形状取 ProjectGroupVM 的渲染源子集（dirs / items），目录模式与平铺模式共用。
+   */
+  const degradedZone = computed<Pick<ProjectGroupVM, 'dirs' | 'items'> | null>(() => {
+    if (projectAreaMode.value === 'groups') return null
+    const dirs = groups().filter((g) => g.sessions.length > 0)
+    return { dirs, items: sessionsInRuntimeGroupOrder(dirs) }
+  })
+
   // ── 锚定分组交互（显式锚定 + 多开：展开态按组独立记忆，不与锚定互斥）──
 
   /** 平铺模式「被手动收起的组 id」集合（空集 = 全开，新增项目天然展开）。
@@ -95,7 +147,9 @@ export function useProjectGroups(options: {
     closed.value = new Set([...closed.value].filter((id) => id !== pgId))
   }
 
-  /** 组头点击（父级按模式裁决，demo onGroupHead/onGroupHeadDir 同构） */
+  /** 组头点击（父级按模式裁决，demo onGroupHead/onGroupHeadDir 同构）。
+   *  锚定切换命令化（§6.6）：发命令、chip 跟随回执更新（本机毫秒级）；失败 toast 已由
+   *  store 出声，此处吞掉 rejection（fire-and-forget 语义）。 */
   function onGroupHeadClick(pg: ProjectGroupVM): void {
     if (mode.value === 'flat') {
       if (pg.id === projectStore.activeProjectId) {
@@ -105,7 +159,7 @@ export function useProjectGroups(options: {
         flatClosed.value = next
         return
       }
-      projectStore.setActiveProject(pg.id)
+      void projectStore.setActiveProject(pg.id).catch(() => {})
       reopen(flatClosed, pg.id)
       return
     }
@@ -115,9 +169,16 @@ export function useProjectGroups(options: {
     dirClosed.value = next
   }
 
-  /** 组头「+」：先落点该项目（新会话归属读 activeProjectId）再进空态新建 */
-  function onCreateTaskIn(pg: ProjectGroupVM): void {
-    projectStore.setActiveProject(pg.id)
+  /** 组头「+」：先落点该项目（新会话归属读 activeProjectId）再进空态新建。
+   *  「先锚定后建」时序在命令化下由回执承载（emit newSession 时刻 activeProjectId 必须
+   *  已切换——归属预填读它）：await 锚定回执落定后才触发新建；锚定命令失败（revision
+   *  失配被拒等，toast 已出声）不进新建流——落点语义无法保证，用户可直接重试。 */
+  async function onCreateTaskIn(pg: ProjectGroupVM): Promise<void> {
+    try {
+      await projectStore.setActiveProject(pg.id)
+    } catch {
+      return
+    }
     reopen(flatClosed, pg.id)
     onNewSession()
   }
@@ -138,16 +199,19 @@ export function useProjectGroups(options: {
     deleteOpen.value = true
   }
 
+  /** 删除确认（命令化：异步命令失败 toast 已由 store 出声，此处吞 rejection；归回的
+   *  会话落默认项目区（恒展开可见，spec sidebar §3.7）——回执到达后分组视图自动更新，
+   *  命名组开合记忆保留不动） */
   function confirmDelete(): void {
-    if (pendingDelete.value) projectStore.removeProject(pendingDelete.value.id)
+    if (pendingDelete.value) void projectStore.removeProject(pendingDelete.value.id).catch(() => {})
     pendingDelete.value = null
     deleteOpen.value = false
-    // 归回的会话落默认项目区（恒展开可见，spec sidebar §3.7）；命名组开合记忆保留不动
   }
 
-  /** 组头行内重命名提交（ProjectGroup 已做空名检查，store 层再检查默认项目/未知 id） */
+  /** 组头行内重命名提交（ProjectGroup 已做空名检查，store 层再检查默认项目/未知 id；
+   *  命令化：失败 toast 已由 store 出声，此处吞 rejection） */
   function onRenameCommit(pg: ProjectGroupVM, name: string): void {
-    projectStore.renameProject(pg.id, name)
+    void projectStore.renameProject(pg.id, name).catch(() => {})
   }
 
   // ── 新建项目（区头「+」入口，用户裁决 2026-10-11：点击后列表顶部出现草稿输入行）──
@@ -172,11 +236,12 @@ export function useProjectGroups(options: {
     })
   }
 
-  /** 提交草稿：非空名创建并锚定展开（addProject 内部锚定新项目；新 id 不在收起集合，天然展开）；
+  /** 提交草稿：非空名发创建命令并关闭草稿行（回执到达后新项目锚定展开——命名组默认
+   *  展开，新 id 不在收起集合；命令失败 toast 已由 store 出声，草稿行收起不重开）；
    *  空名 = 丢弃草稿不创建 */
   function commitCreate(): void {
     const name = draft.value.trim()
-    if (name) projectStore.addProject(name)
+    if (name) void projectStore.addProject(name).catch(() => {})
     creating.value = false
     draft.value = ''
   }
@@ -195,6 +260,10 @@ export function useProjectGroups(options: {
   return {
     projectGroups,
     totalCount,
+    projectAreaMode,
+    degradedZone,
+    editingEnabled,
+    retryProjectLoad,
     flatClosed,
     dirClosed,
     expandGroup,

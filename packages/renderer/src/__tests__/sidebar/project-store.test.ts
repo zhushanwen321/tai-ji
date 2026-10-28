@@ -14,7 +14,8 @@
  *
  * 环境说明：合并文件走默认 happy-dom；原 node 环境节均为纯逻辑 / fs 扫描测试，兼容。
  *
- * vi.mock 说明：'@/api' 门面 mock（project 域 load/save）由 project-store 与
+ * vi.mock 说明：'@/api' 门面 mock（project 域现行成员，load/createProject/rename/
+ * removeProject/setActiveProject——project.save 端点已随 §6.6/u6b 删除）由 project-store 与
  * project-ordering 两节共享（原两文件工厂逐字相同，各节 beforeEach mockClear 保实现）；
  * 其余六节不消费 '@/api'。[读码] 核实于合并时点。
  *
@@ -23,9 +24,11 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
-import type { Project, ProjectStoreState, SessionGroup, UpdateErrorPayload, ProxyTestResult } from '@taiji/shared'
-import { useProjectStore, STORAGE_KEY, DEFAULT_PROJECT_ID } from '@/stores/project'
+import type { Project, SessionGroup, SessionSummary, UpdateErrorPayload, ProxyTestResult } from '@taiji/shared'
+import SessionList from '@/components/sidebar/SessionList.vue'
+import { useProjectStore, DEFAULT_PROJECT_ID } from '@/stores/project'
 import { sessionBelongsToProject } from '@/composables/logic/project-session'
 import { composerInjectionStore } from '@/composables/panel/composer-injection-store'
 import {
@@ -45,17 +48,53 @@ import { usageBarClass } from '@/components/panel/context-usage-display'
 // vi.mock 区（hoist 至文件顶部；project-store / project-ordering 两节共享）
 // ══════════════════════════════════════════════════════════════════════════
 vi.mock('@/api', () => ({
-  project: { load: vi.fn(), save: vi.fn().mockResolvedValue(undefined) },
+  project: {
+    load: vi.fn(),
+    createProject: vi.fn(),
+    renameProject: vi.fn(),
+    removeProject: vi.fn(),
+    setActiveProject: vi.fn(),
+  },
+}))
+
+// 呈现组件测试的失败状态条重试钮断言源：partial mock 只覆写 requestDomainSync
+// （useProjectGroups 的重试入口），其余 '@taiji/core' 导出保留真实实现。
+vi.mock('@taiji/core', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  requestDomainSync: vi.fn(),
 }))
 
 import { project as projectApi } from '@/api'
+import { requestDomainSync } from '@taiji/core'
 
 const mockLoad = projectApi.load as unknown as ReturnType<typeof vi.fn>
-const mockSave = projectApi.save as unknown as ReturnType<typeof vi.fn>
+const mockCreate = projectApi.createProject as unknown as ReturnType<typeof vi.fn>
+const mockRename = projectApi.renameProject as unknown as ReturnType<typeof vi.fn>
+const mockRemove = projectApi.removeProject as unknown as ReturnType<typeof vi.fn>
+const mockSetActive = projectApi.setActiveProject as unknown as ReturnType<typeof vi.fn>
+const mockRequestSync = requestDomainSync as unknown as ReturnType<typeof vi.fn>
 
-/** Project fixture 工厂（project-store / project-ordering 两节原各自定义、逐字相同，去重共享） */
+/** Project fixture 工厂（project-store / project-ordering 两节共享） */
 function makeProject(id: string, name: string, lastUsedAt = 0): Project {
   return { id, name, lastUsedAt }
+}
+
+/** load 回执 fixture（ProjectLoadReply：整表 + revision 水位，u6a runtime 契约） */
+function makeLoadReply(
+  projects: Project[],
+  activeProjectId: string,
+  revision = 0,
+): { projects: Project[]; activeProjectId: string; revision: number } {
+  return { projects, activeProjectId, revision }
+}
+
+/** 命令回执 fixture（ProjectCommandReply：执行后的完整新状态 + revision 新值） */
+function makeCommandReply(
+  projects: Project[],
+  activeProjectId: string,
+  revision: number,
+): { state: { projects: Project[]; activeProjectId: string }; revision: number } {
+  return { state: { projects, activeProjectId }, revision }
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -63,300 +102,494 @@ function makeProject(id: string, name: string, lastUsedAt = 0): Project {
 // ══════════════════════════════════════════════════════════════════════════
 
 /**
- * Project store 测试（D14 语义修正 + 2026-08-04 持久化迁 runtime projects.json）。
+ * Project store 测试（connection-datasync-ssot §6.5/§6.6/§6.9 改造后重写）。
  *
  * 覆盖：
- * - 同步初始态：默认 project 兜底（UI 永不空态）
- * - init()：RPC load 权威数据；RPC 失败降级默认；localStorage 一次性迁移（有旧数据 → 用之 + save 回 runtime）
- * - addProject / setActiveProject / removeProject CRUD + lastUsedAt 排序
- * - isDefaultProject 判定（name 空）
- * - deep watch 变化 → RPC save 被调
+ * - 状态机转移全表（§6.5）：idle→loading→loaded/failed、failed→loading（重试）、
+ *   loaded→loading（重拉，不丢已持有数据）、loaded 态命令失败不改状态机、
+ *   loading 态 syncLoad 重入 fail-fast（表外转移拒绝）
+ * - 命令化（§6.6）：命令携带最近读到的 revision、回执提交整表 + revision 推进、
+ *   同窗口命令串行排队（受控 promise）、无有效数据形态命令拒绝（§6.9）、本地语义守卫
+ * - revision 跟随回执 + isStaleLoadReceipt 交错判据（§6.4）
+ * - 三形态呈现（§6.7 组件测试，用户可见 DOM 断言）：无数据加载占位 / 失败状态条
+ *   （原因 + 重试钮触发 project 域同步）/ 重拉子形态保留最后已知分组 + 编辑入口不禁用
  *
- * mock 策略：mock @/api 门面的 project 域（store 走门面）。
+ * mock 策略：mock @/api 门面的 project 域（load + 4 命令）；mock @taiji/core 的
+ * requestDomainSync（重试钮断言源）。
  * 运行：cd packages/renderer && npx vitest run src/__tests__/sidebar/project-store.test.ts
  */
 
-
 beforeEach(() => {
   setActivePinia(createPinia())
-  localStorage.removeItem(STORAGE_KEY)
-  // mockClear 而非 mockReset：mockReset 会清掉 mockResolvedValue 实现（save 返回 undefined → .catch 崩）
-  mockLoad.mockClear()
-  mockSave.mockClear()
+  for (const m of [mockLoad, mockCreate, mockRename, mockRemove, mockSetActive, mockRequestSync]) {
+    m.mockClear()
+  }
+  mockCreate.mockResolvedValue(makeCommandReply([makeProject(DEFAULT_PROJECT_ID, '')], DEFAULT_PROJECT_ID, 1))
+  mockRename.mockResolvedValue(makeCommandReply([makeProject(DEFAULT_PROJECT_ID, '')], DEFAULT_PROJECT_ID, 1))
+  mockRemove.mockResolvedValue(makeCommandReply([makeProject(DEFAULT_PROJECT_ID, '')], DEFAULT_PROJECT_ID, 1))
+  mockSetActive.mockResolvedValue(makeCommandReply([makeProject(DEFAULT_PROJECT_ID, '')], DEFAULT_PROJECT_ID, 1))
 })
 
-describe('Project store: 初始态与 init()', () => {
-  it('同步初始态：默认 project 兜底（RPC 未返回前 UI 不空）', () => {
-    const store = useProjectStore()
-    expect(store.projects).toHaveLength(1)
-    expect(store.activeProject!.name).toBe('')
-    expect(store.isDefaultProject).toBe(true)
-  })
-
-  it('init()：RPC load 权威数据替换默认态（含 activeProjectId）', async () => {
-    mockLoad.mockResolvedValue({
-      projects: [makeProject('proj-a', 'Alpha'), makeProject('proj-default', '', 0)],
-      activeProjectId: 'proj-a',
-    })
-    const store = useProjectStore()
-    await store.init()
-
-    expect(store.projects).toHaveLength(2)
-    expect(store.activeProjectId).toBe('proj-a')
-    expect(store.isDefaultProject).toBe(false)
-  })
-
-  it('init()：RPC reject 降级默认（不抛，不阻断启动）', async () => {
-    mockLoad.mockRejectedValue(new Error('runtime not ready'))
-    const store = useProjectStore()
-    await expect(store.init()).resolves.toBeUndefined()
-    expect(store.projects).toHaveLength(1)
-    expect(store.activeProject!.name).toBe('')
-  })
-
-  it('init()：runtime 空 + localStorage 有旧数据 → 一次性迁移（用之 + save 回 runtime）', async () => {
-    mockLoad.mockResolvedValue({ projects: [], activeProjectId: '' })
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
-        projects: [{ id: 'p1', name: '旧项目', workspaces: [{ id: 'w1', cwd: '/x', dir: 'x', repo: '', isMain: false }], lastUsedAt: 100 }],
-        activeProjectId: 'p1',
-      }),
+describe('Project store: 状态机转移全表（§6.5）', () => {
+  it('idle→loading→loaded：syncLoad + applyLoadReceipt 提交整表与 revision 水位', async () => {
+    mockLoad.mockResolvedValue(
+      makeLoadReply([makeProject(DEFAULT_PROJECT_ID, ''), makeProject('proj-a', 'Alpha')], 'proj-a', 7),
     )
     const store = useProjectStore()
-    await store.init()
+    expect(store.loadState).toBe('idle')
 
-    // 归一化补插 nameless 默认项（[review MF-2]）：默认聚合视图保持可达，命名项顺延到 index 1
-    expect(store.projects).toHaveLength(2)
-    expect(store.projects[0]!.name).toBe('')
-    expect(store.projects[1]!.name).toBe('旧项目')
-    // 旧 workspaces 字段被剥离
-    expect('workspaces' in store.projects[1]!).toBe(false)
-    // 迁移写回 runtime（归一化后状态：默认项在前）
-    expect(mockSave).toHaveBeenCalled()
-    const saved = mockSave.mock.calls[0][0] as ProjectStoreState
-    expect(saved.projects[1]!.id).toBe('p1')
-  })
+    const loadPromise = store.syncLoad()
+    expect(store.loadState).toBe('loading') // 转移先行（拉取在途即 loading）
+    store.applyLoadReceipt(await loadPromise)
 
-  it('init()：activeProjectId 失配（stale id）→ 归一化回退默认项（review MF-2）', async () => {
-    mockLoad.mockResolvedValue({
-      projects: [makeProject('proj-a', 'Alpha')],
-      activeProjectId: 'ghost-project',
-    })
-    const store = useProjectStore()
-    await store.init()
-
-    // stale id 不再被 SessionList 分组/orderedProjects 高亮消费：回退到 nameless 默认项
-    expect(store.activeProjectId).toBe(DEFAULT_PROJECT_ID)
-    expect(store.isDefaultProject).toBe(true)
-    // 归一化状态被 deep watch 持久化（重启不再复现 stale id）
-    await nextTick()
-    const saved = mockSave.mock.calls[mockSave.mock.calls.length - 1][0] as ProjectStoreState
-    expect(saved.activeProjectId).toBe(DEFAULT_PROJECT_ID)
-  })
-
-  it('init()：projects 缺 nameless 默认项 → 补插；合法 activeProjectId 不被覆盖（review MF-2）', async () => {
-    mockLoad.mockResolvedValue({
-      projects: [makeProject('proj-a', 'Alpha')],
-      activeProjectId: 'proj-a',
-    })
-    const store = useProjectStore()
-    await store.init()
-
-    // 默认聚合视图可达（补插不依赖初始态 makeDefaultProject）
-    expect(store.projects.map((p) => p.id)).toContain(DEFAULT_PROJECT_ID)
-    // 合法数据保留（runtime 权威不被 clobber）
+    expect(store.loadState).toBe('loaded')
+    expect(store.loadError).toBe('')
+    expect(store.projects.map((p) => p.id)).toEqual([DEFAULT_PROJECT_ID, 'proj-a'])
     expect(store.activeProjectId).toBe('proj-a')
-    expect(store.isDefaultProject).toBe(false)
+    expect(store.revision).toBe(7)
   })
 
-  it('init()：默认项被外部改名（id 占用但 name 非空）→ 不补插第二个同 id 项（review S-1）', async () => {
-    // 触发类与 MF-2 相同（projects.json 被外部编辑）：默认项改名 'General'，旧补插条件
-    // 查「无 nameless 项」会 unshift 第二个 id='proj-default' → 重复 id 被持久化 + orderedProjects
-    // 的 filter/find 语义错乱。修复：按 id 占用判默认项存在。
-    mockLoad.mockResolvedValue({
-      projects: [makeProject('proj-default', 'General'), makeProject('proj-a', 'Alpha')],
-      activeProjectId: 'proj-a',
-    })
-    const store = useProjectStore()
-    await store.init()
-
-    // 只保留一个 proj-default（不因 nameless 检查缺失而 unshift 重复 id）
-    const defaultIds = store.projects.filter((p) => p.id === DEFAULT_PROJECT_ID)
-    expect(defaultIds).toHaveLength(1)
-    // 合法 activeProjectId 原样保留（runtime 权威不 clobber，改动不破坏首启/权威语义）
-    expect(store.activeProjectId).toBe('proj-a')
-  })
-
-  it('init()：runtime 空 + localStorage 无数据 → 保持默认 project', async () => {
-    mockLoad.mockResolvedValue({ projects: [], activeProjectId: '' })
-    const store = useProjectStore()
-    await store.init()
-    expect(store.projects).toHaveLength(1)
-    expect(store.activeProject!.name).toBe('')
-  })
-})
-
-// ── 读失败禁回写（RD-3#3 / 审计 M4：读失败被当「可覆写态」→ 整表覆盖 projects.json）──
-
-describe('Project store: loadState 读失败禁回写', () => {
-  it('init()：RPC reject → loadState=failed + loadError 落位，不阻断启动', async () => {
+  it('idle→loading→failed：load reject → failed + loadError 落位，内存保持兜底不抛出链外', async () => {
     mockLoad.mockRejectedValue(new Error('runtime not ready'))
     const store = useProjectStore()
-    await expect(store.init()).resolves.toBeUndefined()
+
+    await expect(store.syncLoad()).rejects.toThrow('runtime not ready')
     expect(store.loadState).toBe('failed')
     expect(store.loadError).toBe('runtime not ready')
-    expect(store.projects).toHaveLength(1) // 默认兜底（UI 永不空态）
+    expect(store.projects).toHaveLength(1) // 兜底默认表（failed 态不渲染分组，见组件测试）
+    expect(store.revision).toBeNull() // 从未读过：无期望 revision
   })
 
-  it('failed 态下 state 变化不触发落盘 save（deep watch early-return）', async () => {
-    mockLoad.mockRejectedValue(new Error('runtime not ready'))
-    const store = useProjectStore()
-    await store.init()
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-
-    store.addProject('X')
-    store.setActiveProject(DEFAULT_PROJECT_ID)
-    await nextTick()
-    await nextTick()
-    expect(mockSave).not.toHaveBeenCalled() // 防整表覆盖 projects.json
-    // 「改动不会落盘」warn 一次（含原因与恢复指引）
-    const warned = warnSpy.mock.calls.map((c) => String(c[0])).join('\n')
-    expect(warned).toContain('不会落盘')
-    expect(warned).toContain('runtime not ready')
-    warnSpy.mockRestore()
-  })
-
-  it('failed 态不走 legacy 迁移：localStorage 有旧数据也不 save（迁移 save 同样会覆写）', async () => {
-    mockLoad.mockRejectedValue(new Error('runtime not ready'))
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ projects: [{ id: 'p1', name: '旧项目', lastUsedAt: 1 }], activeProjectId: 'p1' }),
-    )
-    const store = useProjectStore()
-    await store.init()
-
-    expect(store.loadState).toBe('failed')
-    expect(mockSave).not.toHaveBeenCalled()
-    expect(store.projects).toHaveLength(1) // 内存也保持默认兜底，不消费可能过期的 legacy 数据
-  })
-
-  it('重试（重新执行 init）成功 → loadState 回 loaded，落盘恢复', async () => {
+  it('failed→loading（重试）→loaded：再次 syncLoad 成功即恢复，loadError 清空', async () => {
     mockLoad.mockRejectedValueOnce(new Error('runtime not ready'))
     const store = useProjectStore()
-    await store.init()
+    await expect(store.syncLoad()).rejects.toThrow()
     expect(store.loadState).toBe('failed')
 
-    mockLoad.mockResolvedValue({
-      projects: [makeProject('proj-a', 'Alpha'), makeProject(DEFAULT_PROJECT_ID, '')],
-      activeProjectId: 'proj-a',
-    })
-    await store.init() // 重试 = 重新执行 init
+    mockLoad.mockResolvedValue(makeLoadReply([makeProject(DEFAULT_PROJECT_ID, ''), makeProject('proj-a', 'Alpha')], 'proj-a', 2))
+    store.applyLoadReceipt(await store.syncLoad())
     expect(store.loadState).toBe('loaded')
     expect(store.loadError).toBe('')
     expect(store.projects).toHaveLength(2)
+  })
 
-    mockSave.mockClear()
-    store.addProject('B') // 落盘恢复
-    await nextTick()
-    expect(mockSave).toHaveBeenCalled()
-    const saved = mockSave.mock.calls[0][0] as ProjectStoreState
-    expect(saved.projects.some((p) => p.name === 'B')).toBe(true)
+  it('loaded→loading（重拉）：在途回执未到期间不丢已持有数据（§6.7 重拉子形态的数据前提）', async () => {
+    mockLoad.mockResolvedValue(makeLoadReply([makeProject(DEFAULT_PROJECT_ID, ''), makeProject('proj-a', 'Alpha')], 'proj-a', 1))
+    const store = useProjectStore()
+    store.applyLoadReceipt(await store.syncLoad())
+    expect(store.loadState).toBe('loaded')
+
+    // 重连边沿触发重拉：回执受控挂起
+    let resolveReload!: (v: ReturnType<typeof makeLoadReply>) => void
+    mockLoad.mockReturnValue(new Promise((resolve) => { resolveReload = resolve }))
+    const reloadPromise = store.syncLoad()
+    expect(store.loadState).toBe('loading')
+    // 已持有数据原样保留（重拉子形态「保留最后已知分组」的 store 侧依据）
+    expect(store.projects.map((p) => p.id)).toEqual([DEFAULT_PROJECT_ID, 'proj-a'])
+    expect(store.activeProjectId).toBe('proj-a')
+    expect(store.hasReceivedReceipt).toBe(true)
+
+    resolveReload(makeLoadReply([makeProject(DEFAULT_PROJECT_ID, ''), makeProject('proj-b', 'Beta')], 'proj-b', 2))
+    store.applyLoadReceipt(await reloadPromise)
+    expect(store.loadState).toBe('loaded')
+    expect(store.projects.map((p) => p.id)).toEqual([DEFAULT_PROJECT_ID, 'proj-b'])
+  })
+
+  it('loaded 态单条命令失败不改状态机：loadState 保持 loaded、内存保持命令前状态、错误 toast 出声', async () => {
+    mockLoad.mockResolvedValue(makeLoadReply([makeProject(DEFAULT_PROJECT_ID, ''), makeProject('proj-a', 'Alpha')], 'proj-a', 1))
+    const store = useProjectStore()
+    store.applyLoadReceipt(await store.syncLoad())
+
+    mockCreate.mockRejectedValue(new Error('revision mismatch'))
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await expect(store.addProject('X')).rejects.toThrow('revision mismatch')
+    expect(store.loadState).toBe('loaded') // 命令失败不进加载状态机
+    expect(store.projects.some((p) => p.name === 'X')).toBe(false) // 内存保持命令前状态
+    expect(store.activeProjectId).toBe('proj-a')
+    expect(store.revision).toBe(1) // 水位不推进
+    warnSpy.mockRestore()
+  })
+
+  it('loading 态 syncLoad 重入 = 表外转移 fail-fast（拒绝拉取，防绕过合流的重复在途）', async () => {
+    let resolveLoad!: (v: ReturnType<typeof makeLoadReply>) => void
+    mockLoad.mockReturnValue(new Promise((resolve) => { resolveLoad = resolve }))
+    const store = useProjectStore()
+    const first = store.syncLoad()
+    expect(store.loadState).toBe('loading')
+
+    await expect(store.syncLoad()).rejects.toThrow('re-entered')
+    expect(mockLoad).toHaveBeenCalledTimes(1) // 重入未触发第二次拉取
+    resolveLoad(makeLoadReply([makeProject(DEFAULT_PROJECT_ID, '')], DEFAULT_PROJECT_ID, 0))
+    store.applyLoadReceipt(await first)
+    expect(store.loadState).toBe('loaded')
+  })
+
+  it('被丢弃尝试的残留 loading：回执落定未提交（域同步器判旧丢弃形态）→ 下轮 syncLoad 放弃在途后重拉收敛', async () => {
+    // F1-27 锁定：域同步器判旧丢弃路径不经 store（applyLoadReceipt / loadFailed 均不调用），
+    // loading 残留而本 store 的 RPC 已落定；下轮 syncLoad（丢弃点补发轮）必须区分
+    // 「真重入」（RPC 在途 → 拒绝）与「残留 loading」（RPC 已落定 → 放弃在途回滚后重拉），
+    // 否则补发轮恒被重入守卫拒绝 → project 域重拉能力永久失效直至刷新页面。
+    let resolveLoad!: (v: ReturnType<typeof makeLoadReply>) => void
+    mockLoad.mockReturnValueOnce(new Promise((resolve) => { resolveLoad = resolve }))
+    const store = useProjectStore()
+    const first = store.syncLoad()
+    expect(store.loadState).toBe('loading')
+    resolveLoad(makeLoadReply([makeProject(DEFAULT_PROJECT_ID, '')], DEFAULT_PROJECT_ID, 5))
+    await first
+    // 丢弃形态：回执已返回但 applyLoadReceipt 未被调用 → loading 残留、RPC 不再在途
+    expect(store.loadState).toBe('loading')
+    expect(mockLoad).toHaveBeenCalledTimes(1)
+
+    // 丢弃点补发轮：不撞重入守卫，放弃在途后重新拉取并提交收敛
+    // （第二发用 base 实现——用例中途失败时不残留未消费的 once 实现污染后续用例）
+    mockLoad.mockResolvedValue(
+      makeLoadReply([makeProject(DEFAULT_PROJECT_ID, ''), makeProject('proj-a', 'Alpha')], 'proj-a', 6),
+    )
+    store.applyLoadReceipt(await store.syncLoad())
+    expect(mockLoad).toHaveBeenCalledTimes(2)
+    expect(store.loadState).toBe('loaded')
+    expect(store.loadError).toBe('')
+    expect(store.revision).toBe(6)
+    expect(store.projects.map((p) => p.id)).toEqual([DEFAULT_PROJECT_ID, 'proj-a'])
   })
 })
 
-describe('Project store: CRUD + 持久化', () => {
-  it('addProject：新建 + 设为活跃 + 返回 id；空名不创建', () => {
-    const store = useProjectStore()
-    const id = store.addProject('测试项目')
-    expect(id).toBeTruthy()
-    expect(store.projects).toHaveLength(2)
-    expect(store.activeProjectId).toBe(id)
-    expect(store.isDefaultProject).toBe(false)
+// ── 命令化（§6.6）：发命令、以回执更新；同窗口命令串行排队 ──────────────────
 
-    store.addProject('   ')
-    expect(store.projects).toHaveLength(2)
+describe('Project store: 编辑动作命令化（§6.6）', () => {
+  /** 装载到 loaded 态的 helper（回执链路真实走 syncLoad+apply，非直写状态） */
+  async function loadTo(projects: Project[], activeProjectId: string, revision: number) {
+    const store = useProjectStore()
+    mockLoad.mockResolvedValue(makeLoadReply(projects, activeProjectId, revision))
+    store.applyLoadReceipt(await store.syncLoad())
+    return store
+  }
+
+  it('命令携带最近一次读到的 revision；回执提交整表并推进水位', async () => {
+    const projects = [makeProject(DEFAULT_PROJECT_ID, ''), makeProject('proj-a', 'Alpha')]
+    const store = await loadTo(projects, 'proj-a', 5)
+
+    const created = [...projects, makeProject('proj-new', 'New', 100)]
+    mockCreate.mockResolvedValue(makeCommandReply(created, 'proj-new', 6))
+    await store.addProject('New')
+
+    expect(mockCreate).toHaveBeenCalledWith('New', 5) // 期望 revision = load 回执学得的水位
+    expect(store.projects.map((p) => p.id)).toEqual([DEFAULT_PROJECT_ID, 'proj-a', 'proj-new'])
+    expect(store.activeProjectId).toBe('proj-new') // 回执驱动（非本地预写）
+    expect(store.revision).toBe(6) // 水位推进到回执值
+
+    // 下一条命令携带推进后的水位
+    mockSetActive.mockResolvedValue(makeCommandReply(created, DEFAULT_PROJECT_ID, 7))
+    await store.setActiveProject(DEFAULT_PROJECT_ID)
+    expect(mockSetActive).toHaveBeenCalledWith(DEFAULT_PROJECT_ID, 6)
   })
 
-  it('setActiveProject：纯锚定切换——不改 lastUsedAt、orderedProjects 顺序不变（R6.2 不置顶）', () => {
-    const store = useProjectStore()
-    const a = store.addProject('A')
-    const b = store.addProject('B')
-    // 同毫秒创建 lastUsedAt 相同（tiebreaker = 持久化序）；显式设键锁定倒序断言语义
-    store.projects.find((p) => p.id === a)!.lastUsedAt = 100
-    store.projects.find((p) => p.id === b)!.lastUsedAt = 200
-    store.setActiveProject(a)
+  it('同窗口命令串行排队：上一条回执未到，下一条命令不发出（受控 promise）', async () => {
+    const projects = [makeProject(DEFAULT_PROJECT_ID, ''), makeProject('proj-a', 'Alpha')]
+    const store = await loadTo(projects, 'proj-a', 1)
 
-    expect(store.activeProjectId).toBe(a)
-    // 命名段按 lastUsedAt 倒序（B 较新在前），默认项目固定最后
-    expect(store.orderedProjects.map((p) => p.id)).toEqual([b, a, DEFAULT_PROJECT_ID])
+    let resolveFirst!: (v: ReturnType<typeof makeCommandReply>) => void
+    mockCreate.mockReturnValue(new Promise((resolve) => { resolveFirst = resolve }))
+    const first = store.addProject('First')
+    const second = store.setActiveProject(DEFAULT_PROJECT_ID)
+
+    expect(mockSetActive).not.toHaveBeenCalled() // 第一条在途：第二条排队未发
+
+    resolveFirst(makeCommandReply([...projects, makeProject('proj-first', 'First')], 'proj-first', 2))
+    await first
+    await second
+    expect(mockSetActive).toHaveBeenCalledTimes(1) // 第一条 settle 后才发
+    expect(mockSetActive).toHaveBeenCalledWith(DEFAULT_PROJECT_ID, 2) // 携带第一条回执推进的水位
   })
 
-  it('setActiveProject 不更新 lastUsedAt（排序键仅创建时写入，shared/project.ts 契约）', () => {
+  it('无有效数据形态命令拒绝（§6.9 store 层保底）：未 loaded 不发命令、reject 出声', async () => {
     const store = useProjectStore()
-    const a = store.addProject('A')
-    const b = store.addProject('B')
-    const aBefore = store.projects.find((p) => p.id === a)!.lastUsedAt
-    const bBefore = store.projects.find((p) => p.id === b)!.lastUsedAt
+    await expect(store.addProject('X')).rejects.toThrow('not loaded')
+    expect(mockCreate).not.toHaveBeenCalled()
 
-    store.setActiveProject(a)
-
-    expect(store.projects.find((p) => p.id === a)!.lastUsedAt).toBe(aBefore) // 不 bump
-    expect(store.projects.find((p) => p.id === b)!.lastUsedAt).toBe(bBefore) // 未动
-    // addProject 用 Date.now()（同毫秒可能相等，断言不小于创建前时间即可）
-    expect(store.projects.find((p) => p.id === b)!.lastUsedAt).toBeGreaterThan(0)
+    // 从未成功的 loading 同样拒绝（无回执则期望 revision 缺失）
+    let resolveLoad!: (v: ReturnType<typeof makeLoadReply>) => void
+    mockLoad.mockReturnValue(new Promise((resolve) => { resolveLoad = resolve }))
+    void store.syncLoad()
+    await expect(store.addProject('Y')).rejects.toThrow('not loaded')
+    expect(mockCreate).not.toHaveBeenCalled()
+    resolveLoad(makeLoadReply([makeProject(DEFAULT_PROJECT_ID, '')], DEFAULT_PROJECT_ID, 0))
   })
 
-  it('removeProject：默认项目不可删；保底不删最后一个；删活跃项锚定回落默认项目（spec sidebar §3.7）', () => {
+  it('本地语义守卫：空名不创建；默认项目禁删禁改名；保底不删最后一个；未知 id 不动作', async () => {
+    const projects = [makeProject(DEFAULT_PROJECT_ID, ''), makeProject('proj-a', 'Alpha')]
+    const store = await loadTo(projects, DEFAULT_PROJECT_ID, 1)
+
+    await store.addProject('   ')
+    expect(mockCreate).not.toHaveBeenCalled()
+
+    await store.removeProject(DEFAULT_PROJECT_ID) // review MF-1：兜底聚合无重建路径
+    expect(mockRemove).not.toHaveBeenCalled()
+
+    await store.renameProject(DEFAULT_PROJECT_ID, '改默认') // nameless 身份 = 聚合判据
+    expect(mockRename).not.toHaveBeenCalled()
+
+    await store.renameProject('proj-a', '   ')
+    expect(mockRename).not.toHaveBeenCalled()
+
+    await store.renameProject('ghost-id', '任意')
+    expect(mockRename).not.toHaveBeenCalled()
+
+    await store.setActiveProject('ghost-id')
+    expect(mockSetActive).not.toHaveBeenCalled()
+
+    // 只剩默认项时删除被保底拦截
+    const single = await loadTo([makeProject(DEFAULT_PROJECT_ID, '')], DEFAULT_PROJECT_ID, 1)
+    await single.removeProject(DEFAULT_PROJECT_ID)
+    expect(mockRemove).not.toHaveBeenCalled()
+  })
+})
+
+// ── revision 跟随回执 + 命令×同步交错判据（§6.4/§6.5⑤）──────────────────────
+
+describe('Project store: revision 跟随与 isStaleLoadReceipt 判据（§6.4；判旧资格基线 dmg-r2-1）', () => {
+  it('未读过任何回执（revision null）恒不判旧', () => {
     const store = useProjectStore()
-    const a = store.addProject('A')
-    const b = store.addProject('B')
-    store.setActiveProject(a)
-
-    store.removeProject(a)
-    expect(store.projects).toHaveLength(2) // 默认 + B
-    expect(store.activeProjectId).toBe(DEFAULT_PROJECT_ID) // 回落默认，非首个
-
-    // 默认项目（DEFAULT_PROJECT_ID）不可删除（review MF-1 检查：未归类 session 的兜底聚合）
-    store.removeProject(DEFAULT_PROJECT_ID)
-    expect(store.projects.map((p) => p.id)).toEqual([DEFAULT_PROJECT_ID, b])
-
-    store.removeProject(b)
-    expect(store.projects).toHaveLength(1) // 只剩默认（保底不删最后一个）
-    store.removeProject(store.projects[0]!.id)
-    expect(store.projects).toHaveLength(1) // 默认项目检查再拦一次
+    expect(store.isStaleLoadReceipt(makeLoadReply([], DEFAULT_PROJECT_ID, 0))).toBe(false)
+    expect(store.isStaleLoadReceipt(makeLoadReply([], DEFAULT_PROJECT_ID, 99))).toBe(false)
   })
 
-  it('renameProject：命名项目改名生效；默认项目拒改（nameless 身份检查，双保险见组件侧）', () => {
+  it('load 回执学得水位后：重拉在途（基线 = 学得水位）无命令插入，等于/高于水位与服务端回退（低于基线）均不判旧', async () => {
+    mockLoad
+      .mockResolvedValueOnce(makeLoadReply([makeProject(DEFAULT_PROJECT_ID, '')], DEFAULT_PROJECT_ID, 5))
+      .mockReturnValueOnce(new Promise(() => {})) // 重拉在途（受控挂起，保持基线时点）
     const store = useProjectStore()
-    const id = store.addProject('A')
+    store.applyLoadReceipt(await store.syncLoad())
+    expect(store.revision).toBe(5)
 
-    store.renameProject(id, 'A2')
-    expect(store.projects.find((p) => p.id === id)!.name).toBe('A2')
-
-    store.renameProject(id, '   ') // 空名检查
-    expect(store.projects.find((p) => p.id === id)!.name).toBe('A2')
-
-    store.renameProject(DEFAULT_PROJECT_ID, '改默认')
-    expect(store.projects.find((p) => p.id === DEFAULT_PROJECT_ID)!.name).toBe('')
+    // 重拉发起：本轮判旧基线 = 5（syncStartRevision 快照），无命令插入（水位仍 5）
+    void store.syncLoad()
+    expect(store.isStaleLoadReceipt(makeLoadReply([], DEFAULT_PROJECT_ID, 5))).toBe(false) // 等于水位
+    expect(store.isStaleLoadReceipt(makeLoadReply([], DEFAULT_PROJECT_ID, 6))).toBe(false) // 更新快照
+    // 服务端 revision 回退（runtime 崩溃重启丢写入形态）：低于基线 → 不判旧（照常
+    // apply 重置水位，防幻影水位恒判旧 + 无限补发死锁）
+    expect(store.isStaleLoadReceipt(makeLoadReply([], DEFAULT_PROJECT_ID, 4))).toBe(false)
   })
 
-  it('isDefaultProject：命名 project 非默认；默认 project（name 空）是默认', () => {
+  it('在途 load 期间命令回执推进水位：基线之上的旧快照按新水位判旧（交错规则判据输入）', async () => {
+    const projects = [makeProject(DEFAULT_PROJECT_ID, ''), makeProject('proj-a', 'Alpha')]
+    mockLoad
+      .mockResolvedValueOnce(makeLoadReply(projects, 'proj-a', 3))
+      .mockReturnValueOnce(new Promise(() => {})) // 在途 load（受控挂起，保持基线时点）
+    const store = useProjectStore()
+    store.applyLoadReceipt(await store.syncLoad())
+
+    // 在途 load 发起：本轮基线 = 3（重拉子形态，编辑入口放行）
+    void store.syncLoad()
+    mockSetActive.mockResolvedValue(makeCommandReply(projects, DEFAULT_PROJECT_ID, 4))
+    await store.setActiveProject(DEFAULT_PROJECT_ID)
+    expect(store.revision).toBe(4)
+
+    // 命令前发起、命令后到达的 load 回执（revision 3，落在基线上、水位下）→ 判旧 →
+    // 域同步器丢弃 + 补发
+    expect(store.isStaleLoadReceipt(makeLoadReply(projects, 'proj-a', 3))).toBe(true)
+    expect(store.isStaleLoadReceipt(makeLoadReply(projects, 'proj-b', 4))).toBe(false)
+    // 低于基线（服务端回退形态）不判旧——即使水位已被命令推高
+    expect(store.isStaleLoadReceipt(makeLoadReply(projects, 'proj-a', 2))).toBe(false)
+  })
+
+  it('崩溃回退收敛（dmg-r2-1）：命令推进水位后 runtime revision 回退，新轮回执不判旧、applyLoadReceipt 重置水位（命令通道解锁）', async () => {
+    const projects = [makeProject(DEFAULT_PROJECT_ID, ''), makeProject('proj-a', 'Alpha')]
+    const rolledBack = makeLoadReply([makeProject(DEFAULT_PROJECT_ID, '')], DEFAULT_PROJECT_ID, 4)
+    mockLoad
+      .mockResolvedValueOnce(makeLoadReply(projects, 'proj-a', 5))
+      .mockResolvedValueOnce(rolledBack)
+    const store = useProjectStore()
+    store.applyLoadReceipt(await store.syncLoad())
+    expect(store.revision).toBe(5)
+
+    // 命令通道提交（水位 5 → 6）后 runtime 崩溃重启：debounce 窗口丢失写入 → 文件
+    // revision 回退 4；重连重拉（本轮基线 = 6 幻影水位）
+    mockSetActive.mockResolvedValue(makeCommandReply(projects, DEFAULT_PROJECT_ID, 6))
+    await store.setActiveProject(DEFAULT_PROJECT_ID)
+    expect(store.revision).toBe(6)
+
+    // 回执 revision 4 低于基线 → 不判旧（域同步器直接 apply，非丢弃 + 补发循环）
+    expect(store.isStaleLoadReceipt(rolledBack)).toBe(false)
+    store.applyLoadReceipt(await store.syncLoad())
+    // 水位重置为服务端权威值：命令通道 expectedRevision 与 runtime 重新对齐
+    expect(store.revision).toBe(4)
+    expect(store.loadState).toBe('loaded')
+    expect(store.projects.map((p) => p.id)).toEqual([DEFAULT_PROJECT_ID])
+  })
+})
+
+// ── 查询派生（缓存视图消费面）───────────────────────────────────────────────
+
+describe('Project store: 查询派生', () => {
+  it('同步初始态：默认 project 兜底（idle 窗口的 orderedProjects 消费方不空）', () => {
+    const store = useProjectStore()
+    expect(store.projects).toHaveLength(1)
+    expect(store.activeProject!.name).toBe('')
+    expect(store.isDefaultProject).toBe(true)
+    expect(store.loadState).toBe('idle')
+    expect(store.editingEnabled).toBe(false) // 无有效数据形态
+  })
+
+  it('editingEnabled：loaded 恒可用；重拉子形态（loading+已持有回执）不禁用；无数据 loading/failed 禁用', async () => {
+    let resolveLoad!: (v: ReturnType<typeof makeLoadReply>) => void
+    mockLoad.mockReturnValue(new Promise((resolve) => { resolveLoad = resolve }))
+    const store = useProjectStore()
+    const first = store.syncLoad()
+    expect(store.editingEnabled).toBe(false) // 从未成功的 loading
+
+    resolveLoad(makeLoadReply([makeProject(DEFAULT_PROJECT_ID, ''), makeProject('proj-a', 'Alpha')], 'proj-a', 1))
+    store.applyLoadReceipt(await first)
+    expect(store.editingEnabled).toBe(true) // loaded
+
+    let resolveReload!: (v: ReturnType<typeof makeLoadReply>) => void
+    mockLoad.mockReturnValue(new Promise((resolve) => { resolveReload = resolve }))
+    const reload = store.syncLoad()
+    expect(store.loadState).toBe('loading')
+    expect(store.editingEnabled).toBe(true) // 重拉子形态（§6.9 不禁用）
+
+    resolveReload(makeLoadReply([], DEFAULT_PROJECT_ID, 2))
+    store.applyLoadReceipt(await reload)
+
+    mockLoad.mockRejectedValue(new Error('down'))
+    await expect(store.syncLoad()).rejects.toThrow()
+    expect(store.editingEnabled).toBe(false) // failed
+  })
+
+  it('isDefaultProject：命名 project 非默认；默认 project（name 空）是默认', async () => {
     const store = useProjectStore()
     expect(store.isDefaultProject).toBe(true)
-    store.addProject('Alpha')
+    mockLoad.mockResolvedValue(makeLoadReply([makeProject(DEFAULT_PROJECT_ID, ''), makeProject('proj-a', 'Alpha')], 'proj-a', 1))
+    store.applyLoadReceipt(await store.syncLoad())
     expect(store.isDefaultProject).toBe(false)
   })
+})
 
-  it('deep watch 变化 → RPC save 全量调用', async () => {
+// ── 三形态呈现（§6.7 组件测试，用户可见 DOM 断言；§6.9 编辑入口禁用）──────────
+
+describe('SessionList 项目分组区三形态呈现（§6.7）+ 编辑入口禁用（§6.9）', () => {
+  function mountList(groups: SessionGroup[] = [
+    { cwd: '/repo', sessions: [{ id: 'sa', label: '会话 sa', cwd: '/repo', status: 'idle', lastActiveAt: 1, projectId: 'proj-a' } as SessionSummary] },
+  ]) {
+    return mount(SessionList, {
+      attachTo: document.body,
+      props: {
+        groups,
+        activeId: null,
+        statusOf: () => 'done' as never,
+      },
+    })
+  }
+
+  /** 直写缓存视图装载 loaded 态（呈现测试关注渲染分支，不经命令链） */
+  function seedLoaded(store: ReturnType<typeof useProjectStore>, activeProjectId = DEFAULT_PROJECT_ID): void {
+    store.projects = [makeProject(DEFAULT_PROJECT_ID, ''), makeProject('proj-a', 'Alpha')]
+    store.activeProjectId = activeProjectId
+    store.revision = 3
+    store.loadState = 'loaded'
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = ''
+  })
+
+  it('无数据形态（idle）：分组区渲染加载占位行，不渲染项目组；会话本体照常呈现（§6.7）', () => {
+    useProjectStore() // idle 初态（未 load）
+    const wrapper = mountList()
+
+    expect(wrapper.find('[data-testid="project-group-loading-placeholder"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="project-group-loading-placeholder"]').text()).toContain('加载')
+    // §6.7：会话列表本体（cwd 结构来自 runtime 会话清单）不受影响，正常显示
+    expect(wrapper.find('[data-testid="session-body-flat"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="session-body-flat"]').findAll('.session-item')).toHaveLength(1)
+    // 无数据形态不派生项目分组概念（不渲染兜底默认表 / 默认项目头行）
+    expect(wrapper.find('[data-testid="default-project-flat-zone"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="default-project-head"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="project-group"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="project-load-failed-bar"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('failed：失败状态条（原因 + 重试钮）替代分组区；点重试触发 project 域同步；区头「+」禁用并带原因提示', async () => {
     const store = useProjectStore()
-    store.addProject('Alpha')
+    store.loadState = 'failed'
+    store.loadError = 'runtime not ready'
+    const wrapper = mountList()
+
+    const bar = wrapper.find('[data-testid="project-load-failed-bar"]')
+    expect(bar.exists()).toBe(true)
+    expect(bar.text()).toContain('项目数据加载失败')
+    expect(bar.text()).toContain('runtime not ready') // 原因可见
+
+    const retryBtn = wrapper.find('[data-testid="project-load-retry-btn"]')
+    expect(retryBtn.exists()).toBe(true)
+    await retryBtn.trigger('click')
+    expect(mockRequestSync).toHaveBeenCalledWith('project') // 重试 = 触发 project 域同步
+
+    // 编辑入口禁用（§6.9 无有效数据形态）+ 原因提示（title）
+    const addBtn = wrapper.find('[data-testid="project-add-btn"]')
+    expect(addBtn.attributes('disabled')).toBeDefined()
+    expect(addBtn.attributes('title')).toContain('不可用')
+    // 项目分组区不渲染（失败形态不渲染兜底默认表 / 默认项目头行）
+    expect(wrapper.find('[data-testid="project-group"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="default-project-head"]').exists()).toBe(false)
+    // §6.7 / §5.2：失败窗口会话列表本体照常呈现（失败窗口 65-90s 用户仍看得到会话）
+    expect(wrapper.find('[data-testid="session-body-flat"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="session-body-flat"]').findAll('.session-item')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('目录模式 failed：失败状态条照常替换分组区；会话本体按 cwd 目录标签序列照常呈现、无默认项目头行（§5.2 会话列表本体（目录分组视图）+ §6.7）', () => {
+    localStorage.setItem('taiji:sidebar-session-mode', 'groups')
+    const store = useProjectStore()
+    store.loadState = 'failed'
+    store.loadError = 'runtime not ready'
+    const wrapper = mountList([
+      { cwd: '/repo', sessions: [{ id: 'sa', label: '会话 sa', cwd: '/repo', status: 'idle', lastActiveAt: 1, projectId: 'proj-a' } as SessionSummary] },
+      { cwd: '/lib', sessions: [{ id: 'sb', label: '会话 sb', cwd: '/lib', status: 'idle', lastActiveAt: 2 } as SessionSummary] },
+    ])
+
+    // 失败状态条（§5.2）的渲染判据是 projectAreaMode，与侧栏 flat/groups 模式无关
+    expect(wrapper.find('[data-testid="project-load-failed-bar"]').exists()).toBe(true)
+    // §6.7 会话本体不受影响（目录形态）：降级渲染不经项目切分，目录标签序列（每 cwd 一行
+    // SessionDirLabel）+ 会话行照常呈现——degradedZone.dirs 渲染路径（SessionList 目录分支）
+    expect(wrapper.findAll('[data-testid="folder-actions"]')).toHaveLength(2)
+    expect(wrapper.findAll('.session-item')).toHaveLength(2)
+    // 降级形态不派生「默认项目」展示概念：无默认项目头行、无项目组（与平铺态 failed 断言同型）
+    expect(wrapper.find('[data-testid="default-project-head"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="project-group"]').exists()).toBe(false)
+    wrapper.unmount()
+    localStorage.removeItem('taiji:sidebar-session-mode')
+  })
+
+  it('重拉子形态（loading + 已持有回执）：保留最后已知分组渲染、不闪占位；编辑入口不禁用（§6.9）', async () => {
+    const store = useProjectStore()
+    seedLoaded(store, 'proj-a')
+    const wrapper = mountList()
+    expect(wrapper.find('[data-testid="project-group"][data-project-id="proj-a"]').exists()).toBe(true)
+
+    // 模拟重连边沿重拉在途：loadState → loading，缓存视图未替换（最后已知数据仍在）
+    store.loadState = 'loading'
     await nextTick()
 
-    expect(mockSave).toHaveBeenCalled()
-    const saved = mockSave.mock.calls[0][0] as ProjectStoreState
-    expect(saved.projects.some((p) => p.name === 'Alpha')).toBe(true)
-    expect(saved.activeProjectId).toBe(store.activeProjectId)
+    expect(wrapper.find('[data-testid="project-group-loading-placeholder"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="project-load-failed-bar"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="project-group"][data-project-id="proj-a"]').exists()).toBe(true)
+    // 编辑入口不禁用（§6.9：重拉是读操作，命令 revision 恒匹配）
+    expect(wrapper.find('[data-testid="project-add-btn"]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('loaded：分组正常渲染，编辑入口可用', () => {
+    const store = useProjectStore()
+    seedLoaded(store, 'proj-a')
+    const wrapper = mountList()
+
+    expect(wrapper.find('[data-testid="project-group-loading-placeholder"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="project-load-failed-bar"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="project-group"][data-project-id="proj-a"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="project-add-btn"]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
   })
 })
 
@@ -365,21 +598,18 @@ describe('Project store: CRUD + 持久化', () => {
 // ══════════════════════════════════════════════════════════════════════════
 
 /**
- * Project 排序与重命名单测（R6.2 锚定分组，用户裁决 2026-10-11「顺序稳定不置顶」）。
+ * Project 排序单测（R6.2 锚定分组，用户裁决 2026-10-11「顺序稳定不置顶」）。
  *
- * 覆盖：
+ * 覆盖（数据装载均为直写缓存视图——命令化后排序派生测试不经命令链）：
  *  - orderedProjects 稳定序：命名项目按 lastUsedAt 倒序（该字段仅创建时写入）、
  *    同值按持久化序稳定；默认项目（nameless）固定最后
- *  - 锚定切换零重排：setActiveProject 不更新 lastUsedAt，反复切换显示序逐字不变
- *    （「切换只改变谁展开，不重排组位置」裁决锚点）
- *  - 新建项目落位：addProject（lastUsedAt = Date.now()，最新）落在命名段首位、默认项目仍在最后
- *  - renameProject：命名项目改名生效并落盘；空名 / 未知 id / 默认项目（nameless 身份是
- *    未归类聚合判据）不动作
- *  - removeProject：删活跃项锚定回落默认项目（spec sidebar §3.7）
+ *  - 锚定切换零重排：反复切换显示序逐字不变（「切换只改变谁展开，不重排组位置」裁决锚点）
+ *  - 新建项目落位：最新 lastUsedAt 落在命名段首位、默认项目仍在最后
  *  - sessionBelongsToProject：归属判定规则 SSOT（命名精确匹配；默认聚合未归类 + 孤儿）
+ * （renameProject/removeProject 行为断言随命令化重写并入节 1「编辑动作命令化」。）
  *
  * mock 策略：mock @/api 门面的 project 域（store 走门面，同 project-store.test.ts）。
- * 运行：cd packages/renderer && npx vitest run src/__tests__/sidebar/project-ordering.test.ts
+ * 运行：cd packages/renderer && npx vitest run src/__tests__/sidebar/project-store.test.ts
  */
 
 
@@ -414,7 +644,7 @@ describe('orderedProjects 稳定序（R6.2：lastUsedAt 倒序 + 默认项目固
     expect(store.orderedProjects.map((p) => p.id)).toEqual(['x1', 'x2', 'x3', DEFAULT_PROJECT_ID])
   })
 
-  it('新建项目落位：addProject（lastUsedAt = 当前时间，最新）落命名段首位，默认项目仍在最后', () => {
+  it('新建项目落位：最新 lastUsedAt 落命名段首位，默认项目仍在最后', () => {
     const store = useProjectStore()
     store.projects = [
       makeProject('old', 'Old', 100),
@@ -422,7 +652,11 @@ describe('orderedProjects 稳定序（R6.2：lastUsedAt 倒序 + 默认项目固
     ]
     store.activeProjectId = 'old'
 
-    const newId = store.addProject('Fresh')
+    // 直写缓存视图模拟已加载回执（connection-datasync-ssot §6.6：addProject 已命令化，
+    // 排序派生测试不经命令链——新项目由回执写入，lastUsedAt 由 runtime 生成）
+    const newId = 'proj-fresh'
+    store.projects = [...store.projects, makeProject(newId, 'Fresh', Date.now())]
+    store.activeProjectId = newId
 
     expect(store.orderedProjects.map((p) => p.id)).toEqual([newId, 'old', DEFAULT_PROJECT_ID])
   })
@@ -441,11 +675,12 @@ describe('锚定切换零重排（「顺序稳定不置顶」裁决锚点）', (
     const orderBefore = store.orderedProjects.map((p) => p.id)
     const stampB = store.projects.find((p) => p.id === 'b')!.lastUsedAt
 
-    store.setActiveProject('b')
+    // 直写锚定（setActiveProject 已命令化——排序派生测试不经命令链；回执提交同为直写形态）
+    store.activeProjectId = 'b'
     expect(store.orderedProjects.map((p) => p.id)).toEqual(orderBefore)
 
-    store.setActiveProject('c')
-    store.setActiveProject('b')
+    store.activeProjectId = 'c'
+    store.activeProjectId = 'b'
     expect(store.orderedProjects.map((p) => p.id)).toEqual(orderBefore)
     // 切换是纯锚定动作：排序键不可变（shared/project.ts 契约），否则被点组会跳到最前
     expect(store.projects.find((p) => p.id === 'b')!.lastUsedAt).toBe(stampB)
@@ -460,36 +695,16 @@ describe('锚定切换零重排（「顺序稳定不置顶」裁决锚点）', (
     ]
     store.activeProjectId = 'a'
 
-    store.renameProject('b', 'B2')
+    // 直写缓存视图模拟改名回执（renameProject 已命令化——排序派生测试不经命令链）
+    store.projects = store.projects.map((p) => (p.id === 'b' ? { ...p, name: 'B2' } : p))
 
     expect(store.orderedProjects.map((p) => p.id)).toEqual(['a', 'b', DEFAULT_PROJECT_ID])
     expect(store.projects.find((p) => p.id === 'b')!.name).toBe('B2')
   })
 })
 
-describe('renameProject（组头行内重命名）', () => {
-  it('命名项目改名生效（持久化由 deep watch 全量 save 承载，见 project-store.test.ts）', () => {
-    const store = useProjectStore()
-    const id = store.addProject('旧名')
-    store.renameProject(id, '新名')
-    expect(store.projects.find((p) => p.id === id)!.name).toBe('新名')
-  })
-
-  it('空名（含纯空白）不动作；未知 id 不动作', () => {
-    const store = useProjectStore()
-    const id = store.addProject('保持')
-
-    store.renameProject(id, '   ')
-    store.renameProject('ghost-id', '任意')
-    expect(store.projects.find((p) => p.id === id)!.name).toBe('保持')
-  })
-
-  it('默认项目禁改名：nameless 身份是未归类/孤儿 session 兜底聚合的判据，改名即瓦解聚合', () => {
-    const store = useProjectStore()
-    store.renameProject(DEFAULT_PROJECT_ID, '想改名')
-    expect(store.projects.find((p) => p.id === DEFAULT_PROJECT_ID)!.name).toBe('')
-  })
-})
+// renameProject 行为断言（生效 / 空名 / 未知 id / 默认项目禁改名）已随命令化重写并入
+// 节 1「编辑动作命令化」的「本地语义守卫」与「命令携带 revision」两用例，此处不再重复。
 
 // ── 归属判定规则 SSOT（SessionList 分组切分与组头计数的同一规则）─────────────
 function session(id: string, projectId?: string) {

@@ -7,35 +7,29 @@
  *
  * 依赖方向：无下游（读全局 window.electronAPI，类型经 declare global 自动可用）
  */
-import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, SessionJsonlExportPayload, SessionJsonlExportResult, RemoteAccessInfo, RemoteAccessToggleResult, ShieldsFacesPayload, OverlayContentKind, BrowserFrameState, LocalFileServableReason, LocalFileServableResult, LocalFileReadReason, LocalFileReadResult, QuotaRefreshCookiePayload, QuotaRefreshCookieResult } from '@taiji/shared'
+import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, SessionJsonlExportPayload, SessionJsonlExportResult, RemoteAccessInfo, RemoteAccessToggleResult, ShieldsFacesPayload, OverlayContentKind, BrowserFrameState, LocalFileServableReason, LocalFileServableResult, LocalFileReadReason, LocalFileReadResult, RuntimeTargetSnapshot, QuotaRefreshCookiePayload, QuotaRefreshCookieResult } from '@taiji/shared'
 import type { ImageCacheWritePort } from '@taiji/core'
 
 /** preload 注入的 electronAPI（web/mock / node 测试环境为 undefined——后者连
  * window 全局都没有，裸标识符直接 ReferenceError，故按环境检查取值） */
 const api = typeof window !== 'undefined' ? window.electronAPI : undefined
 
-/** 读取已知 runtime 端口（main 已 spawn）。无 IPC 或未启动返回 undefined */
-export function getRuntimePort(): Promise<number | undefined> {
-  return api ? api.getRuntimePort() : Promise.resolve(undefined)
-}
-
-/** 读取端口偏移（dev +100）。无 IPC 返回 undefined */
-export function getRuntimePortOffset(): Promise<number | undefined> {
-  return api ? api.getRuntimePortOffset() : Promise.resolve(undefined)
+/**
+ * 拉取当前连接目标快照（connection-datasync-ssot §6.1 单一权威连接目标）：
+ * {seq, runtimeId, port, token} 并置读取——启动与重连前的目标判定依据（seq 裁决），
+ * port/token 的零散读口已随连接链切快照并置读取删除（M1-2）。无 IPC（web/mock）返回
+ * undefined，调用方（连接控制器）进入等待态。
+ */
+export function getRuntimeTargetSnapshot(): Promise<RuntimeTargetSnapshot | null | undefined> {
+  return api?.getRuntimeTargetSnapshot ? api.getRuntimeTargetSnapshot() : Promise.resolve(undefined)
 }
 
 /**
- * 读取当前 runtime 的 WS auth token（S1-W1）：连接 open 后作首条 auth 消息发送。
- * runtime 重启后值刷新（supervisor 每次 spawn 重新生成），重连路径须重新调用。
- * 无 IPC（web/mock）返回 undefined——调用方（use-connection / transport）以不带
- * token 连接（mock 平台无需 auth）。
+ * 监听 runtime 目标快照推送（§6.1：channel 不变、载荷从裸端口号升级为快照对象——
+ * spawn 成功 / 重启成功 / 幂等重播时 main 广播），返回取消函数。无 IPC（web/mock）
+ * 返回 no-op。
  */
-export function getRuntimeToken(): Promise<string | null | undefined> {
-  return api?.getRuntimeToken ? api.getRuntimeToken() : Promise.resolve(undefined)
-}
-
-/** 监听 runtime 端口推送（runtime 重启后 main 推新端口触发重连），返回取消函数 */
-export function onRuntimePort(cb: (port: number) => void): () => void {
+export function onRuntimePort(cb: (snapshot: RuntimeTargetSnapshot) => void): () => void {
   return api?.onRuntimePort(cb) ?? (() => {})
 }
 

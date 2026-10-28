@@ -11,6 +11,9 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+// u3（connection-datasync-ssot）起重连数据刷新由连接边沿域同步器承载（watch ws-client
+// connected 迁移驱动），测试按其文件头约定编程直驱同一入口（app-bootstrap.test.ts 同款）
+import { notifyConnectedEdge } from '@taiji/core'
 import type { SessionGroup, SessionSummary, SubagentRecord } from '@taiji/shared'
 import { useSidebarStore } from '@/stores/sidebar'
 import { useSessionStore } from '@/stores/session'
@@ -71,10 +74,9 @@ vi.mock('@taiji/core/transport/api/domains/workspace', async (importActual) => {
   const actual = await importActual<typeof import('@taiji/core/transport/api/domains/workspace')>()
   return { ...actual, listRecent: mocks.workspaceListRecent }
 })
-// project domain 全量 stub（initApp 的 useProjectStore().init 依赖；仅 load/save 两导出）
+// project domain stub（initApp 的 useProjectStore().init 依赖；消费 load——写通道走四命令，见 domains/project.ts）
 vi.mock('@taiji/core/transport/api/domains/project', () => ({
   load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }),
-  save: vi.fn().mockResolvedValue(undefined),
 }))
 vi.mock('@/api', async (importActual) => {
   const actual = await importActual<typeof import('@/api')>()
@@ -275,7 +277,7 @@ describe('useSidebar 接缝（TC-1..TC-4）', () => {
     expect(sidebarStore.collapsed).toBe(!before)
   })
 
-  it('TC-5 重连 onConnected 对聚焦 session 重新拉取 subagent/workflow（首连不拉；分区数据刷新用户可见）', async () => {
+  it('TC-5 重连边沿对聚焦 session 重新拉取 subagent/workflow（首连不拉；分区数据刷新用户可见）', async () => {
     const sessionDomain = await import('@taiji/core/transport/api/domains/session')
     const getSubagentsMock = sessionDomain.getSubagents as ReturnType<typeof vi.fn>
     const getWorkflowsMock = sessionDomain.getWorkflows as ReturnType<typeof vi.fn>
@@ -292,19 +294,22 @@ describe('useSidebar 接缝（TC-1..TC-4）', () => {
     getSubagentsMock.mockResolvedValueOnce({ subagents: [record], oversize: false })
 
     const sidebar = useSidebar()
+    // 首连形态对齐生产（initApp 编排 + 连接边沿两个消费点；此时无聚焦 session，聚焦四项
+    // 跳过不拉）——列表首次拉取归挂载消费方（现行 = composer 任务托盘 useTrayCounts 的
+    // watch(sessionId) 拉取路径）。首连边沿先于 selectSession：生产中首连时用户尚无焦点
+    await sidebar.onConnected()
+    notifyConnectedEdge()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(getSubagentsMock).not.toHaveBeenCalled()
+    expect(getWorkflowsMock).not.toHaveBeenCalled()
+
     useSessionStore().applySnapshot({ groups: [group([summary('s1')])] })
     await sidebar.selectSession('s1')
     getSubagentsMock.mockClear()
     getWorkflowsMock.mockClear()
 
-    // 首连（initApp 路径）不含 subagent/workflow 重新拉取——列表首次拉取归挂载消费方
-    // （现行 = composer 任务托盘 useTrayCounts 的 watch(sessionId) 拉取路径）
-    await sidebar.onConnected()
-    expect(getSubagentsMock).not.toHaveBeenCalled()
-    expect(getWorkflowsMock).not.toHaveBeenCalled()
-
-    // 重连：对聚焦 s1 重新拉取（RPC 直读磁盘，不依赖派生缓存事件）；分区更新 = 侧栏列表数据源
-    await sidebar.onConnected()
+    // 重连边沿：对聚焦 s1 重新拉取（RPC 直读磁盘，不依赖派生缓存事件）；分区更新 = 侧栏列表数据源
+    notifyConnectedEdge()
     await new Promise((r) => setTimeout(r, 0))
     expect(getSubagentsMock).toHaveBeenCalledWith('s1')
     expect(getWorkflowsMock).toHaveBeenCalledWith('s1')
@@ -316,8 +321,10 @@ describe('useSidebar 接缝（TC-1..TC-4）', () => {
     const getSubagentsMock = sessionDomain.getSubagents as ReturnType<typeof vi.fn>
     const sidebar = useSidebar()
 
-    await sidebar.onConnected() // 首连（initApp，空态无 session）
-    await sidebar.onConnected() // 重连（focusedSessionId=null）
+    await sidebar.onConnected() // 首连编排（initApp，空态无 session）
+    notifyConnectedEdge() // 首连连接边沿（focusedSessionId=null，聚焦四项跳过）
+    await new Promise((r) => setTimeout(r, 0))
+    notifyConnectedEdge() // 重连（focusedSessionId=null）
     await new Promise((r) => setTimeout(r, 0))
     expect(getSubagentsMock).not.toHaveBeenCalled()
   })

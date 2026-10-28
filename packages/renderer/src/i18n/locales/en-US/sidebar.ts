@@ -124,7 +124,16 @@ export default {
     // icon toggle (hover tooltip)
     modeFlat: 'Flat list',
     modeGroup: 'Group by folder',
+    // Project-domain failure bar (connection-datasync-ssot §6.5/§6.7: reason + retry button)
+    projectLoadFailed: 'Failed to load projects ({error})',
+    projectLoadRetry: 'Retry',
+    // Loading placeholder for the no-data form (§6.7: idle, or loading that never succeeded)
+    projectsLoading: 'Loading projects…',
+    // Editing-disabled hint (§6.9: no valid data — hover tooltip on disabled entries)
+    projectEditDisabledHint: 'Project data not loaded — editing unavailable',
   },
+  // Project command failure toast (§6.6: single command failure in loaded state — memory keeps pre-command state, error surfaces)
+  projectCommandFailed: 'Project action failed: {msg}',
   assignProjectFailed: 'Failed to assign to project: {msg}',
   // "Move to project" success feedback (sessions spec §3.3: move + toast on click)
   movedToProject: 'Moved to project "{name}"',

@@ -261,7 +261,10 @@
       <div class="flex items-center gap-2">
         <template v-if="phase === 'list'">
           <span class="shrink-0 text-sm text-neutral-mid">{{ t('importSession.importTo') }}</span>
-          <Select v-model="selectedProjectId">
+          <!-- 归属编辑入口禁用（connection-datasync-ssot §6.9）：project 无有效数据形态
+               （idle/从未成功的 loading/failed）时下拉禁用——此时目标列表是兜底默认表而非
+               回执事实；重拉子形态不禁用。 -->
+          <Select v-model="selectedProjectId" :disabled="!projectStore.editingEnabled">
             <SelectTrigger class="h-8 w-[180px] px-2 text-xs" data-testid="import-project-select">
               <!-- SelectValue 自动 label 依赖 optionsSet（SelectItem 渲染时注册），初始未打开
                    下拉时为空——slot 覆盖为自算名，保证「默认当前激活 project」打开即可见 -->

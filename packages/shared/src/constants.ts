@@ -290,6 +290,11 @@ export const ENGINE_ENV_DENY_LIST: readonly string[] = [
   // presetFallback 假披露——故在引擎出站面一律剥除。
   'TAIJI_PRESET_FALLBACK_FROM',
   'TAIJI_PRESET_FALLBACK_TO',
+  // [connection-datasync-ssot §6.1] runtime 实例标识（env 名 SSOT = 下方 RUNTIME_ID_ENV，
+  // 此处按字面量镜像，形态对齐上方 PRESET_FALLBACK 两键）：supervisor 每次 spawn 签发、
+  // 只有 runtime 进程自身消费（auth 成功应答回传）。引擎一跳继承陈旧值 = 后代进程持有
+  // 已死实例标识——生命周期标志族同害，引擎出站面一并剥除。
+  'TAIJI_RUNTIME_ID',
 ]
 
 /**
@@ -499,3 +504,16 @@ export const TTS_CACHE_MAX_BYTES: number = 512 * 1024 * 1024
  * 本值的转发常量（导出清单不变，u1f 既有测试与消费方 import 点不受影响）。
  */
 export const RUNTIME_PLANNED_EXIT_CODE = 86
+
+/**
+ * runtime 实例标识 env 名（connection-datasync-ssot §6.1，SSOT——main 写入方与 runtime
+ * 读取方共用，禁字面量分叉）。
+ *
+ * 语义：supervisor 每次 spawn 与 issueRuntimeToken 同点签发的实例标识（randomBytes 8
+ * 字节 hex），经本 env 注入 runtime 进程；runtime 在 WS auth 成功应答中回传自己的
+ * runtimeId，renderer 连接控制器与目标快照（RuntimeTargetSnapshot）比对做实例核对。
+ * 与 TAIJI_RUNTIME_TOKEN 同属「进程生命周期标志」族：出站剥除清单（spawn-env-contract
+ * 的 SPAWN_ENV_OUTBOUND_DENY_LIST / 本文件 ENGINE_ENV_DENY_LIST）须一并登记该成员，
+ * 漏登记则随 spawn 链泄漏到全部 pi 子进程 env。
+ */
+export const RUNTIME_ID_ENV = 'TAIJI_RUNTIME_ID' as const

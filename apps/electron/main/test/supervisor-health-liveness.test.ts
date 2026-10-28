@@ -24,7 +24,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // --- 存活探针纯函数（supervisor/liveness-probe.ts）---
-import { checkHealthEndpoint, LIVENESS_FAIL_THRESHOLD } from '../supervisor/liveness-probe.js'
+import {
+  checkHealthEndpoint,
+  LIVENESS_FAIL_THRESHOLD,
+  LIVENESS_PROBE_TIMEOUT_MS,
+} from '../supervisor/liveness-probe.js'
 
 // --- runtime-supervisor：依赖 electron，需 mock 后才能实例化 ---
 // mock 必须在 import 之前（vitest hoist）
@@ -74,10 +78,26 @@ describe('W5 checkHealthEndpoint 存活探针（纯函数）', () => {
 
     const result = await checkHealthEndpoint(12345)
 
-    // 用 fetch 调了 http://127.0.0.1:12345/health
-    expect(fetch).toHaveBeenCalledWith('http://127.0.0.1:12345/health')
+    // 用 fetch 调了 http://127.0.0.1:12345/health（携带逐请求超时信号）
+    expect(fetch).toHaveBeenCalledWith(
+      'http://127.0.0.1:12345/health',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
     expect(result.ok).toBe(true)
     expect(typeof result.ms).toBe('number')
+  })
+
+  it('fetch 携带逐请求 2s 超时（AbortSignal.timeout，判死窗口 2s×3×5s 间隔≈12s 的兑现点）', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, status: 200 }),
+    )
+
+    await checkHealthEndpoint(12345)
+
+    expect(LIVENESS_PROBE_TIMEOUT_MS).toBe(2_000)
+    const init = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][1] as RequestInit
+    expect(init.signal).toBeInstanceOf(AbortSignal)
   })
 
   it('/health 返回 500 时 ok=false', async () => {

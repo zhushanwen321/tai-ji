@@ -8,14 +8,11 @@
  *    （原 ProjectSwitcher 徽章计数族随卡片网格退役删除）
  *
  * 判定语义（2026-08-04 D14 语义修正）：见 sessionBelongsToProject 注释。
+ * 默认项目谓词 isDefaultProjectOf 已上移 @taiji/shared/project（跨包 SSOT，与
+ * DEFAULT_PROJECT_ID / makeDefaultProject 并置，消费方直接 import shared）；本文件
+ * 保留 session 归属判定族。
  */
 import type { Project } from '@taiji/shared'
-
-/** 是否为默认项目（name 空 = 未命名兜底聚合）。与 store.isDefaultProject（!activeProject.name）同构：
- * activeProject 就是 projects 列表中的一项，per-project 泛化即 !p.name。 */
-export function isDefaultProjectOf(p: Pick<Project, 'name'>): boolean {
-  return !p.name
-}
 
 /** 全部命名 project 的 id 集合（孤儿判定基准：projectId 不在集合内即归属已删除）。 */
 export function collectNamedProjectIds(projects: Project[]): Set<string> {

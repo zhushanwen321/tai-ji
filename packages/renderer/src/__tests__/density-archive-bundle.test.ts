@@ -53,7 +53,7 @@ function makeSummary(id: string): SessionSummary {
   return { id, label: id, cwd: '/proj', status: 'idle', lastActiveAt: 1 }
 }
 
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }) },
   chat: { getHistory: vi.fn(() => Promise.resolve([])) },
   session: {
     create: vi.fn(() => Promise.resolve(makeSummary('mock'))),

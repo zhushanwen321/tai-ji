@@ -39,16 +39,17 @@ function installTestPlatform(): void {
   })
 }
 
-function authResult(ok: boolean): string {
-  return JSON.stringify({ type: 'auth.result', payload: { ok } })
+/** auth 应答构造（runtimeId 与 buildIpc 桩默认期望一致——本地形态核对 §6.3） */
+function authResult(ok: boolean, runtimeId = 'rt-fix'): string {
+  return JSON.stringify({ type: 'auth.result', payload: { ok, runtimeId } })
 }
 
 /** 本地形态 ipc 端口 stub（auth-rejection 测试 buildIpc 同款最小视图） */
-function buildIpc(knownPort: number, token: string): NonNullable<ConnectionPorts['ipc']> {
+function buildIpc(port: number, token: string, opts?: { seq?: number; runtimeId?: string }): NonNullable<ConnectionPorts['ipc']> {
+  const seq = opts?.seq ?? 1
+  const runtimeId = opts?.runtimeId ?? 'rt-fix'
   return {
-    getRuntimePort: vi.fn().mockResolvedValue(knownPort),
-    getRuntimePortOffset: vi.fn().mockResolvedValue(undefined),
-    getRuntimeToken: vi.fn().mockResolvedValue(token),
+    getRuntimeTargetSnapshot: vi.fn().mockResolvedValue({ seq, runtimeId, port, token }),
     onRuntimePort: vi.fn().mockReturnValue(() => {}),
     onRuntimeRestarting: vi.fn().mockReturnValue(() => {}),
     onRuntimeFailed: vi.fn().mockReturnValue(() => {}),

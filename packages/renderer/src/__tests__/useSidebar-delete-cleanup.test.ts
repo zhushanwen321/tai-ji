@@ -72,7 +72,7 @@ const removeMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
 const removeByCwdMock = vi.hoisted(() => vi.fn(() =>
   Promise.resolve({ cwd: '/proj', deleted: [] as string[], failed: [] })))
 const switchSessionMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }) },
   chat: { getHistory: vi.fn(() => Promise.resolve({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 })), streamSubscribe: vi.fn(() => () => {}) },
   extension: {},
   session: {

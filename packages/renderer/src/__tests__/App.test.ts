@@ -32,13 +32,14 @@ import {
 import { _resetMemoryPressureForTest } from '@/composables/useMemoryPressure'
 
 // 可控的 connectionState（App.vue 的 watch / 分支渲染数据源；外部修改触发 watch）
-const connectionState = ref<'disconnected' | 'connected' | 'failed'>('failed')
+const connectionState = ref<'disconnected' | 'connected' | 'failed' | 'waiting-runtime'>('failed')
 
 const mocks = vi.hoisted(() => ({
   onConnected: vi.fn(async () => {}),
   init: vi.fn(async () => {}),
   teardown: vi.fn(),
   retryRuntime: vi.fn(async () => {}),
+  retrySnapshot: vi.fn(async () => {}),
 }))
 
 // RD-3#2 IPC 捕获点（vi.mock 工厂引用闭包，vi.hoisted 保证先于工厂执行就绪）
@@ -74,6 +75,7 @@ vi.mock('@/composables/useConnection', () => ({
     init: mocks.init,
     teardown: mocks.teardown,
     retryRuntime: mocks.retryRuntime,
+    retrySnapshot: mocks.retrySnapshot,
   }),
 }))
 
@@ -370,5 +372,52 @@ describe('内存压力提示条 surface 注册（§6.7 view 遮蔽族，App.vue 
     expect(after).toHaveLength(1)
     expect(after[0]!.id).toBe('memory-pressure-bar')
     expect(after[0]!.rect, 'rect 读提示条根元素实测').toBeDefined()
+  })
+})
+
+describe('waiting-runtime 态重试按钮（快照重拉入口，F1-13）', () => {
+  let wrapper: VueWrapper | null = null
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    ipcHolder.runtimeErrorCb = null
+    ipcHolder.pullResolve = null
+    connectionState.value = 'waiting-runtime'
+  })
+
+  afterEach(() => {
+    wrapper?.unmount()
+    wrapper = null
+  })
+
+  it('点重试 → 调 retrySnapshot 重拉快照；拉取进行中禁用防连点，完成后恢复可再点（失败停留 waiting 态）', async () => {
+    wrapper = mount(App)
+    await flushPromises()
+    ipcHolder.pullResolve!(null)
+    await flushPromises()
+
+    const btn = () => wrapper!.find('[data-testid="waiting-retry-btn"]')
+    expect(btn().exists()).toBe(true)
+    // 文案复用 failed 态重试钮的 connection.retry 键（zh-CN「重试」）
+    expect(btn().text()).toBe('重试')
+
+    // 拉取挂起 = 用户点击后的进行中窗口
+    let resolvePull!: () => void
+    mocks.retrySnapshot.mockImplementation(
+      () => new Promise<void>((resolve) => { resolvePull = resolve }),
+    )
+    await btn().trigger('click')
+    await flushPromises()
+    expect(mocks.retrySnapshot).toHaveBeenCalledTimes(1)
+    expect(btn().attributes('disabled'), '拉取进行中禁用（防连点）').toBeDefined()
+
+    // 重拉完成（快照仍 null 的失败形态也 resolve、核心停留 waiting-runtime）→ 恢复可再点
+    resolvePull()
+    await flushPromises()
+    expect(btn().attributes('disabled')).toBeUndefined()
+    expect(wrapper.text()).toContain('正在启动 runtime…')
+    await btn().trigger('click')
+    expect(mocks.retrySnapshot).toHaveBeenCalledTimes(2)
   })
 })

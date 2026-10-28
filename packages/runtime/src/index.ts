@@ -172,6 +172,9 @@ import { startRollingRestart, resolveRollingRestartConfig, shutdownStep } from '
 import type { RollingRestartHandle } from './services/session/rolling-restart.js'
 // u7c：滚动重启计划内退出码（D5 ④；SSOT 在 shared，main 侧 PLANNED_EXIT_CODE 是同值转发）。
 import { RUNTIME_PLANNED_EXIT_CODE } from '@taiji/shared'
+// connection-datasync-ssot §6.1：实例标识 env 名（TAIJI_RUNTIME_ID，supervisor spawn 时
+// 与 token 同点注入；env 名 SSOT 在 shared，禁字面量）。
+import { RUNTIME_ID_ENV } from '@taiji/shared'
 // u17（设计 §6.12）：spawn 清单读侧在 infra SSOT（读写同模块）；组合根注入给 services 层
 // （D6c port 纪律——reap/startup-background-init 不直接 import infra）。
 import { readSpawnMarkerList, sweepStaleSpawnMarkerTmpFiles } from './infra/pi/spawn-markers.js'
@@ -229,6 +232,20 @@ function resolveRuntimeToken(): string | null {
   }
   console.warn('[runtime] WS auth token unavailable (TAIJI_RUNTIME_TOKEN env / <dataDir>/runtime-token both missing) — fail-closed: ALL WebSocket connections will be rejected')
   return null
+}
+
+/**
+ * 解析实例标识（connection-datasync-ssot §6.1）：env TAIJI_RUNTIME_ID（supervisor
+ * spawn 时与 token 同点签发注入，env 名 SSOT = RUNTIME_ID_ENV）。auth 成功应答经
+ * ConnectionManager 回传给客户端（连接控制器与目标快照核对「连的是谁」）。
+ *
+ * 缺失容忍置 null——与 token 的 fail-closed 语义刻意相反：裸跑（脚本/测试直起
+ * runtime，无 supervisor spawn 链）时 env 缺失是常态形态，实例核对失败不拒连接
+ * （fail-fast 消费侧在 renderer 连接控制器）；token 缺失则拒绝全部连接。
+ */
+function resolveRuntimeId(): string | null {
+  const raw = process.env[RUNTIME_ID_ENV]
+  return raw && raw.trim().length > 0 ? raw.trim() : null
 }
 
 // ── u5b-runtime-forensics D6-②：runtime 内存水位定时器 ──────────────────
@@ -493,6 +510,9 @@ async function main(): Promise<void> {
     host: remoteAccess ? '0.0.0.0' : undefined,
     remoteTokenProvider: remoteAccess ? readRemoteAccessToken : undefined,
     mobileStaticHandler: mobileStaticRoot !== null ? createMobileStaticHandler(mobileStaticRoot) : undefined,
+    // 实例标识（connection-datasync-ssot §6.1）：auth 成功应答回传；env 缺失（裸跑）
+    // 容忍置 null，不 fail-closed——见 resolveRuntimeId。
+    runtimeId: resolveRuntimeId(),
   })
 
   // MessageBus 单例（wave:runtime-wiring）：per-session 消息广播核心。

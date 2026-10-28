@@ -12,7 +12,7 @@
  * 无组件作用域依赖（store 走 pinia 单例、toast 文案走 i18n.global.t），多调用点返回
  * 等价闭包。恢复后的会话列表刷新走 runtime unarchive 步骤 7 的 broadcastSessionList
  * 广播回流（core bindSessionListBroadcast 自动 applySnapshot——owner 唯一写通道，
- * 本编排不旁路直呼 store mutation；重连对账兜底由 useSidebar.onConnected 既有链承担）。
+ * 本编排不旁路直呼 store mutation；会话列表重连重拉由 core 域同步器 sessions 域边沿承载，connection-datasync-ssot §6.4）。
  *
  * 恢复成功编排（D5 步骤 7 / D10）：unarchive reply 的 SessionSummary 不自动切入
  * （设计 §5.1：恢复后主区是确认形态，点击行才打开完整对话）——切回会话列表 +
@@ -106,7 +106,7 @@ function displayName(archive: ArchiveSummary): string {
  * 恢复路径全量重写主文件使 mtime = 恢复时刻，列表序 = mtime 降序，无需前端重排。
  * 恢复的 session 回场会话列表由 runtime broadcastSessionList 广播回流（core
  * bindSessionListBroadcast 自动 applySnapshot——数据 owner 唯一写通道，本编排不旁路
- * 直呼 store mutation；重连对账兜底由 useSidebar.onConnected 既有链承担）。失败
+ * 直呼 store mutation；会话列表重连重拉由 core 域同步器 sessions 域边沿承载，connection-datasync-ssot §6.4）。失败
  * toast 按 error envelope code 分流（§5.2 界面表现 + 恢复指引；未知码回退通用模板）。
  * 入口按 sessionId 防重入：在途期间同一行再次触发直接忽略（列表行钮同时禁用）。
  */

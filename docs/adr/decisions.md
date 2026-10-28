@@ -1152,3 +1152,25 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **否决记录**：dev 集成分支触发全量 CI（push 加 dev-*）——每次合入 15-20 分钟全量（含 e2e）成本高且无门禁消费其结果，快速族前置已覆盖「终局 PR 才第一次跑」的主痛点，全量留终局 PR 是有意的分层；ci.yml 动态生成 steps——GitHub Actions 不支持运行时读仓库文件生成。
 
 **效果**：清单漂移与零执行点测试（v0.11.16 实测 6 个）从静默分叉变红灯；CI 测试步骤解掩蔽（continue-on-error + 聚合）使一次 run 暴露全部失败。
+
+### ADR-0173 连接目标快照与域同步收敛：supervisor 签发实例标识 + 目标快照单一权威 + 连接边沿统一域同步 + project 写通道命令化（2026-10-27 设计裁决，connection-datasync-ssot）
+
+**背景**：冷启动侧栏项目分组丢失的架构级修复。旧形态四层缺陷叠加——① runtime 端口经「裸端口推送 + 前端备用端口猜连公式」双通道分发，dev 延迟启动期前端拿过期端口猜连至他人实例；② 端口推送无实例标识，runtime 重启后前端持有死端口/死 token 重连；③ 连接重连的域刷新由 initApp 一次性编排 + 重连分支逐域手写两套并存；④ project 表由前端 localStorage 回写 + runtime save 端点双写，无 revision 水位，双窗口并发编辑互相整表覆盖。设计过程产物 connection-datasync-ssot（tech-design 归档），本条即该形态决策的现行登记处。
+
+**决策**：九条。
+
+1. **实例标识与目标快照单一权威**（§6.1）：runtime 子进程每次 spawn 时 supervisor 与 token 同点签发 runtimeId（8 字节 hex）并经 env `TAIJI_RUNTIME_ID` 注入；连接目标统一为快照 `{seq, runtimeId, port, token}`——seq 随 spawn 成功单调递增（失败半途清理不消耗代数），连接目标 IPC 通道（快照读口与推送）承载快照而非裸端口。磁盘端口文件（runtime.port）不在连接目标通道内，仍写裸端口数字，消费方是 CLI 端口发现与单实例互斥判活（`packages/runtime/src/cli/port-discovery.ts` / `src/infra/single-instance-guard.ts`），renderer 连接不读它。auth 成功应答回传 runtimeId（`{ok:true, runtimeId}`），连接控制器与期望快照核对「连的是谁」，不一致 fail-fast（streak 计数 + 重拉快照，禁静默续用）。旧客户端只读 `payload.ok` 不受影响（多余字段无消费者）。
+2. **删除备用端口猜连**（§6.2）：`resolveFallbackPort` 链及其唯一消费通道 `get-runtime-port-offset` IPC 同批删除；权威目标确认前不连接、不初始化——init 拉取快照为 null 即进 waiting-runtime 等待态（连接状态词表新增该态，与「连接中…」显式区分），快照经拉取或推送到达即转 connecting。HMR 重连改为重拉快照连接。
+3. **唯一连接控制器按目标比较裁决**（§6.3）：4 处 runtime-port 广播点统一改推快照（同 channel 载荷升级）；`use-connection.ts` 收敛为裁决表——同 seq 不动作；seq 更高或期望未建立且未认证 → 断旧连新；auth 拒绝 → 重拉快照换凭据重连；实例变更（新 runtimeId）必经断连→connected 边沿。终端域 `getCurrentToken` 世代判据语义与调用点不变（回归项，真机验收覆盖）。
+4. **连接边沿统一域同步器**（§6.4）：`connection-edge-sync.ts`（core，headless：零 DOM/零 store import）以 `DomainSyncDescriptor` 声明式登记数据域（project/sessions/workspace）与辅助刷新层；连接边沿（首次认证成功、每次重连认证成功）触发登记域同步，取代「initApp 一次性编排 + 重连分支逐域手写」两套。机制约束：并发合流（同域同时刻至多一个在途）、仅最新代提交（连接代单调计数，旧代回执丢弃并在丢弃点补发）、每域首次落定 promise（启动编排消费——initApp 等 project 域落定后才进落地页）、命令×同步交错判据（project 域在途 load 回执携带的 revision 早于 store 已提交值时按过时丢弃 + 补发，防旧快照回滚命令结果）。workspace 域失败语义由「置空」改为「失败保留旧值」（显式行为改进）。
+5. **project 加载 4 值状态机 + 失败显式呈现**（§6.5）：renderer project store 显式转移表 idle→loading→loaded/failed、failed→loading（重试或连接边沿）、loaded→loading（重拉）；表外转移 fail-fast。loaded 态单条命令失败不改状态机（内存保持命令前状态 + toast）。
+6. **project 写通道命令化，runtime 唯一写入口**（§6.6）：四命令（createProject/renameProject/removeProject/setActiveProject）经 runtime 串行队列执行，revision 水位校验（失配抛 `project_revision_mismatch`），成功回执 = 归一化后完整新状态 + revision 新值，并广播 `project.changed` 失效信号（各窗口据此重拉）；存量文件无 revision 字段按 0 读、首写补 1；归一化为读时修复（load 只改回执视图不写盘）。旧 `project.save` 端点 + payload/reply 映射 + core save 封装 + mock 实现 + 前端 localStorage legacy 迁移同批拆除（全仓 grep 零命中）。
+7. **分组派生按加载状态降级**（§6.7）：分组区三形态——loaded 正常渲染；无数据形态（idle 或从未成功过的 loading）渲染加载占位（禁把兜底默认表渲染成「只有一个空默认组」——本次事故可见症状）；failed 整体替换为失败状态条（原因 + 重试钮）；重拉子形态（loaded→loading）保留最后已知分组（缓存视图更新时机构造性成立）。
+8. **连接状态词表新增 waiting-runtime**（§6.8）：见决策 2；App.vue 非连接态四分支（waiting-runtime / restarting / failed / 过渡屏）显式分呈。
+9. **加载失败期间禁用项目编辑**（§6.9）：无有效数据形态（failed / 无回执的 loading）下编辑入口不可用——区头新建「+」显式置灰带原因提示，组头动作（重命名/删除/锚定切换/默认区新建）随 §6.7 分组区三形态替换构造性不可达（入口不渲染）；store 层二次检查（入队与执行时双检 loaded + revision 非空）保底。失败窗口内首发会话归入未分组（projectId 空），数据恢复后不被追溯改动。
+
+**不采用**：保留备用端口猜连做 dev 延迟启动兜底（猜测公式是双轨端口源，冷启分组丢失的直接触发路径）；前端 localStorage 继续做 project 写通道（双写无水位，并发互相覆盖的根因）；用时间窗/平抑逻辑掩盖瞬态（ADR-0122：删后数据仍最终一致 = 补偿补丁删之）；恢复读文件/轮询表模拟实时（存储只做恢复源）。
+
+**依据**：ADR-0122 事实驱动原则体系（本机故障模型 = 进程生死二态，状态判定来源严格递减：同步查询 > 确定性事件 > 禁止时间推测；失败显式上报、首败即停；UI 跟随事实）的具体化；ADR-0097 拉为主推补充（拉是真理通道、推是性能提示，可靠性由通道保证，功能域代码禁出现推送补偿逻辑）在连接与项目域落地；域同步器是 ADR-0097「丢失后的收敛由域同步协议统一提供」的实现载体。
+
+**登记**：实装——协议地基 `packages/shared/src/{protocol,ipc-channels,constants}.ts`（快照类型 / project 命令域 / IPC 通道常量 / `RUNTIME_ID_ENV`）；主进程 `apps/electron/main/supervisor/{runtime-supervisor,process-control}.ts`（快照持有与签发、4 广播点载荷升级）+ `gateway/bridge-handlers.ts`（快照 IPC 读口）+ `preload/preload.ts`；runtime `packages/runtime/src/transport/connection-manager.ts`（auth 应答回传）+ `transport/project-message-handler.ts` + `services/project/project-store.ts`（四命令 + 串行队列 + revision + 归一化）；core `packages/core/src/transport/use-connection.ts`（连接控制器裁决表）+ `connection-edge-sync.ts`（域同步器）+ `transport/api/domains/project.ts`（命令封装）；renderer `stores/project.ts`（4 值状态机 + 命令化编辑）+ `composables/features/sidebar/{useSidebar,useProjectGroups}.ts` + `components/sidebar/{SessionList,ProjectGroup,ProjectLoadStatus}.vue`。出站 env deny 登记（C-proc-09 spawn-env-contract）随 `TAIJI_RUNTIME_ID` 注入更新。无新约束族；排障条目见 [TROUBLESHOOTING.md](../TROUBLESHOOTING.md) 连接状态词与快照排查节。真机验收（设计 §8 七场景 + P-3/P-4/P-5 探针）由 verify-taiji 场景剧本族承载（`a1-cold-start-groups` / `a2-first-port-occupied` / `a3-runtime-restart-recovery` / `a4-failure-presentation-recovery` / `a5-failure-window-edit-disabled` / `a6-dual-window-revision` / `a7-disk-invariant`）。

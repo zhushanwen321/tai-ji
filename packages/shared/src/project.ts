@@ -19,7 +19,8 @@
  *   不存在 Workspace 实体。~~Project → Workspace → Session 三层结构~~ 已废弃（2026-08-04
  *   语义修正：workspace 是展示概念，不该进模型）。
  *
- * 持久化：project 列表存 renderer localStorage（未来迁移 runtime RPC projects.json）；
+ * 持久化：project 列表存 runtime projects.json（唯一权威持久化，runtime ProjectStore
+ * 唯一读写入口含 revision 校验；legacy renderer localStorage 持久化已删除）；
  * session 归属存 runtime sidecar `<sessionFile>.project.json`（磁盘权威，删除 session
  * 归属自动消失，fork 继承父归属）。
  *
@@ -38,8 +39,54 @@ export interface Project {
   lastUsedAt: number
 }
 
-/** project store 持久化结构（localStorage / 未来 runtime projects.json） */
+/** project store 持久化结构（runtime projects.json，ProjectStore 唯一读写入口） */
 export interface ProjectStoreState {
   projects: Project[]
   activeProjectId: string
+}
+
+/**
+ * 默认项目 id（connection-datasync-ssot §6.6① 归一化迁 runtime 时上移的领域常量）：
+ * nameless 默认项目 = 未归类/孤儿 session 的兜底聚合。消费方 = runtime ProjectStore
+ * 归一化（默认项缺失补插 + activeProjectId 失配回退链终点）与 renderer project store
+ * （本地导出随 u6b 收敛对齐此单一登记处）。跨包禁止手抄字面量。
+ */
+export const DEFAULT_PROJECT_ID = 'proj-default'
+
+/**
+ * 默认项目工厂（name 空 = 未命名默认项目，未归类 session 的兜底聚合；lastUsedAt 0 =
+ * 未记录，排序稳定殿后）。runtime ProjectStore（归一化补插）、renderer project store
+ * （缓存视图初值）、core mock（内存态初始化）三方共用——跨包禁止手抄副本。
+ */
+export function makeDefaultProject(): Project {
+  return { id: DEFAULT_PROJECT_ID, name: '', lastUsedAt: 0 }
+}
+
+/**
+ * 是否为默认项目（name 空 = 未命名兜底聚合判定）。与 renderer project store 的
+ * isDefaultProject（!activeProject.name）同构：activeProject 就是 projects 列表中
+ * 的一项，per-project 泛化即 !p.name。
+ */
+export function isDefaultProjectOf(p: Pick<Project, 'name'>): boolean {
+  return !p.name
+}
+
+/**
+ * 状态归一化（§6.6①，runtime 权威侧语义的共享纯函数）：
+ * ① nameless 默认项缺失（legacy/外部编辑数据）→ 按 id 占用判定补插头部（按 nameless
+ *    判占用会在默认项被改名时补插第二个同 id 项）；
+ * ② activeProjectId 失配 → 回退链「nameless 默认项 → 首个 → DEFAULT_PROJECT_ID」。
+ * 消费方：runtime ProjectStore（load 读时修复 + 命令路径修复）与 core mock（内存态
+ * 归一化，仍自持内存数据但消费共享规则）——INV-4 语义变更时两方同步演进，禁止复刻副本。
+ */
+export function normalizeProjectState(state: ProjectStoreState): ProjectStoreState {
+  const projects = [...state.projects]
+  if (!projects.some((p) => p.id === DEFAULT_PROJECT_ID)) {
+    projects.unshift(makeDefaultProject())
+  }
+  let activeProjectId = state.activeProjectId
+  if (!projects.some((p) => p.id === activeProjectId)) {
+    activeProjectId = projects.find((p) => isDefaultProjectOf(p))?.id ?? projects[0]?.id ?? DEFAULT_PROJECT_ID
+  }
+  return { projects, activeProjectId }
 }

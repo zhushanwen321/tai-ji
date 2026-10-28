@@ -40,12 +40,11 @@ export const terminalConfigMock = {
   setTerminalConfig: vi.fn((cfg: TerminalConfig) => Promise.resolve({ config: cfg, corrupted: false })),
 }
 
-/** '@/api' mock 工厂：config 域转发捕获单例 + project load/save 惰性桩 */
+/** '@/api' mock 工厂：config 域转发捕获单例 + project load 惰性桩 */
 export function terminalConfigApiModule() {
   return {
     project: {
       load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }),
-      save: vi.fn().mockResolvedValue(undefined),
     },
     config: terminalConfigMock,
   }

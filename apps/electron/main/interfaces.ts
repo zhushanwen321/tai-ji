@@ -14,7 +14,7 @@
  * @see docs/architecture/design.md §4.2 M1–M5
  */
 import type { BrowserWindow } from 'electron'
-import type { WindowState, LatestReleaseInfo, LaunchResult, UpdateSource } from '@taiji/shared'
+import type { WindowState, LatestReleaseInfo, LaunchResult, UpdateSource, RuntimeTargetSnapshot } from '@taiji/shared'
 import type { BrowserViewManager } from './browser/browser-view-manager.js'
 import type { IUpdateOrchestrator } from './update/orchestrator.js'
 
@@ -41,7 +41,9 @@ export interface IRuntimeSupervisor {
   start(): Promise<number>
 
   /**
-   * 启动 runtime 并把端口通知给渲染进程（消除 main.ts whenReady/activate 重复）。
+   * 启动 runtime 并把连接目标快照通知给渲染进程（消除 main.ts whenReady/activate 重复）。
+   * 推送走 RUNTIME_PORT channel，载荷为 RuntimeTargetSnapshot {seq, runtimeId, port, token}
+   * （connection-datasync-ssot §6.1：channel 名不变，载荷由裸端口号升级为目标快照）。
    * 失败时发 'runtime-error' 事件而非抛出。
    * @returns 实际监听的端口号
    */
@@ -49,14 +51,14 @@ export interface IRuntimeSupervisor {
 
   /**
    * 手动重启 runtime（用户从「runtime 不可用」状态条点击重试时调）。
-   * 重置策略计数后走 start()，成功广播 runtime-port，失败广播 runtime-failed。
-   * runtime 已存活时幂等（直接广播端口）。
+   * 重置策略计数后走 start()，成功广播 runtime-port（载荷为目标快照），失败广播
+   * runtime-failed。runtime 已存活时幂等（直接广播目标快照）。
    */
   restartRuntime(): Promise<void>
 
   /**
    * 配置变更触发的 runtime 重启（remote-access 开关切换）：先广播
-   * runtime-restarting → stop → 重新 spawn → 成功广播 runtime-port。
+   * runtime-restarting → stop → 重新 spawn → 成功广播 runtime-port（载荷为目标快照）。
    * 无条件真重启（restartRuntime 对存活进程幂等短路，不适用「必须以新配置
    * 重启」的场景）。失败 reject 上抛，不走崩溃退避链。
    * @returns 重启后实际监听的端口号
@@ -73,10 +75,11 @@ export interface IRuntimeSupervisor {
   readonly port: number | null
 
   /**
-   * 当前 runtime 的 WS auth token（S1-W1，spec §3.3 D4；未启动为 null）。
-   * renderer 经 get-runtime-token IPC 读取后作为 WS 首条 auth 消息发送。
+   * 当前连接目标快照（connection-datasync-ssot §6.1；未启动为 null）。
+   * 单一权威读口：renderer 启动与重连前经 get-runtime-target-snapshot IPC 拉取；
+   * runtime-port 广播载荷同形态（{seq, runtimeId, port, token}）。
    */
-  readonly token: string | null
+  readonly targetSnapshot: RuntimeTargetSnapshot | null
 
   /**
    * 最近一次启动失败原因（RD-3#2 启动失败真因可见性；成功启动后清除，null = 当前无已知失败）。
@@ -230,7 +233,7 @@ export interface IReleaseChecker {
 export interface IpcHandlerDeps {
   /** 读取主窗口（供 privileged handler 发送事件） */
   getMainWindow: () => BrowserWindow | null
-  /** Runtime 监管者（桥接 handler 读 port/portOffset） */
+  /** Runtime 监管者（桥接 handler 经唯一读口 get-runtime-target-snapshot 读连接目标快照，token 随快照并置） */
   runtime: IRuntimeSupervisor
   /** 是否开发模式（决定 createWindow 加载 URL） */
   isDev: boolean

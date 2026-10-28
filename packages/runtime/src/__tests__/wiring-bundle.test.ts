@@ -25,7 +25,7 @@ import type { IDispatcherSessionOps } from '../services/session/session-internal
 import type { IManagedSessionView } from '../services/session/types.js';
 import type { WorkspaceService } from '../services/workspace/workspace-service.js';
 import { extractCallWindows } from './helpers/bracket-call-window.js';
-import { Project, ReplyPayloadMap, type ImportSourceKind, type ProjectStoreState, type ServerMessage, type ServerMessageMap } from '@taiji/shared';
+import { Project, ReplyPayloadMap, type ImportSourceKind, type ServerMessage, type ServerMessageMap } from '@taiji/shared';
 import { normalizeZcodeSessionId, openZcodeSessionDb, zcodeCandidateKey } from '@zhushanwen/zcode-session-source';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -510,6 +510,50 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
     replyKey: 'workspace.recentList',
     effectiveFields: ['records'],
   },
+  // ── 分支一（project 域）：project 列表写通道命令四件套（connection-datasync-ssot §6.6）。
+  // 四命令共用 ProjectCommandReply（protocol.ts 具名形状：state 完整新状态整表 + revision
+  // 新值，均必需），reply type 与 request 同名、ReplyPayloadMap 引用 ServerMessageMap 同名
+  // 条目（preset.create 同款 payload 消费型同名模式）。后端可变换请求值：id 由 runtime
+  // 生成 / name trim 落盘 / activeProjectId 锚定回落 / INV-4 归一化修复随命令落盘
+  //（project-store createProject/renameProject/removeProject/setActiveProject →
+  // ensureInvariants + commitCommand），请求值 ≠ 生效状态——renderer 缓存视图禁乐观写，
+  // 回执整表提交；拒绝（revision 失配/语义校验失败）走统一 error envelope，renderer 保持
+  // 命令前状态，错误态不走 effectiveFields（信封语义同 mcp ok:false）。──
+  {
+    // create：id 运行时生成（proj-<ts>-<seq>）+ trim 后名称 + 新建即设活跃——生效 id
+    // 与名称仅回执可知。
+    type: 'project.createProject',
+    branch: 'transformable',
+    contract: 'effective-value',
+    replyKey: 'project.createProject',
+    effectiveFields: ['state', 'revision'],
+  },
+  {
+    // rename：trim 后名称生效；nameless 默认项目拒绝（error envelope，不落盘）。
+    type: 'project.renameProject',
+    branch: 'transformable',
+    contract: 'effective-value',
+    replyKey: 'project.renameProject',
+    effectiveFields: ['state', 'revision'],
+  },
+  {
+    // remove：删除的是活跃项时 activeProjectId 锚定回落默认项目（INV-4 回退链），
+    // 生效 active 仅回执可知。
+    type: 'project.removeProject',
+    branch: 'transformable',
+    contract: 'effective-value',
+    replyKey: 'project.removeProject',
+    effectiveFields: ['state', 'revision'],
+  },
+  {
+    // setActive：锚定切换不更新 lastUsedAt（R6.2 顺序稳定不置顶），回执整表 + revision
+    // 新值校准缓存视图。
+    type: 'project.setActiveProject',
+    branch: 'transformable',
+    contract: 'effective-value',
+    replyKey: 'project.setActiveProject',
+    effectiveFields: ['state', 'revision'],
+  },
   // ── 分支二：ack 豁免清单（reply 无回显字段，豁免理由逐条登记）──
   {
     type: 'preset.setDefault',
@@ -739,12 +783,13 @@ const SERVER_MESSAGE_MAP_BASE_BLOCK = extractBlock('export interface ServerMessa
 
 
 /** 谓词覆盖域（ADR-0065 范围边界）：session 配置状态 / model / preset / config / mcp /
- * subagent / workspace 七域（mcp 为 pi-mcp-management 设计纳入——add/update/remove 是 mcp.json 配置
+ * subagent / workspace / project 八域（mcp 为 pi-mcp-management 设计纳入——add/update/remove 是 mcp.json 配置
  * 状态 mutation；subagent 为 subagent-model-switch 设计纳入——setModel 是执行模型配置
  * mutation，renderer 持显示副本、回执含生效值字段；workspace 为最近工作区列表纳入——
  * record/setPinned 改 recent-workspaces.json 持久化状态，renderer 持列表副本、reply
- * 回写后终态列表） */
-const MUTATION_DOMAINS = ['session', 'model', 'preset', 'config', 'mcp', 'subagent', 'workspace'] as const
+ * 回写后终态列表；project 为 connection-datasync-ssot 写通道命令化纳入——四命令是
+ * projects.json 持久化状态的 runtime 唯一写入口，renderer 持缓存视图副本、回执整表提交） */
+const MUTATION_DOMAINS = ['session', 'model', 'preset', 'config', 'mcp', 'subagent', 'workspace', 'project'] as const
 
 
 /**
@@ -1083,9 +1128,8 @@ async function catchCode_z3(work: () => Promise<unknown>): Promise<string> {
 // ← src/__tests__/project-store.test.ts
 // ======================================================================
 
-function mkProject(id: string, name: string, lastUsedAt = 0): Project {
-  return { id, name, lastUsedAt }
-}
+// ProjectStore 单测（D14：project 列表迁 runtime projects.json；写通道命令化
+// connection-datasync-ssot §6.6 后，写路径 = 命令通道）。
 
 // wave3 包装：本段原文件顶层语句收进 describe 作用域（顶层 hook 不再外溢到同文件其他来源的用例）
 describe('wiring-bundle', () => {
@@ -1681,6 +1725,10 @@ describe('MUTATION_RPC_REGISTRY 清单检查（ADR-0065 / C-pi-14，D8 机器强
     // workspace 域（最近工作区列表）：echo-value 的 records 必需回显（degraded optional
     // 是降级信封标记，不入契约）
     const workspaceRecentListRecords: HasRequiredField<ServerMessageMap['workspace.recentList'], 'records'> = true
+    // project 域（connection-datasync-ssot 写通道命令化）：ProjectCommandReply 的完整新
+    // 状态整表与 revision 新值必需（四命令共用形态，以 createProject 一处为代表断言）
+    const projectCommandState: HasRequiredField<ServerMessageMap['project.createProject'], 'state'> = true
+    const projectCommandRevision: HasRequiredField<ServerMessageMap['project.createProject'], 'revision'> = true
 
     const assertions = [
       modelSwitchProvider, modelSwitchModelId, thinkingLevel,
@@ -1689,6 +1737,7 @@ describe('MUTATION_RPC_REGISTRY 清单检查（ADR-0065 / C-pi-14，D8 机器强
       providerUpdatedEcho, mcpMutationEntry,
       subagentSetModelEffectiveModel, subagentSetModelEffectiveThinking,
       workspaceRecentListRecords,
+      projectCommandState, projectCommandRevision,
     ]
     expect(assertions, '类型断言清单意外为空——本用例失效，请检查').not.toHaveLength(0)
     expect(assertions.every(Boolean)).toBe(true)
@@ -4404,75 +4453,75 @@ describe('ProjectStore', () => {
     rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
-  it('save → load 往返：projects + activeProjectId 都持久化', () => {
-    const state: ProjectStoreState = {
-      projects: [mkProject('proj-a', 'Alpha'), mkProject('proj-default', '', 0)],
-      activeProjectId: 'proj-a',
-    }
-    store.save(state)
+  /** projects.json 磁盘形态（与 persistToFile 写入结构对齐；revision 由 store 维护）。 */
+  interface RawFileState {
+    projects: Project[]
+    activeProjectId: string
+    revision?: number
+  }
+
+  it('命令 → load 往返：projects + activeProjectId 都持久化', async () => {
+    await store.createProject('Alpha', 0)
+    await store.createProject('Beta', 1)
     store.flushAll()
 
     const reloaded = new ProjectStore(dir)
     const loaded = reloaded.load()
-    expect(loaded.projects.map((p) => p.id)).toEqual(['proj-a', 'proj-default'])
-    expect(loaded.projects[0]!.name).toBe('Alpha')
-    expect(loaded.activeProjectId).toBe('proj-a')
+    // ensureInvariants 补插默认项（name 空）在头部；锚定 = 最后创建项
+    expect(loaded.projects.map((p) => p.name)).toEqual(['', 'Alpha', 'Beta'])
+    expect(loaded.activeProjectId).toBe(loaded.projects.find((p) => p.name === 'Beta')?.id)
   })
 
-  it('文件内容为 ProjectStoreState 结构（{ projects, activeProjectId }）', () => {
-    const state: ProjectStoreState = {
-      projects: [mkProject('proj-a', 'Alpha')],
-      activeProjectId: 'proj-a',
-    }
-    store.save(state)
+  it('文件内容为 ProjectStoreState 结构（{ projects, activeProjectId }）', async () => {
+    await store.createProject('Alpha', 0)
     store.flushAll()
 
-    const raw = JSON.parse(readFileSync(join(dir, 'projects.json'), 'utf-8'))
+    const raw = JSON.parse(readFileSync(join(dir, 'projects.json'), 'utf-8')) as RawFileState
     expect(Array.isArray(raw.projects)).toBe(true)
-    expect(raw.activeProjectId).toBe('proj-a')
-    expect(raw.projects[0].id).toBe('proj-a')
+    expect(raw.projects.map((p) => p.name)).toEqual(['', 'Alpha'])
+    expect(raw.activeProjectId).toBe(raw.projects.find((p) => p.name === 'Alpha')?.id)
   })
 
-  it('全量替换语义：save 后删除的 project 从文件消失', () => {
-    store.save({ projects: [mkProject('a', 'A'), mkProject('b', 'B')], activeProjectId: 'a' })
+  it('删除的 project 从文件消失（命令路径 cache 清空重建语义）', async () => {
+    await store.createProject('A', 0)
+    const b = await store.createProject('B', 1)
     store.flushAll()
-    // 第二次 save 只保留 a（b 被删）
-    store.save({ projects: [mkProject('a', 'A')], activeProjectId: 'a' })
+    await store.removeProject(b.state.projects.find((p) => p.name === 'B')!.id, 2)
     store.flushAll()
 
-    const raw = JSON.parse(readFileSync(join(dir, 'projects.json'), 'utf-8'))
-    expect(raw.projects.map((p: Project) => p.id)).toEqual(['a'])
+    const raw = JSON.parse(readFileSync(join(dir, 'projects.json'), 'utf-8')) as RawFileState
+    expect(raw.projects.map((p) => p.name)).toEqual(['', 'A'])
   })
 
-  it('首启无文件 → 空态（不抛）', () => {
+  it('首启无文件 → 归一化兜底默认项（不抛）', () => {
     const loaded = store.load()
-    expect(loaded.projects).toEqual([])
-    expect(loaded.activeProjectId).toBe('')
+    expect(loaded.projects.map((p) => p.id)).toEqual(['proj-default'])
+    expect(loaded.activeProjectId).toBe('proj-default')
+    expect(store.getRevision()).toBe(0)
   })
 
-  it('文件损坏 → 空态不抛（INV-1）', () => {
+  it('文件损坏 → 隔离后空态兜底默认项，不抛（INV-1）', () => {
     writeFileSync(join(dir, 'projects.json'), '{broken json', 'utf-8')
     const loaded = store.load()
-    expect(loaded.projects).toEqual([])
+    expect(loaded.projects.map((p) => p.id)).toEqual(['proj-default'])
   })
 
-  it('非法结构（非 ProjectStoreState）→ 空态不抛', () => {
+  it('非法结构（非 ProjectStoreState）→ 空态兜底默认项，不抛', () => {
     writeFileSync(join(dir, 'projects.json'), JSON.stringify([{ id: 'a' }]), 'utf-8')
     const loaded = store.load()
-    expect(loaded.projects).toEqual([])
+    expect(loaded.projects.map((p) => p.id)).toEqual(['proj-default'])
   })
 
-  it('load 触发 WriteBackCache 懒加载（save 后新实例能读到已落盘数据）', () => {
-    store.save({ projects: [mkProject('p1', 'One')], activeProjectId: 'p1' })
+  it('load 触发 WriteBackCache 懒加载（命令落盘后新实例能读到已落盘数据）', async () => {
+    await store.createProject('One', 0)
     store.flushAll()
     const s2 = new ProjectStore(dir)
     const loaded = s2.load()
-    expect(loaded.projects).toHaveLength(1)
-    expect(loaded.projects[0]!.name).toBe('One')
+    expect(loaded.projects.some((p) => p.name === 'One')).toBe(true)
   })
 
-  it('existsSync 确认文件确实落盘', () => {
-    store.save({ projects: [mkProject('p1', 'One')], activeProjectId: 'p1' })
+  it('existsSync 确认文件确实落盘', async () => {
+    await store.createProject('One', 0)
     store.flushAll()
     expect(existsSync(join(dir, 'projects.json'))).toBe(true)
   })

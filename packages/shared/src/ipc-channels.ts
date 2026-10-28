@@ -123,12 +123,10 @@ export const RUNTIME_ERROR = 'runtime-error' as const
 export const RUNTIME_RESTARTING = 'runtime-restarting' as const
 /** runtime 自动重启用尽推送（main → renderer；payload { attempts, message }）。 */
 export const RUNTIME_FAILED = 'runtime-failed' as const
-/** 读取 runtime 端口（invoke）。 */
-export const GET_RUNTIME_PORT = 'get-runtime-port' as const
-/** 读取端口偏移（invoke；dev 模式 +100）。 */
-export const GET_RUNTIME_PORT_OFFSET = 'get-runtime-port-offset' as const
-/** 读取 WS auth token（invoke；S1-W1）。 */
-export const GET_RUNTIME_TOKEN = 'get-runtime-token' as const
+/** 读取 runtime 目标快照（invoke；payload = RuntimeTargetSnapshot {seq, runtimeId, port, token}，
+ *  connection-datasync-ssot §6.1：连接目标单一权威读口——supervisor 每次 spawn 更新快照，
+ *  renderer 启动与重连前经此拉取 {seq, runtimeId, port, token} 并置目标）。 */
+export const GET_RUNTIME_TARGET_SNAPSHOT = 'get-runtime-target-snapshot' as const
 /** 读取最近一次启动失败真因（invoke；RD-3#2 boot 竞态拉取兜底）。 */
 export const GET_RUNTIME_START_ERROR = 'get-runtime-start-error' as const
 /** 请求手动重启 runtime（invoke；崩溃重启用尽后用户点重试触发）。 */

@@ -16,10 +16,12 @@
  *   （实现时若 child 非空且未退出 exitCode===null，直接返回 this._port）
  * - start 完整时序：findAvailablePort → spawn → waitForHealth → writePortFile
  * - startAndNotify 消除 main.ts whenReady/activate 重复：spawn 成功发 'runtime-port'，失败发 'runtime-error'
+ * - [§6.1] 'runtime-port' 载荷 = 目标快照 RuntimeTargetSnapshot {seq, runtimeId, port, token}
+ *   （channel 名不变；supervisor 持有快照单一权威，4 广播点统一经 currentSnapshot() 取载荷）
  * - **崩溃自动重启**：onExit 回调检查 stopping 标志 → restart-policy 判定 → 退避后 start()
  *   - 主动 stop() 设 stopping=true，onExit 短路不重启
  *   - 重启用尽（MAX_RESTARTS）→ 广播 'runtime-failed'，等待用户手动重试
- *   - 重启成功 → 广播 'runtime-port'（所有窗口重连新端口）
+ *   - 重启成功 → 广播 'runtime-port'（所有窗口按新快照重连）
  *   - 重启在途幂等：restartTimer 存在时不叠加（exit 事件可能重入）
  *
  * start 时序：
@@ -31,7 +33,7 @@
  *     4. child = spawnRuntimeProcess(port, onExit)
  *     5. await waitForHealth(port)
  *     6. writePortFile(port)
- *     7. this._port = port; restartPolicy.recordSuccess(); return port
+ *     7. this._port = port; 组装目标快照（seq+1, runtimeId, port, token）; restartPolicy.recordSuccess(); return port
  * ```
  *
  * 依赖方向：runtime-supervisor → interfaces + 5 个子模块 + electron(BrowserWindow)
@@ -53,6 +55,7 @@ import { crashJournal } from '../logs/crash-journal.js'
 // 不变（PLANNED_EXIT_CODE 转发，u1f 既有测试与消费方 import 点不受影响）。
 // runtime-* 推送通道名同源 shared（ipc-channels SSOT，preload 侧同 import 消费）。
 import { RUNTIME_PLANNED_EXIT_CODE, RUNTIME_PORT, RUNTIME_ERROR, RUNTIME_RESTARTING, RUNTIME_FAILED } from '@taiji/shared'
+import type { RuntimeTargetSnapshot } from '@taiji/shared'
 
 /**
  * 重启决策的触发源（杀链决策日志 D6-⑥ 的 trigger 字段）：
@@ -145,8 +148,20 @@ export function classifyRuntimeExit(input: {
 export class RuntimeSupervisor implements IRuntimeSupervisor {
   private child: ChildProcess | null = null
   private _port: number | null = null
-  /** 当前 runtime 的 WS auth token（S1-W1：spawn 时生成，随进程生命周期存续；stop/exit 清 null） */
-  private _token: string | null = null
+  /**
+   * 当前 runtime 的实例标识（connection-datasync-ssot §6.1）：spawn 时与 token 同点签发，
+   * 随进程生命周期存续（stop/exit 清 null）。快照字段之一，不单独暴露。
+   */
+  private _runtimeId: string | null = null
+  /**
+   * 连接目标快照（connection-datasync-ssot §6.1）：{seq, runtimeId, port, token} 的单一
+   * 权威持有形态。seq = supervisor 进程内 spawn 计数（spawnSeq），每次 spawn +1——唯一
+   * 职责是过期快照防护（消费方仅接受更高 seq）。生命周期与进程绑定：doStart 成功时组装，
+   * stop()/onRuntimeExit 清 null；未启动（mock/等待态）读口返回 null，消费方进等待态。
+   */
+  private _snapshot: RuntimeTargetSnapshot | null = null
+  /** spawn 计数（seq 来源）：supervisor 进程内单调递增，跨 stop/restart 不清零（过期快照防护依赖代数单调） */
+  private spawnSeq = 0
   /**
    * 最近一次启动失败原因（RD-3#2 启动失败真因可见性）：startAndNotify / attemptRestart
    * 失败时记录，start() 成功即清除（null = 当前无已知失败）。renderer 经
@@ -173,9 +188,12 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
     return this._port
   }
 
-  /** 当前 runtime 的 WS auth token（未启动为 null）。renderer 经 get-runtime-token IPC 读取 */
-  get token(): string | null {
-    return this._token
+  /**
+   * 当前连接目标快照（connection-datasync-ssot §6.1；未启动为 null）。
+   * renderer 经 get-runtime-target-snapshot IPC 拉取；RUNTIME_PORT 广播载荷同形态。
+   */
+  get targetSnapshot(): RuntimeTargetSnapshot | null {
+    return this._snapshot
   }
 
   /** 最近一次启动失败原因（成功启动后清除；null = 当前无已知失败）。renderer 经 get-runtime-start-error IPC 拉取 */
@@ -281,7 +299,7 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
     try {
       // doStart 前置 stop 已清 child，幂等检查不命中 → 必然真 spawn（新配置生效的保证）
       const port = await this.doStart()
-      this.broadcastToAllWindows(RUNTIME_PORT, port)
+      this.broadcastToAllWindows(RUNTIME_PORT, this.currentSnapshot())
       return port
     } catch (e) {
       // 失败补 failed 终态广播：renderer 经既有 failed 态拿重试按钮，协议不变量
@@ -322,8 +340,8 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
     console.log(`[runtime] Starting on port ${port}`)
     const spawned = spawnRuntimeProcess(port, (code) => this.onRuntimeExit(code))
     this.child = spawned.child
-    // S1-W1：持有本生命周期 token（spawnRuntimeProcess 已注入 env + 写 token 文件）
-    this._token = spawned.token
+    // §6.1：持有本生命周期实例标识（spawnRuntimeProcess 已与 token 同点签发并注入 env）
+    this._runtimeId = spawned.runtimeId
 
     // [HISTORICAL] W5 改动 4：spawn 成功但 waitForHealth 可能失败（进程半活）。
     // 必须包 try-catch：失败时主动 stop() 清理半活 child，
@@ -353,6 +371,16 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
 
     writePortFile(port)
     this._port = port
+    // §6.1：目标快照随启动成功落定（seq 递增在 spawn 落定后——快照只在「健康检查通过」
+    // 的目标上成立；失败半途清理不消耗代数，下次 spawn 仍是新代）。字段直取局部 spawned
+    // （this._runtimeId 经 await 后类型窄化失效且语义等价——同一次 spawn 的产物）。
+    this.spawnSeq += 1
+    this._snapshot = {
+      seq: this.spawnSeq,
+      runtimeId: spawned.runtimeId,
+      port,
+      token: spawned.token,
+    }
     // 重启成功 → 记录事实（计数无时间窗清零，清零唯一入口 = 用户显式重试）
     this.policy.recordSuccess()
     // [HISTORICAL] 复位 stopping：上方 `await this.stop()`（清旧进程）曾 markStopping，
@@ -379,17 +407,18 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
   }
 
   /**
-   * 启动 runtime 并通知渲染进程端口。
+   * 启动 runtime 并把连接目标快照通知给渲染进程。
    *
-   * 成功：win.webContents.send(RUNTIME_PORT, port)
+   * 成功：win.webContents.send(RUNTIME_PORT, RuntimeTargetSnapshot)
    * 失败：win.webContents.send(RUNTIME_ERROR, { message })（不抛出）
    *
    * 消除 main.ts whenReady/activate 两处重复的 spawn + 通知逻辑。
+   * [§6.1] RUNTIME_PORT 载荷为快照对象（channel 名不变，renderer 消费方按快照形态读取）。
    */
   async startAndNotify(win: BrowserWindow): Promise<number> {
     try {
       const port = await this.start()
-      win.webContents.send(RUNTIME_PORT, port)
+      win.webContents.send(RUNTIME_PORT, this.currentSnapshot())
       return port
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
@@ -406,14 +435,14 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
    *
    * 场景：崩溃后自动重启用尽，前端展示 runtime-failed 状态条 + 重试按钮。
    * 用户点击 → 前端调 restartRuntime IPC → 此方法。
-   * - runtime 已存活：幂等，直接广播端口（用户误点）
-   * - runtime 已死：重置策略计数，走 start()，成功广播端口，失败广播 failed
+   * - runtime 已存活：幂等，直接广播目标快照（用户误点）
+   * - runtime 已死：重置策略计数，走 start()，成功广播快照，失败广播 failed
    */
   async restartRuntime(): Promise<void> {
-    // runtime 存活 → 幂等，直接广播当前端口
+    // runtime 存活 → 幂等，直接广播当前目标快照
     if (this.child && this.child.exitCode === null && this._port !== null) {
-      console.log(`[runtime] restartRuntime: already running on ${this._port}, broadcast port`)
-      this.broadcastToAllWindows(RUNTIME_PORT, this._port)
+      console.log(`[runtime] restartRuntime: already running on ${this._port}, broadcast target snapshot`)
+      this.broadcastToAllWindows(RUNTIME_PORT, this.currentSnapshot())
       return
     }
     // 重置策略：手动重试给一个新的 5 次配额（清停止标志 + 计数）
@@ -440,8 +469,9 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
     await stopRuntimeProcess(this.child, timeoutMs)
     this.child = null
     this._port = null
-    // token 随进程生命周期结束失效（下次 start 重新生成）
-    this._token = null
+    // 快照与实例标识同生命周期（下次 start 重新签发；seq 不清零——代数单调）
+    this._runtimeId = null
+    this._snapshot = null
   }
 
   /**
@@ -514,10 +544,12 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
   private onRuntimeExit(code: number | null): void {
     // 先捕获 pid 再清状态：杀链决策日志需要「谁死了」（u5b kill decision 的 target 语义）
     const pid = this.child?.pid
-    // 清状态（幂等检查据此判定无活进程）；token 随进程死亡失效（防旧 token 复用）
+    // 清状态（幂等检查据此判定无活进程）；实例标识 / 目标快照随进程死亡失效
+    // （防旧代快照——含其中 token——把重连目标拉回死实例）
     this.child = null
     this._port = null
-    this._token = null
+    this._runtimeId = null
+    this._snapshot = null
 
     // 崩溃登记清单（crash-forensics D1：runtime 自身事件由 main 侧写——runtime 被 SIGKILL
     // 时自己写不了，supervisor 是唯一在场者）。分类判别式见 classifyRuntimeExit：
@@ -648,7 +680,7 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
     try {
       const newPort = await this.start()
       console.log(`[runtime] Restart succeeded on port ${newPort}`)
-      this.broadcastToAllWindows(RUNTIME_PORT, newPort)
+      this.broadcastToAllWindows(RUNTIME_PORT, this.currentSnapshot())
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
       // 重启失败同样刷新真因（RD-3#2）：failed 屏显示的始终是最近一次启动失败原因
@@ -676,5 +708,18 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
         win.webContents.send(channel, payload)
       }
     }
+  }
+
+  /**
+   * RUNTIME_PORT 广播点的载荷取值（§6.1：4 广播点统一推 RuntimeTargetSnapshot）。
+   * 构造不变量：4 个调用点都在 start/doStart 成功之后（成功即组装快照），运行时
+   * _snapshot 必非 null；万一编排演进破坏该前提（广播点先于启动成功），显式 throw
+   * 防止把 undefined/null 载荷推给 renderer（消费方无从区分「快照变更」与「快照清除」）。
+   */
+  private currentSnapshot(): RuntimeTargetSnapshot {
+    if (!this._snapshot) {
+      throw new Error('[runtime] RUNTIME_PORT broadcast invoked without an active target snapshot (start not completed)')
+    }
+    return this._snapshot
   }
 }

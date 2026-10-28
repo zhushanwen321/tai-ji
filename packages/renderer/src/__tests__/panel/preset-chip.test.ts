@@ -292,7 +292,7 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ error: vi.fn(), info: vi.fn(), warning: vi.fn() }),
 }))
 vi.mock('@/api', () => ({
-  project: { load: vi.fn(async () => ({ projects: [], activeProjectId: '' })), save: vi.fn(async () => {}) },
+  project: { load: vi.fn(async () => ({ projects: [], activeProjectId: '' })) },
   chat: { send: vi.fn(), steer: vi.fn() },
   model: { switchModel: vi.fn() },
   session: { setThinkingLevel: vi.fn(), listSessions: vi.fn().mockResolvedValue([]) },

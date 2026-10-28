@@ -1650,9 +1650,7 @@ describe("use-connection-seq-gap", () => {
   function makePorts(): ConnectionPorts {
     return {
       ipc: {
-        getRuntimePort: vi.fn().mockResolvedValue(undefined),
-        getRuntimePortOffset: vi.fn().mockResolvedValue(undefined),
-  getRuntimeToken: vi.fn(async () => null),
+        getRuntimeTargetSnapshot: vi.fn().mockResolvedValue(null),
         onRuntimePort: vi.fn().mockReturnValue(() => {}),
         onRuntimeRestarting: vi.fn().mockReturnValue(() => {}),
         onRuntimeFailed: vi.fn().mockReturnValue(() => {}),

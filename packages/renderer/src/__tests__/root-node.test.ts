@@ -1559,7 +1559,7 @@ describe('session.thinkingLevelSet 事件 → 状态层 thinkingLevel 同步', (
  * 覆盖：
  * - T3.1: defaultCwd = records[0]?.cwd
  * - T3.2: records 空 → defaultCwd undefined
- * - T3.4: RPC reject 降级（records 置 [] 不抛）
+ * - T3.4: RPC reject 降级（保留旧 records 不抛；§6.4 降级型显式行为改进——原置空口径已废）
  *
  * mock 策略：mock workspaceApi.listRecent 返回值。
  *
@@ -1646,23 +1646,28 @@ describe('workspaceStore.load（T3.1 / T3.2）', () => {
 })
 
 describe('workspaceStore.load 降级（T3.4）', () => {
-  it('RPC reject → records 置 [] 不抛', async () => {
-    mockListRecent.mockRejectedValue(new Error('RPC timeout'))
+  it('RPC reject → 保留旧 records 不抛（§6.4 降级型显式行为改进：断连重拉失败不闪空列表）', async () => {
+    mockListRecent.mockResolvedValueOnce([mkRecord('/repo-a', 300)])
     const store = useWorkspaceStore()
-    // 不抛
     await store.load()
-    expect(store.records).toEqual([])
-    expect(store.defaultCwd).toBeUndefined()
+    // 重拉失败（断连重拉形态）
+    mockListRecent.mockRejectedValue(new Error('RPC timeout'))
+    await store.load()
+    // 保留旧值（不置空）+ defaultCwd 跟随旧值
+    expect(store.records).toEqual([mkRecord('/repo-a', 300)])
+    expect(store.defaultCwd).toBe('/repo-a')
   })
 
   it('RD-3#4: RPC reject → 补 console.warn + loadError 标记（读失败 ≠ 无历史，可观测）', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
-      mockListRecent.mockRejectedValue(new Error('RPC timeout'))
+      mockListRecent.mockResolvedValueOnce([mkRecord('/repo-a', 300)])
       const store = useWorkspaceStore()
       await store.load()
-      // AC-4.5 口径不变：records 置 [] 不抛、不阻断启动（不加错误条/重试）
-      expect(store.records).toEqual([])
+      mockListRecent.mockRejectedValue(new Error('RPC timeout'))
+      await store.load()
+      // 保留旧值不置空（§6.4 降级型）
+      expect(store.records).toEqual([mkRecord('/repo-a', 300)])
       // RD-3#4：留痕 + 标记，让「读失败」与「真无历史」在观测范围可分
       expect(store.loadError).toBe('RPC timeout')
       expect(warnSpy).toHaveBeenCalledWith(

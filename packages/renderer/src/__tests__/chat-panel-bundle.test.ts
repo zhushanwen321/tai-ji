@@ -24,7 +24,7 @@
  *    mock 会砍掉）。bottom-drawer 节改 beforeEach spy 模块对象的 useSessionDerivations
  *    返回 derivedStatus 恒 done 的桩，afterEach restore。
  *  - **改造③**（useChat 的 '@/api' 窄 mock 改保留式）：spread 真实门面 + 域内逐成员覆写
- *    （project.load/save、chat 7 动作、session 4 成员转发 apiMock）——原窄替换砍门面其余
+ *    （project.load、chat 7 动作、session 4 成员转发 apiMock）——原窄替换砍门面其余
  *    域，bottom-drawer 节挂真实 PanelContainer 全树的消费面（transport/mock 全量）不受影响。
  *  - bottom-drawer 的 12 条组件 vi.mock + useGitStatus mock 保留：useChat /
  *    follow-triggers / derive-status / tray-order / model-picker-data / panel.store 各节
@@ -155,7 +155,6 @@ vi.mock('@/api', async (importOriginal) => {
     project: {
       ...actual.project,
       load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }),
-      save: vi.fn().mockResolvedValue(undefined),
     },
     chat: {
       ...actual.chat,

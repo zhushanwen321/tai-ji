@@ -48,12 +48,19 @@ vi.mock('../../../core/src/transport/ws-client', () => ({
     return () => { mockHolder.routeHandler = null }
   }),
   onQueueDrop: vi.fn(() => () => {}),
+  // u3（connection-datasync-ssot）起 core use-connection init 链路新增的 ws-client 依赖，
+  // mock 工厂须补形状：auth 应答/拒绝单槽信号（返回取消函数）+ 抑制位读口/复位 + 等待态/探活
+  onAuthAccepted: vi.fn(() => () => {}),
+  onAuthRejected: vi.fn(() => () => {}),
+  isAuthRejectedSuppressed: vi.fn(() => false),
+  resetAuthRejectionSuppression: vi.fn(),
+  setWaitingRuntime: vi.fn(),
+  probeAlive: vi.fn(),
 }))
 
 vi.mock('@/lib/ipc', () => ({
-  getRuntimePort: vi.fn(async () => undefined),
-  getRuntimePortOffset: vi.fn(async () => undefined),
-  getRuntimeToken: vi.fn(async () => undefined),
+  // 连接控制器快照读口桩（connection-datasync-ssot §6.2：null = 不发起连接）
+  getRuntimeTargetSnapshot: vi.fn(async () => null),
   onRuntimePort: vi.fn(() => () => {}),
   onRuntimeRestarting: vi.fn(() => () => {}),
   onRuntimeFailed: vi.fn(() => () => {}),
