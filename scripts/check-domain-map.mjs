@@ -17,10 +17,14 @@
  *      防止逻辑文件被误登记进域清单（域清单只收挂载渲染重型文件）；
  *   6. 消费一致性：renderer/ui 的 vitest.config.ts 必须引用 domain-exclusions
  *      加载器（默认档排除来自权威源），scripts/run-domain-tests.mjs 必须存在。
+ *   7. staged 新增挂载文件登记提示（warn 级）：新增 .test.ts 含挂载特征且未登记
+ *      域表时提示自查（重型的结果性判定兜底 = CI check-slow-tests >2s 门禁，
+ *      静态特征区分不了轻重，故不红灯）。
  *
  * 用法：node scripts/check-domain-map.mjs（不挂钩子，挂接归 W2-C）
  */
 import { existsSync, readFileSync } from 'node:fs'
+import { execSync } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -133,3 +137,33 @@ const perDomain = Object.entries(domains)
   .map(([name, entry]) => `${name}:${entry.files.length}`)
   .join(' ')
 console.log(`[domain-map] OK：${Object.keys(domains).length} 域 / ${fileCount} 文件（${perDomain}）——结构、存在性、唯一归属、挂载特征、消费方接线全部通过`)
+
+// ── 7. staged 新增挂载文件的登记提示（warn 级，不红灯）────────────────────
+// 静态挂载特征区分不了「重型（须登记进域表）」与「轻量（合法留默认档，存量数百个）」，
+// 故只提示不拦；重型的结果性判定兜底 = CI check-slow-tests（默认组用例 >2s 红灯）。
+let stagedAdded = []
+try {
+  stagedAdded = execSync('git diff --cached --name-only --diff-filter=A', { cwd: ROOT, encoding: 'utf-8' })
+    .split('\n')
+    .filter(Boolean)
+} catch {
+  stagedAdded = [] // 非 git 上下文（如直接手跑）跳过提示
+}
+const registeredSet = new Set(
+  Object.values(domains ?? {}).flatMap((entry) => (Array.isArray(entry?.files) ? entry.files : [])),
+)
+const freshMounted = stagedAdded.filter(
+  (f) =>
+    PKG_PREFIXES.some((p) => f.startsWith(p)) &&
+    FILE_SUFFIXES.some((s) => f.endsWith(s)) &&
+    !registeredSet.has(f) &&
+    existsSync(path.join(ROOT, f)) &&
+    MOUNT_MARK.test(readFileSync(path.join(ROOT, f), 'utf-8')),
+)
+if (freshMounted.length > 0) {
+  console.warn('')
+  console.warn(`⚠ [domain-map] 本次新增 ${freshMounted.length} 个带挂载特征的测试文件未登记域表（不拦提交，按判据自查）：`)
+  for (const f of freshMounted) console.warn(`    ${f}`)
+  console.warn('  · 用例实测 >2s（CI check-slow-tests 门禁口径）→ 属挂载渲染重型：同 commit 登记进 docs/testing/domain-map.json 对应域，走域触发档；')
+  console.warn('  · 轻量挂载文件留默认档即可（存量大量同类，合法形态）。')
+}

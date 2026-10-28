@@ -44,10 +44,10 @@ cd packages/renderer && npx vitest run src/__tests__/panel/composer-slash-trigge
 # runtime（有独立 vitest.config.ts）
 cd packages/runtime && npx vitest run
 
-# core（chat/composer/session 等 domain 纯逻辑单测，独立 vitest，node 环境，120 测试文件 2026-09-12 实测）
+# core（chat/composer/session 等 domain 纯逻辑单测，独立 vitest，node 环境）
 cd packages/core && npx vitest run
 
-# ui（features/chat 等跨端组件 mount 测试，独立 vitest，happy-dom，58 测试文件 2026-09-12 实测）
+# ui（features/chat 等跨端组件 mount 测试，独立 vitest，happy-dom）
 cd packages/ui && npx vitest run
 
 # typecheck（vue-tsc 在 apps/electron/node_modules）
@@ -75,9 +75,9 @@ node scripts/verify-scheduler-e2e.cjs
 
 ### 测试执行体系总览
 
-一个测试文件从写入到进入回归，经过四层机制，每层有唯一权威源与机器守卫（新增 / 修改测试文件时的登记义务汇总见「新写测试判据」节的登记义务导航）：
+一个测试文件从写入到进入回归，经过四层机制，每层有唯一权威源与机器检查（新增 / 修改测试文件时的登记义务汇总见「新写测试判据」节的登记义务导航）：
 
-| 层 | 职责 | 权威源 | 机器守卫 |
+| 层 | 职责 | 权威源 | 机器检查 |
 |----|------|--------|---------|
 | 归属层 | 全部测试文件按被测模块的唯一变更原因登记进唯一 owner 域；改动 diff → 该跑哪些域由域注册表派生 | [docs/testing/domain-slices/](testing/domain-slices/)（38 域）；挂载渲染重型文件另登记 [docs/testing/domain-map.json](testing/domain-map.json)（默认档排除 + 域触发选中） | `scripts/check-domain-slices.mjs`（健康度 + 未覆盖红灯）+ `select-affected-domain --staged`（新增文件漏登记 pre-commit 无条件红灯）+ `scripts/check-domain-map.mjs` |
 | 入口层 | 四档执行入口（见下表）：日常按域分流、全量三段、重型带门控、单域秒级触发 | 根 package.json scripts + `scripts/run-daily-tests.mjs` / `run-domain-tests.mjs` | `scripts/check-test-results.mjs`（junit 聚合退出码判定） |
@@ -97,11 +97,11 @@ node scripts/verify-scheduler-e2e.cjs
 
 **域触发档的登记与排除契约**（权威源 = [docs/testing/domain-map.json](testing/domain-map.json)，域清单以该文件实际条目为准）：挂载渲染重型测试文件（含 `@vue/test-utils` 引用或 `mount(` 调用）按功能域登记进 `domains` 表，每文件唯一归属；默认档排除与域触发选中都从该表派生——renderer / ui 的 vitest.config.ts 经 `test-guard/domain-exclusions.ts` 加载排除清单，域触发经 `scripts/run-domain-tests.mjs` 取清单，禁止任何一侧手抄文件副本。登记义务：新增挂载渲染重型文件须同 commit 登记进对应域（漏登记 = 文件落回默认档拖慢全量档）；逻辑层文件禁止登记（域清单只收挂载渲染）。健康度机器校验 = `scripts/check-domain-map.mjs`（结构 / 存在性 / 唯一归属 / 挂载特征 / 消费方接线五项；pre-commit 以权威源、消费方 config、两个脚本或 `test-guard/` 任一 staged 触发）。
 
-**功能域切片登记契约**（权威源 = [docs/testing/domain-slices/](testing/domain-slices/) 目录，38 域 = 35 功能域 + foundation / host / uncategorized 三池；引擎四件 = `scripts/select-affected-domain.mjs` 按变更选域、`scripts/check-domain-slices.mjs` 健康度守卫、`scripts/run-domain-tests.mjs` 多域运行、`scripts/run-daily-tests.mjs` 日常档编排〔`pnpm test`：diff → 选域 → 基础池 core ∪ 命中域〕）：全部测试文件按被测模块的唯一变更原因登记进唯一 owner 域（owner 唯一保证并行登记不冲突；跨域触发的测试用 `sharedBy` 注记联跑域，键 = owner 域登记的文件路径、值 = 联跑域列表，超集方向不漏跑；域间联动义务用 `contracts` 登记）。与 domain-map 的分工：domain-map 只管挂载渲染重型文件（默认档排除 + 域触发选中），domain-slices 覆盖全量测试文件（改动了什么 → 该跑哪些域）。登记义务：新增测试文件须同 commit 登记进所属域 JSON（`coverageEnforced=true` 后守卫对未覆盖文件红灯）；归属按消费方证据（被测模块 / describe 实测内容），禁文件名启发式（`new-task-bundle.test.ts` 目录名陷阱实例：实测全为 GitMessageHandler，归 git 域）。健康度机器校验 = `scripts/check-domain-slices.mjs`（结构 / 存在性 / 唯一归属 / W2-B 交叉核对 / 未覆盖强制；pre-commit 2f-4 段以注册表或三脚本任一 staged 触发）。
+**功能域切片登记契约**（权威源 = [docs/testing/domain-slices/](testing/domain-slices/) 目录，38 域 = 35 功能域 + foundation / host / uncategorized 三池；引擎四件 = `scripts/select-affected-domain.mjs` 按变更选域、`scripts/check-domain-slices.mjs` 健康度检查、`scripts/run-domain-tests.mjs` 多域运行、`scripts/run-daily-tests.mjs` 日常档编排〔`pnpm test`：diff → 选域 → 基础池 core ∪ 命中域〕）：全部测试文件按被测模块的唯一变更原因登记进唯一 owner 域（owner 唯一保证并行登记不冲突；跨域触发的测试用 `sharedBy` 注记联跑域，键 = owner 域登记的文件路径、值 = 联跑域列表，超集方向不漏跑；域间联动义务用 `contracts` 登记）。与 domain-map 的分工：domain-map 只管挂载渲染重型文件（默认档排除 + 域触发选中），domain-slices 覆盖全量测试文件（改动了什么 → 该跑哪些域）。登记义务：新增测试文件须同 commit 登记进所属域 JSON（`coverageEnforced=true` 后检查对未覆盖文件红灯）；归属按消费方证据（被测模块 / describe 实测内容），禁文件名启发式（`new-task-bundle.test.ts` 目录名陷阱实例：实测全为 GitMessageHandler，归 git 域）。健康度机器校验 = `scripts/check-domain-slices.mjs`（结构 / 存在性 / 唯一归属 / W2-B 交叉核对 / 未覆盖强制；pre-commit 2f-4 段以注册表或三脚本任一 staged 触发）。
 
 **零特征共享池**（subagent-core / core / zcode-subagent-cli 三包接线，runtime / renderer 登记未接线；权威源 = [docs/testing/zero-mock-pool.json](testing/zero-mock-pool.json)，e2e-map 登记 = E2E-PIPE-28）：已接线三包的默认档测试按「零特征文件 → shared project（isolate:false，模块图与 worker 进程跨文件复用）；其余 → isolated project（每文件新进程，groupOrder 1 与 shared 组严格串行，vitest 4 分池调度契约见 `packages/runtime/vitest.config.ts` 文件头）」执行，入口命令不变（`pnpm test`）。准入判据三层：①静态零特征——七特征正则（vi.mock / vi.doMock / vi.resetModules / vi.useFakeTimers / vi.stubGlobal / process.env 直写 / globalThis 直写）全不命中；②非门控——集成门控（import integration-gate）与真机 live 门控（ENGINE_CONFORMANCE_LIVE）文件一律隔离，门控档执行语义只在隔离态验证过；③动态验证通过——零特征 ≠ 零污染（「正常 API 调用改写模块级单例」静态原理性漏判，core settings-store 实例），共享池实跑红过的文件出局进隔离池并登记 dynamicExclusions 附原因。维护契约：新测试文件默认落隔离池（漏登记无危害只是慢，方向安全）；池扩容 = `node scripts/check-zero-mock-pool.mjs --update` 重写登记表 → 已接线包各两轮全量动态验证（TAIJI_SKIP_REAL_PI=1 pnpm test 全绿 + junit 用例名与变更前基线守恒）→ 同 commit 提交；给池内文件引入 mock / 门控特征由机器检查 G3/G4 红灯拦截（健康度机器校验 = `scripts/check-zero-mock-pool.mjs`，G1-G7：结构 / 存在性 / 特征复扫 / 门控复扫 / 动态出场表 / 已接线包 config 消费方接线 / 未登记漂移提示）。**接线边界（同负载窗口交替 A/B 实证）**：包内零特征占比 ≥~50% 才有净收益（subagent-core 59% → 2.13x；core 1.55x）；占比 ~10% 时新增 project 的固定开销（第二个 vite server + 组串行化）反噬净慢 0.6~2.9s——runtime（24/235）、renderer（10/113）据此停在「已登记未接线」（登记表 `wired` 标记受 G6 检查约束，重新接线判据与 A/B 数据见登记表 `_meta` 与 `scripts/check-zero-mock-pool.mjs` POOL_PKGS 注释）；ui / mobile-renderer / electron-main 不登记（零特征文件过少，无提速对象）。
 
-**重型档的门控与载体登记维护契约**（SSOT = `packages/runtime/vitest.config.ts` 文件头维护契约 + [下方「集成测试门控约定」](#集成测试门控约定taiji_test_integration)）：真进程 / 真 IO 用例两种门控形态（用例级 `describe.skipIf` / 文件级 INTEGRATION_TESTS 登记）的选型、载体表登记义务见该节。漏登记（成员文件内存在未包裹用例却不在 INTEGRATION_UNGATED_CARRIERS）= 门控关闭时该文件不被收集、用例静默消失——机器守卫 `scripts/check-integration-carriers.mjs`（pre-commit 以 runtime vitest.config.ts / `test-guard/` / runtime 测试文件任一 staged 触发；复用 `SKIP_CODE_RULES_CHECK` 开关）。
+**重型档的门控与载体登记维护契约**（SSOT = `packages/runtime/vitest.config.ts` 文件头维护契约 + [下方「集成测试门控约定」](#集成测试门控约定taiji_test_integration)）：真进程 / 真 IO 用例两种门控形态（用例级 `describe.skipIf` / 文件级 INTEGRATION_TESTS 登记）的选型、载体表登记义务见该节。漏登记（成员文件内存在未包裹用例却不在 INTEGRATION_UNGATED_CARRIERS）= 门控关闭时该文件不被收集、用例静默消失——机器检查 `scripts/check-integration-carriers.mjs`（pre-commit 以 runtime vitest.config.ts / `test-guard/` / runtime 测试文件任一 staged 触发；复用 `SKIP_CODE_RULES_CHECK` 开关）。
 
 ### 集成测试门控约定（TAIJI_TEST_INTEGRATION）
 
@@ -135,7 +135,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
 
 文件级集成组的维护契约写在各包 config 文件头（现行范例 = `packages/runtime/vitest.config.ts`：main 与 integration 同池满并行、real-pi 串行尾组的两池分工——integration 同池的实证背书与安全前提见该文件头调度契约段；无同池实证的新建组仍按上表默认串行尾组形态）。新建 integration project 漏挂双防线由 `scripts/check-vitest-guard.mjs` 第 5 条拦截。
 
-**收集条件化**（门控关闭时不付空转装载成本）：integration project 的 `include` 按门控组装——门控开启 = 全部登记文件；门控关闭 = 只收集 `INTEGRATION_UNGATED_CARRIERS` 表内文件。判据 = 该文件是否含未包 `describe.skipIf` 的用例（门控关闭时仍会真实执行）：含则登记进载体表（多一个「库内非门控用例载体」登记位），整文件都是门控用例则不进表——收集它是纯空转（只付 import/transform，产出 0 条断言）。漏登记载体表 = 该文件的非门控用例在门控关闭时静默不收集；机器守卫 = `scripts/check-integration-carriers.mjs`（静态解析两表 + 成员文件逐用例 skipIf 覆盖扫描，pre-commit 触发条件见「测试执行四档」节）。real-pi 池不适用条件化：其成员含不依赖凭证的 faux 层用例（`REAL_PI_READY` 关闭时仍真实执行），按门控跳过整个池会静默丢断言。
+**收集条件化**（门控关闭时不付空转装载成本）：integration project 的 `include` 按门控组装——门控开启 = 全部登记文件；门控关闭 = 只收集 `INTEGRATION_UNGATED_CARRIERS` 表内文件。判据 = 该文件是否含未包 `describe.skipIf` 的用例（门控关闭时仍会真实执行）：含则登记进载体表（多一个「库内非门控用例载体」登记位），整文件都是门控用例则不进表——收集它是纯空转（只付 import/transform，产出 0 条断言）。漏登记载体表 = 该文件的非门控用例在门控关闭时静默不收集；机器检查 = `scripts/check-integration-carriers.mjs`（静态解析两表 + 成员文件逐用例 skipIf 覆盖扫描，pre-commit 触发条件见「测试执行四档」节）。real-pi 池不适用条件化：其成员含不依赖凭证的 faux 层用例（`REAL_PI_READY` 关闭时仍真实执行），按门控跳过整个池会静默丢断言。
 
 **引擎包特例**：`packages/pi-subagent-cli` 与 `packages/zcode-subagent-cli` 受引擎包边界检查（`scripts/check-engine-package-boundary.mjs`）约束——src 内相对说明符不得逃出包根，测试文件**不** import 仓库根的 `test-guard/integration-gate.ts`，改 import 包内副本（`packages/pi-subagent-cli/src/__tests__/integration-gate.local.ts` 与 `packages/zcode-subagent-cli/src/__tests__/integration-gate.local.ts`，同语义读同名 env、注释指回本节；改语义时与 SSOT 同步）。env 名的语义权威仍在 `test-guard/integration-gate.ts`，包内副本只是边界约束下同步维护的副本。
 
@@ -170,15 +170,16 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
 
 **机器防线**（新增测试的极端形态在提交与 CI 两级被拦，判断不留给人）：
 - pre-commit `.githooks/check-test-extremes.mjs`：staged 测试文件命中「真子进程调用但未挂门控 / 显式 timeout ≥5s / waitFor 显式 timeout ≥1s / performance.now 断言」任一信号即红；合法例外（锁语义需真实 pid 判定、检查器黑盒自测等）登记在该脚本的 EXEMPT 表，逐条附理由。
-- CI 慢用例门禁 `scripts/check-slow-tests.mjs`：各 test job 在测试步骤后解析 junit（`test-results/vitest-junit.xml` 每次运行自动落盘），默认组任一用例 >2s 即红——e2e-map `E2E-INTEG-*` 规则登记的门控资产文件豁免（其耗时属集成组语义）。本地对账入口：`node scripts/check-slow-tests.mjs`（扫当前已落盘的全部 junit）。
+- 慢用例门禁 `scripts/check-slow-tests.mjs`（提交与 CI 两级）：CI 侧各 test job 在测试步骤后解析 junit（`test-results/vitest-junit.xml` 每次运行自动落盘），默认组任一用例 >2s 即红——e2e-map `E2E-INTEG-*` 规则登记的门控资产文件豁免（其耗时属集成组语义）；pre-commit 侧 `--if-fresh`（2f-6）只查本次 staged 测试文件所属包、且 junit 新鲜（mtime ≥ staged 文件，即改完真跑过）的包，junit 缺失或陈旧的包黄字跳过不拦。本地对账入口：`node scripts/check-slow-tests.mjs`（扫当前已落盘的全部 junit）。
+- 挂载文件域登记提示 `scripts/check-domain-map.mjs` 检查项 7（warn 级）：staged 新增 .test.ts 含挂载特征且未登记 domain-map 时提示自查——静态特征区分不了重型（须登记走域触发档）与轻量（合法留默认档，存量数百个），重型的结果性判定兜底 = 上一条慢用例门禁，故只提示不拦。
 
 **派发纪律**：向 subagent 派发涉及写测试的任务时，提示词必须附带本节三档判据与门控写法要点（或直接指路本节），防新用例把极端形态带回单测层——项目 AGENTS.md 测试节已登记此要求。
 
-**登记义务导航（新增 / 修改测试文件时逐行对照，漏登即守卫红灯或回归漏跑）**：
+**登记义务导航（新增 / 修改测试文件时逐行对照，漏登即检查红灯或回归漏跑）**：
 
-| 登记处 | 什么文件必须登 | 漏登后果 | 机器守卫 |
+| 登记处 | 什么文件必须登 | 漏登后果 | 机器检查 |
 |--------|--------------|---------|---------|
-| `docs/testing/domain-slices/` 域 JSON | **全部**测试文件（唯一 owner 域，按被测模块消费方证据归属，禁文件名启发式） | 日常档按域分流漏跑该文件；未覆盖文件守卫红灯 | `select-affected-domain --staged`（pre-commit 无条件拦新增文件漏登记）+ `scripts/check-domain-slices.mjs` |
+| `docs/testing/domain-slices/` 域 JSON | **全部**测试文件（唯一 owner 域，按被测模块消费方证据归属，禁文件名启发式） | 日常档按域分流漏跑该文件；未覆盖文件检查红灯 | `select-affected-domain --staged`（pre-commit 无条件拦新增文件漏登记）+ `scripts/check-domain-slices.mjs` |
 | `docs/testing/domain-map.json` | 挂载渲染重型文件（`@vue/test-utils` 引用或 `mount(` 调用且用例重——CI 慢用例门禁 >2s 是重型的判定兜底） | 文件落默认档拖慢全量档 | `scripts/check-domain-map.mjs`（登记质量）；`scripts/check-slow-tests.mjs`（CI >2s 红灯逼登记）。轻量挂载文件（数百个存量）合法留默认档，静态特征区分不了轻重，勿反向硬卡 |
 | `docs/testing/e2e-map.json` | 门控 / live / E2E 档资产（集成门控文件、真机验收用例、updater E2E 段等） | 触发式回归（select-affected-e2e）漏跑该资产 | `select-affected-e2e --check` + `scripts/validate-e2e-map.mjs` |
 | 所在包 `vitest.config.ts` 门控表 | 文件级集成组成员（INTEGRATION_TESTS）与门控关闭仍需收集的载体（INTEGRATION_UNGATED_CARRIERS）；real-pi 组成员（REAL_PI_TESTS） | 门控关闭时非门控用例静默不收集；或同一文件双执行 | `scripts/check-integration-carriers.mjs` + `scripts/check-vitest-guard.mjs` |
@@ -339,11 +340,11 @@ it('首屏渲染：<页面> DOM 含关键交互元素', () => {
 
 ## 6. pre-commit hook
 
-提交前自动跑（`.githooks/`）：
+提交前自动跑（活钩子由 `.githooks/install-hooks.sh` 生成派发——完整检查清单与触发条件的权威源 = 该安装脚本的分段注释，本节只列代表性分层；测试域各检查的登记义务对照见「新写测试判据」节的登记义务导航）：
 1. **前端 ESLint 检查**（含 taste 规则：no-magic-spacing / no-silent-catch 等）
 2. **vue-tsc 类型检查**
-3. **代码规范检查**
-4. **测试盲等形态检查**（staged 测试文件，见「异步等待写法」节）
+3. **代码规范检查**（80+ 静态检查：分层 / 边界 / i18n / 路径白名单等，按 staged 路径触发）
+4. **测试域检查**（2f 系）：测试盲等形态（见「异步等待写法」节）、极端形态（check-test-extremes）、域映射健康度 + 新增挂载文件登记提示（check-domain-map）、域切片健康度 + 新增文件归域门禁（无条件）、零特征池健康度（G1-G7）、慢用例本地门禁（check-slow-tests --if-fresh，junit 新鲜即查）、flake 卫生
 
 taste/no-silent-catch 处理：纯 console.warn 仍报（要求传播/重抛）。项目惯例用 `// eslint-disable-next-line taste/no-silent-catch -- <理由>`（参考 runtime `fetchAndBroadcastCommands`、useSidebar/useNewTaskFlow 的 getCommands catch）。**改 catch 前先 `grep -rn "no-silent-catch"` 看现有写法**。
 
@@ -440,10 +441,10 @@ taste/no-silent-catch 处理：纯 console.warn 仍报（要求传播/重抛）�
 
 羊毛 provider（[ADR-0166](adr/decisions.md)：三家族 = taiji 插件 `plugin-wool-<family>` 承载管理动作 + pi provider 扩展 `pi-wool-<family>` 承载对话链）的真实验收轨：依赖三家真实凭据链路（Qoder 钥匙串提取 / Trae storage.json 容器解密 / WorkBuddy OAuth 授权）与本机登录态、真实上游对话（烧账号额度），不可凭证无关化——按 e2e 资产三态全部归 **R2（按改动范围触发）**，不进 CI、不进 PR/merge 门禁（与「等价性测试双轨」的 real-pi 分工同口径）。
 
-- **触发条件**：改动独立仓 tai-ji-plugin 的插件包/扩展包（家族侧改动在该仓跑测试；涉及宿主契约时回主仓跑本轨）、`packages/runtime/src/services/provider-write-proxy.ts`、`packages/runtime/src/services/wool-extension-installer.ts`、`packages/shared/src/plugin-namespace.ts`、插件来源接入的宿主面（`packages/runtime/src/services/plugin-service/` 能力放行与安装编排、`packages/renderer/src/components/settings/provider/PluginProviderFlow.vue` / `PluginProviderSource.ts`）时，在 dev-flow 验收阶段跑受影响家族的对应场景子集
+- **触发条件**：改动独立仓 tai-ji-plugin 的插件包/扩展包（家族侧改动在该仓跑测试；涉及宿主契约时回主仓跑本组）、`packages/runtime/src/services/provider-write-proxy.ts`、`packages/runtime/src/services/wool-extension-installer.ts`、`packages/shared/src/plugin-namespace.ts`、插件来源接入的宿主范围（`packages/runtime/src/services/plugin-service/` 能力放行与安装编排、`packages/renderer/src/components/settings/provider/PluginProviderFlow.vue` / `PluginProviderSource.ts`）时，在 dev-flow 验收阶段跑受影响家族的对应场景子集
 - **执行纪律**：空载串行（真实 LLM 轮次延迟受 CPU 并发影响，项目 e2e 执行准则 SSOT = AGENTS.md「测试」节）；临时数据目录 dev 实例（`--data-dir` 隔离）；凭据探针产物不入库
 - **场景清单**（逐条步骤与通过标准见 wool-provider 设计文档 §4 场景表；本节只登记归宿，判定方式按「脚本可判定 / agent 判定 / 既有套件承接」描述——不使用 L1-L3 执行层标签，避免与上方四层框架撞名）：S1 Qoder 全链路接入 / S2 WorkBuddy OAuth 接入 / S3 Trae 接入（真实凭据对话，agent 判定）；S4 模型清单更新 / S5 扩展热更新 / S8 生命周期与邻居不变量 / S12 选择器整合双态（脚本可判定，其中 S5 的 npm 发布链与 S2 的 OAuth 全链路依赖发布资产/用户交互，分段执行）；S6 令牌过期恢复 / S7 签到默认关 / S10 降级隔离 / S11 未装 IDE 家族（确定性断言 + 交互判定混合）；S9 既有零回归 = 既有单测全量套件承接（非真实凭据轨——model.list 聚合与扩展装载的回归由 ADR-0164 登记的 P0 关联义务覆盖）
-- **登记形态说明**：本轨无固定 spec 文件资产（场景为真机编排 + 断言脚本按次执行，不落 e2e/ 目录），按新资产流转规则 1 的「本表」分支登记——触发条件落本节即为登记，不属 `docs/testing/e2e-map.json` 收录对象（其结构校验要求每条 rule 的 assets 非空且指向磁盘存在的 spec，见 `scripts/validate-e2e-map.mjs`）；场景定义权威 = wool-provider 设计文档 §4，执行记录 = dev-flow runlog
+- **登记形态说明**：本组无固定 spec 文件资产（场景为真机编排 + 断言脚本按次执行，不落 e2e/ 目录），按新资产流转规则 1 的「本表」分支登记——触发条件落本节即为登记，不属 `docs/testing/e2e-map.json` 收录对象（其结构校验要求每条 rule 的 assets 非空且指向磁盘存在的 spec，见 `scripts/validate-e2e-map.mjs`）；场景定义权威 = wool-provider 设计文档 §4，执行记录 = dev-flow runlog
 
 ## 8. Extension Upgrade 回归基线 [from: extension-upgrade]
 
@@ -539,7 +540,7 @@ pi 边界可靠性设计的测试范围落地（2026-08-27 事故对 → 四支�
 
 **裁决二：subagent-workflow 剩余耗时——架构固有，不动**（墙钟 14.3s / 944 用例）。求和大头的构成：review-fix-loop-e2e 13.1s（真实 worker 子进程）属真实 IO 语义成本；~8-10s 是 7 个「装配真实入口」测试文件的首用例动态 import 整棵组合根——forks 池无磁盘 transform 缓存、每 fork 重复付，属架构固有。三个压缩方案全部否决：入口懒加载会动组合根装配时序（u7a 验收固定「extension 加载完成时触发」）；deps.optimizer 内联 `@zhushanwen/subagent-core` 会破坏 vi.mock 深路径与 barrel 的物理模块等价性（mock 静默失效风险）；改测试 import 形态违背 D3 裁决（2026-09-03，测试深路径统一经 alias 正则不改写）。
 
-**裁决三：根全量入口（现 `pnpm test:all`）包级并发预算——默认已最优，不调**。10 核机 4 重包对照实测（2026-09-15）：默认并发 31.6s < concurrency=2 的 32.9s < 串行 35.3s——并发膨胀（zcode 求和 +15%）被包间进程启动/IO 重叠收益抵消还有余。CI 不经此路径（走 `--filter <pkg> exec vitest run --shard=` 按包分 job）。
+**裁决三：根全量入口（`pnpm test:all`）包级并发预算 = 三段式各段定档（small concurrency=3 / mid concurrency=2 / heavy 串行），调整须有同窗口对照实测**。机理依据（10 核机 4 重包对照，2026-09-15）：默认并发 31.6s < 全局 concurrency=2 的 32.9s < 串行 35.3s——并发膨胀（zcode 求和 +15%）被包间进程启动/IO 重叠收益抵消还有余，故小包放开并发、重包收串行。CI 不经此路径（走 `--filter <pkg> exec vitest run --shard=` 按包分 job）。
 
 `[HISTORICAL]` 案例锚（扫描根锚错层）：zcode capabilities 零消费方检查的 `srcRoot` 上跳 5 级落到 **workspace 父目录**，实际扫所有兄弟 worktree 全部 .ts（3.1s 且耗时随兄弟 worktree 文件量漂移）；修正为本包 src 后 4ms。对照：renderer i18n 两个检查在 `__tests__/i18n` 子目录（深 2 层），5 级跳恰好落仓库根（正确）。规则：目录内 walk 扫描的根推导层数必须按「测试文件实际深度」核对，禁止从别包抄跳层数；改完用负向探针（植入消费点确认变红）验证检查仍有效。
 

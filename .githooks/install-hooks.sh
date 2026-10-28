@@ -780,11 +780,14 @@ fi
 #     与 scripts/run-domain-tests.mjs（域触发选中）共同消费它，任何一侧漂移
 #     （文件改名/删除未同步登记、双收录、逻辑文件误登记、config 绕开权威源
 #     手抄清单）→ 默认档排除与域触发选中失配，本检查拦成红灯。触发条件 =
-#     权威源 / 消费方 / 检查脚本自身任一 staged（test-guard/ 并入触发：排除清单
-#     派生器 domain-exclusions 载体所在域）。复用 SKIP_CODE_RULES_CHECK 开关。
+#     权威源 / 消费方 / 检查脚本自身 / renderer·ui 测试文件任一 staged
+#     （test-guard/ 并入触发：排除清单派生器 domain-exclusions 载体所在域；
+#     测试文件并入触发：新增挂载特征文件未登记域表时提示自查——重型的
+#     结果性判定兜底 = CI check-slow-tests，静态特征区分不了轻重故只提示
+#     不拦）。复用 SKIP_CODE_RULES_CHECK 开关。
 # ============================================================================
 
-if echo "$STAGED_FILES" | grep -qE "^docs/testing/domain-map\.json$|^packages/(renderer|ui)/vitest\.config\.ts$|^scripts/(check-domain-map|run-domain-tests)\.mjs$|^test-guard/"; then
+if echo "$STAGED_FILES" | grep -qE "^docs/testing/domain-map\.json$|^packages/(renderer|ui)/vitest\.config\.ts$|^scripts/(check-domain-map|run-domain-tests)\.mjs$|^test-guard/|^packages/(renderer|ui)/.+\.test\.tsx?$"; then
     print_section "[挂载渲染域映射健康度检查]"
     if [ "$SKIP_CODE_RULES_CHECK" != "1" ]; then
         if ! node scripts/check-domain-map.mjs; then
@@ -868,6 +871,28 @@ if echo "$STAGED_FILES" | grep -qE "^docs/testing/zero-mock-pool\.json$|^scripts
         fi
     else
         echo -e "${YELLOW}[SKIP] 零特征共享池健康度检查已跳过${NC}"
+    fi
+fi
+
+# ============================================================================
+# 2f-6. 慢用例本地门禁（--if-fresh：CI check-slow-tests 的提交前前置）
+#     scripts/check-slow-tests.mjs --if-fresh：把「默认组用例 >2s 红灯」从 CI
+#     提前到提交时——只查本次 staged 测试文件所属包、且 junit 新鲜（mtime ≥
+#     staged 文件，即改完真跑过）的包；junit 缺失或陈旧的包黄字跳过不拦
+#     （防陈旧数据误拦与「未跑测试不许提交」的过度强制）；无测试文件 staged
+#     静默通过。判据权威 = docs/TEST-STRATEGY.md「新写测试判据」节。
+#     无条件运行（脚本内自筛，与 2f-4 第二道同款设计）。复用 SKIP_CODE_RULES_CHECK。
+# ============================================================================
+
+if [ "$SKIP_CODE_RULES_CHECK" != "1" ]; then
+    if [ ! -f "scripts/check-slow-tests.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/check-slow-tests.mjs（检查脚本被删除）${NC}"
+        exit 1
+    fi
+    if ! node scripts/check-slow-tests.mjs --if-fresh; then
+        echo -e "${RED}[ERROR] 慢用例本地门禁未通过——按上方明细处置（确定性同步化 / 缩数据量 / 挂 TAIJI_TEST_INTEGRATION 门控并在 e2e-map 登记）后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
     fi
 fi
 
