@@ -20,16 +20,22 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
 
 import { PluginHostProcess } from '../src/services/plugin-service/plugin-host-process.js'
 import { PluginRpcServer } from '../src/services/plugin-service/plugin-rpc-server.js'
-import { fakePluginChildren, resetPluginHostStubs } from './helpers/plugin-host-inproc-stubs.js'
+import { fakePluginChildren, fakePluginFork, resetPluginHostStubs } from './helpers/plugin-host-inproc-stubs.js'
 
 vi.mock('node:child_process', async () =>
   (await import('./helpers/plugin-host-inproc-stubs')).childProcessModule(),
 )
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+// fork env 能力键 SSOT（plugin-fs-guard.cjs 的 ENV_* 常量；plugin-capability-wiring.test.ts 同款取法）
+const nodeRequire = createRequire(import.meta.url)
+const fsGuard = nodeRequire(resolve(__dirname, '../src/services/plugin-service/plugin-fs-guard.cjs')) as {
+  ENV_ALLOWED_MODULES_KEY: string
+}
 /** fork 目标（bootstrapPathOverride 注入；fork 已桩化，路径仅作构造入参记录）。 */
 const MOCK_BOOTSTRAP = resolve(__dirname, 'fixtures/plugin-bootstrap-process.mock.cjs')
 /** MF-1：sandbox fork 边界断言 execArgv 含 --import（生产 fail-closed 检查，必须满足）。 */
@@ -338,5 +344,82 @@ describe('PluginHostProcess', () => {
 
     const handle = host.getProcessHandleById(processId)!
     expect(handle.pluginIds).toEqual(['dup-test'])
+  })
+
+  /**
+   * 白盒注入「崩溃分流已发生但同步清理未跟上」的残留形态（disposeStaleProcess 的
+   * 防护目标态）：handle 已非 active 而 processInstances 仍持有旧 child。现行
+   * handleProcessCrash 同步删除两处 Map，公开链路构造不出该状态（TC13 重建时
+   * disposeStaleProcess 只走早退分支）——直改内部句柄 status 破坏不变量，验证
+   * createProcess 侧第二道防线（M6a-03）。
+   */
+  function markHandleCrashedWithoutCleanup(host: PluginHostProcess, processId: string): void {
+    const handle = (host as unknown as { processes: Map<string, { status: string }> }).processes.get(processId)
+    if (!handle) throw new Error(`test setup: handle ${processId} not found`)
+    handle.status = 'crashed'
+  }
+
+  // ── TC15: 残留旧 child 的重建（disposeStaleProcess 主体）─────
+  it('TC15: rebuild over residual stale child — kill + 摘监听 + 清索引/能力登记 + rpc 反注册后重建', async () => {
+    const { host, rpc } = createHost()
+    track(host)
+
+    const crashes: Array<{ processId: string; pluginIds: string[]; error: string }> = []
+    host.setCrashCallback((processId, pluginIds, error) => {
+      crashes.push({ processId, pluginIds, error })
+    })
+
+    // 1. 首启 sandbox 进程（child A）并登记能力（登记随 dispose 清除是被断言面之一）
+    host.setPluginCapabilityEnv('stale-test', { capabilities: ['network.http'] })
+    const processId = await host.assignProcess('stale-test', 'sandbox')
+    const childA = fakePluginChildren()[0]!
+    const firstEnv = fakePluginFork.mock.calls[0]?.[2]?.env as Record<string, unknown> | undefined
+    expect(firstEnv?.[fsGuard.ENV_ALLOWED_MODULES_KEY]).toBeDefined()
+
+    // 2. 注入残留形态 → 重激活：复用分支不命中（status 非 active）→ createProcess
+    //    → disposeStaleProcess 发现旧 child 并走完整清理
+    markHandleCrashedWithoutCleanup(host, processId)
+    const rebuilt = await host.assignProcess('stale-test', 'sandbox')
+
+    // 3. 重建成功：同 processId、新 child 实例、handle active、反向索引指向新实例
+    expect(rebuilt).toBe(processId)
+    const childB = fakePluginChildren()[1]
+    expect(childB).toBeDefined()
+    expect(childB).not.toBe(childA)
+    const handle = host.getProcessHandleById(processId)!
+    expect(handle.status).toBe('active')
+    expect(handle.pid).toBe(childB!.pid)
+    expect(host.getProcessHandle('stale-test')!.processId).toBe(processId)
+
+    // 4. 旧 child 已 kill，且监听在 kill 前已摘——kill 触发的 disconnect/exit 不误报 crash
+    expect(childA.signalCode).not.toBeNull()
+    expect(crashes).toHaveLength(0)
+
+    // 5. 旧能力登记随 dispose 清除：重建 fork env 不复活旧放行清单（未重登记场景）
+    const rebuiltEnv = fakePluginFork.mock.calls[1]?.[2]?.env as Record<string, unknown> | undefined
+    expect(rebuiltEnv?.[fsGuard.ENV_ALLOWED_MODULES_KEY]).toBeUndefined()
+
+    // 6. rpc 通道重建可用（dispose 反注册 + createProcess 重注册）
+    await expect(rpc.invoke(processId, 'test.method', {})).resolves.toBeNull()
+  })
+
+  // ── TC16: 残留 child kill 抛错不阻塞重建 ─────────────────────
+  it('TC16: stale child kill failure does not block rebuild', async () => {
+    const { host } = createHost()
+    track(host)
+
+    const processId = await host.assignProcess('stale-kill-throw', 'sandbox')
+    const childA = fakePluginChildren()[0]!
+    // kill 失败形态（进程已被 OS 回收/权限不足）：disposeStaleProcess 的 catch 吞错继续
+    vi.spyOn(childA, 'kill').mockImplementation(() => {
+      throw new Error('process already reaped (EPERM)')
+    })
+
+    markHandleCrashedWithoutCleanup(host, processId)
+    const rebuilt = await host.assignProcess('stale-kill-throw', 'sandbox')
+
+    expect(rebuilt).toBe(processId)
+    const handle = host.getProcessHandleById(processId)!
+    expect(handle.status).toBe('active')
   })
 })
