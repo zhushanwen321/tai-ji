@@ -252,3 +252,18 @@ export const SET_REMOTE_ACCESS_ENABLED = 'set-remote-access-enabled' as const
 export const SOUND_LIST = 'sound:list' as const
 /** 播放系统提示音（invoke；win 返 wav base64）。 */
 export const SOUND_PLAY = 'sound:play' as const
+
+// ── quota:* 族（额度查询登录态刷新）──────────────────────────────────────────
+
+/**
+ * cookie 登录态刷新通道。
+ *
+ * invoke 通道：renderer（额度设置页「刷新登录态」入口）经此委托 main 打开隐藏
+ * BrowserWindow（独立 persist partition `persist:quota-<providerId>`）加载平台页，
+ * 轮询额度 API 直到 HTTP 200，导出该 session 的 cookie 以 0600 写回
+ * `<dataDir>/secrets/<providerId>-cookie.txt`（与 runtime quota-service 同一文件，
+ * cookie 查询每次直读无缓存，写盘即生效）。登录态失效时窗口转可见让用户完成登录
+ * （超时放宽），完成后回到隐藏轮询。选冒号式 `quota:*`：对齐 'browser:*' /
+ * 'image-cache:*' 领域族惯例。
+ */
+export const QUOTA_REFRESH_COOKIE = 'quota:refresh-cookie' as const

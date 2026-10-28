@@ -1,7 +1,7 @@
 // apps/electron/preload/preload.ts
 import { contextBridge, ipcRenderer } from 'electron'
-import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, ImageCacheWritePayload, ImageCacheWriteResult, DebugRunLogRetentionResult, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, SessionJsonlExportPayload, SessionJsonlExportResult, RemoteAccessInfo, RemoteAccessToggleResult, ShieldsFacesPayload, OverlayContentKind, BrowserFrameState, LocalFileServableResult, LocalFileReadResult } from '@taiji/shared'
-import { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE, SESSION_EXPORT_JSONL, LOCAL_FILE_SERVABLE, LOCAL_FILE_READ,
+import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, ImageCacheWritePayload, ImageCacheWriteResult, DebugRunLogRetentionResult, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, SessionJsonlExportPayload, SessionJsonlExportResult, RemoteAccessInfo, RemoteAccessToggleResult, ShieldsFacesPayload, OverlayContentKind, BrowserFrameState, LocalFileServableResult, LocalFileReadResult, QuotaRefreshCookiePayload, QuotaRefreshCookieResult } from '@taiji/shared'
+import { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE, SESSION_EXPORT_JSONL, LOCAL_FILE_SERVABLE, LOCAL_FILE_READ, QUOTA_REFRESH_COOKIE,
   RUNTIME_PORT, RUNTIME_ERROR, RUNTIME_RESTARTING, RUNTIME_FAILED, GET_RUNTIME_PORT, GET_RUNTIME_PORT_OFFSET, GET_RUNTIME_TOKEN, GET_RUNTIME_START_ERROR, RUNTIME_RESTART,
   CREATE_WINDOW, GET_WINDOWS, FOCUS_WINDOW, WINDOW_LIST_UPDATED, WINDOW_MINIMIZE, WINDOW_TOGGLE_MAXIMIZE, WINDOW_CLOSE, FULLSCREEN_CHANGED,
   PICK_DIRECTORY, PICK_FILE, OPEN_EXTERNAL, REVEAL_IN_FOLDER, GET_DATA_DIR,
@@ -294,6 +294,15 @@ export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先�
    * status 分支展示。
    */
   exportSessionJsonl(payload: SessionJsonlExportPayload): Promise<SessionJsonlExportResult>
+  // ── cookie 登录态刷新（quota:refresh-cookie）──
+  /**
+   * 刷新 cookie 类 provider 的登录态：main 创建隐藏窗口（独立 persist partition）加载
+   * 平台页，轮询额度 API 直到 HTTP 200 后导出该 session 的 cookie 以 0600 写回
+   * `<dataDir>/secrets/<providerId>-cookie.txt`（runtime 查询直读该文件，写盘即生效）。
+   * 登录态失效时窗口转可见等用户完成登录（120s 超时）。执行失败 resolve ok:false +
+   * error 文案（永不 reject）；非法 payload（fetcherId 不在刷新目标注册表）reject。
+   */
+  refreshQuotaCookie(payload: QuotaRefreshCookiePayload): Promise<QuotaRefreshCookieResult>
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -446,4 +455,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ── 会话 JSONL 导出（通道名经 shared SSOT 常量）──
   exportSessionJsonl: (payload: SessionJsonlExportPayload) =>
     ipcRenderer.invoke(SESSION_EXPORT_JSONL, payload),
+  // ── cookie 登录态刷新（通道名经 shared SSOT 常量）──
+  refreshQuotaCookie: (payload: QuotaRefreshCookiePayload) =>
+    ipcRenderer.invoke(QUOTA_REFRESH_COOKIE, payload),
 } satisfies ElectronAPI)

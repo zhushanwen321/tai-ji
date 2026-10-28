@@ -33,7 +33,8 @@
       "packages/shared/src/gen-stats.ts",
       "packages/shared/src/usage-stats.ts",
       "packages/shared/src/quota-presets.ts",
-      "packages/shared/src/quota-types.ts"
+      "packages/shared/src/quota-types.ts",
+      "packages/shared/src/quota-refresh-targets.ts"
     ]
   },
   "tests": [
@@ -46,9 +47,11 @@
     "packages/runtime/src/services/quota-providers/**",
     "packages/core/src/domain/usage/__tests__/usage.test.ts",
     "packages/renderer/src/__tests__/panel/gen-stats-composable.test.ts",
+    "packages/renderer/src/__tests__/composables/quota-cookie-auto-refresh.test.ts",
     "packages/renderer/src/__tests__/panel/context-capacity-card.test.ts",
     "packages/renderer/src/components/panel/__tests__/PlanQuotaFloatPanel.test.ts",
     "packages/shared/src/__tests__/gen-stats.test.ts",
+    "packages/shared/src/__tests__/quota-cookie-merge.test.ts",
     "packages/shared/src/__tests__/quota-cookie-normalize.test.ts",
     "packages/shared/src/__tests__/quota-credential-source.test.ts",
     "packages/shared/src/__tests__/quota-pct-format.test.ts",

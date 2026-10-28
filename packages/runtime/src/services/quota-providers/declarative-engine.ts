@@ -561,30 +561,45 @@ function buildHeaders(config: DeclarativeFetcherConfig, credential: string, extr
   return headers
 }
 
-/** 引擎自管的主请求（fetchQuotaJson 骨架只有 reason 通道，statusMap 需要原始 HTTP 状态）。 */
+/** 单请求结果（fetchPrimary）：setCookies = 该响应捕获的原始 Set-Cookie 行（无则缺省）。 */
+type FetchPrimaryResult =
+  | { ok: true; data: unknown; setCookies?: string[] }
+  | { ok: false; reason: QuotaFetchFailureReason; setCookies?: string[] }
+
+/** 读取响应全部 Set-Cookie 行（undici/Node 18.14+ 的 getSetCookie 逐条返回）。
+ *  无 Set-Cookie 时返回 undefined（不带空数组——outcome 不得物化 setCookies 空键）。 */
+function readSetCookies(resp: Response): string[] | undefined {
+  const lines = resp.headers.getSetCookie().filter((line) => line !== '')
+  return lines.length > 0 ? lines : undefined
+}
+
+/** 引擎自管的主请求（fetchQuotaJson 骨架只有 reason 通道，statusMap 需要原始 HTTP 状态）。
+ *  拿到响应即捕获 Set-Cookie（含 !resp.ok 分支——服务端滑动续期常伴随 3xx/401 出现，
+ *  消费与否由 service 按凭证形态裁决，引擎只透传不解释）。 */
 async function fetchPrimary(
   config: DeclarativeFetcherConfig,
   url: string,
   headers: Record<string, string>,
   doFetch: (url: string, init: RequestInit) => Promise<Response>,
-): Promise<{ ok: true; data: unknown } | { ok: false; reason: QuotaFetchFailureReason }> {
+): Promise<FetchPrimaryResult> {
   let resp: Response
   try {
     resp = await doFetch(url, { headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS), redirect: 'manual' })
   } catch {
     return { ok: false, reason: 'network' }
   }
+  const setCookies = readSetCookies(resp)
   if (!resp.ok) {
     void resp.body?.cancel()
     const mapped = config.statusMap?.[String(resp.status)]
-    return { ok: false, reason: mapped ?? statusToReason(resp.status) }
+    return { ok: false, reason: mapped ?? statusToReason(resp.status), ...(setCookies && { setCookies }) }
   }
   try {
     const data: unknown = await resp.json()
-    if (!isRecord(data)) return { ok: false, reason: 'parse' }
-    return { ok: true, data }
+    if (!isRecord(data)) return { ok: false, reason: 'parse', ...(setCookies && { setCookies }) }
+    return { ok: true, data, ...(setCookies && { setCookies }) }
   } catch {
-    return { ok: false, reason: 'parse' }
+    return { ok: false, reason: 'parse', ...(setCookies && { setCookies }) }
   }
 }
 
@@ -597,18 +612,23 @@ function resolvePreconditionHeader(config: DeclarativeFetcherConfig, fetcherConf
 }
 
 /** 辅助请求并行 + 独立 fail-safe（mimo detail：失败仅 resetSec 降级，不影响主数据）。
- * allSettled 表达「独立数据源允许部分降级」：单请求失败不拖垮其余辅助请求。 */
+ * allSettled 表达「独立数据源允许部分降级」：单请求失败不拖垮其余辅助请求。
+ * 各响应捕获的 Set-Cookie（成功/失败分支均可能携带）合并返回，与主请求的合并后由
+ * service 消费。 */
 async function fetchAuxiliaryRequests(
   config: DeclarativeFetcherConfig,
   primaryDef: DeclarativeFetcherConfig['requests'][number],
   headers: Record<string, string>,
   fetchImpl: (url: string, init: RequestInit) => Promise<Response>,
   reqs: ResolvedRequests,
-): Promise<void> {
+): Promise<string[]> {
+  const collected: string[] = []
   await Promise.allSettled(config.requests.filter(r => r !== primaryDef).map(async (def) => {
     const r = await fetchPrimary(config, def.url, headers, fetchImpl)
     if (r.ok) reqs.byName[def.name] = r.data
+    if (r.setCookies) collected.push(...r.setCookies)
   }))
+  return collected
 }
 
 /** 在体业务码判定（mimo code / minimax base_resp.status_code / zhipu success boolean）；返回非 null = 提前返回。 */
@@ -644,6 +664,12 @@ function evaluateRequires(config: DeclarativeFetcherConfig, primaryData: unknown
     return { ok: false, reason: 'no-subscription' }
   }
   return null
+}
+
+/** 把捕获的 Set-Cookie 行附加到 outcome（空则原样返回——不加 setCookies 键，既有
+ *  outcome 逐字断言与「无续期」语义的消费者零扰动）。 */
+function attachSetCookies(outcome: QuotaFetchOutcome, setCookies: string[]): QuotaFetchOutcome {
+  return setCookies.length > 0 ? { ...outcome, setCookies } : outcome
 }
 
 /** 窗口装配（未声明的 slot 恒 INFINITE_WIN）。 */
@@ -691,9 +717,12 @@ export async function runDeclarativeFetcher(
   const fetchImpl = doFetch ?? ((url: string, init: RequestInit) => fetch(url, init))
   const primaryDef = config.requests.find(r => r.role !== 'auxiliary') ?? config.requests[0]
   const primary = await fetchPrimary(config, primaryDef.url, headers, fetchImpl)
-  if (!primary.ok) return primary
+  if (!primary.ok) return attachSetCookies(primary, primary.setCookies ?? [])
   const reqs: ResolvedRequests = { primaryName: primaryDef.name, byName: { [primaryDef.name]: primary.data } }
-  await fetchAuxiliaryRequests(config, primaryDef, headers, fetchImpl, reqs)
+  const auxSetCookies = await fetchAuxiliaryRequests(config, primaryDef, headers, fetchImpl, reqs)
+  // 全部出口统一附加（主请求在前、辅助请求在后）——续期语义与查询成败无关（unauthorized
+  // 分支的 Set-Cookie 同样要给 service 回写）
+  const setCookies = [...(primary.setCookies ?? []), ...auxSetCookies]
 
   // 求值段（业务码/存在性/窗口/label）：任何 wire 形态漂移（WireDriftError）→ parse，
   // fail-visible 不静默降级（对齐各家现行 shape guard 的「漂移可见」语义）。
@@ -703,12 +732,12 @@ export async function runDeclarativeFetcher(
     prevalidateWindowPaths(config, reqs.byName[reqs.primaryName])
     const primaryData = reqs.byName[reqs.primaryName]
     const bodyResult = evaluateBodyCode(config, primaryData)
-    if (bodyResult) return bodyResult
+    if (bodyResult) return attachSetCookies(bodyResult, setCookies)
     const requiresResult = evaluateRequires(config, primaryData)
-    if (requiresResult) return requiresResult
-    return assembleWindows(config, reqs, primaryData)
+    if (requiresResult) return attachSetCookies(requiresResult, setCookies)
+    return attachSetCookies(assembleWindows(config, reqs, primaryData), setCookies)
   } catch (e) {
-    if (e instanceof WireDriftError) return { ok: false, reason: 'parse' }
+    if (e instanceof WireDriftError) return attachSetCookies({ ok: false, reason: 'parse' }, setCookies)
     throw e
   }
 }

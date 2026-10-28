@@ -29,6 +29,7 @@
   "tests": [
     "packages/renderer/src/__tests__/settings/**",
     "packages/renderer/src/__tests__/composables/settings-domain-bundle.test.ts",
+    "packages/renderer/src/__tests__/composables/use-quota-configure-cookie-refresh.test.ts",
     "packages/renderer/src/__tests__/provider-builtin-ui.test.ts",
     "packages/renderer/src/components/settings/**",
     "packages/ui/src/features/settings/**",

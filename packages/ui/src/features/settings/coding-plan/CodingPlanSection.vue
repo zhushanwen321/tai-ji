@@ -87,6 +87,29 @@
           class="mt-1 text-[length:var(--text-3xs)] text-warn"
           data-testid="quota-missing-cookie"
         >{{ missingHint('cookie') }}</p>
+        <!--
+          cookie 自动续期：执行体是 main 隐藏窗口刷新器（写回 secrets 文件，写盘即生效），
+          成功后 module 内重跑 testQuery。可用性判定（cookie 形态 + fetcher 在册 + 类型未变）
+          在 module（view.cookieRefresh.available），此处只做渲染与 i18n 映射；不在册的
+          cookie 类 fetcher（如 opendesign）不渲染本入口。
+        -->
+        <div v-if="view.cookieRefresh.available" class="mt-1.5 flex items-center gap-2" data-testid="quota-cookie-refresh">
+          <Button
+            class="h-6 gap-1 px-2 text-[length:var(--text-2xs)]"
+            :disabled="view.cookieRefresh.running"
+            data-testid="quota-cookie-refresh-btn"
+            @click="refreshCookie()"
+          >
+            <Loader2 v-if="view.cookieRefresh.running" class="animate-spin" />
+            {{ cookieRefreshButtonText }}
+          </Button>
+          <span
+            v-if="cookieRefreshStatusText"
+            class="text-[length:var(--text-3xs)]"
+            :class="view.cookieRefresh.result === 'fail' ? 'text-danger' : 'text-neutral-dim'"
+            data-testid="quota-cookie-refresh-status"
+          >{{ cookieRefreshStatusText }}</span>
+        </div>
       </div>
 
       <!-- api-key 类：凭证来源分段控件（D3）+ 专属 Key 输入（仅选「用专属 Key」时出现） -->
@@ -279,7 +302,7 @@ const MISSING_HINT_KEYS: Record<MissingField, string> = {
 const { t } = useI18n()
 
 /** quota configure module 实例（ProviderEditBody provide；缺失 = 接线错误，loud fail） */
-const { draft, view, test, selectType, setEnabled, saveAndTest } = useQuotaConfigureModule()
+const { draft, view, test, selectType, setEnabled, saveAndTest, refreshCookie } = useQuotaConfigureModule()
 
 /** 类型下拉变更：非字符串检查在 module selectType 内（reka Select 的宽联合 payload） */
 
@@ -297,6 +320,23 @@ function setCredentialSource(value: QuotaCredentialSource): void {
 function clearCookieDraft(): void {
   draft.value.cookie = ''
 }
+
+/** cookie 自动续期按钮文字（进行中换文案 + spinner；状态判定在 module view.cookieRefresh）。 */
+const cookieRefreshButtonText = computed<string>(() => (
+  view.value.cookieRefresh.running
+    ? t('settings.providerEdit.quotaCookieAutoRefreshRunning')
+    : t('settings.providerEdit.quotaCookieAutoRefresh')
+))
+
+/**
+ * cookie 自动续期状态文案：成功后结果展示由重跑的 testQuery 接管，这里只提示「已续期」；
+ * 失败显示 module 拼好的错误（main 侧 error 透传，无则 i18n 兜底）。
+ */
+const cookieRefreshStatusText = computed<string>(() => {
+  if (view.value.cookieRefresh.result === 'ok') return t('settings.providerEdit.quotaCookieAutoRefreshOk')
+  if (view.value.cookieRefresh.result === 'fail') return view.value.cookieRefresh.error
+  return ''
+})
 
 /**
  * 密文掩码哨兵聚焦全选（D7）：点进输入框即选中掩码串，直接粘贴新值覆盖；不动则掩码展示

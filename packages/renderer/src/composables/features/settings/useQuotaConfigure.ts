@@ -12,6 +12,7 @@
  *   保存侧识别哨兵不发送（保留既存）；哨兵展示单源来自 syncFromProvider 的磁盘态重建
  */
 import { ref, computed, watch } from 'vue'
+import type { ComputedRef } from 'vue'
 import type {
   NormalizedQuotaRow,
   QuotaConfigurePayload,
@@ -20,12 +21,13 @@ import type {
   QuotaAuthKind,
   QuotaFetchFailureReason,
 } from '@taiji/shared'
-import { normalizeCookieHeader, normalizeQuotaWorkspaceUrl, resolveQuotaCredentialSource, resolveQuotaPresets, supportsExclusiveCredential } from '@taiji/shared'
+import { normalizeCookieHeader, normalizeQuotaWorkspaceUrl, getQuotaRefreshTarget, resolveQuotaCredentialSource, resolveQuotaPresets, supportsExclusiveCredential } from '@taiji/shared'
 // W3c：presets 数据源从编译期基线切到 runtime 下发的合并视图（remote-config 域 2）
 import { getSettingsStore } from '@taiji/core'
 import type {
   QuotaConfigureInputs,
   QuotaConfigureModule,
+  QuotaCookieRefreshView,
   QuotaDraftInput,
   QuotaFailureKind,
   QuotaReadiness,
@@ -38,6 +40,7 @@ import type {
 import { API_KEY_CLEAR_SENTINEL, QUOTA_SECRET_MASK, getSettingsTransport } from '@taiji/core'
 import { optimisticUpdate, refCell } from '@taiji/core/foundation/optimistic-update'
 import { useQuotaStore } from '@/stores/quota'
+import { refreshQuotaCookie } from '@/lib/ipc'
 import { quotaFailReasonText } from '@/composables/features/model/useQuotaQuery'
 
 /**
@@ -171,13 +174,97 @@ const FAILURE_KINDS: Record<QuotaFetchFailureReason, QuotaFailureKind> = {
   'credential-unsupported': 'generic',
 }
 
+// ── cookie 自动续期控制器（手动入口；执行体 = main 隐藏窗口刷新器，经 lib/ipc 调用）──
+
+/**
+ * 控制器输入：主工厂内 ref 的 getter 只读视图（getter 内读 ref 建立响应式依赖）。
+ * 拆为模块级工厂是为主工厂行数上限（taste max-lines-per-function 300）——
+ * 续期状态与动作自成一组，不与草稿 / readiness 判定交叉。
+ */
+interface CookieRefreshInputs {
+  t: QuotaConfigureInputs['t']
+  /** 当前编辑 provider id（无 provider = undefined，动作 no-op） */
+  providerId: () => string | undefined
+  /** 当前类型草稿（未选 = undefined） */
+  fetcherId: () => string | undefined
+  /** 磁盘已保存的 fetcher（从未保存 = undefined） */
+  savedFetcher: () => string | undefined
+  /** 当前草稿是否 cookie 形态（isCookieAuth 透传） */
+  isCookieAuth: () => boolean
+  /** 续期成功后的结果刷新（重跑 testQuery） */
+  onRefreshed: () => Promise<void>
+}
+
+function createCookieRefreshController(inputs: CookieRefreshInputs): {
+  view: ComputedRef<QuotaCookieRefreshView>
+  refreshCookie: () => Promise<void>
+} {
+  const running = ref(false)
+  const result = ref<'ok' | 'fail' | null>(null)
+  const error = ref('')
+
+  /**
+   * 入口可用性：cookie 形态 + 当前 fetcher 在 QUOTA_REFRESH_TARGETS 在册（在册 ⊆ cookie
+   * 类——opendesign 等 cookie 类但无刷新目标的 fetcher 不在册，入口不渲染）+ 类型未变更
+   * （归属判据同 readiness：类型已变未保存时，刷新写回的 cookie 归属不明，等保存后再刷）。
+   * 从未保存过类型的 provider（savedFetcher undefined）放行：选好类型即可先续期登录
+   * （SSO 窗弹出），cookie 写盘后「保存并测试」即可消费。
+   */
+  const available = computed<boolean>(() => {
+    if (!inputs.isCookieAuth()) return false
+    const fid = inputs.fetcherId()
+    if (!fid || getQuotaRefreshTarget(fid) === undefined) return false
+    const saved = inputs.savedFetcher()
+    return saved === undefined || fid === saved
+  })
+
+  const view = computed<QuotaCookieRefreshView>(() => ({
+    available: available.value,
+    running: running.value,
+    result: result.value,
+    error: error.value,
+  }))
+
+  /**
+   * 手动触发续期：main 隐藏窗口刷新器写回 secrets 文件（写盘即生效，runtime fetcher
+   * 直读）。成功（ok 且 cookieWritten）重跑 testQuery；失败只写 error——不动草稿与
+   * 既有测试结果（用户已填的输入不因续期失败丢失）。lib/ipc 封装保证不 reject
+   * （main 侧业务失败也 resolve ok:false），catch 面只覆盖通道装配异常。
+   */
+  async function refreshCookie(): Promise<void> {
+    const pid = inputs.providerId()
+    const fid = inputs.fetcherId()
+    if (!pid || !fid || !available.value || running.value) return
+
+    running.value = true
+    result.value = null
+    error.value = ''
+    try {
+      const refreshed = await refreshQuotaCookie({ fetcherId: fid, providerId: pid })
+      if (refreshed.ok && refreshed.cookieWritten) {
+        result.value = 'ok'
+        await inputs.onRefreshed()
+      } else {
+        result.value = 'fail'
+        error.value = refreshed.error || inputs.t('settings.providerEdit.quotaCookieAutoRefreshFail')
+      }
+    } catch (e) {
+      result.value = 'fail'
+      error.value = e instanceof Error ? e.message : inputs.t('settings.providerEdit.quotaCookieAutoRefreshFail')
+    } finally {
+      running.value = false
+    }
+  }
+
+  return { view, refreshCookie }
+}
+
 /**
  * QuotaConfigure module 实现（契约见 core QuotaConfigureModule）。
  *
  * @param inputs - 工厂输入（业务输入由 ProviderEditBody 按当前编辑体装配；t 由壳层包装
  *   函数注入，见 core QuotaConfigureInputs / useSettingsShell provide 点）
- */
-export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureModule {
+ */export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureModule {
   const { t, provider: providerRef, preset, providerOauthPresent, providerApiKeyDraft } = inputs
   const quotaStore = useQuotaStore()
   const enabled = ref(false)
@@ -357,6 +444,7 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
         providerWarning,
       },
       workspace: { required: needsWorkspace.value },
+      cookieRefresh: cookieRefresh.view.value,
       help: helpUrl ? { url: helpUrl, text: activePreset.value?.helpText ?? '' } : null,
     }
   })
@@ -619,6 +707,17 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
     }
   }
 
+  // ── cookie 自动续期（手动入口；控制器实现见模块级 createCookieRefreshController）──
+  // 放在 testQuery 之后：onRefreshed 引用 testQuery（函数声明提升，显式后置消除前向引用）
+  const cookieRefresh = createCookieRefreshController({
+    t,
+    providerId: () => providerRef.value?.id,
+    fetcherId: () => fetcherIdDraft.value,
+    savedFetcher: () => providerRef.value?.quota?.fetcher,
+    isCookieAuth: () => isCookieAuth.value,
+    onRefreshed: testQuery,
+  })
+
   return {
     draft,
     view,
@@ -626,5 +725,6 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
     selectType,
     setEnabled,
     saveAndTest,
+    refreshCookie: cookieRefresh.refreshCookie,
   }
 }

@@ -548,6 +548,11 @@ export default {
     // points at the correct copy path (DevTools → Network → request-header Cookie, not the Application → Cookies table).
     quotaCookieFormatInvalid: 'Invalid Cookie format: no name=value pairs found. In DevTools → Network, select any request and copy the full Cookie from its request headers (like name=value; name2=value2), then retry',
     quotaUpdateCookie: 'Update Cookie',
+    // cookie auto-refresh (main hidden-window refresher): button / running / ok / fail copy
+    quotaCookieAutoRefresh: 'Auto-refresh Cookie',
+    quotaCookieAutoRefreshRunning: 'Refreshing…',
+    quotaCookieAutoRefreshOk: 'Cookie refreshed, re-querying',
+    quotaCookieAutoRefreshFail: 'Auto-refresh failed; update the Cookie manually',
     // window labels + time formatting (CodingPlanSection inline quota preview)
     quotaWindow5h: '5h',
     quotaWindowWeek: 'This week',

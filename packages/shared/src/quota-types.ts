@@ -108,13 +108,53 @@ export function normalizeCookieHeader(raw: string): string {
 }
 
 /**
+ * 把响应 Set-Cookie 行按 cookie name 合并回当前 Cookie 头（cookie 滑动续期，方案①）。
+ *
+ * cookie 类 provider 依赖用户手贴浏览器 Cookie，静态快照会过期；部分平台（如 stepfun
+ * 半年滑动窗口）每次响应都下发续期 Set-Cookie——把响应合并回 secrets cookie 文件，
+ * 服务端续期机制就能跟着每次额度查询走。合并规则与浏览器 cookie 语义对齐：
+ * - Set-Cookie 行只取第一段 name=value（其后 `Path=/; HttpOnly` 等是属性段，不属于值）；
+ * - 新值覆盖同名旧值（值更新，位置留在当前 Cookie 头的原顺序处）；当前头中不存在的
+ *   新 cookie 按 Set-Cookie 行序追加尾部；
+ * - 值为空的 Set-Cookie（`name=`）是服务端删除标记（`Set-Cookie: name=; Expires=1970` 形态），
+ *   从结果移除该 cookie；
+ * - 其余 cookie 保留原顺序与原值。
+ *
+ * 纯函数；输出与 normalizeCookieHeader 同格式（`; ` 连接的 name=value 串），全部被删除
+ * 时返回空串（调用方按「无 cookie」处理）。
+ */
+export function mergeCookieHeader(currentHeader: string, setCookieLines: string[]): string {
+  const merged = new Map<string, string>()
+  for (const pair of currentHeader.split(';')) {
+    const eq = pair.indexOf('=')
+    if (eq < 0) continue
+    const name = pair.slice(0, eq).trim()
+    if (name) merged.set(name, pair.slice(eq + 1).trim())
+  }
+  for (const line of setCookieLines) {
+    // 只取第一段：`sid=x; Path=/; HttpOnly` 的 Path/HttpOnly 是属性不是 cookie
+    const first = (line.split(';')[0] ?? '').trim()
+    const eq = first.indexOf('=')
+    if (eq <= 0) continue // 无 name=value 段的行（空行/纯属性串）无 cookie 语义
+    const name = first.slice(0, eq).trim()
+    const value = first.slice(eq + 1).trim()
+    if (value === '') merged.delete(name)
+    else merged.set(name, value)
+  }
+  return [...merged.entries()].map(([name, value]) => `${name}=${value}`).join('; ')
+}
+
+/**
  * 单次额度查询结果：成功带数据，失败带可区分 reason（不 throw）。
  * unauthorized：HTTP 401/403 或 cookie 过期（原 isCredentialValid 语义）——
  * 凭证可能过期，恢复指引见 D6（发起一次对话触发刷新后重试，runtime 不自行 refresh）。
+ * setCookies（可选）：本次查询各响应捕获的原始 Set-Cookie 行——cookie 类 provider 的
+ * 服务端滑动续期载体（见 mergeCookieHeader），unauthorized 分支同样可能携带（3xx/401
+ * 响应带续期 Set-Cookie 是常见形态）；非 cookie 类 fetcher 恒缺省。
  */
 export type QuotaFetchOutcome =
-  | { ok: true; data: NormalizedQuotaRow }
-  | { ok: false; reason: QuotaFetchFailureReason }
+  | { ok: true; data: NormalizedQuotaRow; setCookies?: string[] }
+  | { ok: false; reason: QuotaFetchFailureReason; setCookies?: string[] }
 
 /**
  * per-provider 只读查询配置（D1-2，timeout-audit-hygiene-batch）：QuotaService 从

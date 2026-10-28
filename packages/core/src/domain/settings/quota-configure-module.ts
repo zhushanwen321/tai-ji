@@ -106,6 +106,26 @@ export interface QuotaFailure {
 }
 
 /**
+ * cookie 自动续期入口的展示态（手动「自动续期」按钮）。
+ * 刷新执行体 = main 隐藏窗口刷新器（QUOTA_REFRESH_TARGETS 在册 fetcher），
+ * 经 renderer lib/ipc 封装调用；本视图只承载 UI 渲染所需的状态。
+ */
+export interface QuotaCookieRefreshView {
+  /**
+   * 入口是否可用：cookie 形态 + 当前 fetcher 在 QUOTA_REFRESH_TARGETS 在册 + 类型
+   * 未变更（类型已变未保存时刷新写回的 cookie 归属不明，等保存后再刷）。
+   * false = 按钮不渲染（非 cookie 类 / 不在册如 opendesign / 类型草稿已切换）。
+   */
+  available: boolean
+  /** 刷新执行中（可达 15s~120s，登录页停留等用户完成 SSO）；按钮禁用 + 进行中文案 */
+  running: boolean
+  /** 最近一次结果：null = 从未触发 / 'ok' = cookie 已写入并重查 / 'fail' = 失败 */
+  result: 'ok' | 'fail' | null
+  /** 失败文案（result==='fail' 时非空；main 侧 error 透传，无则 i18n 兜底） */
+  error: string
+}
+
+/**
  * 输入草稿（v-model 直绑，「保存并测试」一次提交）。
  * 类型草稿不在其中 —— 它有写入规则（同值短路 / 真变清凭证草稿），写入必须经 selectType。
  */
@@ -160,6 +180,8 @@ export interface QuotaSectionView {
     /** 当前 fetcher 是否需要 workspace 配置（QuotaPreset.requiresWorkspace；false = 隐藏输入框） */
     required: boolean
   }
+  /** cookie 自动续期入口（cookie 形态且刷新目标在册时渲染；见 QuotaCookieRefreshView） */
+  cookieRefresh: QuotaCookieRefreshView
   /** 帮助链接（基于当前选中 fetcher；null = 不渲染） */
   help: { url: string; text: string } | null
 }
@@ -234,4 +256,10 @@ export interface QuotaConfigureModule {
    * 类型发生变更时清该 provider 的 QuotaCache 条目（§7.1 副作用表）
    */
   saveAndTest(): Promise<void>
+  /**
+   * 手动触发 cookie 自动续期（main 隐藏窗口刷新器写回 secrets 文件）。成功（ok 且
+   * cookieWritten）后重跑 testQuery 刷新结果；失败只写 view.cookieRefresh.error，
+   * 不动草稿与既有测试结果。刷新目标不可用（view.cookieRefresh.available=false）时 no-op。
+   */
+  refreshCookie(): Promise<void>
 }

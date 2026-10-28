@@ -7,7 +7,7 @@
  *
  * 依赖方向：无下游（读全局 window.electronAPI，类型经 declare global 自动可用）
  */
-import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, SessionJsonlExportPayload, SessionJsonlExportResult, RemoteAccessInfo, RemoteAccessToggleResult, ShieldsFacesPayload, OverlayContentKind, BrowserFrameState, LocalFileServableReason, LocalFileServableResult, LocalFileReadReason, LocalFileReadResult } from '@taiji/shared'
+import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, SessionJsonlExportPayload, SessionJsonlExportResult, RemoteAccessInfo, RemoteAccessToggleResult, ShieldsFacesPayload, OverlayContentKind, BrowserFrameState, LocalFileServableReason, LocalFileServableResult, LocalFileReadReason, LocalFileReadResult, QuotaRefreshCookiePayload, QuotaRefreshCookieResult } from '@taiji/shared'
 import type { ImageCacheWritePort } from '@taiji/core'
 
 /** preload 注入的 electronAPI（web/mock / node 测试环境为 undefined——后者连
@@ -597,4 +597,17 @@ export function localFileServable(absPath: string): Promise<LocalFileServableRes
 export function localFileRead(absPath: string): Promise<LocalFileReadResult> {
   if (!api?.localFileRead) return Promise.reject(new Error('localFileRead unavailable'))
   return api.localFileRead(absPath)
+}
+
+// ── quota cookie 登录态刷新（quota:refresh-cookie invoke 通道）────────
+
+/**
+ * 触发 main 隐藏窗口刷新器续期 cookie 登录态（写回 secrets 文件，runtime fetcher
+ * 直读该文件、写盘即生效）。main 侧 handler 保证业务失败也 resolve ok:false + error
+ * （见 apps/electron/main/quota/quota-cookie-ipc.ts 错误契约），本封装不 reject。
+ * 无 IPC（web/mock）→ ok:false：自动触发链静默保留原失败展示，手动入口显示失败文案。
+ */
+export function refreshQuotaCookie(payload: QuotaRefreshCookiePayload): Promise<QuotaRefreshCookieResult> {
+  return api?.refreshQuotaCookie(payload)
+    ?? Promise.resolve({ ok: false, cookieWritten: false, error: 'refreshQuotaCookie unavailable' })
 }

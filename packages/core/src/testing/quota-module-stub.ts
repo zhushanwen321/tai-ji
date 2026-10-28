@@ -47,6 +47,7 @@ function readyView(): QuotaSectionView {
       providerWarning: null,
     },
     workspace: { required: false },
+    cookieRefresh: { available: false, running: false, result: null, error: '' },
     help: null,
   }
 }
@@ -71,6 +72,7 @@ function emptyView(): QuotaSectionView {
       providerWarning: null,
     },
     workspace: { required: false },
+    cookieRefresh: { available: false, running: false, result: null, error: '' },
     help: null,
   }
 }
@@ -101,5 +103,6 @@ export function makeQuotaModuleStub({
     selectType: vi.fn(),
     setEnabled: vi.fn(async (_next: boolean) => {}),
     saveAndTest: vi.fn(async () => {}),
+    refreshCookie: vi.fn(async () => {}),
   }
 }

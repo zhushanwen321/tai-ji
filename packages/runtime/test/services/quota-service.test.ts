@@ -14,7 +14,7 @@
  * 运行：cd packages/runtime && npx vitest run test/services/quota-service.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, rmSync, existsSync, statSync, readFileSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync, statSync, readFileSync, mkdirSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { QuotaService } from '../../src/services/quota-service.js'
@@ -1552,5 +1552,139 @@ describe('QuotaService — D12: clearProviderState 直调（provider 删除链 q
     expect(svc.getCached('glm-del').reason).toBeUndefined()
     await new Promise((r) => setImmediate(r))
     expect(svc.getCached('glm-del').data).toBeNull()
+  })
+})
+
+// ── Set-Cookie 滑动续期回写（方案①）：doFetch 消费 outcome.setCookies 合并回 secrets
+// cookie 文件。回写是辅助功能——失败不拖垮 quota 主结果；且回写必须落在 finishFetch
+// 在途 fetcher 变更守卫语义内（换类型时不回写，与缓存三件套同等对待）。──
+
+describe('QuotaService — Set-Cookie 续期回写', () => {
+  it('成功 outcome 带 setCookies + cookie 形态 → 合并回写 cookie 文件；quota 结果不受回写影响', async () => {
+    // 防的回归：cookie 类 provider 依赖用户手贴静态快照，服务端滑动续期（如 stepfun
+    // 半年窗口）不跟着走则快照必然过期——回写让续期机制随每次额度查询生效。
+    const svc = new QuotaService({
+      providerCredentialResolver: makeResolver(),
+      dataDir: tmpDir,
+      providerExtrasStore: extrasStore,
+      providerExists: () => true,
+      getProviderInfo: () => ({ baseUrl: 'https://platform.xiaomimimo.com', quota: { fetcher: 'mimo' } }),
+    })
+    await svc.configure({ providerId: 'mimo-id', enabled: true, cookie: 'sid=old; keep=1', fetcher: 'mimo' })
+    mockFetchQuota.mockResolvedValue({
+      ok: true,
+      data: { label: 'MiMo Coding', wins: [] as never },
+      setCookies: ['sid=new; Path=/; HttpOnly', 'extra=2'],
+    })
+
+    const result = await svc.fetch('mimo-id')
+
+    expect(result.data?.label).toBe('MiMo Coding')
+    // sid 新值覆盖（属性段不入值）、keep 原序原值保留、extra 追加尾部
+    expect(readFileSync(join(tmpDir, 'secrets', 'mimo-id-cookie.txt'), 'utf-8')).toBe('sid=new; keep=1; extra=2')
+  })
+
+  it('unauthorized 分支的 setCookies 同样回写：失败 reason 照常返回，cookie 已续期', async () => {
+    // 3xx/401 响应带续期 Set-Cookie 是服务端「会话将过期但本次已刷新」的常见形态——
+    // 查询失败与凭证续期不互斥，下次查询用新 cookie 才不再连败。
+    const svc = new QuotaService({
+      providerCredentialResolver: makeResolver(),
+      dataDir: tmpDir,
+      providerExtrasStore: extrasStore,
+      providerExists: () => true,
+      getProviderInfo: () => ({ baseUrl: 'https://platform.xiaomimimo.com', quota: { fetcher: 'mimo' } }),
+    })
+    await svc.configure({ providerId: 'mimo-id', enabled: true, cookie: 'sid=expiring', fetcher: 'mimo' })
+    mockFetchQuota.mockResolvedValue({ ok: false, reason: 'unauthorized', setCookies: ['sid=refreshed'] })
+
+    const result = await svc.fetch('mimo-id')
+
+    expect(result.data).toBeNull()
+    expect(result.reason).toBe('unauthorized')
+    expect(readFileSync(join(tmpDir, 'secrets', 'mimo-id-cookie.txt'), 'utf-8')).toBe('sid=refreshed')
+  })
+
+  it('非 cookie 形态（api-key）的 setCookies → 不回写（api-key/oauth 凭证无「响应续期」语义）', async () => {
+    const svc = new QuotaService({
+      providerCredentialResolver: makeResolver(),
+      dataDir: tmpDir,
+      getProviderInfo: () => ({ baseUrl: 'https://bigmodel.cn', quota: { fetcher: 'zhipu' } }),
+    })
+    mockFetchQuota.mockResolvedValue({
+      ok: true,
+      data: { label: 'zhipu', wins: [] as never },
+      setCookies: ['a=1'],
+    })
+
+    await svc.fetch('glm-id')
+
+    expect(mockFetchQuota).toHaveBeenCalledTimes(1)
+    expect(existsSync(join(tmpDir, 'secrets', 'glm-id-cookie.txt'))).toBe(false)
+  })
+
+  it('fetch 在途期间 configure 换 fetcher → 旧 fetch 的 setCookies 不回写（守卫语义内）', async () => {
+    // 防的回归：回写若在 finishFetch 守卫之外执行，换类型后旧 fetcher 的响应 Set-Cookie
+    // 仍会写进 cookie 文件——新类型可能根本不是 cookie 类，文件内容被无主凭证污染。
+    const info: { baseUrl: string; quota: { fetcher: string } } = {
+      baseUrl: 'https://platform.xiaomimimo.com',
+      quota: { fetcher: 'mimo' },
+    }
+    const cookiePath = join(tmpDir, 'secrets', 'mimo-id-cookie.txt')
+    const svc = new QuotaService({
+      providerCredentialResolver: makeResolver(),
+      dataDir: tmpDir,
+      providerExtrasStore: extrasStore,
+      providerExists: () => true,
+      getProviderInfo: () => info,
+    })
+    await svc.configure({ providerId: 'mimo-id', enabled: true, cookie: 'sid=old', fetcher: 'mimo' })
+
+    // 旧 fetcher（mimo）fetch 在途：手动控制 resolve 时刻
+    let resolveOld!: (v: { ok: true; data: { label: string; wins: never[] }; setCookies: string[] }) => void
+    mockFetchQuota.mockReturnValueOnce(
+      new Promise((r) => {
+        resolveOld = r as typeof resolveOld
+      }),
+    )
+    const oldFetchP = svc.fetch('mimo-id')
+    await new Promise((r) => setImmediate(r)) // 凭证解析含 await，等一拍确认已进入 fetchQuota
+    expect(mockFetchQuota).toHaveBeenCalledTimes(1)
+
+    // 在途期间换类型（mimo → zhipu）
+    info.quota = { fetcher: 'zhipu' }
+    const cfg = await svc.configure({ providerId: 'mimo-id', enabled: true, fetcher: 'zhipu' })
+    expect(cfg.ok).toBe(true)
+
+    // 旧 fetch 迟到落地（带 setCookies）：守卫失配 → 回写被丢弃
+    resolveOld({ ok: true, data: { label: 'mimo-stale', wins: [] as never }, setCookies: ['sid=rotated'] })
+    await oldFetchP
+
+    expect(readFileSync(cookiePath, 'utf-8')).toBe('sid=old')
+  })
+
+  it('回写失败（cookie 文件只读 → writeFileSync EACCES）→ quota 结果不受影响，文件保持旧值', async () => {
+    // 辅助功能降级契约：回写是 cookie 续期的辅助路径，失败只 warn（带恢复指引，见
+    // persistCookieRotation），不得拖垮 quota 主结果——成功态照常返回、不重发请求。
+    const svc = new QuotaService({
+      providerCredentialResolver: makeResolver(),
+      dataDir: tmpDir,
+      providerExtrasStore: extrasStore,
+      providerExists: () => true,
+      getProviderInfo: () => ({ baseUrl: 'https://platform.xiaomimimo.com', quota: { fetcher: 'mimo' } }),
+    })
+    await svc.configure({ providerId: 'mimo-id', enabled: true, cookie: 'sid=old', fetcher: 'mimo' })
+    const cookiePath = join(tmpDir, 'secrets', 'mimo-id-cookie.txt')
+    // 读侧可读、写侧必败：文件置只读（读凭证正常 → 回写 writeFileSync 抛 EACCES）
+    chmodSync(cookiePath, 0o444)
+    mockFetchQuota.mockResolvedValue({
+      ok: true,
+      data: { label: 'MiMo Coding', wins: [] as never },
+      setCookies: ['sid=new'],
+    })
+
+    const result = await svc.fetch('mimo-id')
+
+    expect(result.data?.label).toBe('MiMo Coding') // 主结果不受回写失败影响
+    expect(readFileSync(cookiePath, 'utf-8')).toBe('sid=old') // 写失败 → 旧值保留
   })
 })
