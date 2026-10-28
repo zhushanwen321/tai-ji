@@ -113,7 +113,7 @@ describe('EventInterpreter compaction 编排 (M4 事件驱动)', () => {
 
     // 恒发帧（原 `if (r.summary)` 真值门已删）：payload.summary 为 undefined，下游
     // registry/reducer 走「上下文已压缩」fallback——live 与重开（pi 无条件落盘）一致，
-    // 登记例外④消灭（等价性断言见 apply-entry-equivalence E4b）
+    // 登记例外④消灭（等价性断言见 apply-entry-merged.test.ts 的 apply-entry-equivalence 合并节 E4b）
     const summary = sent.find((m) => m.type === 'message.compactionSummary')
     expect(summary).toBeDefined()
     expect(summary!.payload).toMatchObject({ sessionId: 's1', summary: undefined, tokensBefore: 999 })

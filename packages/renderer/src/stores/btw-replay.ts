@@ -7,7 +7,7 @@
  * chatStore 的线分区（W4a 后键 = 线 pi 真实会话 id；store.hydrate，内部 mergeBaselineWithLive
  * 保尾部 live 实体）。
  * live ≡ reload 由共用同一 applyEntry reducer 构造性成立（等价性断言见本目录测试
- * btw-replay.test.ts + core apply-entry-equivalence 家族）。
+ * chat-store-bundle.test.ts 的 btw-replay 来源节 + core apply-entry-merged.test.ts 的 apply-entry-equivalence 家族）。
  *
  * 触发范围 = 复合谓词单一源「drawer 开 + btw tab + 选中线」（selection/predicates.ts 的
  * useViewedBtwSession，display-containers §7.1 迁出不变量——与 getViewedVids 的 D5 豁免、
