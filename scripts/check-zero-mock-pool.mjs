@@ -2,33 +2,42 @@
 /**
  * check-zero-mock-pool.mjs — 零特征共享池（isolate:false 双池）的清单派生与健康度检查。
  *
- * 机制背景（.tmp/round6/process-reuse-reeval.md 实证）：subagent-core / core /
- * zcode-subagent-cli 三包的默认档测试按「零特征文件 → 共享池（isolate:false，模块图与
- * worker 进程跨文件复用）；其余文件 → 隔离池（isolate:true，每文件新进程）」分池执行。
+ * 机制背景（.tmp/round6/process-reuse-reeval.md 实证）：默认档测试按「零特征文件 →
+ * 共享池（isolate:false，模块图与 worker 进程跨文件复用）；其余文件 → 隔离池
+ * （isolate:true，每文件新进程）」分池执行。subagent-core / core / zcode-subagent-cli
+ * 三包已接线（config 消费本表）；runtime / renderer 两包「已登记未接线」（候选清单与
+ * 判据在册、config 不消费——A/B 实证接线为净负收益，占比与依据见 POOL_PKGS 注释）。
  * 共享池的准入判据是文件不含 mock / 共享可变状态硬特征——本脚本是该判据的唯一派生实现
  * （登记表只存结果，判据逻辑只在此处）。
  *
- * 三层判据（与 reeval 同源）：
+ * 四层判据（与 reeval 同源）：
  *   1. 静态特征扫描（七特征正则，vi.mock / vi.doMock / vi.resetModules /
  *      vi.useFakeTimers / vi.stubGlobal / process.env 直写 / globalThis 直写）——
  *      命中任一即污染源，禁止进池（漏判实例：core settings-store 被「正常 API 调用改写
- *      模块级单例」污染，静态扫描抓不到，故有第 3 层）；
+ *      模块级单例」污染，静态扫描抓不到，故有第 4 层）；
  *   2. 门控排除——集成门控（import integration-gate）与真机 live 门控
  *      （ENGINE_CONFORMANCE_LIVE）文件一律不进池：其真实执行只发生在门控档，
  *      共享态语义从未验证，门控开启时也保持与分池前完全一致的隔离执行；
- *   3. 动态出场登记（registry 的 dynamicExclusions 表）——静态零特征但共享池实跑红过的
+ *   3. main 收集范围对齐——共享池只从「默认档 main/isolated project 实际收集的文件」里
+ *      选：runtime 剔除其 config 登记的 REAL_PI_TESTS + INTEGRATION_TESTS 成员
+ *      （real-pi 尾组与门控组文件；后者多数另有门控标记，但 real-pi 成员的门控在
+ *      fixture 内部、文件文本扫不出——session-manager-full-e2e 实例），renderer 剔除
+ *      domain-map.json 登记的默认档排除文件（挂载渲染重型测试，默认档本就不收集，
+ *      误入池 = 默认档凭空多跑文件）。漏剔 = 同文件被 shared 与 real-pi/integration
+ *      双收集，用例双跑；
+ *   4. 动态出场登记（registry 的 dynamicExclusions 表）——静态零特征但共享池实跑红过的
  *      文件出局进隔离池，附原因；池成员变更后必须重跑两轮全量动态验证（全绿 + junit
  *      用例名守恒）才能提交。
  *
  * 检查项（默认模式，红灯 = exit 1）：
- *   G1 结构：登记表 packages 覆盖三包、条目为字符串数组；
+ *   G1 结构：登记表 packages 覆盖五包、条目为字符串数组；
  *   G2 存在性：登记文件必须在盘上（改名/删除未同步登记 → 红）；
  *   G3 特征复扫：登记进池的文件命中任一静态特征 → 红（防静默污染：给池内文件新增
  *      vi.mock 等特征会让它在共享 worker 里污染同池邻居）；
  *   G4 门控复扫：登记进池的文件出现门控标记 → 红（门控文件禁共享，见判据 2）；
  *   G5 动态出场表：条目必须在盘上、仍属静态零特征且未被门控排除（否则登记过期 → 红）；
- *   G6 消费一致性：三包 vitest.config.ts 必须引用 zero-mock-pool 加载器（池清单来自
- *      权威源派生，禁止手抄文件清单进 config）；
+ *   G6 消费一致性：已接线包（wired，默认 true）的 vitest.config.ts 必须引用 zero-mock-pool
+ *      加载器（池清单来自权威源派生，禁止手抄文件清单进 config）；
  *   G7 漂移方向（warn 不红）：盘上新增零特征文件未登记 → 提示跑 --update + 动态验证。
  *      有意不红：漏登记的文件落回隔离池，只是慢一点，失败模式安全方向正确（reeval §3.1）。
  *
@@ -47,11 +56,21 @@ const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(SCRIPT_DIR, '..')
 const REGISTRY_PATH = path.join(ROOT, 'docs', 'testing', 'zero-mock-pool.json')
 
-/** 池化包清单：name = 仓库包目录名（登记表键）；scanDirs = 该包默认档收集的测试目录。 */
+/** 池化包清单：name = 仓库包目录名（登记表键）；scanDirs = 该包默认档收集的测试目录；
+ *  wired = 是否接线进该包 vitest.config 的 shared project（默认 true）。
+ *  runtime/renderer 两包为「已登记未接线」：候选清单与判据在册（判据 3 的 config/domain
+ *  对齐解析照常维护），但 2026-10-28 A/B 实证接线为净负收益（runtime forks +0.9~1.3s /
+ *  renderer forks +0.6~2.5s / renderer threads +2.9s，双 vite server 固定开销 + 组串行化
+ *  > fork 复用收益；根因 = 零特征占比过低——runtime 24/234、renderer 10/113，对照
+ *  subagent-core 115/194 实证 2.13x），故 config 不接线（G6 只查 wired 包）。
+ *  重新接线判据：零特征文件占比显著上升（域测试改造 / mock 清理后）或 vitest project
+ *  固定开销下降时，按 .tmp/round6/zero-mock-expand-report.md 的 A/B 方法重测。 */
 const POOL_PKGS = [
   { name: 'subagent-core', scanDirs: ['src'] },
   { name: 'core', scanDirs: ['src'] },
   { name: 'zcode-subagent-cli', scanDirs: ['src', 'test'] },
+  { name: 'runtime', scanDirs: ['src', 'test', 'scripts'], wired: false },
+  { name: 'renderer', scanDirs: ['src'], wired: false },
 ]
 
 /** 静态污染特征（正则 + 排除理由）。判据与 reeval 七特征一致；vi.spyOn 有意不在列：
@@ -144,13 +163,63 @@ function collectTestFiles(pkg) {
 }
 
 /**
+ * 判据 3（main 收集范围对齐）：返回该包默认档 main/isolated project 不收集的文件集合
+ * （包内相对路径）——这些文件天然不是共享池候选（runtime 的 real-pi 尾组与集成门控组
+ * 登记成员 / renderer 的 domain-map 默认档排除成员）。漏剔会导致同文件被 shared 与
+ * real-pi/integration project 双收集（用例双跑），或默认档凭空多跑文件。
+ */
+function mainPoolExcludes(pkg) {
+  if (pkg.name === 'runtime') {
+    // 从 config 文本提取 REAL_PI_TESTS / INTEGRATION_TESTS 数组成员（单一权威源 =
+    // runtime config，与 main project 的 exclude 组装同源）。real-pi 成员的门控在
+    // fixture 内部，文件文本无门控标记，静态扫描原理性抓不到，必须走 config 对齐。
+    const cfg = readFileSync(path.join(ROOT, 'packages/runtime/vitest.config.ts'), 'utf-8')
+    const out = []
+    for (const arrName of ['REAL_PI_TESTS', 'INTEGRATION_TESTS']) {
+      const m = cfg.match(new RegExp(`const ${arrName} = \\[([\\s\\S]*?)\\] as const`))
+      if (!m) {
+        throw new Error(
+          `[zero-mock-pool] 解析 packages/runtime/vitest.config.ts 的 ${arrName} 失败——数组声明形态变更，须同步本检查器的提取逻辑`,
+        )
+      }
+      const items = [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1])
+      if (items.length === 0) {
+        throw new Error(`[zero-mock-pool] packages/runtime/vitest.config.ts 的 ${arrName} 提取为空——数组非空是现状事实，提取逻辑漂移`)
+      }
+      out.push(...items)
+    }
+    return new Set(out)
+  }
+  if (pkg.name === 'renderer') {
+    // domain-map.json（SSOT）登记的默认档排除文件：挂载渲染重型测试默认档不收集。
+    // 与 test-guard/domain-exclusions.ts 的 loadDomainExclusions 同源同口径
+    // （检查器为 .mjs，直接读 JSON 过滤包前缀）。
+    const map = JSON.parse(readFileSync(path.join(ROOT, 'docs/testing/domain-map.json'), 'utf-8'))
+    const prefix = 'packages/renderer/'
+    const out = new Set()
+    for (const entry of Object.values(map.domains ?? {})) {
+      for (const f of entry.files ?? []) {
+        if (typeof f === 'string' && f.startsWith(prefix)) out.add(f.slice(prefix.length))
+      }
+    }
+    return out
+  }
+  return new Set()
+}
+
+/**
  * 派生单包共享池候选：静态零特征 ∧ 无门控标记。
- * 返回逐文件账目（pool / gatedOut / featured），动态出场文件由调用方另行剔除。
+ * 返回逐文件账目（pool / gatedOut / featured / outOfMain），动态出场文件由调用方另行剔除。
  */
 function derivePkg(pkg) {
   const pkgRoot = path.join(ROOT, 'packages', pkg.name)
-  const account = { pool: [], gatedOut: [], featured: [] }
+  const outOfMain = mainPoolExcludes(pkg)
+  const account = { pool: [], gatedOut: [], featured: [], outOfMain: [] }
   for (const rel of collectTestFiles(pkg)) {
+    if (outOfMain.has(rel)) {
+      account.outOfMain.push(rel)
+      continue
+    }
     const raw = readFileSync(path.join(pkgRoot, rel), 'utf-8')
     const text = stripComments(raw)
     const feats = FEATURES.filter((f) => f.rx.test(text)).map((f) => f.mark)
@@ -209,7 +278,7 @@ if (process.argv.includes('--update')) {
   writeFileSync(REGISTRY_PATH, JSON.stringify(next, null, 2) + '\n')
   const counts = POOL_PKGS.map((pkg) => `${pkg.name}:${next.packages[pkg.name].length}`).join(' ')
   console.log(`[zero-mock-pool] 登记表已按派生结果重写（${counts}；dynamicExclusions ${dynamicExclusions.length} 条保留）`)
-  console.log('[zero-mock-pool] 提交前必跑：三包各两轮全量（TAIJI_SKIP_REAL_PI=1 pnpm test）全绿 + junit 用例名守恒')
+  console.log('[zero-mock-pool] 提交前必跑：已接线包（当前 subagent-core / core / zcode-subagent-cli）各两轮全量（TAIJI_SKIP_REAL_PI=1 pnpm test）全绿 + junit 用例名守恒')
   process.exit(0)
 }
 
@@ -277,7 +346,7 @@ for (const entry of dynamicExclusions) {
   }
   const pkg = POOL_PKGS.find((p) => entry.file.startsWith(`packages/${p.name}/`))
   if (!pkg) {
-    failures.push(`G5 动态出场条目 "${entry.file}" 不在池化三包内——登记错位。[FIX] 移除或改到正确包`)
+    failures.push(`G5 动态出场条目 "${entry.file}" 不在池化五包内——登记错位。[FIX] 移除或改到正确包`)
     continue
   }
   const rel = entry.file.slice(`packages/${pkg.name}/`.length)
@@ -296,8 +365,9 @@ for (const entry of dynamicExclusions) {
   }
 }
 
-// G6 消费一致性：三包 config 必须经加载器消费权威源
-for (const pkg of POOL_PKGS) {
+// G6 消费一致性：已接线（wired）包的 config 必须经加载器消费权威源；
+// 未接线包（runtime/renderer，见 POOL_PKGS 注释）config 不引用属预期
+for (const pkg of POOL_PKGS.filter((p) => p.wired !== false)) {
   const configPath = path.join(ROOT, 'packages', pkg.name, 'vitest.config.ts')
   if (!existsSync(configPath)) {
     failures.push(`G6 packages/${pkg.name}/vitest.config.ts 不存在`)
@@ -313,7 +383,7 @@ for (const pkg of POOL_PKGS) {
 if (process.argv.includes('--list')) {
   for (const pkg of POOL_PKGS) {
     const a = derived.get(pkg.name)
-    console.log(`== ${pkg.name}: 默认档 ${a.pool.length + a.gatedOut.length + a.featured.length} 文件 = 池 ${a.pool.length} + 特征 ${a.featured.length} + 门控出局 ${a.gatedOut.length}`)
+    console.log(`== ${pkg.name}: 默认档 ${a.pool.length + a.gatedOut.length + a.featured.length} 文件 = 池 ${a.pool.length} + 特征 ${a.featured.length} + 门控出局 ${a.gatedOut.length}${a.outOfMain.length > 0 ? ` + main 范围外 ${a.outOfMain.length}` : ''}`)
     for (const g of a.gatedOut) console.log(`   门控出局: ${g.file} (${g.gates.join(',')})`)
   }
   process.exit(failures.length > 0 ? 1 : 0)
@@ -331,7 +401,8 @@ if (failures.length > 0) {
 const summary = POOL_PKGS.map((pkg) => {
   const registered = registry.packages[pkg.name]
   const a = derived.get(pkg.name)
-  return `${pkg.name} 池 ${registered.length}/${a.pool.length + a.gatedOut.length + a.featured.length}`
+  const tag = pkg.wired === false ? '（已登记未接线）' : ''
+  return `${pkg.name}${tag} 池 ${registered.length}/${a.pool.length + a.gatedOut.length + a.featured.length}`
 }).join(' | ')
 for (const w of warnings) console.warn(`  ⚠ ${w}`)
 console.log(

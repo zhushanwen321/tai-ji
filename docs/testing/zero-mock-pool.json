@@ -1,11 +1,11 @@
 {
   "_meta": {
     "name": "零特征共享池登记表（SSOT）",
-    "description": "subagent-core / core / zcode-subagent-cli 三包默认档测试的 isolate:false 共享池成员清单（包内相对路径）。共享池准入 = 静态零特征（七特征正则：vi.mock / vi.doMock / vi.resetModules / vi.useFakeTimers / vi.stubGlobal / process.env 直写 / globalThis 直写）∧ 无门控标记（integration-gate / ENGINE_CONFORMANCE_LIVE）∧ 未被动态出场。派生与检查的唯一实现 = scripts/check-zero-mock-pool.mjs；消费方 = test-guard/zero-mock-pool.ts（三包 vitest.config.ts 经 loadZeroMockPool 组装 shared project include）。实证依据：.tmp/round6/process-reuse-reeval.md（subagent-core 单池 2.13x / core 1.55x 两轮全绿）。",
-    "criterion": "特征/门控正则以 scripts/check-zero-mock-pool.mjs 为准（本文件只存派生结果）。静态扫描有原理性漏判（「正常 API 调用改写模块级单例」不在七特征覆盖内，core settings-store 实例）——零特征 ≠ 零污染，池成员变更后必须重跑动态验证：三包各两轮全量（TAIJI_SKIP_REAL_PI=1 pnpm test）全绿 + junit 用例名与变更前基线守恒，红则按「该文件出局进隔离池 + 登记 dynamicExclusions」收敛。",
-    "maintenance": "新增测试文件默认落隔离池（漏登记无危害，只是慢）；想让池扩容：node scripts/check-zero-mock-pool.mjs --update 重写本表 → 跑两轮全量动态验证 → 同 commit 提交。给池内文件引入 vi.mock 等特征 = 检查红灯（G3），必须先把它移出池。门控文件（集成 / live）永久不进池（G4）。",
+    "description": "零特征共享池登记表（SSOT）。subagent-core / core / zcode-subagent-cli 三包已接线（默认档测试按「零特征文件 → shared project（isolate:false，模块图与 worker 跨文件复用）；其余 → isolated project（每文件新进程）」分池）；runtime / renderer 两包已登记未接线（config 不消费本表，接线 A/B 实证为净负收益——零特征占比过低：runtime 24/234、renderer 10/113，对照 subagent-core 115/194 实证 2.13x；重新接线判据与数据见 scripts/check-zero-mock-pool.mjs POOL_PKGS 注释与 .tmp/round6/zero-mock-expand-report.md）。共享池准入 = 静态零特征（七特征正则：vi.mock / vi.doMock / vi.resetModules / vi.useFakeTimers / vi.stubGlobal / process.env 直写 / globalThis 直写）∧ 无门控标记（integration-gate / ENGINE_CONFORMANCE_LIVE）∧ main 收集范围对齐（runtime 剔除 REAL_PI_TESTS/INTEGRATION_TESTS 成员，renderer 剔除 domain-map 默认档排除成员）∧ 未被动态出场。派生与检查的唯一实现 = scripts/check-zero-mock-pool.mjs；消费方 = test-guard/zero-mock-pool.ts（已接线包的 vitest.config.ts 经 loadZeroMockPool 组装 shared project include）。三包接线实证依据：.tmp/round6/process-reuse-reeval.md（subagent-core 单池 2.13x / core 1.55x 两轮全绿）。",
+    "criterion": "特征/门控/范围正则以 scripts/check-zero-mock-pool.mjs 为准（本文件只存派生结果）。静态扫描有原理性漏判（「正常 API 调用改写模块级单例」不在七特征覆盖内，core settings-store 实例）——零特征 ≠ 零污染，已接线包的池成员变更后必须重跑动态验证：各包两轮全量（TAIJI_SKIP_REAL_PI=1 pnpm test）全绿 + junit 用例名与变更前基线守恒，红则按「该文件出局进隔离池 + 登记 dynamicExclusions」收敛。renderer 特例（接线时生效）：候选 10 文件中 7 个默认 happy-dom、3 个文件级 @vitest-environment node pragma——runner 复用按环境判等（vitest isEqualRunner/isEnvironmentEqual），跨环境文件绝不共享模块图，同 project 内混合环境安全。",
+    "maintenance": "新增测试文件默认落隔离池（漏登记无危害，只是慢）；想让池扩容：node scripts/check-zero-mock-pool.mjs --update 重写本表 → 已接线包跑两轮全量动态验证 → 同 commit 提交。给池内文件引入 vi.mock 等特征 = 检查红灯（G3），必须先把它移出池。门控文件（集成 / live）与 main 范围外文件（runtime real-pi/integration 登记、renderer domain-map 排除）永久不进池（G4 + 判据 3）。未接线包（runtime/renderer）重新接线：vitest.config.ts 加 shared project（形态照抄 packages/core/vitest.config.ts，runtime 须与 real-pi/integration 的 groupOrder 协调，见该包 config 头注释）→ G6 自动纳入 → 两轮全量 + junit 守恒验证。",
     "consumers": [
-      "test-guard/zero-mock-pool.ts（loadZeroMockPool：三包 vitest.config.ts 的 shared project include 来源）",
+      "test-guard/zero-mock-pool.ts（loadZeroMockPool：已接线包 vitest.config.ts 的 shared project include 来源）",
       "scripts/check-zero-mock-pool.mjs（G1-G7 健康度检查 + --update 派生重写）"
     ]
   },
@@ -203,6 +203,44 @@
       "src/__tests__/reader.test.ts",
       "src/__tests__/registration.test.ts",
       "src/__tests__/stderr-rotation.test.ts"
+    ],
+    "runtime": [
+      "scripts/__tests__/gen-builtin-providers.test.ts",
+      "scripts/gen-builtin-providers.test.ts",
+      "src/__tests__/infra/pi/entry-tree-builder.test.ts",
+      "src/__tests__/infra/single-instance-guard.test.ts",
+      "src/__tests__/infra/system/uncaught-policy.test.ts",
+      "src/__tests__/scan-external.test.ts",
+      "src/infra/pi/__tests__/event-adapter.test.ts",
+      "src/infra/pi/__tests__/pi-semantics-bundle-1.test.ts",
+      "src/infra/pi/__tests__/pi-semantics-bundle-2.test.ts",
+      "src/infra/pi/__tests__/pi-semantics-bundle-3.test.ts",
+      "src/infra/pi/__tests__/rpc-client-lf-framing.test.ts",
+      "src/infra/pi/argv-redact.test.ts",
+      "src/services/canvas/__tests__/canvas-invariants.test.ts",
+      "src/services/message-bus/__tests__/message-bus-bundle.test.ts",
+      "src/services/migration/parsers/__tests__/parsers-bundle.test.ts",
+      "src/services/remote-config/__tests__/remote-provider-templates.test.ts",
+      "src/services/scanners/__tests__/scanner-degraded-warn.test.ts",
+      "src/services/services-root-bundle.test.ts",
+      "src/services/session/session-root-bundle.test.ts",
+      "src/transport/__tests__/transport-bundle-2.test.ts",
+      "src/transport/handler-settings-bundle.test.ts",
+      "src/utils/__tests__/utils-bundle.test.ts",
+      "test/helpers/free-port.test.ts",
+      "test/new-task/new-task-bundle.test.ts"
+    ],
+    "renderer": [
+      "src/__tests__/composables/useCommandPopoverTrigger.mutual-exclusion.test.ts",
+      "src/__tests__/panel/context-chips-bar.test.ts",
+      "src/__tests__/panel/session-file-format.test.ts",
+      "src/__tests__/panel/session-trace/trace-row-item.test.ts",
+      "src/__tests__/settings/settings-i18n.test.ts",
+      "src/__tests__/stores/stores-pure-bundle.test.ts",
+      "src/__tests__/v6-visual/tokens.test.ts",
+      "src/components/canvas/canvas-ops.test.ts",
+      "src/components/panel/__tests__/terminal-instance-bar.test.ts",
+      "src/components/ui/__tests__/ToastContainer.transition.test.ts"
     ]
   }
 }
