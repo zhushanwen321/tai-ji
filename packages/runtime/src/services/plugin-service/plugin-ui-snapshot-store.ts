@@ -21,7 +21,7 @@
  * 清除该视图分区（调度器等插件以空树收缩面板）。
  */
 import type { HeaderActionUpdatePayload, PluginUiSnapshotPayload, ViewSnapshotItem } from '@taiji/shared'
-import { pluginViewScopeKey, pluginViewScopeFromWire } from '@taiji/shared'
+import { pluginViewScopeKey, pluginViewScopeMountPrefix, pluginViewScopeFromWire } from '@taiji/shared'
 
 
 /**
@@ -97,16 +97,22 @@ export class PluginUiSnapshotStore {
     }
     // scope 过滤（U2）：会话域 / 全局域精确键匹配，都给 = 调用方 bug → 空结果 + warn
     //（fail-visible，不静默退化为全量）；都缺 = 无过滤全量（connected 边沿恢复路径）。
+    // 键形态统一经 pluginViewScopeKey 推导（SSOT = shared plugin-view-scope，禁手拼——
+    // setView 写入与过滤/清理必须落同一分区）。
     let viewKey: string | undefined
     if (filter.sessionId !== undefined && filter.mountId !== undefined) {
       console.warn('[plugin-ui-snapshot-store] snapshot filter sessionId 与 mountId 互斥（二选一），本次返回空快照')
       return { headerActions: [], views: [] }
     }
     if (filter.sessionId !== undefined) {
-      viewKey = `session:${filter.sessionId}`
+      viewKey = pluginViewScopeKey({ kind: 'session', sessionId: filter.sessionId })
     } else if (filter.mountId !== undefined) {
-      // pluginId 缺省时键无法成形 → 空结果（与「无匹配分区返回空」同语义，不猜测插件）
-      viewKey = filter.pluginId !== undefined ? `global:${filter.mountId}:${filter.pluginId}` : `global:${filter.mountId}:`
+      if (filter.pluginId === undefined) {
+        // 全局域键无法成形（pluginId 缺省）→ views 空结果（与「无匹配分区返回空」同
+        // 语义，不猜测插件）；headerAction 无全局域形态，不受影响保持全量。
+        return { headerActions, views: [] }
+      }
+      viewKey = pluginViewScopeKey({ kind: 'global', mountId: filter.mountId, pluginId: filter.pluginId })
     }
     for (const [key, partition] of this.views) {
       if (viewKey !== undefined && key !== viewKey) continue
@@ -121,7 +127,7 @@ export class PluginUiSnapshotStore {
   /** 会话销毁清理（setOnSessionDestroyed 链，防长会话反复建删时条目单调累积）。 */
   clearForSession(sessionId: string): void {
     this.headerActions.delete(sessionId)
-    this.views.delete(`session:${sessionId}`)
+    this.views.delete(pluginViewScopeKey({ kind: 'session', sessionId }))
   }
 
   /**
@@ -130,10 +136,10 @@ export class PluginUiSnapshotStore {
    */
   clearForMount(mountId: string, pluginId?: string): void {
     if (pluginId !== undefined) {
-      this.views.delete(`global:${mountId}:${pluginId}`)
+      this.views.delete(pluginViewScopeKey({ kind: 'global', mountId, pluginId }))
       return
     }
-    const prefix = `global:${mountId}:`
+    const prefix = pluginViewScopeMountPrefix(mountId)
     for (const key of this.views.keys()) {
       if (key.startsWith(prefix)) this.views.delete(key)
     }

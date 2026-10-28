@@ -5,7 +5,7 @@
  * 解析（合法两态 + 都缺/都给/空串/非 string 逐字段拒绝）。纯函数零 IO。
  */
 import { describe, expect, it } from 'vitest'
-import { pluginViewScopeFromWire, pluginViewScopeKey } from '../plugin-view-scope.js'
+import { pluginViewScopeFromWire, pluginViewScopeKey, pluginViewScopeMountPrefix } from '../plugin-view-scope.js'
 
 describe('pluginViewScopeKey（scope 串形态单一事实源）', () => {
   it('会话域 → session:<sessionId>', () => {
@@ -16,6 +16,18 @@ describe('pluginViewScopeKey（scope 串形态单一事实源）', () => {
     expect(pluginViewScopeKey({ kind: 'global', mountId: 'provider.authorize', pluginId: 'wool-workbuddy' })).toBe(
       'global:provider.authorize:wool-workbuddy',
     )
+  })
+})
+
+describe('pluginViewScopeMountPrefix（挂载位前缀原语：pluginId 缺省的收窄/清理场景）', () => {
+  it('挂载位前缀 → global:<mountId>:', () => {
+    expect(pluginViewScopeMountPrefix('provider.authorize')).toBe('global:provider.authorize:')
+  })
+
+  it('键形态对账：全局域精确键必然以挂载位前缀开头（前缀删除覆盖全部精确键写入的分区）', () => {
+    const prefix = pluginViewScopeMountPrefix('provider.authorize')
+    expect(pluginViewScopeKey({ kind: 'global', mountId: 'provider.authorize', pluginId: 'plug-a' }).startsWith(prefix)).toBe(true)
+    expect(pluginViewScopeKey({ kind: 'global', mountId: 'provider.authorize', pluginId: 'plug-b' }).startsWith(prefix)).toBe(true)
   })
 })
 

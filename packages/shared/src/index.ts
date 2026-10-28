@@ -587,7 +587,7 @@ export { displayAgentName, displayWorkflowName } from './display-name'
 // 推导与 wire 形态检查——runtime 快照存储 / core 渲染缓存 / renderer bridge 三方共用
 // 的跨包契约（type 与可执行函数同源单模块）。
 export type { PluginViewScope, SessionViewScope, GlobalViewScope } from './plugin-view-scope'
-export { pluginViewScopeKey, pluginViewScopeFromWire } from './plugin-view-scope'
+export { pluginViewScopeKey, pluginViewScopeMountPrefix, pluginViewScopeFromWire } from './plugin-view-scope'
 // session occupancy 域（chat-flow-consistency D1 契约根）：turn 相位值域 + 「回合进行中」
 // 判定集合与函数（laneOf 投递判定 / 发送位形态与角标 / Alt+⏎ 分流 / 活动条 / 前端回合判定
 // 统一引用）。形状 SSOT = ./session-occupancy，protocol.ts 的 'session.occupancy' 帧内联引用
