@@ -228,7 +228,12 @@ async function copyWorkflowDir(outDir, extraAssets) {
 			`workflows dir missing: ${SUBAGENT_CORE_WORKFLOWS_DIR}（subagent-core 包 workflow 资产缺失 = 打包配置回归）`,
 		);
 	}
-	await cp(SUBAGENT_CORE_WORKFLOWS_DIR, join(outDir, "workflows"), { recursive: true });
+	await cp(SUBAGENT_CORE_WORKFLOWS_DIR, join(outDir, "workflows"), {
+		recursive: true,
+		// 排除 *.ts（双平台构建源 .dwf.ts / src/*.shared.ts / *.zcode.tpl.ts）：运行时形态
+		// 是 .js，staged 残留 .ts 会被 resolver fallback 旁路 bundle（R3 校验 fail-fast 对象）
+		filter: (s) => !s.endsWith(".ts"),
+	});
 	extraAssets.push("workflows/");
 }
 
@@ -302,7 +307,11 @@ async function copyManifestResourceDirs(pkg, srcDir, outDir) {
 			}
 			await cp(src, dest, {
 				recursive: true,
-				filter: (s) => !s.includes(`${sep}node_modules${sep}`),
+				// 排除 node_modules 与 *.ts：staged 是 build 产物（dev/build 加载路径分流，
+				// 见 prepare-builtin-extensions.sh 头注——dev 走源码 .ts、build 只认 bundle .js），
+				// 残留 .ts 会让 extension-resolver fallback 旁路 bundle（R3 校验 fail-fast 的防护对象）
+				filter: (s) =>
+					!s.includes(`${sep}node_modules${sep}`) && !s.endsWith(".ts"),
 			});
 			copiedManifestDirs.push(`${field}:${rel}`);
 		}
