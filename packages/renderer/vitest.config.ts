@@ -24,17 +24,17 @@ export default taijiTestConfig({
       VITE_MOCK: 'true',
     },
     // coverage gate（方法论见 docs/TEST-STRATEGY.md §7「覆盖率与 coverage gate」）。
-    // 2026-08-20 重校准：PR #185 大量重构扩大全量分母，旧基线（2026-06 S3-W1：Stmts72.34/Branch61.79/
-    // Funcs69.15/Lines74.84 → 阈值 72/70/59/67）失效，实测跌破必红。当前工作区全量实测
-    // Lines70.57/Stmts68.38/Branch58.95/Funcs63.37，按基线-2~3% 设阈留 flake 缓冲。
-    // 未来收紧需补测试提升覆盖率或记录原因后再调（保持基线-2~3% 原则）。
+    // 阈值维护原则：实测默认档全量基线 -2~3% 设阈（留 flake 缓冲）；分母结构变化后
+    // （如 domain-gating 把挂载重型测试移出默认档）实测跌破必红，按新基线重校准并
+    // 在此处记录当次实测值。收紧需补测试提升覆盖率后再调。
+    // 当前基线（domain-gating 后默认档实测）：Lines49.48/Stmts47.63/Branch32.99/Funcs37.88。
     coverage: {
       provider: 'v8',
       thresholds: {
-        lines: 68,
-        statements: 66,
-        branches: 56,
-        functions: 60,
+        lines: 47,
+        statements: 45,
+        branches: 30,
+        functions: 35,
       },
       reporter: ['text', 'html', 'lcov'],
       include: ['src/**'],

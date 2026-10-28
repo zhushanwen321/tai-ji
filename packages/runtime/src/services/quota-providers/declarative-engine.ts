@@ -735,6 +735,22 @@ function assembleWindows(config: DeclarativeFetcherConfig, reqs: ResolvedRequest
 }
 
 /**
+ * 凭证归一与请求头装配（runDeclarativeFetcher 准备段）。cookie 模式的空判据必须判
+ * **归一后**的值：`';'` 等无 k=v 对的粘贴伪影原文非空、归一后为空串——按原文判空会带
+ * 空 cookie 头真发一次请求（normalizeCookieHeader 契约：归一后为空 → 调用方按
+ * cookie-invalid-format 处理，与「服务端拒绝」的 unauthorized 分流——前者根本没发请求）。
+ */
+function prepareFetchHeaders(config: DeclarativeFetcherConfig, credential: string,
+  fetcherConfig?: { quotaParams?: Record<string, string> },
+): { headers: Record<string, string> } | { failure: QuotaFetchFailureReason } {
+  const resolvedCredential = config.credential === 'cookie' ? normalizeCookieHeader(credential) : credential
+  if (!resolvedCredential) return { failure: config.credential === 'cookie' ? 'cookie-invalid-format' : 'unauthorized' }
+  const resolvedHeaders = resolveHeaderFroms(config.headerFroms ?? [], resolvedCredential, fetcherConfig?.quotaParams)
+  if ('failure' in resolvedHeaders) return { failure: resolvedHeaders.failure }
+  return { headers: buildHeaders(config, resolvedCredential, { ...(config.extraHeaders ?? {}), ...resolvedHeaders.headers }) }
+}
+
+/**
  * 执行声明式 fetcher（ProviderQuotaFetcher.fetchQuota 的引擎实现）。
  * doFetch 注入参数供测试；生产走全局 fetch。
  */
@@ -744,17 +760,9 @@ export async function runDeclarativeFetcher(
   fetcherConfig?: { quotaParams?: Record<string, string> },
   doFetch?: (url: string, init: RequestInit) => Promise<Response>,
 ): Promise<QuotaFetchOutcome> {
-  // cookie 模式的空判据必须判**归一后**的值：`';'` / `' ; '` 等无任何 k=v 对的粘贴伪影原文
-  // 非空，归一后为空串——按原文判空会带着空 cookie 头真发一次请求（normalizeCookieHeader
-  // 契约：归一后为空 → 调用方按 cookie-invalid-format 处理，与「服务端拒绝」的 unauthorized
-  // 分流——前者根本没发出 HTTP 请求，恢复动作是「换正确的复制路径重贴」）。
-  const resolvedCredential = config.credential === 'cookie' ? normalizeCookieHeader(credential) : credential
-  if (!resolvedCredential) return { ok: false, reason: config.credential === 'cookie' ? 'cookie-invalid-format' : 'unauthorized' }
-
-  const extra = { ...(config.extraHeaders ?? {}) }
-  const resolvedHeaders = resolveHeaderFroms(config.headerFroms ?? [], resolvedCredential, fetcherConfig?.quotaParams)
-  if ('failure' in resolvedHeaders) return { ok: false, reason: resolvedHeaders.failure }
-  const headers = buildHeaders(config, resolvedCredential, { ...extra, ...resolvedHeaders.headers })
+  const prepared = prepareFetchHeaders(config, credential, fetcherConfig)
+  if ('failure' in prepared) return { ok: false, reason: prepared.failure }
+  const headers = prepared.headers
 
   const fetchImpl = doFetch ?? ((url: string, init: RequestInit) => fetch(url, init))
   const primaryDef = config.requests.find(r => r.role !== 'auxiliary') ?? config.requests[0]

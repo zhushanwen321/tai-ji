@@ -1,11 +1,15 @@
 /**
- * CodingPlanSection cookie 自动续期入口测试（quota cookie 刷新 U3）。
+ * CodingPlanSection cookie 自动续期入口 + 用户维度参数区测试。
  *
- * 覆盖按钮渲染与状态文案（module 契约 view.cookieRefresh + refreshCookie 动作）：
+ * cookie 自动续期（quota cookie 刷新 U3）——覆盖按钮渲染与状态文案（module 契约
+ * view.cookieRefresh + refreshCookie 动作）：
  * - available=true（cookie 形态 + 在册）→ 入口渲染；available=false → 不渲染
  * - running → 按钮禁用 + 进行中文案（t 返回 key，断言 key 形态）
  * - 点击 → module.refreshCookie 被调（交互经 module seam，组件不直连 IPC）
  * - result ok / fail → 状态文案分别取 i18n key / module 透传 error
+ *
+ * 用户维度参数区（2026-10 泛化，原 workspace 单框）：view.params 逐项渲染 +
+ * 输入经 setParamDraft 写 draft.params（reka 宽联合载荷的字符串收窄）。
  *
  * module 实例经 makeQuotaModuleStub（@taiji/core/testing）注入——契约漂移在桩工厂
  * 侧变编译错误；i18n 经包 vitest.setup mock（t 返回 key）。
@@ -15,6 +19,7 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { makeQuotaModuleStub } from '@taiji/core/testing'
+import type { QuotaParamView, ReadinessMissing } from '@taiji/core'
 import { QUOTA_CONFIGURE_MODULE_KEY } from '../injection-keys'
 import CodingPlanSection from '../coding-plan/CodingPlanSection.vue'
 
@@ -81,5 +86,50 @@ describe('CodingPlanSection cookie 自动续期入口', () => {
     module.view.value.cookieRefresh.error = 'login timeout'
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[data-testid="quota-cookie-refresh-status"]').text()).toContain('login timeout')
+  })
+})
+
+describe('CodingPlanSection 用户维度参数区（2026-10 泛化）', () => {
+  /** 挂组件并按需塞入 param 视图项（stub 'ready' 预设 params 为空数组）。 */
+  function mountWithParams(params: QuotaParamView[], missing: ReadinessMissing[] = []) {
+    const module = makeQuotaModuleStub({ state: 'ready' })
+    module.view.value.params = params
+    module.view.value.readiness = { ready: missing.length === 0, missing }
+    const wrapper = mount(CodingPlanSection, {
+      global: { provide: { [QUOTA_CONFIGURE_MODULE_KEY as symbol]: module } },
+    })
+    return { wrapper, module }
+  }
+
+  it('view.params 多项 → 按 key 逐项渲染 label / placeholder / helpText；missing 含 param → 必填提示', async () => {
+    const { wrapper } = mountWithParams(
+      [
+        { key: 'workspace', label: '工作区', placeholder: '输入工作区 ID', helpText: '帮助文字', required: true },
+        { key: 'orgId', label: '组织', required: true },
+      ],
+      ['param'],
+    )
+    await wrapper.vm.$nextTick()
+
+    const block = wrapper.find('[data-testid="quota-param-block-workspace"]')
+    expect(block.exists()).toBe(true)
+    expect(wrapper.find('[data-testid="quota-param-block-orgId"]').exists()).toBe(true)
+    expect(block.text()).toContain('工作区')
+    expect(block.text()).toContain('帮助文字')
+    const input = wrapper.find('[data-testid="quota-param-input-workspace"]')
+    expect(input.attributes('placeholder')).toBe('输入工作区 ID')
+    // missing 含 'param' → 每个 param 块渲染必填提示（i18n key，t mock 返回 key）
+    expect(wrapper.find('[data-testid="quota-missing-param-workspace"]').text())
+      .toContain('settings.providerEdit.quotaMissingParam')
+  })
+
+  it('param 输入 → setParamDraft 写入 draft.params（字符串通过，保留既有键）', async () => {
+    const { wrapper, module } = mountWithParams([
+      { key: 'workspace', label: '工作区', required: true },
+    ])
+    module.draft.value.params = { orgId: 'org-1' }
+
+    await wrapper.find('[data-testid="quota-param-input-workspace"]').setValue('ws-9')
+    expect(module.draft.value.params).toEqual({ orgId: 'org-1', workspace: 'ws-9' })
   })
 })
