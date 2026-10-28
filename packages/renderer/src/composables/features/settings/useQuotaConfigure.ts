@@ -244,6 +244,9 @@ function createCookieRefreshController(inputs: CookieRefreshInputs): {
       if (refreshed.ok && refreshed.cookieWritten) {
         result.value = 'ok'
         await inputs.onRefreshed()
+        // ok 文案（「正在重新查询」）随重查完成使命结束——结果由测试结果区呈现，
+        // 不复位会永久悬挂
+        result.value = null
       } else {
         result.value = 'fail'
         error.value = refreshed.error || inputs.t('settings.providerEdit.quotaCookieAutoRefreshFail')

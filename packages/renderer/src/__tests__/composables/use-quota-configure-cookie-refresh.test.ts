@@ -135,7 +135,7 @@ describe('useQuotaConfigure cookie 自动续期手动入口', () => {
 
   // ── 状态流转 ──────────────────────────────────────────────────────────
 
-  it('成功流转：running 中间态 → ok 且 cookieWritten → result=ok + 重跑 testQuery', async () => {
+  it('成功流转：running 中间态 → ok 且 cookieWritten → 重跑 testQuery → result 复位（「正在重新查询」不悬挂）', async () => {
     let releaseIpc: ((v: { ok: boolean; cookieWritten: boolean }) => void) | undefined
     ipcRefresh.refreshQuotaCookie.mockImplementation(
       () => new Promise((resolve) => {
@@ -158,7 +158,8 @@ describe('useQuotaConfigure cookie 自动续期手动入口', () => {
     await flushPromises()
 
     expect(module.view.value.cookieRefresh.running).toBe(false)
-    expect(module.view.value.cookieRefresh.result).toBe('ok')
+    // 重查完成后 result 复位：查询结果由测试结果区呈现，「已续期，正在重新查询」不悬挂
+    expect(module.view.value.cookieRefresh.result).toBeNull()
     expect(module.test.value.status).toBe('success')
     expect(module.test.value.row).toEqual(mockRow)
   })
