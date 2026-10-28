@@ -619,6 +619,11 @@ function buildAggregatorPrompt({ header, round, max, roundDir, reviewResults, pr
     "  their tracked id verbatim; NEW suggestions get S-" + round + "-<seq> (e.g. S-" + round + "-1, ...).",
     "  severity for suggestion_ids MUST be minor — critical/major findings belong in must_fix_ids; an",
     "  explicit critical/major in suggestion_ids is treated as must-fix by the workflow.",
+    // dmg-r1-2：suggestion 数字口径成文（与 must_fix 的 :635 口径声明对齐）——检测层
+    // detectLedgerDefect 强制 ids >= 数字，宽口径报数（Infos 行 / 去重前 reviewer 计数
+    // 之和）会让语义完整的响应被判台账缺陷（重试一次后仍固执 = aggregator-failure）。
+    "- suggestion (the number) counts the deduplicated Suggestions table rows ONLY — the same base as",
+    "  suggestion_ids. Do NOT count Infos rows and do NOT sum the per-reviewer counts (they overlap after dedup).",
     "- title: one-line issue title extracted from the sub-review report row. It is the stable",
     "  cross-round identity anchor — when the SAME issue re-appears, keep the title close to the",
     "  previous wording (the workflow matches re-reported issues by id AND title).",
@@ -664,7 +669,8 @@ function buildAggregatorPrompt({ header, round, max, roundDir, reviewResults, pr
     "1. Did you write " + roundDir + "/aggregated.md? If not, do it first.",
     "2. Is must_fix in your JSON equal to the 'Must-fix: N' in your markdown (the summary line counts adjudication=evidence rows only)?",
     "3. Are must_fix_ids consistent with the Must-Fix table rows?",
-    "4. Are suggestion_ids consistent with the Suggestions table rows (EVERY suggestion row, none left only in markdown)?",
+    "4. Are suggestion_ids consistent with the Suggestions table rows (EVERY suggestion row, none left only in",
+    "   markdown), and does the suggestion number equal those deduplicated rows?",
     "5. Is every must-fix row adjudicated (evidence / unverified / downgraded+reason)?",
     "6. Does fixes_caution cover all high-risk or weak-evidence claims?",
     "7. Do groups cover every evidence issue id (must-fix AND suggestion) exactly once, with no file overlap between groups?",
@@ -1059,7 +1065,7 @@ function applyFixedRegression(entry, statusNow, id, seen, round) {
  * reconCount===0（无对账数据场景，如 doc-reviewer-only 批）时重报 fix-attempted/fixed
  * 条目 = 修复失败。语义与 merge 原内联块逐字段等价：status→regressed、fixAttempts+1
  *（修复失败计数，needs-redesign 数据源）、openStreak+1、history 追加；severity 经
- * inheritCarryoverFields 同源写入（采信本轮显式标注——与延续继承同一权威语义，不在此
+ * inheritCarryoverFields 同源写入（单向只升不降——与延续继承同一守卫语义，不在此
  * 重复第二份 severity 写法）。调用方门控（reconCount===0 且 status ∈ {fix-attempted,
  * fixed}）在 review-fix-loop.js merge 循环内，本函数无条件转换。与 reconcile 路径的
  * applyFixAttemptedOutcome/applyFixedRegression 语义同向但进入条件不同（对账通道吃
@@ -1429,21 +1435,32 @@ function normalizeAggregatorResult(raw) {
 }
 
 /**
- * suggestion 台账完整性校验（aggregator 输出消费前 fail-fast）：suggestion > 0 时
- * 必须提供与数字匹配的 suggestion_ids 条目（每条去重 suggestion 一个）。缺数组 /
- * 空数组 / 条数不足都是 aggregator 数据缺陷——线上事故形态正是「21 条 suggestion
+ * aggregator 台账完整性校验（双通道计数-台账核对，消费前 fail-fast）：数字 > 0 必须
+ * 有配套条目级台账，否则数字没有 owner/覆盖校验——线上事故形态正是「21 条 suggestion
  * 只有数字」，fix 阶段无 owner，残留 suggestion 在 clean 终态静默消失。
- * 显式 suggestion: 0 + suggestion_ids: [] 合法；条数多于数字也合法（数字是观测，
- * 台账才是事实源）。
- * @returns { suggestion: number, suggestion_ids: number } | null（null = 合法）
+ * - must-fix 通道（dmg-r1-4 对称化）：must_fix > 0 而键缺失或活跃条目
+ *   （adjudication=evidence，与 prompt 的 must_fix 口径同基数）不足 = 缺陷——此前该形态
+ *   静默走 G1 空清单降级路径（must-fix 无条目级 id，ES3 无法逐条覆盖校验）；同一弱
+ *   聚合模型对两数组的字段漏输出概率同源，sibling 通道升 fail-fast 后保持对称。
+ * - suggestion 通道：suggestion > 0 时 suggestion_ids 条数（全量，数字口径 = 去重表行）
+ *   不得少于数字；缺数组/空数组/条数不足都是缺陷。
+ * 显式数字 0 + 空数组（或键缺失）合法；条数多于数字也合法（数字是观测，台账才是
+ * 事实源）。双通道同时缺陷时先报 must-fix（红线通道优先）。
+ * @returns { channel: "must-fix"|"suggestion", reported: number, provided: number } | null
  */
-function detectSuggestionLedgerDefect(agg) {
+function detectLedgerDefect(agg) {
   if (!agg || typeof agg !== "object") return null;
-  const count = typeof agg.suggestion === "number" && Number.isFinite(agg.suggestion) ? agg.suggestion : 0;
-  if (count <= 0) return null;
-  const ids = Array.isArray(agg.suggestion_ids) ? agg.suggestion_ids.length : 0;
-  if (ids >= count) return null;
-  return { suggestion: count, suggestion_ids: ids };
+  const mfCount = typeof agg.must_fix === "number" && Number.isFinite(agg.must_fix) ? agg.must_fix : 0;
+  if (mfCount > 0) {
+    const active = Array.isArray(agg.must_fix_ids) ? filterActiveIds(agg.must_fix_ids).length : 0;
+    if (active < mfCount) return { channel: "must-fix", reported: mfCount, provided: active };
+  }
+  const sugCount = typeof agg.suggestion === "number" && Number.isFinite(agg.suggestion) ? agg.suggestion : 0;
+  if (sugCount > 0) {
+    const ids = Array.isArray(agg.suggestion_ids) ? agg.suggestion_ids.length : 0;
+    if (ids < sugCount) return { channel: "suggestion", reported: sugCount, provided: ids };
+  }
+  return null;
 }
 
 // ── rfl 数据链消费函数（tier-1 §4/§6.1/§6.3） ──────────────────
@@ -1526,14 +1543,24 @@ function recordDormant(dormant, entries, round, excludeIds) {
   return list;
 }
 
+/** severity 等级表（critical > major > minor）：单向只升不降的判定基准。 */
+const SEVERITY_RANK = { critical: 3, major: 2, minor: 1 };
+
 /**
  * 延续条目字段继承（wf-1792073055433 空壳缺陷修复）：聚合器重报已追踪条目时
  * title/severity 可能缺省（旧格式 string / 对象缺字段）——清单侧已有字段为权威不覆盖，
- * title 缺失侧从本轮重报回填；severity 采信本轮显式标注（与 R1/regressed 分支的
- * 「entry.severity || 既有」聚合权威语义一致）。无 title 的延续条目会让跨轮身份锚点
- * 断链（L2 标题对账失配、prev_titles 注入段变 "no title recorded" 空壳）。
+ * title 缺失侧从本轮重报回填；severity 单向只升不降（dmg-r1-1）：重报等级更高时回写，
+ * 更低时不覆盖——同题 suggestion 重报（恒 minor 层）经 L2 标题命中已追踪 critical/major
+ * 条目时若照采本轮标注，追踪条目被洗成 minor 后 ES3 defer 校验以追踪 severity 为权威
+ * （resolveDeferredEffectiveSeverity），「must-fix 不得 defer」红线被静默绕过；降级必须
+ * 走 aggregator 显式裁决（adjudication=downgraded → dormant 通道）。与 R1 init 的同题
+ * 异号防覆盖守卫（已建条目不覆盖）镜像，「must-fix 优先」在 R1/R2+ 两个合并站点一致
+ * 成立。无 title 的延续条目会让跨轮身份锚点断链（L2 标题对账失配、prev_titles 注入段
+ * 变 "no title recorded" 空壳）。
  * 签名收窄（AC1）：tracked/entry 恒对象（tracked 取自 state.issues 活跃条目，entry 经
- * normalize）——不设对象性防御，normalize 契约是唯一防御层。
+ * normalize——severity 恒 ∈ {critical,major,minor}）——不设对象性防御，normalize 契约
+ * 是唯一防御层；tracked.severity 来自历史状态文件，不在等级表内的意外值不参与降级
+ * 判定（entry 合法等级照常回写，保持「清单侧字段异常时本轮为权威」语义）。
  * 原地更新 tracked，返回是否有变更（调用方可记 log）。
  */
 function inheritCarryoverFields(tracked, entry) {
@@ -1543,8 +1570,13 @@ function inheritCarryoverFields(tracked, entry) {
     changed = true;
   }
   if (typeof entry.severity === "string" && entry.severity && tracked.severity !== entry.severity) {
-    tracked.severity = entry.severity;
-    changed = true;
+    const from = SEVERITY_RANK[tracked.severity];
+    const to = SEVERITY_RANK[entry.severity];
+    // from 缺等级 = 历史脏值 → 采信本轮；to 缺等级（normalize 契约破裂）或降级 → 不覆盖
+    if (from === undefined || to > from) {
+      tracked.severity = entry.severity;
+      changed = true;
+    }
   }
   return changed;
 }
@@ -2174,7 +2206,7 @@ module.exports = {
   findNeedsRedesign,
   parseResult,
   normalizeAggregatorResult,
-  detectSuggestionLedgerDefect,
+  detectLedgerDefect,
   buildIssueEntry,
   resolveRunRoot,
   computeOrigin,

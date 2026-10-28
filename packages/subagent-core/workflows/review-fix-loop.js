@@ -155,7 +155,7 @@ const {
   findNeedsRedesign,
   parseResult,
   normalizeAggregatorResult,
-  detectSuggestionLedgerDefect,
+  detectLedgerDefect,
   buildIssueEntry,
   combineIssueEntries,
   resolveRunRoot,
@@ -200,6 +200,12 @@ const REVIEWER_RETRY_SUFFIX = "\n\n[RETRY] Your previous response failed schema 
 // suggestion>0 但 suggestion_ids 缺失/条数不足时追加失败原因重问——必须逐条返回，
 // 不允许只有数字或只写 markdown 表；确实没有 suggestion 时须显式 suggestion:0 + []。
 const SUGGESTION_LEDGER_RETRY_SUFFIX = "\n\n[RETRY] Your previous response failed validation: it reported suggestion > 0 but returned missing or too few `suggestion_ids` entries. Re-output ONLY a valid response matching the required schema, with one `suggestion_ids` object for EVERY deduplicated suggestion row (never a bare count and never markdown-only). If there are truly 0 suggestions, return suggestion: 0 with suggestion_ids: [].";
+
+// aggregator must-fix 台账缺陷的原位重试后缀（dmg-r1-4 双通道对称化，同上机制）：
+// must_fix>0 但 must_fix_ids 键缺失或活跃（adjudication=evidence）条目不足时带因重问
+// ——数字口径只计 evidence 条目，downgraded/unverified 行留在 must_fix_ids 但不计入
+// must_fix；确无 evidence 条目时须显式 must_fix:0（must_fix_ids 可为 [] 或保留降级行）。
+const MUST_FIX_LEDGER_RETRY_SUFFIX = "\n\n[RETRY] Your previous response failed validation: it reported must_fix > 0 but returned missing or too few `must_fix_ids` entries with adjudication=evidence (the must_fix number counts evidence rows only; downgraded/unverified rows stay in must_fix_ids but do not count). Re-output ONLY a valid response matching the required schema, with one `must_fix_ids` object for EVERY must-fix table row. If there are truly 0 evidence-backed must-fix entries, return must_fix: 0.";
 
 // fail-fast 批内包装（B1/B2）：结构化返回是必须满足的前提，agent() 失败 resolve 的
 // {value, error} 信封（worker-script-builder 归一化，B4）在此转为 reject——Promise.all
@@ -395,7 +401,9 @@ const aggregatorSchema = {
     },
     // suggestion_ids（suggestion 台账，与 must_fix_ids 同构）：suggestion 不再只是数字/
     // markdown 行——每条有稳定 id、进问题清单、进 fixer 文档、进 ES3 覆盖校验与 R2 对账。
-    // 键可选（向后兼容旧 aggregator 输出）；缺失 = 未提供条目级数据，消费侧走数字口径。
+    // 键可选，但消费侧 detectLedgerDefect 核对数字与台账：suggestion>0 而缺失/条数不足 =
+    // 台账缺陷（带因重试一次，仍缺陷即 aggregator-failure 终止）；仅 suggestion=0 时缺失
+    // 合法放行（「向后兼容旧输出」实际只兼容 suggestion=0 的旧输出）。
     suggestion_ids: {
       type: "array",
       description: "Issue ids of the deduplicated suggestion-level (minor) list, same object shape as must_fix_ids; every suggestion row must appear here, never markdown-only",
@@ -1162,17 +1170,21 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     // suggestion 台账完整性（消费前 fail-fast）：suggestion>0 必须配足 suggestion_ids，
     // 否则数字没有条目/owner/覆盖校验——线上事故形态（21 条只有数字）会让残留 suggestion
     // 在 clean 终态静默消失。显式 suggestion:0 + [] 合法；条数多于数字合法。
-    let ledgerDefect = (agg && typeof agg.must_fix === "number") ? detectSuggestionLedgerDefect(agg) : null;
+    // dmg-r1-4：must-fix 通道对称 fail-fast——must_fix>0 而 must_fix_ids 键缺失或活跃
+    // （evidence）条目不足同判缺陷，不再静默走 G1 空清单降级（ES3 无法逐条覆盖校验）。
+    let ledgerDefect = (agg && typeof agg.must_fix === "number") ? detectLedgerDefect(agg) : null;
 
     if (!agg || typeof agg.must_fix !== "number" || ledgerDefect) {
       // 原 prompt 重试一次争取完整恢复（重试失败即终判，无 md 兜底——弱格式降级
       // 通道已整体拆除）：numeric-only 兜底会丢 must_fix_ids 整条数据链（merge 跳过 /
       // fixed 重报转 regressed 链断 / dormant 不落 / W5 门控退化），不可接受。
-      // 台账缺陷时追加失败原因重问（不是静默重发同一 prompt）。
-      const retryPrompt = ledgerDefect ? aggPrompt + SUGGESTION_LEDGER_RETRY_SUFFIX : aggPrompt;
+      // 台账缺陷时追加失败原因重问（不是静默重发同一 prompt），按通道选重试后缀。
+      const retryPrompt = ledgerDefect
+        ? aggPrompt + (ledgerDefect.channel === "must-fix" ? MUST_FIX_LEDGER_RETRY_SUFFIX : SUGGESTION_LEDGER_RETRY_SUFFIX)
+        : aggPrompt;
       if (ledgerDefect) {
-        log("Aggregator suggestion ledger invalid (suggestion=" + ledgerDefect.suggestion
-          + ", suggestion_ids=" + ledgerDefect.suggestion_ids + ") — retrying once with the failure reason.");
+        log("Aggregator " + ledgerDefect.channel + " ledger invalid (reported " + ledgerDefect.reported
+          + ", ids=" + ledgerDefect.provided + ") — retrying once with the failure reason.");
       } else {
         log("Aggregator JSON invalid (len=" + (typeof aggValue === "string" ? aggValue.length : 0) + ") — retrying once with the same prompt.");
       }
@@ -1190,7 +1202,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
       }));
       aggValue = aggRaw?.value ?? aggRaw;
       agg = normalizeAggregatorResult(aggValue);
-      ledgerDefect = (agg && typeof agg.must_fix === "number") ? detectSuggestionLedgerDefect(agg) : null;
+      ledgerDefect = (agg && typeof agg.must_fix === "number") ? detectLedgerDefect(agg) : null;
     }
 
     if (!agg || typeof agg.must_fix !== "number" || ledgerDefect) {
@@ -1208,13 +1220,14 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
       saveState(state);
       terminated = "aggregator-failure";
       if (ledgerDefect) {
-        finalMessage = "Batch " + batchIndex + " round " + round + ": aggregator suggestion 台账缺陷（suggestion="
-          + ledgerDefect.suggestion + ", suggestion_ids=" + ledgerDefect.suggestion_ids
-          + "）— 声称 " + ledgerDefect.suggestion + " 条去重 suggestion 但只提供 " + ledgerDefect.suggestion_ids
-          + " 条台账（不允许只有数字或只写 markdown 表），suggestion 无法分派与覆盖校验，继续执行会让残留 suggestion 静默消失"
+        finalMessage = "Batch " + batchIndex + " round " + round + ": aggregator " + ledgerDefect.channel
+          + " 台账缺陷（reported=" + ledgerDefect.reported + ", ids=" + ledgerDefect.provided
+          + "）— 声称 " + ledgerDefect.reported + " 条"
+          + (ledgerDefect.channel === "must-fix" ? "（adjudication=evidence 口径）" : "去重条目")
+          + " 但只提供 " + ledgerDefect.provided + " 条台账（不允许只有数字或只写 markdown 表），条目无法分派与覆盖校验，继续执行会让残留条目静默消失"
           + (aggRaw && typeof aggRaw === "object" && aggRaw.error ? " — " + aggRaw.error : "")
-          + "。恢复动作：重跑 workflow；或换聚合模型 / 检查 aggregator 输出是否按 prompt 返回 suggestion_ids"
-          + "（每条去重 suggestion 一个条目；确实没有 suggestion 时显式返回 suggestion: 0 + suggestion_ids: []）";
+          + "。恢复动作：重跑 workflow；或换聚合模型 / 检查 aggregator 输出是否按 prompt 返回 "
+          + (ledgerDefect.channel === "must-fix" ? "must_fix_ids（每条 must-fix 表行一个条目，must_fix 只计 evidence 行；确无 evidence 条目时显式返回 must_fix: 0）" : "suggestion_ids（每条去重 suggestion 一个条目；确实没有 suggestion 时显式返回 suggestion: 0 + suggestion_ids: []）");
       } else {
         finalMessage = "Batch " + batchIndex + " round " + round + ": aggregator 失败（重试后仍无效）"
           + (aggRaw && typeof aggRaw === "object" && aggRaw.error ? " — " + aggRaw.error : "");
@@ -1360,8 +1373,10 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         if (tracked) {
           dormantExcludeIds.add(id); // 翻译后仍在问题清单活跃的表格号 → dormant exclude
           // 延续条目字段继承（wf-1792073055433 空壳缺陷修复）：重报命中已追踪条目时，
-          // title 缺失侧从本轮重报回填、severity 采信本轮显式标注——防无 title 延续条目
-          // 断跨轮身份锚点（下轮 L2 标题对账失配 → clean 轮无法销账 → 误判 stuck）。
+          // title 缺失侧从本轮重报回填、severity 单向只升不降（dmg-r1-1，与 R1 init 的
+          // 同题异号防覆盖守卫镜像）——防同题 suggestion 重报把追踪 must-fix 洗成 minor
+          // 绕过 defer 红线；也防无 title 延续条目断跨轮身份锚点（下轮 L2 标题对账
+          // 失配 → clean 轮无法销账 → 误判 stuck）。
           if (inheritCarryoverFields(tracked, entry)) {
             log("Carryover fields inherited for " + resolved.key + " (title/severity synced from re-report)");
           }
@@ -1616,10 +1631,10 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     // = 旧单 fixer 行为退化）。活跃条目为 0（聚合数据不一致的罕见路径）时归一组空清单。
     const fixGroups = reconcileGroups(agg.groups, activeEntriesForFix);
     if (fixGroups.length === 0) {
-      // 全 clean 轮不会走到 fix（all-clean/A4 break 拦截）；活跃为 0 但 mustFix>0
-      // 且 aggregator 未给 must_fix_ids（schema 可选字段）的旧格式数据走此路径——派单个
-      // fixer 读报告；该轮 must-fix 无条目级 id，ES3 无法逐条覆盖校验。suggestion>0
-      // 无 suggestion_ids 已在聚合入口 fail-fast（aggregator-failure），不会到这里。
+      // 全 clean 轮不会走到 fix（all-clean/A4 break 拦截）；must_fix>0 / suggestion>0 而
+      // 台账缺失或不足已在聚合入口双通道 fail-fast（detectLedgerDefect，dmg-r1-4），
+      // 不会到这里。可达残留仅剩活跃条目为 0 且未被上游拦截的形态（如 mustFix=0 且
+      // suggestion 全降级）——派单个 fixer 读报告；该轮无条目级 id，ES3 无法逐条覆盖校验。
       fixGroups.push({ id: "G1", issueIds: [], files: [], note: "no active ledger entries (aggregator returned no issue ids)" });
     }
     log("Fix: " + fixGroups.length + " group(s) — " + fixGroups.map((g) => g.id + "(" + g.issueIds.length + ")").join(", "));
