@@ -443,8 +443,8 @@ export type { QuotaPreset, QuotaParamSpec } from './quota-presets'
 export { QUOTA_PRESETS, isQuotaPreset, matchQuotaPreset, resolveQuotaPresets } from './quota-presets'
 // cookie 登录态刷新目标（quota:refresh-cookie 通道的导航信息 SSOT：main 隐藏窗口
 // 刷新器与 renderer 入口判定共用，与 runtime baseline-fetchers 的请求解析规则分治）
-export type { QuotaRefreshTarget } from './quota-refresh-targets'
-export { QUOTA_REFRESH_TARGETS, getQuotaRefreshTarget } from './quota-refresh-targets'
+export type { QuotaRefreshTarget, QuotaFetcherProviderLike } from './quota-refresh-targets'
+export { QUOTA_REFRESH_TARGETS, getQuotaRefreshTarget, resolveQuotaFetcherId } from './quota-refresh-targets'
 // 语音合成朗读（TTS）契约类型（ai-voice-tts 设计 §7.1/§7.3；协议载荷形状 SSOT，纯类型无 node 依赖）
 export type {
   TtsProviderId,

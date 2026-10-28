@@ -2,16 +2,19 @@
  * useQuotaQuery unauthorized 自动续期测试（quota cookie 刷新 U3）。
  *
  * 覆盖 hover 路径的自动触发链：
- * - unauthorized 且刷新目标在册 → 调 lib/ipc refreshQuotaCookie；成功（ok 且
- *   cookieWritten）后重查一次 fetchQuota 并以新结果写 store
+ * - unauthorized 且刷新目标在册 → 调 lib/ipc refreshQuotaCookie；成功（ok 且带导出串）
+ *   后经 transport.configureQuota（quota.configure 保存链）落盘，再 force 重查一次
+ *   refreshQuota 并以新结果写 store
  * - 10 分钟冷却（模块级，触发即记账：失败也占用冷却窗）+ 在途去重
- * - 续期失败 / ok 但未写入 → 静默（不重查、store 保留 unauthorized 展示）
+ * - 续期失败 / ok 但无导出串 / 保存失败 → 静默（不重查、store 保留 unauthorized 展示）
  * - 非 unauthorized（network）/ 刷新目标不在册（opendesign、api-key 类）不触发
- * - 手动 fetcher 缺席时按 preset 自动匹配解析刷新目标（与 runtime 前两级同构）
+ * - 手动 fetcher 缺席时按 preset 自动匹配解析刷新目标（两级判定单源在 shared
+ *   resolveQuotaFetcherId）
  *
- * mock 策略：vi.mock quota RPC 域（getCached / fetchQuota）与 '@/lib/ipc'
- * （refreshQuotaCookie）；settings store 为 core 惰性单例，直接 setProviders /
- * setQuotaPresets 灌数（无 transport 依赖面）。冷却窗用 vi.useFakeTimers +
+ * mock 策略：vi.mock quota RPC 域（getCached / fetchQuota / refreshQuota）与 '@/lib/ipc'
+ * （refreshQuotaCookie）；configureQuota 经 provideSettingsTransport(makeSettingsTransportStub)
+ * 注入桩（保存链走真实 transport seam）；settings store 为 core 惰性单例，直接
+ * setProviders / setQuotaPresets 灌数（无 transport 依赖面）。冷却窗用 vi.useFakeTimers +
  * setSystemTime 推进墙钟（续期链自身无 setTimeout，微任务 flush 不受影响）。
  *
  * 冷却注册表是 useQuotaQuery 模块级状态，跨用例持久——各用例使用互不相同的
@@ -25,21 +28,26 @@ import { createPinia, setActivePinia } from 'pinia'
 import { ref } from 'vue'
 import type { NormalizedQuotaRow, ProviderId, ProviderInfo } from '@taiji/shared'
 import { QUOTA_PRESETS } from '@taiji/shared'
-import { getSettingsStore } from '@taiji/core'
+import { getSettingsStore, provideSettingsTransport } from '@taiji/core'
 import type { QuotaResult } from '@taiji/core/transport/api/domains/quota'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
 const quotaApi = vi.hoisted(() => ({
   getCached: vi.fn<(providerId: string) => Promise<QuotaResult>>(),
   fetchQuota: vi.fn<(providerId: string) => Promise<QuotaResult>>(),
+  refreshQuota: vi.fn<(providerId: string) => Promise<QuotaResult>>(),
 }))
 
 const ipcRefresh = vi.hoisted(() => ({
-  refreshQuotaCookie: vi.fn<(payload: { fetcherId: string; providerId: string }) => Promise<{ ok: boolean; cookieWritten: boolean; error?: string }>>(),
+  refreshQuotaCookie: vi.fn<(payload: { fetcherId: string; providerId: string }) => Promise<{ ok: boolean; cookie?: string; error?: string }>>(),
 }))
+
+const transportConfigureQuota = vi.hoisted(() => vi.fn())
 
 vi.mock('@taiji/core/transport/api/domains/quota', () => ({
   getCached: quotaApi.getCached,
   fetchQuota: quotaApi.fetchQuota,
+  refreshQuota: quotaApi.refreshQuota,
 }))
 
 vi.mock('@/lib/ipc', () => ({
@@ -102,17 +110,22 @@ describe('useQuotaQuery unauthorized 自动续期', () => {
     vi.useFakeTimers({ now: Date.now() })
     vi.clearAllMocks()
     quotaApi.getCached.mockResolvedValue(EMPTY_CACHED)
-    ipcRefresh.refreshQuotaCookie.mockResolvedValue({ ok: true, cookieWritten: true })
+    quotaApi.refreshQuota.mockResolvedValue(UNAUTHORIZED)
+    ipcRefresh.refreshQuotaCookie.mockResolvedValue({ ok: true, cookie: 'sid=refreshed' })
+    transportConfigureQuota.mockResolvedValue({ ok: true })
+    provideSettingsTransport(makeSettingsTransportStub({
+      configureQuota: transportConfigureQuota,
+    }))
   })
 
   afterEach(() => {
     vi.useRealTimers()
   })
 
-  it('unauthorized + 在册 fetcher → 自动续期，成功后重查并以新数据写 store', async () => {
+  it('unauthorized + 在册 fetcher → 自动续期：导出串经 configure 落盘后 force 重查并以新数据写 store', async () => {
     quotaApi.fetchQuota
       .mockResolvedValueOnce(UNAUTHORIZED) // 首查失败
-      .mockResolvedValueOnce({ data: OK_ROW, lastFetchAt: 123 }) // 续期后重查成功
+    quotaApi.refreshQuota.mockResolvedValueOnce({ data: OK_ROW, lastFetchAt: 123 }) // 续期后 force 重查成功
     const { q, store } = setup(providerInfo({ id: 'mimo-ok', quota: { enabled: true, fetcher: 'mimo', cookieSet: true } }))
 
     await q.onHoverEnter()
@@ -120,27 +133,36 @@ describe('useQuotaQuery unauthorized 自动续期', () => {
 
     expect(ipcRefresh.refreshQuotaCookie).toHaveBeenCalledTimes(1)
     expect(ipcRefresh.refreshQuotaCookie).toHaveBeenCalledWith({ fetcherId: 'mimo', providerId: 'mimo-ok' })
-    expect(quotaApi.fetchQuota).toHaveBeenCalledTimes(2)
+    // 保存链：导出串经 quota.configure 落盘（enabled 透传当前值，其余键缺省不动）
+    expect(transportConfigureQuota).toHaveBeenCalledWith({
+      providerId: 'mimo-ok',
+      enabled: true,
+      cookie: 'sid=refreshed',
+    })
+    // 重查走 force 通道（refreshQuota），非 force 的 fetchQuota 只发生首查一次
+    expect(quotaApi.fetchQuota).toHaveBeenCalledTimes(1)
+    expect(quotaApi.refreshQuota).toHaveBeenCalledTimes(1)
+    expect(quotaApi.refreshQuota).toHaveBeenCalledWith('mimo-ok')
     expect(store.getEntry('mimo-ok')?.data).toEqual(OK_ROW)
     expect(q.error.value).toBeNull()
   })
 
   it('手动 fetcher 缺席时按 preset 自动匹配解析刷新目标', async () => {
-    // name 命中 mimo preset（\bmimo\b），无手动 fetcher → 前两级解析落到自动匹配
-    quotaApi.fetchQuota
-      .mockResolvedValueOnce(UNAUTHORIZED)
-      .mockResolvedValueOnce({ data: OK_ROW, lastFetchAt: 123 })
+    // name 命中 mimo preset（\bmimo\b），无手动 fetcher → 两级解析落到自动匹配
+    quotaApi.fetchQuota.mockResolvedValueOnce(UNAUTHORIZED)
+    quotaApi.refreshQuota.mockResolvedValueOnce({ data: OK_ROW, lastFetchAt: 123 })
     const { q } = setup(providerInfo({ id: 'auto-p', name: 'mimo proxy', quota: { enabled: true } }))
 
     await q.onHoverEnter()
     await flushPromises()
 
     expect(ipcRefresh.refreshQuotaCookie).toHaveBeenCalledWith({ fetcherId: 'mimo', providerId: 'auto-p' })
+    expect(transportConfigureQuota).toHaveBeenCalledWith({ providerId: 'auto-p', enabled: true, cookie: 'sid=refreshed' })
     expect(q.data.value).toEqual(OK_ROW)
   })
 
-  it('续期失败（ok:false）→ 静默：不重查、store 保留 unauthorized 展示', async () => {
-    ipcRefresh.refreshQuotaCookie.mockResolvedValue({ ok: false, cookieWritten: false, error: 'login timeout' })
+  it('续期失败（ok:false）→ 静默：不落盘、不重查、store 保留 unauthorized 展示', async () => {
+    ipcRefresh.refreshQuotaCookie.mockResolvedValue({ ok: false, error: 'login timeout' })
     quotaApi.fetchQuota.mockResolvedValue(UNAUTHORIZED)
     const { q, store } = setup(providerInfo({ id: 'mimo-fail', quota: { enabled: true, fetcher: 'mimo', cookieSet: true } }))
 
@@ -148,20 +170,37 @@ describe('useQuotaQuery unauthorized 自动续期', () => {
     await flushPromises()
 
     expect(ipcRefresh.refreshQuotaCookie).toHaveBeenCalledTimes(1)
+    expect(transportConfigureQuota).not.toHaveBeenCalled()
     expect(quotaApi.fetchQuota).toHaveBeenCalledTimes(1)
+    expect(quotaApi.refreshQuota).not.toHaveBeenCalled()
     expect(q.error.value).toBe('panel.context.quotaFailUnauthorized')
     expect(store.getEntry('mimo-fail')?.data).toBeNull()
   })
 
-  it('ok 但 cookieWritten:false（cookie 未变化）→ 不重查', async () => {
-    ipcRefresh.refreshQuotaCookie.mockResolvedValue({ ok: true, cookieWritten: false })
+  it('ok 但未导出串（目标域无 cookie）→ 不落盘不重查', async () => {
+    ipcRefresh.refreshQuotaCookie.mockResolvedValue({ ok: true })
     quotaApi.fetchQuota.mockResolvedValue(UNAUTHORIZED)
     const { q } = setup(providerInfo({ id: 'mimo-nowrite', quota: { enabled: true, fetcher: 'mimo', cookieSet: true } }))
 
     await q.onHoverEnter()
     await flushPromises()
 
+    expect(transportConfigureQuota).not.toHaveBeenCalled()
     expect(quotaApi.fetchQuota).toHaveBeenCalledTimes(1)
+    expect(quotaApi.refreshQuota).not.toHaveBeenCalled()
+    expect(q.error.value).toBe('panel.context.quotaFailUnauthorized')
+  })
+
+  it('导出串保存失败（configure ok:false）→ 静默：不重查、保留 unauthorized 展示', async () => {
+    transportConfigureQuota.mockResolvedValue({ ok: false, error: 'persist failed' })
+    quotaApi.fetchQuota.mockResolvedValue(UNAUTHORIZED)
+    const { q } = setup(providerInfo({ id: 'mimo-savefail', quota: { enabled: true, fetcher: 'mimo', cookieSet: true } }))
+
+    await q.onHoverEnter()
+    await flushPromises()
+
+    expect(transportConfigureQuota).toHaveBeenCalledTimes(1)
+    expect(quotaApi.refreshQuota).not.toHaveBeenCalled()
     expect(q.error.value).toBe('panel.context.quotaFailUnauthorized')
   })
 
@@ -187,7 +226,7 @@ describe('useQuotaQuery unauthorized 自动续期', () => {
   })
 
   it('在途去重：续期 promise 未决期间重复 unauthorized 不重复发起', async () => {
-    let releaseRefresh: ((v: { ok: boolean; cookieWritten: boolean }) => void) | undefined
+    let releaseRefresh: ((v: { ok: boolean; error?: string }) => void) | undefined
     ipcRefresh.refreshQuotaCookie.mockImplementation(
       () => new Promise((resolve) => {
         releaseRefresh = resolve
@@ -206,7 +245,7 @@ describe('useQuotaQuery unauthorized 自动续期', () => {
     await flushPromises()
     expect(ipcRefresh.refreshQuotaCookie).toHaveBeenCalledTimes(1)
 
-    releaseRefresh?.({ ok: false, cookieWritten: false })
+    releaseRefresh?.({ ok: false, error: 'timeout' })
     await flushPromises()
   })
 

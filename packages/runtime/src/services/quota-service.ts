@@ -16,7 +16,7 @@
 import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync, chmodSync } from 'node:fs'
 import { join } from 'node:path'
 import type { NormalizedQuotaRow, ProviderQuotaFetcher, QuotaAuthKind, QuotaCredentialSource, QuotaConfigurePayload, QuotaFetchFailureReason, QuotaFetcherConfig } from '@taiji/shared'
-import { matchQuotaPreset, mergeCookieHeader, normalizeCookieHeader, resolveQuotaCredentialSource, supportsExclusiveCredential } from '@taiji/shared'
+import { mergeCookieHeader, normalizeCookieHeader, resolveQuotaCredentialSource, resolveQuotaFetcherId, supportsExclusiveCredential } from '@taiji/shared'
 import { mapLegacyWorkspaceParams, normalizeQuotaParams, paramSpecsForFetcher, resolveParamsValue } from './quota-params.js'
 import { getQuotaFetcher, listQuotaPresets } from './quota-providers/index.js'
 import { QuotaCache } from './quota-cache.js'
@@ -762,20 +762,19 @@ export class QuotaService {
   private getFetcherForProvider(providerId: string): ProviderQuotaFetcher | null {
     const info = this.getProviderInfo(providerId)
 
-    // 优先级 1：用户手动指定的 fetcher id（不再依赖 baseUrl/name 自动匹配，
-    // 适配自建反代、非标准 baseUrl 等自动匹配失败/猜错的场景）
-    if (info?.quota?.fetcher) {
-      const manual = getQuotaFetcher(info.quota.fetcher)
-      if (manual) return manual
-    }
-
-    // 优先级 2：经 baseUrl/name 匹配 preset（presets = 基线 ⊕ 远程合并视图，
-    // 远程更新匹配规则后 runtime 匹配链同步生效——与前端同源，无 UI/执行背离）
-    if (info) {
-      const preset = matchQuotaPreset({ baseUrl: info.baseUrl, name: info.name }, listQuotaPresets())
-      if (preset) {
-        return getQuotaFetcher(preset.fetcher)
-      }
+    // 优先级 1+2 单源在 shared resolveQuotaFetcherId（手动 quota.fetcher 在册优先，
+    // 否则 matchQuotaPreset 按 baseUrl/name 匹配；presets = 基线 ⊕ 远程合并视图，
+    // 远程更新匹配规则后 runtime 匹配链同步生效——与前端同源，无 UI/执行背离）。
+    // preset 命中但 fetcher 已下线（远程配置下线该 id）时 getQuotaFetcher 得 null =
+    // 显式失败，不落第三级兜底——下线的 fetcher 不得静默换源
+    // （quota-providers 头注「只增不改名」契约）。
+    const fetcherId = resolveQuotaFetcherId(
+      info ?? {},
+      listQuotaPresets(),
+      (id) => getQuotaFetcher(id) !== null,
+    )
+    if (fetcherId !== undefined) {
+      return getQuotaFetcher(fetcherId)
     }
 
     // 优先级 3：直接按 providerId 查 fetchers（仅命中 provider id 恰好等于 fetcher id 的场景）

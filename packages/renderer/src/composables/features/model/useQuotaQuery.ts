@@ -10,8 +10,9 @@
  * 6. 失败态写 error 到 store（UI 区分「从未查询」vs「查询失败」）：
  *    - RPC rejected（连接层错误）
  *    - fulfilled 但带 reason（A2-4 失败态契约：runtime 查询失败返回 data=null + reason，不抛错）
- * 7. unauthorized 且 cookie 刷新目标在册时自动续期：调 main 隐藏窗口刷新器写回
- *    cookie，成功后重查一次（10 分钟冷却 + 在途去重，失败静默）
+ * 7. unauthorized 且 cookie 刷新目标在册时自动续期：调 main 隐藏窗口刷新器导出新
+ *    cookie 串（main 不落盘），经 quota.configure 保存链由 runtime 单点落盘后 force
+ *    重查一次（10 分钟冷却 + 在途去重，失败静默）
  *
  * 设计文档：docs/architecture/v3-specs/coding-plan-quota/design.md §2.2.4
  * HANDOFF：.taiji-harness/coding-plan-quota/HANDOFF.md §5 Wave 4
@@ -19,9 +20,10 @@
 import { computed } from 'vue'
 import type { Ref } from 'vue'
 import type { NormalizedQuotaRow, ProviderInfo, QuotaFetchFailureReason } from '@taiji/shared'
-import { getQuotaRefreshTarget, matchQuotaPreset, resolveQuotaPresets } from '@taiji/shared'
+import { getQuotaRefreshTarget, resolveQuotaFetcherId, resolveQuotaPresets } from '@taiji/shared'
 import i18n from '@/i18n'
-import { getSettingsStore } from '@taiji/core'
+import { getSettingsStore, getSettingsTransport } from '@taiji/core'
+import { createInflightDedup } from '@taiji/core/foundation/create-inflight-dedup'
 import { refreshQuotaCookie } from '@/lib/ipc'
 import { useQuotaStore, type QuotaCacheEntry } from '@/stores/quota'
 import * as quotaApi from '@taiji/core/transport/api/domains/quota'
@@ -68,26 +70,33 @@ const COOKIE_REFRESH_COOLDOWN_MS = 600_000 // 10 分钟（10 × 60s）
 // taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，登记草稿）：续期冷却时刻表（防重触发登记，非展示数据）
 const cookieRefreshLastTriggerAt = new Map<string, number>()
 
-/** 在途去重：续期期间（可达 15s~120s）同一 provider 不重复发起。 */
-// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，登记草稿）：续期在途集合（并发去重登记，非展示数据）
-const cookieRefreshInflight = new Set<string>()
+/**
+ * 在途去重：续期期间（可达 15s~120s）同一 provider 不重复发起。createInflightDedup
+ * 单点工具（C-data-18：禁手写 Map/Set + settle 清理的同构实现）——fn 仅首轮执行、
+ * 在途触发复用同一 promise 后 void 丢弃，与「在途时新触发直接 return」的
+ * fire-and-forget 语义等价，另获内建引用比对防误删与 unhandled rejection 防护。
+ */
+// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，登记草稿）：续期在途去重登记（并发去重，非展示数据）
+const cookieRefreshDedup = createInflightDedup<void>()
 
 /**
  * 解析 provider 的 cookie 刷新目标 fetcher（在册返回 fetcher id，否则 undefined）。
- * 与 runtime QuotaService.getFetcherForProvider 的前两级同构：手动 quota.fetcher
- * 在册优先，否则 preset 自动匹配（presets = 远程合并视图，空态回落编译期基线）。
+ * 两级判定（手动 quota.fetcher 在册优先，否则 preset 自动匹配）单源在 shared
+ * resolveQuotaFetcherId——与 runtime QuotaService.getFetcherForProvider 同一规则
+ * （presets 数据源两侧独立：前端 = RPC 下发副本空态回落基线，runtime = 现算合并视图）。
  * runtime 第三级（providerId 直查 fetcher 注册表）是「provider id 恰好等于 fetcher id」
  * 的兜底，前端展示链（resolveQuotaPresetLabel）同样未实现，此处保持同构不实现。
- * cookie 类但不在册的 fetcher（如 opendesign）：两级都不命中 → undefined，不触发。
+ * 解析结果再过刷新目标在册判定：cookie 类但不在册的 fetcher（如 opendesign）两级都
+ * 不命中 → undefined，不触发。
  */
 function resolveCookieRefreshFetcherId(provider: ProviderInfo): string | undefined {
-  const manual = provider.quota?.fetcher
-  if (manual !== undefined && getQuotaRefreshTarget(manual) !== undefined) return manual
-  const presets = resolveQuotaPresets(getSettingsStore().quotaPresets.value)
-  const matched = matchQuotaPreset({ baseUrl: provider.baseUrl, name: provider.name }, presets)
-  return matched !== undefined && getQuotaRefreshTarget(matched.fetcher) !== undefined
-    ? matched.fetcher
-    : undefined
+  const fetcherId = resolveQuotaFetcherId(
+    provider,
+    resolveQuotaPresets(getSettingsStore().quotaPresets.value),
+    (id) => getQuotaRefreshTarget(id) !== undefined,
+  )
+  // preset 命中但刷新目标不在册（如 opendesign）→ 不触发；手动级已在 hasFetcher 过滤
+  return fetcherId !== undefined && getQuotaRefreshTarget(fetcherId) !== undefined ? fetcherId : undefined
 }
 
 /**
@@ -210,42 +219,67 @@ export function useQuotaQuery(providerIdRef: Ref<string | null>): UseQuotaQueryR
   }
 
   /**
-   * unauthorized 后的自动续期：调 main 隐藏窗口刷新器写回 cookie，成功（ok 且实际
-   * 写入）才重查一次；失败静默（store 已写 unauthorized 文案，无需叠加噪音）。
-   * SSO 登录窗弹出场景由 main 侧处理（登录页停留转可见），renderer 不做任何窗口操作。
+   * unauthorized 后的自动续期：调 main 隐藏窗口刷新器导出新 cookie 串（main 不落盘），
+   * 成功（ok 且带串）才经 quota.configure 保存链由 runtime 单点落盘，随后 force 重查
+   * 一次；失败静默（store 已写 unauthorized 文案，无需叠加噪音）。SSO 登录窗弹出场景
+   * 由 main 侧处理（登录页停留转可见），renderer 不做任何窗口操作。
    */
   async function attemptCookieRefresh(pid: string): Promise<void> {
     const provider = getSettingsStore().providers.value.find((p) => p.id === pid)
     if (!provider) return
     const fetcherId = resolveCookieRefreshFetcherId(provider)
     if (!fetcherId) return
-    if (cookieRefreshInflight.has(pid)) return
+    if (cookieRefreshDedup.has(pid)) return
     const last = cookieRefreshLastTriggerAt.get(pid)
     if (last !== undefined && Date.now() - last < COOKIE_REFRESH_COOLDOWN_MS) return
 
-    cookieRefreshInflight.add(pid)
     cookieRefreshLastTriggerAt.set(pid, Date.now())
+    void cookieRefreshDedup
+      .run(pid, () => runCookieRefresh(pid, provider.quota?.enabled ?? false, fetcherId))
+      .promise
+  }
+
+  /**
+   * 续期执行体（dedup 首轮发起时执行，永不 reject——异常归一进 catch 面的 debug 留痕，
+   * 在途/冷却去重由 dedup 与冷却表承担）。
+   */
+  async function runCookieRefresh(pid: string, enabled: boolean, fetcherId: string): Promise<void> {
     try {
       const result = await refreshQuotaCookie({ fetcherId, providerId: pid })
-      if (result.ok && result.cookieWritten) {
-        // 写盘即生效（runtime fetcher 直读 secrets 文件），重查拿到的是新 cookie 的结果
-        if (store.markPending(pid)) {
-          try {
-            const refetched = await quotaApi.fetchQuota(pid)
-            applyFetchResult(store, pid, refetched)
-          } catch (e) {
-            store.setError(pid, e instanceof Error ? e.message : String(e ?? 'unknown error'))
-          } finally {
-            store.unmarkPending(pid)
-          }
-        }
+      if (!(result.ok && result.cookie)) return
+      // 单写方落盘（data-source-registry #66）：main 只导出串，保存走 quota.configure
+      // 保存链——secrets 文件由 runtime QuotaService 进程内写入（权限 / 顺序与用户
+      // 手贴保存同一条链），configure 成功即 cookieSet 落盘
+      const saved = await getSettingsTransport().configureQuota({
+        providerId: pid,
+        enabled,
+        cookie: result.cookie,
+      })
+      if (!saved.ok) {
+        console.debug('[quota] cookie refresh save failed:', saved.error ?? 'unknown error')
+        return
+      }
+      if (!store.markPending(pid)) {
+        // 在途查询早于写盘发起、晚于写盘返回时，其 unauthorized 是旧 cookie 的真实
+        // 结果——UI 停留失败态到下次 hover 才刷新，留痕便于观测
+        console.debug('[quota] cookie refreshed while a fetch is pending; unauthorized state stays until next hover:', pid)
+        return
+      }
+      try {
+        // force 重查（refreshQuota）绕 10s 节流：触发续期的那次失败查询刚写过
+        // lastFetchTime（runtime finishFetch 在非 force 路径的 unauthorized 失败出口
+        // 也写时间戳），非 force 重查必然命中节流读回过期失败态
+        const refetched = await quotaApi.refreshQuota(pid)
+        applyFetchResult(store, pid, refetched)
+      } catch (e) {
+        store.setError(pid, e instanceof Error ? e.message : String(e ?? 'unknown error'))
+      } finally {
+        store.unmarkPending(pid)
       }
     } catch (e) {
       // IPC 通道层异常（通道缺席 / preload 旧版）：保留 unauthorized 展示（冷却已记账，
       // 触发即记，不会形成失败风暴），debug 级留痕便于排查通道装配问题
       console.debug('[quota] cookie refresh failed:', e instanceof Error ? e.message : e)
-    } finally {
-      cookieRefreshInflight.delete(pid)
     }
   }
 

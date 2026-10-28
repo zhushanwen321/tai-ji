@@ -602,12 +602,13 @@ export function localFileRead(absPath: string): Promise<LocalFileReadResult> {
 // ── quota cookie 登录态刷新（quota:refresh-cookie invoke 通道）────────
 
 /**
- * 触发 main 隐藏窗口刷新器续期 cookie 登录态（写回 secrets 文件，runtime fetcher
- * 直读该文件、写盘即生效）。main 侧 handler 保证业务失败也 resolve ok:false + error
- * （见 apps/electron/main/quota/quota-cookie-ipc.ts 错误契约），本封装不 reject。
+ * 触发 main 隐藏窗口刷新器续期 cookie 登录态（导出新 cookie 串经返回值回本进程——
+ * main 不落盘，调用方走 quota.configure 保存链由 runtime 单点写 secrets 文件）。
+ * main 侧 handler 保证业务失败也 resolve ok:false + error（见
+ * apps/electron/main/quota/quota-cookie-ipc.ts 错误契约），本封装不 reject。
  * 无 IPC（web/mock）→ ok:false：自动触发链静默保留原失败展示，手动入口显示失败文案。
  */
 export function refreshQuotaCookie(payload: QuotaRefreshCookiePayload): Promise<QuotaRefreshCookieResult> {
   return api?.refreshQuotaCookie(payload)
-    ?? Promise.resolve({ ok: false, cookieWritten: false, error: 'refreshQuotaCookie unavailable' })
+    ?? Promise.resolve({ ok: false, error: 'refreshQuotaCookie unavailable' })
 }

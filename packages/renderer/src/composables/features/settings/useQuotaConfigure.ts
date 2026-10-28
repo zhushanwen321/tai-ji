@@ -227,6 +227,8 @@ interface CookieRefreshInputs {
   savedFetcher: () => string | undefined
   /** 当前草稿是否 cookie 形态（isCookieAuth 透传） */
   isCookieAuth: () => boolean
+  /** 续期导出串的落盘（走 quota.configure 保存链，runtime 单点写 secrets 文件） */
+  saveCookie: (pid: string, cookie: string) => Promise<{ ok: boolean; error?: string }>
   /** 续期成功后的结果刷新（重跑 testQuery） */
   onRefreshed: () => Promise<void>
 }
@@ -242,9 +244,9 @@ function createCookieRefreshController(inputs: CookieRefreshInputs): {
   /**
    * 入口可用性：cookie 形态 + 当前 fetcher 在 QUOTA_REFRESH_TARGETS 在册（在册 ⊆ cookie
    * 类——opendesign 等 cookie 类但无刷新目标的 fetcher 不在册，入口不渲染）+ 类型未变更
-   * （归属判据同 readiness：类型已变未保存时，刷新写回的 cookie 归属不明，等保存后再刷）。
+   * （归属判据同 readiness：类型已变未保存时，续期保存的 cookie 归属不明，等保存后再刷）。
    * 从未保存过类型的 provider（savedFetcher undefined）放行：选好类型即可先续期登录
-   * （SSO 窗弹出），cookie 写盘后「保存并测试」即可消费。
+   * （SSO 窗弹出），cookie 落盘后「保存并测试」即可消费。
    */
   const available = computed<boolean>(() => {
     if (!inputs.isCookieAuth()) return false
@@ -262,10 +264,11 @@ function createCookieRefreshController(inputs: CookieRefreshInputs): {
   }))
 
   /**
-   * 手动触发续期：main 隐藏窗口刷新器写回 secrets 文件（写盘即生效，runtime fetcher
-   * 直读）。成功（ok 且 cookieWritten）重跑 testQuery；失败只写 error——不动草稿与
-   * 既有测试结果（用户已填的输入不因续期失败丢失）。lib/ipc 封装保证不 reject
-   * （main 侧业务失败也 resolve ok:false），catch 面只覆盖通道装配异常。
+   * 手动触发续期：main 隐藏窗口刷新器导出新 cookie 串（main 不落盘），经 saveCookie
+   * （quota.configure 保存链）由 runtime 单点写 secrets 文件。成功（保存 ok）重跑
+   * testQuery；失败只写 error——不动草稿与既有测试结果（用户已填的输入不因续期失败
+   * 丢失）。lib/ipc 封装保证不 reject（main 侧业务失败也 resolve ok:false），
+   * catch 面只覆盖通道装配异常。
    */
   async function refreshCookie(): Promise<void> {
     const pid = inputs.providerId()
@@ -277,16 +280,23 @@ function createCookieRefreshController(inputs: CookieRefreshInputs): {
     error.value = ''
     try {
       const refreshed = await refreshQuotaCookie({ fetcherId: fid, providerId: pid })
-      if (refreshed.ok && refreshed.cookieWritten) {
-        result.value = 'ok'
-        await inputs.onRefreshed()
-        // ok 文案（「正在重新查询」）随重查完成使命结束——结果由测试结果区呈现，
-        // 不复位会永久悬挂
-        result.value = null
-      } else {
+      if (!(refreshed.ok && refreshed.cookie)) {
         result.value = 'fail'
         error.value = refreshed.error || inputs.t('settings.providerEdit.quotaCookieAutoRefreshFail')
+        return
       }
+      // 单写方落盘（data-source-registry #66）：保存失败按续期失败呈现（cookie 未生效）
+      const saved = await inputs.saveCookie(pid, refreshed.cookie)
+      if (!saved.ok) {
+        result.value = 'fail'
+        error.value = saved.error || inputs.t('settings.providerEdit.quotaCookieAutoRefreshFail')
+        return
+      }
+      result.value = 'ok'
+      await inputs.onRefreshed()
+      // ok 文案（「正在重新查询」）随重查完成使命结束——结果由测试结果区呈现，
+      // 不复位会永久悬挂
+      result.value = null
     } catch (e) {
       result.value = 'fail'
       error.value = e instanceof Error ? e.message : inputs.t('settings.providerEdit.quotaCookieAutoRefreshFail')
@@ -773,6 +783,10 @@ function createCookieRefreshController(inputs: CookieRefreshInputs): {
     fetcherId: () => fetcherIdDraft.value,
     savedFetcher: () => providerRef.value?.quota?.fetcher,
     isCookieAuth: () => isCookieAuth.value,
+    // 落盘中转：main 只导出串，保存走 quota.configure 保存链（enabled 传当前值，
+    // 其余键缺省 = 不变——fetcher/来源/params 继承磁盘既存）
+    saveCookie: (pid, cookie) =>
+      getSettingsTransport().configureQuota({ providerId: pid, enabled: enabled.value, cookie }),
     onRefreshed: testQuery,
   })
 

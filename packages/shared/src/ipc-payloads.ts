@@ -378,10 +378,13 @@ export interface QuotaRefreshCookiePayload {
 
 /**
  * quota:refresh-cookie 返回。ok=false 时 error 携带可展示原因（超时 / 页面加载失败 /
- * 未知 fetcher）；cookieWritten 仅在成功路径且 secrets 文件实际写入时为 true。
+ * 未知 fetcher）；ok=true 时 cookie 携带导出的目标域 cookie 串（`name=value; name2=value2`
+ * 手贴格式）。main 刷新器不落盘——secrets 文件的唯一写方进程 = runtime QuotaService，
+ * 导出串经 IPC 回 renderer 后由续期链走 quota.configure 保存链单点落盘
+ * （跨进程单写方裁决，data-source-registry #66）。
  */
 export interface QuotaRefreshCookieResult {
   ok: boolean
-  cookieWritten: boolean
+  cookie?: string
   error?: string
 }

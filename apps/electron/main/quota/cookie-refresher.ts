@@ -5,13 +5,15 @@
  * （页面 JS + SSO 跳转），本模块按需创建隐藏 BrowserWindow 让续期循环跑起来：
  *
  *   种 cookie（secrets 文件 → partition）→ 加载 pageUrl → 轮询 apiUrl 直到 HTTP 200
- *   → 导出 partition 的目标域 cookie → 0600 写回 secrets 文件 → 销毁窗口
+ *   → 导出 partition 的目标域 cookie 串 → 销毁窗口（串经 IPC 回 renderer）
  *
  * 日常零内存占用：窗口按需创建、成败都 destroy；partition 用 persist 前缀（历史登录态
  * 跨刷新保留，SSO 跳转链的中间 cookie 不丢）。
  *
- * 与 runtime 的生效关系：runtime 是独立 Node 子进程、与 main 无业务 RPC，但 quota
- * fetcher 每次**直读** secrets 文件无缓存——main 写盘即生效，无需通知。
+ * 与 runtime 的写方关系（跨进程单写方裁决，data-source-registry #66）：main **只读**
+ * secrets 文件（种 cookie 直读）；导出串不落盘，由 renderer 续期链走 quota.configure
+ * 保存链经 runtime QuotaService 单点写入——secrets 文件的唯一写方进程恒为 runtime，
+ * 消除 main 覆盖写与 runtime 读-合并-写跨进程交错丢更新的竞态。
  *
  * 安全策略（与主窗口 window-factory 的白名单语义不同，独立成套）：
  * - will-navigate 只放行目标站点域（pageUrl / apiUrl 的 host）+ loginUrlPatterns 中
@@ -25,8 +27,8 @@
  */
 import { BrowserWindow, session } from 'electron'
 import type { Session } from 'electron'
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { getDataDir } from '@taiji/shared/paths'
 import { getQuotaRefreshTarget, normalizeCookieHeader } from '@taiji/shared'
 import type { QuotaRefreshCookieResult, QuotaRefreshTarget } from '@taiji/shared'
@@ -44,11 +46,6 @@ const LOGIN_TIMEOUT_MS = 120_000
 const HTTP_OK = 200
 /** 毫秒 → 秒（超时失败文案用）。 */
 const MS_PER_SECOND = 1_000
-
-/** secret 文件权限：仅属主可读写（对齐 runtime quota-service 的 W4 权限处理）。 */
-const SECRET_FILE_MODE = 0o600
-/** secrets 目录权限：仅属主可读写执行（W4）。 */
-const SECRET_DIR_MODE = 0o700
 
 /** 刷新请求（与 IPC payload 同构；providerId 决定 partition 与 secrets 文件名）。 */
 export type QuotaRefreshInput = {
@@ -85,7 +82,7 @@ async function runRefresh(input: QuotaRefreshInput, deps: QuotaRefreshDeps): Pro
   const target = getQuotaRefreshTarget(input.fetcherId)
   if (!target) {
     // IPC 层已校验 fetcherId 在册；此处兜底（直接调用方传错 id 时给出可定位文案）
-    return { ok: false, cookieWritten: false, error: `no quota refresh target for fetcher: ${input.fetcherId}` }
+    return { ok: false, error: `no quota refresh target for fetcher: ${input.fetcherId}` }
   }
   const dataDir = deps.dataDir?.() ?? getDataDir()
   let win: BrowserWindow | null = null
@@ -111,15 +108,15 @@ async function runRefresh(input: QuotaRefreshInput, deps: QuotaRefreshDeps): Pro
       // （如 xiaomimimo 的 genLoginUrl → account.xiaomi.com），打断初始加载。
       // SSO 跳转/登录页检测/超时全部由轮询承载，这里只拦真正的加载故障
       if (!isAbortedNavigation(err)) {
-        return { ok: false, cookieWritten: false, error: `page load failed: ${errorMessage(err)}` }
+        return { ok: false, error: `page load failed: ${errorMessage(err)}` }
       }
     }
     const polled = await pollUntilApiOk(win, target)
-    if (!polled.ok) return { ok: false, cookieWritten: false, error: polled.error }
-    const cookieWritten = await exportCookies(ses, target, dataDir, input.providerId)
-    return { ok: true, cookieWritten }
+    if (!polled.ok) return { ok: false, error: polled.error }
+    const cookie = await exportCookies(ses, target)
+    return { ok: true, cookie }
   } catch (err) {
-    return { ok: false, cookieWritten: false, error: errorMessage(err) }
+    return { ok: false, error: errorMessage(err) }
   } finally {
     if (win && !win.isDestroyed()) win.destroy()
   }
@@ -247,19 +244,21 @@ function isAbortedNavigation(err: unknown): boolean {
   return code === NET_ERR_ABORTED || /ERR_ABORTED/.test(err.message)
 }
 
-// ── 导出写回（partition → secrets 文件）──────────────────────────────────────
+// ── 导出（partition → IPC 返回值）────────────────────────────────────────────
 
 /**
- * 导出 partition 中目标域的 cookie 并写回 secrets 文件。
+ * 导出 partition 中目标域的 cookie 串。
  *
  * ses.cookies.get({}) 能拿到 HttpOnly cookie（document.cookie 拿不到，这正是要走
  * 隐藏窗口而非 renderer fetch 的原因）；导出串保持手贴格式（`name=value; name2=value2`），
  * 除域过滤外不做任何加工——runtime fetcher 直接把它作 Cookie 请求头发送。
+ * main 不落盘（跨进程单写方裁决，见模块头注释）：串经 QuotaRefreshCookieResult.cookie
+ * 回 renderer，由续期链走 quota.configure 保存链经 runtime 单点写 secrets 文件。
  *
- * @returns 写入成功 true；目标域一条 cookie 都没有时 throw（API 200 却无 cookie 属于
- *   不可能态，按异常上抛由调用方统一归一，不静默返回「成功但没写」）
+ * @returns 目标域一条 cookie 都没有时 throw（API 200 却无 cookie 属于不可能态，按异常
+ *   上抛由调用方统一归一，不静默返回「成功但没导出」）
  */
-async function exportCookies(ses: Session, target: QuotaRefreshTarget, dataDir: string, providerId: string): Promise<boolean> {
+async function exportCookies(ses: Session, target: QuotaRefreshTarget): Promise<string> {
   const all = await ses.cookies.get({})
   const siteHosts = siteHostsOf(target)
   const header = all
@@ -269,27 +268,7 @@ async function exportCookies(ses: Session, target: QuotaRefreshTarget, dataDir: 
   if (!header) {
     throw new Error(`no cookies captured for target domain (${[...siteHosts].join(', ')})`)
   }
-  writeSecretFile(cookieFilePath(dataDir, providerId), header)
-  return true
-}
-
-/**
- * [W4] 写入 secret 文件并设 0600 权限（main 侧独立实现，参照 runtime quota-service
- * writeSecretFile 的权限目标）。writeFileSync 的 mode 选项仅在创建新文件时生效且被
- * 进程 umask 过滤，chmodSync 后置强制设权限可覆盖三种形态（新建被 umask 收紧 /
- * 已存在文件覆盖后 mode 不变 / 原文件权限过宽）——chmod 不受 umask 影响，故不采用
- * runtime 侧的「umask 清零」做法（process.umask 设值在 worker 线程不可用，
- * main 测试池即 threads）。secrets 目录缺失时补建（chmod 后置 0700）——首次刷新
- * 可能早于任何 cookie 配置写入。
- */
-function writeSecretFile(filePath: string, content: string): void {
-  const dir = dirname(filePath)
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true })
-    chmodSync(dir, SECRET_DIR_MODE)
-  }
-  writeFileSync(filePath, content, { encoding: 'utf-8', mode: SECRET_FILE_MODE })
-  chmodSync(filePath, SECRET_FILE_MODE)
+  return header
 }
 
 // ── 导航守卫（安全策略）───────────────────────────────────────────────────────

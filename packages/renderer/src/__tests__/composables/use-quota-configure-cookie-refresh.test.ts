@@ -4,10 +4,10 @@
  * 覆盖 module 契约新增面（view.cookieRefresh + refreshCookie 动作）：
  * - available 矩阵：cookie 形态且 fetcher 在 QUOTA_REFRESH_TARGETS 在册且类型未变；
  *   api-key 类 / 不在册（opendesign）/ 类型草稿已切换（归属失效）均不渲染入口
- * - 成功流转：running 中间态 → ok 且 cookieWritten → result='ok' + 重跑 testQuery
- *   （transport.refreshQuota）
- * - 失败流转：ok:false → result='fail' + error 透传；草稿与既有测试结果不动；
- *   error 缺省走 i18n 兜底（注入 t 的 T: 前缀形态）
+ * - 成功流转：running 中间态 → ok 且带导出串 → 经 transport.configureQuota
+ *   （quota.configure 保存链）落盘 → 重跑 testQuery（transport.refreshQuota）
+ * - 失败流转：ok:false / 保存失败 → result='fail' + error 透传；草稿与既有测试结果
+ *   不动；error 缺省走 i18n 兜底（注入 t 的 T: 前缀形态）
  * - 入口不可用时动作 no-op（不发 IPC）
  *
  * mock 策略：SettingsTransport seam 经 makeSettingsTransportStub 注入（与
@@ -28,8 +28,10 @@ import type { QuotaConfigureModule, QuotaSnapshot } from '@taiji/core'
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
 const ipcRefresh = vi.hoisted(() => ({
-  refreshQuotaCookie: vi.fn<(payload: { fetcherId: string; providerId: string }) => Promise<{ ok: boolean; cookieWritten: boolean; error?: string }>>(),
+  refreshQuotaCookie: vi.fn<(payload: { fetcherId: string; providerId: string }) => Promise<{ ok: boolean; cookie?: string; error?: string }>>(),
 }))
+
+const transportConfigureQuota = vi.hoisted(() => vi.fn())
 
 vi.mock('@/lib/ipc', () => ({
   refreshQuotaCookie: ipcRefresh.refreshQuotaCookie,
@@ -84,11 +86,12 @@ describe('useQuotaConfigure cookie 自动续期手动入口', () => {
     // presets 合并视图灌编译期基线（与 settings-domain-bundle 同口径）
     getSettingsStore().setQuotaPresets([...QUOTA_PRESETS])
     vi.clearAllMocks()
-    ipcRefresh.refreshQuotaCookie.mockResolvedValue({ ok: true, cookieWritten: true })
+    ipcRefresh.refreshQuotaCookie.mockResolvedValue({ ok: true, cookie: 'sid=refreshed' })
+    transportConfigureQuota.mockResolvedValue({ ok: true })
     provideSettingsTransport(makeSettingsTransportStub({
       getCachedQuota: vi.fn(async (): Promise<QuotaSnapshot> => ({ data: null, lastFetchAt: null })),
       refreshQuota: vi.fn(async (): Promise<QuotaSnapshot> => ({ data: mockRow, lastFetchAt: 456 })),
-      configureQuota: vi.fn(async () => ({ ok: true })),
+      configureQuota: transportConfigureQuota,
     }))
   })
 
@@ -135,8 +138,8 @@ describe('useQuotaConfigure cookie 自动续期手动入口', () => {
 
   // ── 状态流转 ──────────────────────────────────────────────────────────
 
-  it('成功流转：running 中间态 → ok 且 cookieWritten → 重跑 testQuery → result 复位（「正在重新查询」不悬挂）', async () => {
-    let releaseIpc: ((v: { ok: boolean; cookieWritten: boolean }) => void) | undefined
+  it('成功流转：running 中间态 → ok 且带导出串 → 经 configure 落盘 → 重跑 testQuery → result 复位（「正在重新查询」不悬挂）', async () => {
+    let releaseIpc: ((v: { ok: boolean; cookie?: string }) => void) | undefined
     ipcRefresh.refreshQuotaCookie.mockImplementation(
       () => new Promise((resolve) => {
         releaseIpc = resolve
@@ -153,19 +156,25 @@ describe('useQuotaConfigure cookie 自动续期手动入口', () => {
     expect(module.view.value.cookieRefresh.running).toBe(true)
     expect(ipcRefresh.refreshQuotaCookie).toHaveBeenCalledWith({ fetcherId: 'mimo', providerId: 'p1' })
 
-    releaseIpc?.({ ok: true, cookieWritten: true })
+    releaseIpc?.({ ok: true, cookie: 'sid=refreshed' })
     await pending
     await flushPromises()
 
     expect(module.view.value.cookieRefresh.running).toBe(false)
+    // 导出串经 quota.configure 保存链落盘（enabled 透传当前值，其余键缺省不动）
+    expect(transportConfigureQuota).toHaveBeenCalledWith({
+      providerId: 'p1',
+      enabled: true,
+      cookie: 'sid=refreshed',
+    })
     // 重查完成后 result 复位：查询结果由测试结果区呈现，「已续期，正在重新查询」不悬挂
     expect(module.view.value.cookieRefresh.result).toBeNull()
     expect(module.test.value.status).toBe('success')
     expect(module.test.value.row).toEqual(mockRow)
   })
 
-  it('失败流转：ok:false → result=fail + error 透传；草稿与测试结果不动', async () => {
-    ipcRefresh.refreshQuotaCookie.mockResolvedValue({ ok: false, cookieWritten: false, error: 'login timeout' })
+  it('失败流转：ok:false → result=fail + error 透传；草稿与测试结果不动、不落盘不重查', async () => {
+    ipcRefresh.refreshQuotaCookie.mockResolvedValue({ ok: false, error: 'login timeout' })
     const { module } = mountModule(
       provider({ quota: { enabled: true, fetcher: 'mimo', cookieSet: true } }),
       P('mimo'),
@@ -178,13 +187,31 @@ describe('useQuotaConfigure cookie 自动续期手动入口', () => {
 
     expect(module.view.value.cookieRefresh.result).toBe('fail')
     expect(module.view.value.cookieRefresh.error).toBe('login timeout')
-    // 失败不清空现有表单（用户已填输入保留），不触发重查
+    // 失败不清空现有表单（用户已填输入保留），不触发保存与重查
     expect(module.draft.value.cookie).toBe('userPastedCookie=1')
+    expect(transportConfigureQuota).not.toHaveBeenCalled()
+    expect(module.test.value.status).toBe('idle')
+  })
+
+  it('保存失败（configure ok:false）→ result=fail + error 透传；不重跑 testQuery', async () => {
+    transportConfigureQuota.mockResolvedValue({ ok: false, error: 'persist failed' })
+    const { module } = mountModule(
+      provider({ quota: { enabled: true, fetcher: 'mimo', cookieSet: true } }),
+      P('mimo'),
+    )
+    await flushPromises()
+
+    await module.refreshCookie()
+    await flushPromises()
+
+    expect(module.view.value.cookieRefresh.result).toBe('fail')
+    expect(module.view.value.cookieRefresh.error).toBe('persist failed')
+    // 保存失败 = cookie 未生效，不重跑测试查询
     expect(module.test.value.status).toBe('idle')
   })
 
   it('失败无 error 时走 i18n 兜底文案', async () => {
-    ipcRefresh.refreshQuotaCookie.mockResolvedValue({ ok: false, cookieWritten: false })
+    ipcRefresh.refreshQuotaCookie.mockResolvedValue({ ok: false })
     const { module } = mountModule(
       provider({ quota: { enabled: true, fetcher: 'mimo', cookieSet: true } }),
       P('mimo'),

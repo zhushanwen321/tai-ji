@@ -4,7 +4,8 @@
  * cookie 类 provider（mimo / opencode-go 等）的服务端登录态换发必须走真实浏览器环境
  * （页面 JS + SSO 跳转），Electron main 进程的「隐藏窗口 cookie 刷新器」按本配置创建
  * 独立 persist partition 的隐藏 BrowserWindow、加载 pageUrl 让平台续期循环跑起来、
- * 轮询 apiUrl 直到 HTTP 200，再导出该 session 的 cookie 写回 secrets 文件。
+ * 轮询 apiUrl 直到 HTTP 200，再导出该 session 的 cookie 串经 IPC 回 renderer（落盘由
+ * renderer 续期链走 quota.configure 保存链，main 不写 secrets 文件）。
  *
  * 与 runtime 包 baseline-fetchers.json 的分工（防双源）：本配置只含**刷新导航信息**
  * （去哪个页面、轮询哪个 API、登录页长什么样），不含额度请求解析规则（响应字段映射、
@@ -20,6 +21,9 @@
  *   （'auth.'）匹配子域前缀（auth.opencode.ai）。正则消费侧点的通配属宽松方向
  *   （多判一次登录页无害），字面消费侧无通配（伪装域不放行）。
  */
+import type { QuotaPreset } from './quota-presets'
+import { matchQuotaPreset } from './quota-presets'
+
 export type QuotaRefreshTarget = {
   /** 平台控制台页面（隐藏窗口加载入口，续期循环在此页面上跑） */
   pageUrl: string
@@ -82,4 +86,41 @@ export const QUOTA_REFRESH_TARGETS: Record<string, QuotaRefreshTarget> = {
  */
 export function getQuotaRefreshTarget(fetcherId: string): QuotaRefreshTarget | undefined {
   return QUOTA_REFRESH_TARGETS[fetcherId]
+}
+
+/** resolveQuotaFetcherId 的 provider 侧最小结构（baseUrl/name + 手动 fetcher 指定）。 */
+export interface QuotaFetcherProviderLike {
+  baseUrl?: string
+  name?: string
+  /** 用户手动指定的 fetcher id（优先于 preset 自动匹配）。 */
+  quota?: { fetcher?: string } | undefined
+}
+
+/**
+ * provider → quota fetcher id 的两级解析（单源，双实现归并产物）：
+ * 1. 手动指定的 quota.fetcher 且在册（hasFetcher 判定）→ 该 id；
+ * 2. 否则经 baseUrl/name 调 matchQuotaPreset 匹配 → preset.fetcher（**在册与否不在本
+ *    函数判定**——preset 命中即返回 id，消费方按各自策略收尾，见下）。
+ *
+ * 消费方（规则单源、在册语义各自声明）：
+ * - runtime QuotaService.getFetcherForProvider：hasFetcher = fetcher 注册表可执行查询；
+ *   两级返回的 id 再查注册表取对象——preset 命中但 fetcher 已下线时得 null = 显式失败，
+ *   不落第三级 providerId 兜底（远程下线的 fetcher 不得静默换源）。
+ * - renderer useQuotaQuery（cookie 自动续期目标解析）：hasFetcher = QUOTA_REFRESH_TARGETS
+ *   在册；两级结果再过一次刷新目标在册判定（不在册 → undefined 不触发续期）。
+ *
+ * presets 作形参传入（调用方决定权威来源）：runtime 传 listQuotaPresets() 合并视图，
+ * renderer 传 RPC 下发副本经 resolveQuotaPresets 空态回落——两侧判定读同一规则，
+ * 数据源差异由调用方显式声明。
+ *
+ * @returns 解析到的 fetcher id；两级都未命中返回 undefined
+ */
+export function resolveQuotaFetcherId(
+  provider: QuotaFetcherProviderLike,
+  presets: readonly QuotaPreset[],
+  hasFetcher: (fetcherId: string) => boolean,
+): string | undefined {
+  const manual = provider.quota?.fetcher
+  if (manual !== undefined && hasFetcher(manual)) return manual
+  return matchQuotaPreset({ baseUrl: provider.baseUrl, name: provider.name }, presets)?.fetcher
 }

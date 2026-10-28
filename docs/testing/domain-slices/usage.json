@@ -55,6 +55,7 @@
     "packages/shared/src/__tests__/quota-cookie-merge.test.ts",
     "packages/shared/src/__tests__/quota-cookie-normalize.test.ts",
     "packages/shared/src/__tests__/quota-credential-source.test.ts",
+    "packages/shared/src/__tests__/quota-fetcher-resolution.test.ts",
     "packages/shared/src/__tests__/quota-pct-format.test.ts",
     "packages/shared/src/__tests__/quota-presets.test.ts",
     "packages/shared/src/__tests__/quota-workspace.test.ts"
