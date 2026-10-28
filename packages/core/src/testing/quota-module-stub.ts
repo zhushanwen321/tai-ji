@@ -46,7 +46,7 @@ function readyView(): QuotaSectionView {
       sourceHint: 'providerApiKey',
       providerWarning: null,
     },
-    workspace: { required: false },
+    params: [],
     cookieRefresh: { available: false, running: false, result: null, error: '' },
     help: null,
   }
@@ -71,7 +71,7 @@ function emptyView(): QuotaSectionView {
       sourceHint: 'providerApiKey',
       providerWarning: null,
     },
-    workspace: { required: false },
+    params: [],
     cookieRefresh: { available: false, running: false, result: null, error: '' },
     help: null,
   }
@@ -85,7 +85,7 @@ export function makeQuotaModuleStub({
     cookie: '',
     apiKey: '',
     credentialSource: 'provider',
-    workspace: '',
+    params: {},
   })
   // 消费方存在 view.value.readiness = ... / view.value.configuring = true 的属性级写法
   // （如 coding-plan-section.test.ts），预设视图按调用构造独立副本防跨 stub 实例状态泄漏。

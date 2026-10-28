@@ -8,7 +8,24 @@
  *
  * 零 vue 组件依赖（纯函数 + 类型），i18n 经参数注入（getDisplayLabel 同款注入范式）。
  */
-import type { GenStatsCacheMiss } from '@taiji/shared'
+import type { GenStatsCacheMiss, GenStatsDistribution, GenStatsSpeed } from '@taiji/shared'
+
+/**
+ * 分布矩阵的列定义（5 统计量之一）。label 由调用方 t() 注入——本模块零 i18n 依赖，
+ * 与归因文案注入范式一致。note = 列头 hover 补句（口径澄清）。
+ */
+export interface DistributionColumn {
+  key: keyof GenStatsDistribution
+  label: string
+  note?: string
+}
+
+/** 分布矩阵的行定义（一个滚动窗口 + 该窗口的五量取值）。key = 'day' | 'd7' | 'd30'（或自定义）。 */
+export interface DistributionRow {
+  key: string
+  label: string
+  values: GenStatsDistribution
+}
 
 /** 缓存命中率语义色三档阈值（demo ComposerBar cacheCls 对齐：≥80 success / 50–80 中性 /
  *  <50 warn——中档是「正常波动」非告警，低档才值得提醒，均非 danger 级） */
@@ -68,9 +85,54 @@ export function cachePercentDisplay(v: number | null | undefined): string {
   return v == null ? '—' : `${v}%`
 }
 
-/** 速度统一显示：null →「—」，否则「N t/s」（浮层四行同口径） */
+/** 速度统一显示：null →「—」，否则「N t/s」（触发器与卡内同口径） */
 export function formatSpeed(v: number | null | undefined): string {
   return v == null ? '—' : `${v} t/s`
+}
+
+/**
+ * 分布单元格显示（矩阵内用，**不带单位**）：两卡的单位已在列头/卡头声明，
+ * 每格再缀一次会让 3×5 矩阵变成噪声墙。
+ *  - 速度：`35`（列头声明 t/s）；
+ *  - TTFT：走 {@link formatTtftDuration}（`820ms` / `1.2s`）——延迟的量级跨毫秒到秒，
+ *    单位必须逐格可见，否则 820 与 1200 无法区分量级；
+ *  - null →「—」（无值纪律：null 不填 0）。
+ * 两个 formatter 显式注入而不是内部 switch 指标类型：调用方比本模块更清楚格的量纲，
+ * 也避免了「TTFT 卡调用速度 formatter」这类错接（矩阵渲染是泛型的）。
+ */
+export function formatDistributionValue(
+  v: number | null | undefined,
+  format: (n: number) => string,
+): string {
+  return v == null ? '—' : format(v)
+}
+
+// ── 分布矩阵共享形态（GenStatsSpeedCard / GenStatsTtftCard 两卡共用；防拷贝漂移）──
+
+/** 矩阵缺省值（帧存在但窗口无样本时的兑底；与 GenStatsDistribution 五量 null 同形）。 */
+export const NULL_DISTRIBUTION: GenStatsDistribution = { avg: null, p50: null, p99: null, max: null, min: null }
+
+/** 矩阵列头（两卡同一五量纲；P99 列带尾延迟说明）。t 在 computed 内调用，i18n 响应式保持。 */
+export function distributionColumns(t: (key: string) => string): DistributionColumn[] {
+  return [
+    { key: 'avg', label: t('panel.context.genStatsColAvg') },
+    { key: 'p50', label: t('panel.context.genStatsColP50') },
+    { key: 'p99', label: t('panel.context.genStatsColP99'), note: t('panel.context.genStatsColP99Note') },
+    { key: 'max', label: t('panel.context.genStatsColMax') },
+    { key: 'min', label: t('panel.context.genStatsColMin') },
+  ]
+}
+
+/** 三滚动窗口矩阵行（speed 与 ttft 帧同形 {day,d7,d30}，缺窗口落 NULL_DISTRIBUTION）。 */
+export function distributionRows(
+  t: (key: string) => string,
+  agg: Pick<GenStatsSpeed, 'day' | 'd7' | 'd30'> | undefined,
+): DistributionRow[] {
+  return [
+    { key: 'day', label: t('panel.context.genStatsWindowDay'), values: agg?.day ?? NULL_DISTRIBUTION },
+    { key: 'd7', label: t('panel.context.genStatsWindowD7'), values: agg?.d7 ?? NULL_DISTRIBUTION },
+    { key: 'd30', label: t('panel.context.genStatsWindowD30'), values: agg?.d30 ?? NULL_DISTRIBUTION },
+  ]
 }
 
 // ── TTFT（composer-genstats-ttft U4，设计 §3.1）──

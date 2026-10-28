@@ -227,11 +227,16 @@ function bareIdOfClientUuid(clientUuid: string): string {
   return clientUuid.startsWith(CLIENT_UUID_PREFIX) ? clientUuid.slice(CLIENT_UUID_PREFIX.length) : clientUuid
 }
 
+/** 分区 get-or-create + 追加裸标记 id 并回写（markShownDirect 与 ③ 降级整帧登记共用）。 */
+function addShownBareIds(sid: string, bareIds: readonly string[]): void {
+  const partition = shownDirectMarkerIds.get(sid) ?? new Set<string>()
+  for (const bare of bareIds) partition.add(bare)
+  shownDirectMarkerIds.set(sid, partition)
+}
+
 /** 入流即登记已显示（裸 id 反推进分区）：③ 降级判定的去重锚（① 落点与 ③ 降级共用）。 */
 function markShownDirect(sid: string, clientUuid: string): void {
-  const partition = shownDirectMarkerIds.get(sid) ?? new Set<string>()
-  partition.add(bareIdOfClientUuid(clientUuid))
-  shownDirectMarkerIds.set(sid, partition)
+  addShownBareIds(sid, [bareIdOfClientUuid(clientUuid)])
 }
 
 /** ref 流中是否已有该裸标记 id 的气泡（appendUser 契约气泡 id = 入参 id 原样，双形态匹配）。 */
@@ -278,9 +283,7 @@ export function degradeUnmatchedKernelDelivery(
     textToSegments(text.replace(DEFER_FLUSH_MARKER_RE_GLOBAL, '').trimEnd()),
     unshown[0]!,
   )
-  const partition = shown ?? new Set<string>()
-  for (const bare of markers) partition.add(bare)
-  shownDirectMarkerIds.set(sid, partition)
+  addShownBareIds(sid, markers)
   logUnmatchedDeliveryDegraded(sid, unshown)
   return true
 }

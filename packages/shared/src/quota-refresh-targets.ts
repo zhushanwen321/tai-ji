@@ -25,6 +25,11 @@ export type QuotaRefreshTarget = {
   pageUrl: string
   /** 额度查询 API（轮询目标；同源页面上下文内 fetch，HTTP 200 即完成信号） */
   apiUrl: string
+  /** 探测请求方法（缺省 GET）。POST 端点（connect RPC 形态，如 stepfun）对 GET 回
+   *  405——探测必须与真实额度请求同方法，否则登录态健康也会被误判为探测失败 */
+  apiMethod?: 'GET' | 'POST'
+  /** apiMethod=POST 时的请求体（静态 JSON 字符串） */
+  apiBody?: string
   /** 登录页 URL 特征（正则字符串，大小写不敏感；命中即视为登录态失效需要用户登录） */
   loginUrlPatterns: string[]
 }
@@ -53,6 +58,19 @@ export const QUOTA_REFRESH_TARGETS: Record<string, QuotaRefreshTarget> = {
     // '/login' '/signin' 是路径形态（仅登录页检测用，不参与导航白名单）；
     // 'auth.' 是 host 形态尾点前缀（better-auth 登录子域，参与导航白名单）
     loginUrlPatterns: ['/login', '/signin', 'auth.'],
+  },
+  stepfun: {
+    pageUrl: 'https://platform.stepfun.com/account-overview',
+    apiUrl: 'https://platform.stepfun.com/api/step.openapi.devcenter.Dashboard/QueryStepPlanRateLimit',
+    // connect RPC 端点只收 POST（GET 回 405），探测与真实额度请求同方法同体
+    apiMethod: 'POST',
+    apiBody: '{}',
+    // 账号域（host 形态，参与导航白名单——登录态换发源）+ 平台自身登录路径（路径形态）
+    loginUrlPatterns: [
+      'account.stepfun.com',
+      'platform.stepfun.com/login',
+      'platform.stepfun.com/signin',
+    ],
   },
 }
 

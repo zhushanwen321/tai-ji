@@ -64,7 +64,8 @@ export function matchAutoEnablePreset(
   const preset = matchQuotaPreset(provider, presets)
   if (!preset) return undefined
   if (!preset.auth.includes('api-key')) return undefined
-  if (preset.requiresWorkspace) return undefined
+  // 用户维度参数未齐备（资源维度 fetcher 需逐账号配置 params）不自动开启——与 cookie 类同判据
+  if (preset.params && preset.params.length > 0) return undefined
   return preset
 }
 

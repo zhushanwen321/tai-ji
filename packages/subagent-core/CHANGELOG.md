@@ -1,5 +1,15 @@
 # @zhushanwen/subagent-core
 
+## 2.1.0
+
+### Minor Changes
+
+- da658a786: EnginePort.listModels 改为 union 门面：manifest 静态快照可枚举时同步返回快照（不发帧），无静态枚举（省略 / null / dynamic:true 空清单）时经协议 listModels RPC 取引擎活清单（10s 控制域超时）。engineDefaults 偏好层成员校验（resolveEngineModelWithTranslation）随之异步化：远程引擎的失效偏好模型引用在派发前被拦截（原先只在引擎侧以 model_not_available 失败）；RPC 失败放行并按引擎一次性 warn，引擎侧 validateModel/run prepare 防线保留。
+
+- da658a786: review-fix-loop（pi 内置版）新增统一 commit 的 content 补修子循环：commit 被提交前检查拦截且恢复需改仓库内文件时，自动派补修 agent 按报错原文补全（上限 2 次，含 git status 快照差集对账与显式路径 add），不再直接 fix-failure 终态交人工。聚合失败重试改为回注失败原因（报告已写好场景命中率提升）。跨轮条目字段继承（防空壳）与补修子循环已单源化：实装移入 workflows/src/review-fix-loop.shared.ts，与 zcode 版（~/.zcode/workflows/review-fix-loop.dwf.ts）共用同一实现，经 pnpm build:workflows 构建拼装双平台产物。
+
+- da658a786: Raise review-fix-loop wall-clock defaults to 2h: reviewer / aggregator / retry / env-fix / repair agent timeouts (was 1h / 20min / 10min) and the git retry / stage / status wrappers (was 60s / 30s) in the pi build; the zcode build's git/sh runner now passes an explicit 2h timeout instead of falling back to the engine's 300s default. Commits carrying pre-commit hooks and instrumented gate runs under load were being killed by the short defaults.
+
 ## 2.0.1
 
 ### Patch Changes

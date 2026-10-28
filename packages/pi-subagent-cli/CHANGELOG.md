@@ -1,5 +1,11 @@
 # @zhushanwen/pi-subagent-cli
 
+## 0.9.0
+
+### Minor Changes
+
+- da658a786: Engine fact chain hardening: queue edges, exit-0 anti-forgery, auto_retry frames, and the late-terminal contract; raw stop reasons and diagnostics now bind to the stop frame with same-frame semantics.
+
 ## 0.8.1
 
 ### Patch Changes

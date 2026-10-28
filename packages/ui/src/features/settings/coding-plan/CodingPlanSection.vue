@@ -171,25 +171,29 @@
         >{{ providerCredentialWarningText }}</p>
       </template>
 
-      <!-- Workspace 地址（资源维度 fetcher；明文回显，D13 判定只看草稿） -->
-      <div v-if="view.workspace.required" class="mt-2" data-testid="quota-workspace-block">
-        <Label class="mb-1 block text-[length:var(--text-3xs)] text-neutral-mid">
-          {{ t('settings.providerEdit.quotaWorkspaceLabel') }}
-          <span class="normal-case text-neutral-dim">· {{ fieldBadgeLabel('workspace') }}</span>
-        </Label>
-        <Input
-          v-model="draft.workspace"
-          class="h-8 font-mono text-[length:var(--text-2xs)]"
-          :placeholder="t('settings.providerEdit.quotaWorkspacePlaceholder')"
-          data-testid="quota-workspace-input"
-        />
-        <p
-          v-if="isMissing('workspace')"
-          class="mt-1 text-[length:var(--text-3xs)] text-warn"
-          data-testid="quota-missing-workspace"
-        >{{ missingHint('workspace') }}</p>
-        <p class="mt-1 text-[length:var(--text-3xs)] text-neutral-dim">{{ t('settings.providerEdit.quotaWorkspaceHelp') }}</p>
-      </div>
+      <!-- 用户维度参数（2026-10 泛化，原 workspace 单框；按 preset.params 逐项渲染；
+           明文回显，D13 判定只看草稿） -->
+      <template v-for="param in view.params" :key="param.key">
+        <div class="mt-2" :data-testid="`quota-param-block-${param.key}`">
+          <Label class="mb-1 block text-[length:var(--text-3xs)] text-neutral-mid">
+            {{ param.label }}
+            <span class="normal-case text-neutral-dim">· {{ fieldBadgeLabel('param') }}</span>
+          </Label>
+          <Input
+            :model-value="draft.params[param.key] ?? ''"
+            class="h-8 font-mono text-[length:var(--text-2xs)]"
+            :placeholder="param.placeholder ?? ''"
+            :data-testid="`quota-param-input-${param.key}`"
+            @update:model-value="setParamDraft(param.key, $event)"
+          />
+          <p
+            v-if="isMissing('param')"
+            class="mt-1 text-[length:var(--text-3xs)] text-warn"
+            :data-testid="`quota-missing-param-${param.key}`"
+          >{{ missingHint('param') }}</p>
+          <p v-if="param.helpText" class="mt-1 text-[length:var(--text-3xs)] text-neutral-dim">{{ param.helpText }}</p>
+        </div>
+      </template>
 
       <!-- 帮助链接 -->
       <p v-if="view.help" class="mt-1.5 flex items-start gap-1 text-[length:var(--text-3xs)] text-neutral-dim">
@@ -290,13 +294,13 @@ import { QUOTA_SECRET_MASK } from '@taiji/core'
 import { useQuotaConfigureModule } from '../injection-keys'
 import QuotaWindowList from './QuotaWindowList.vue'
 
-/** 字段级缺口的显式白名单（§7.4：只对这三个键查 i18n，'type' 走 D8 分支根本不进提示渲染）。 */
-type MissingField = 'cookie' | 'apiKey' | 'workspace'
+/** 字段级缺口的显式白名单（§7.4：只对这些键查 i18n，'type' 走 D8 分支根本不进提示渲染）。 */
+type MissingField = 'cookie' | 'apiKey' | 'param'
 
 const MISSING_HINT_KEYS: Record<MissingField, string> = {
   cookie: 'settings.providerEdit.quotaMissingCookie',
   apiKey: 'settings.providerEdit.quotaMissingApiKey',
-  workspace: 'settings.providerEdit.quotaMissingWorkspace',
+  param: 'settings.providerEdit.quotaMissingParam',
 }
 
 const { t } = useI18n()
@@ -314,6 +318,15 @@ function onToggleEnabled(value: unknown): void {
 /** 凭证来源切换（D3）：只改草稿这一个字段，随 saveAndTest 落盘 */
 function setCredentialSource(value: QuotaCredentialSource): void {
   draft.value.credentialSource = value
+}
+
+/**
+ * 用户维度参数草稿写入（2026-10 泛化，原 v-model 直绑 draft.workspace）：动态键赋值——
+ * reka Input 的 update:modelValue 是宽联合类型，只放字符串通过（非字符串检查，同 selectType 范式）。
+ */
+function setParamDraft(key: string, value: unknown): void {
+  if (typeof value !== 'string') return
+  draft.value.params = { ...draft.value.params, [key]: value }
 }
 
 /** 失败态点「更新 Cookie」：清空草稿引导重贴（清的是草稿不是磁盘，D7） */
@@ -401,7 +414,7 @@ const exclusiveKeyPlaceholder = computed<string>(() => (isMissing('apiKey')
  * 与字段级提示**同源**：两者都读同一份 readiness.missing。missing 是唯一编码了凭证归属
  * 规则（D5：类型切换后旧 cookie / 旧专属 Key 归属失效）的派生量，因此「不在 missing 里」
  * ⟺「该字段此刻有效」，正是徽标要表达的语义（不是「磁盘上曾存过一份」）。
- * 用磁盘原始标记（provider.quota.cookieSet / provider.quota.apiKeySet / provider.quota.workspace）
+ * 用磁盘原始标记（provider.quota.cookieSet / provider.quota.apiKeySet）
  * 各自复算会得到第二份真相：类型切换后徽标说「已配置」而下方提示说「必填」（同屏矛盾，S7 反例）。
  * 同源之后「徽标已配置 + 提示必填」结构性不可达，无需再靠调用方自觉。
  *
@@ -460,7 +473,7 @@ const failMessage = computed(() => {
   // cookie-invalid-format（2026-10-18）：粘贴内容归一化为空（无 name=value 对）——与
   // 「凭证已失效」分流，指引正确的复制路径（DevTools → Network 请求头），不误报重新登录。
   if (failure.kind === 'cookie-invalid-format') return t('settings.providerEdit.quotaFetchFailCookieInvalidFormat')
-  // not-configured（D1-3，timeout-audit-hygiene-batch）：必填 workspace 缺失——指引去配置，
+  // not-configured（D1-3，timeout-audit-hygiene-batch）：必填用户维度参数缺失——指引去配置，
   // 而非检查凭证（病根在配置缺失，凭证指引会把用户带偏）
   if (failure.kind === 'not-configured') return t('settings.providerEdit.quotaFetchFailNotConfigured')
   // no-credential（D6，§5.2 路径 4）：凭证链解析不到任何凭证；cookie 变体给「重新粘贴 Cookie」

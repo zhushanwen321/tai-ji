@@ -546,24 +546,46 @@ describe('纯函数契约', () => {
       }
     })
 
-    it('composer-genstats-ttft 新增 key 双侧齐（U4：title/note/day/d7/d30 五键，不复用 genStatsDay）', () => {
+    it('TTFT 卡 key 双侧齐（title/note；分布矩阵改造后行 label 走共用 genStatsWindow*/genStatsCol*）', () => {
       const zhCtx = asRecord(asRecord(zhPanel).context)
       const enCtx = asRecord(asRecord(enPanel).context)
-      const TTFT_KEYS = [
-        'genStatsTtftTitle',
-        'genStatsTtftNote',
-        'genStatsTtftDay',
-        'genStatsTtftD7',
-        'genStatsTtftD30',
-      ] as const
+      const TTFT_KEYS = ['genStatsTtftTitle', 'genStatsTtftNote'] as const
       for (const k of TTFT_KEYS) {
         expect(typeof zhCtx[k], `zh-CN panel.context.${k}`).toBe('string')
         expect(typeof enCtx[k], `en-US panel.context.${k}`).toBe('string')
       }
-      // p50 语义独立锁：genStatsTtftDay 与 genStatsDay（今日均值）双侧均非同文
-      //（设计 §3.1 采纳 R1-suggestion——「今日均值」与 p50 中位数语义矛盾，禁复用）
-      expect(zhCtx.genStatsTtftDay).not.toBe(zhCtx.genStatsDay)
-      expect(enCtx.genStatsTtftDay).not.toBe(enCtx.genStatsDay)
+      // [HISTORICAL] 专属 p50 行 label（genStatsTtftDay/D7/D30）随分布矩阵退役——
+      // 保留断言防「改回专属键」时静默重建双份语义文案
+      for (const k of ['genStatsTtftDay', 'genStatsTtftD7', 'genStatsTtftD30'] as const) {
+        expect(zhCtx[k], `zh-CN panel.context.${k} 应已退役`).toBeUndefined()
+        expect(enCtx[k], `en-US panel.context.${k} 应已退役`).toBeUndefined()
+      }
+    })
+
+    it('分布矩阵 key 双侧齐且非空（5 统计量列 + 3 窗口行 + P99 口径补句）', () => {
+      const zhCtx = asRecord(asRecord(zhPanel).context)
+      const enCtx = asRecord(asRecord(enPanel).context)
+      const MATRIX_KEYS = [
+        'genStatsColAvg',
+        'genStatsColP50',
+        'genStatsColP99',
+        'genStatsColP99Note',
+        'genStatsColMax',
+        'genStatsColMin',
+        'genStatsWindowDay',
+        'genStatsWindowD7',
+        'genStatsWindowD30',
+      ] as const
+      for (const k of MATRIX_KEYS) {
+        expect(typeof zhCtx[k], `zh-CN panel.context.${k}`).toBe('string')
+        expect(typeof enCtx[k], `en-US panel.context.${k}`).toBe('string')
+        expect((zhCtx[k] as string).length, `zh-CN panel.context.${k} 空文案`).toBeGreaterThan(0)
+        expect((enCtx[k] as string).length, `en-US panel.context.${k} 空文案`).toBeGreaterThan(0)
+      }
+      // 五列名互不相同（同文会让矩阵列头读不出区别）
+      const zhLabels = ['genStatsColAvg', 'genStatsColP50', 'genStatsColP99', 'genStatsColMax', 'genStatsColMin']
+        .map((k) => zhCtx[k])
+      expect(new Set(zhLabels).size).toBe(5)
     })
   })
 }

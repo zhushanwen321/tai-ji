@@ -508,7 +508,6 @@ export default {
     // D1（§6.2）字段级提示：显式白名单三键（'type' 走 D8 分支不配文案，见 §7.4）
     quotaMissingCookie: '这里必须填 —— 该平台的额度接口只认 Cookie，没有继承路径',
     quotaMissingApiKey: '这里必须填 —— 已选择「用专属 Key」，但还没有可用的 Key',
-    quotaMissingWorkspace: '这里必须填 —— 额度挂在具体 workspace 下，同一个 Cookie 可能对应多个',
     quotaSaveAndTestFail: '保存并测试失败',
     // A2-4 失败态文案（reason 透传后的恢复指引，Phase B 渲染）。
     // 动作必须指向本屏真实存在的控件（§5.2 路径 3）：设置页区块内只有「保存并测试」，
@@ -530,12 +529,11 @@ export default {
     quotaFetchFailNoCredential: '额度查询失败：未找到可用凭证。请在上方「凭据」区填写 API Key，或在此填写专属 API Key',
     // §5.2 路径 4 cookie 变体（幽灵态：cookieSet=true 但 secrets 缺失，只能重贴 Cookie 恢复）
     quotaFetchFailNoCredentialCookie: '额度查询失败：未找到可用凭证。请在下方重新粘贴该平台的 Cookie 后重试',
-    // Workspace 地址（资源维度 fetcher 如 opencode-go，D1-1）
-    quotaWorkspaceLabel: 'Workspace 地址',
-    quotaWorkspacePlaceholder: '粘贴 workspace 页 URL 或 wrk_ id',
-    quotaWorkspaceHelp: '打开 opencode.ai 控制台进入你的 workspace，从浏览器地址栏复制页面 URL（形如 https://opencode.ai/workspace/wrk_xxx/go）',
-    quotaWorkspaceRequired: '请先输入 Workspace 地址',
-    quotaWorkspaceInvalid: 'Workspace 地址无效：请粘贴 opencode.ai 的 workspace 页 URL（形如 https://opencode.ai/workspace/wrk_xxx/go）或裸 wrk_ id',
+    // 用户维度参数（2026-10 泛化，原 quotaWorkspace 五键）：标签/占位/说明移入 preset 的
+    // param spec（逐平台不同，见 QUOTA_PRESETS.params）；此处只留通用校验与缺口文案
+    quotaParamRequired: '请先填写必填参数',
+    quotaParamInvalid: '参数无效：请检查输入格式',
+    quotaMissingParam: '参数未填写',
     // B-3 失败态旧缓存折叠入口（design §3.4 展示语义）
     quotaLastSuccessToggle: '查看上次成功数据',
     quotaLastSuccessAt: '数据截至 {time}',

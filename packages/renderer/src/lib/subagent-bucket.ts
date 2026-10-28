@@ -73,6 +73,11 @@ interface SubagentDotRule {
   cls: string
 }
 
+/** user.cancelled 判据（用户主动中止——失败红 / 中性暗 / tone 三处共用的唯一判据点）。 */
+function isUserCancelledCause(failure: FailureCause): boolean {
+  return failure.class === 'user' && failure.kind === 'cancelled'
+}
+
 /**
  * 判失败轮（红点，subagent-observability §3.3.3②）：lastRound.failure 非空且非
  * user.cancelled——FailureCause 存在即失败轮（同时覆盖 error 停因与 aborted + harness/
@@ -86,7 +91,7 @@ interface SubagentDotRule {
 function isFailedRound(record: SubagentRecord): boolean {
   const failure = record.lastRound?.failure
   if (failure !== undefined) {
-    return !(failure.class === 'user' && failure.kind === 'cancelled')
+    return !isUserCancelledCause(failure)
   }
   return record.stopReason === 'failed'
 }
@@ -97,7 +102,7 @@ function isFailedRound(record: SubagentRecord): boolean {
 function isNeutralRound(record: SubagentRecord): boolean {
   if (record.lastRound?.promptDisposition === 'handled') return true
   const failure = record.lastRound?.failure
-  if (failure !== undefined && failure.class === 'user' && failure.kind === 'cancelled') return true
+  if (failure !== undefined && isUserCancelledCause(failure)) return true
   if (record.stopReason === 'reopened') return true
   return record.stopReason !== undefined && INTERRUPTED_STOP_REASONS.has(record.stopReason)
 }
@@ -156,7 +161,7 @@ export function failureCauseLabel(failure: FailureCause): string {
  * isFailedRound 归中性档的同源语义）→ 中性 dim；其余失败分类 → danger。
  */
 export function failureCauseToneClass(failure: FailureCause): string {
-  return failure.class === 'user' && failure.kind === 'cancelled'
+  return isUserCancelledCause(failure)
     ? 'text-neutral-dim opacity-70'
     : 'text-danger'
 }

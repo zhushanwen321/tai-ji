@@ -147,17 +147,20 @@ function mergeBaselineWithLive(baseline: Message[], partition: Message[]): Messa
   // reconcile/hydrate 注入的消息），id 命中兜底同 id 形态；live overlay 的 u-<uuid> id
   // 与基线 uuidv7 是两个永不相等的 id 空间（mutations.ts prependHistory 同款论证），
   // 不会被误判已确认。
-  const baselineIds = new Set<string>()
   // [turn-key 身份保留 2026-10-24] 基线下标反查表（首次出现优先——entry id/id 在基线内唯一，
   // 防御性取首）：供命中分区消息回查自己对应的基线副本下标，见函数尾「身份保留」。
+  // 键集即基线身份集（piEntryId 与 id 双收——user/assistant 消息带 piEntryId；system 族无
+  // piEntryId 字段但 id 即 entry 派生 uuidv7——与 hydrate 锚取值 `piEntryId ?? id` 对称）：
+  // 分区 user 的已确认判据 = 身份任一命中（identityConfirmed 读两表 has）：piEntryId 命中
+  // 覆盖真实基线派生视图（前轮 reconcile/hydrate 注入的消息），id 命中兑底同 id 形态；live
+  // overlay 的 u-<uuid> id 与基线 uuidv7 是两个永不相等的 id 空间（mutations.ts
+  // prependHistory 同款论证），不会被误判已确认。
   const baselineIdxByEntryId = new Map<string, number>()
   const baselineIdxById = new Map<string, number>()
   baseline.forEach((m, i) => {
-    if (m.piEntryId !== undefined) {
-      baselineIds.add(m.piEntryId)
-      if (!baselineIdxByEntryId.has(m.piEntryId)) baselineIdxByEntryId.set(m.piEntryId, i)
+    if (m.piEntryId !== undefined && !baselineIdxByEntryId.has(m.piEntryId)) {
+      baselineIdxByEntryId.set(m.piEntryId, i)
     }
-    baselineIds.add(m.id)
     if (!baselineIdxById.has(m.id)) baselineIdxById.set(m.id, i)
   })
   // [steer-bubble Gate B 修复 2026-08-30] user 文本多重集判据（第三判据）：
@@ -197,7 +200,7 @@ function mergeBaselineWithLive(baseline: Message[], partition: Message[]): Messa
     return idx
   }
   const identityConfirmed = (m: Message): boolean =>
-    (m.piEntryId !== undefined && baselineIds.has(m.piEntryId)) || baselineIds.has(m.id)
+    (m.piEntryId !== undefined && baselineIdxByEntryId.has(m.piEntryId)) || baselineIdxById.has(m.id)
   // 预计算整分区三态确认标记（正序消费多重集——尾部 walk 的逆序调用序会把同文本
   // 新 overlay 错配到基线旧副本上，AC-2b 同文本双投递场景实测暴露）：
   // 'identity' = 前轮合并注入的基线派生视图；'text' = 与基线副本文本同源的 dup overlay；

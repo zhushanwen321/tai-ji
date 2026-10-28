@@ -367,6 +367,29 @@ describe('refreshQuotaCookie：API 轮询成功路径', () => {
     expect(written).toBe('sid=token-1; uid=42')
     expect(statSync(cookiePath('p-export')).mode & 0o777).toBe(0o600)
   })
+
+  it('stepfun：POST 端点探测带 method/body，200 → 成功写回目标域 cookie', async () => {
+    const STEPFUN = getQuotaRefreshTarget('stepfun')!
+    expect(STEPFUN.apiMethod).toBe('POST')
+
+    // partition 预置目标域 cookie（首轮探测即 200 的时序下导出不能依赖事后再种）
+    const cookies = new fake.FakeCookies()
+    fake.state.partitions.set('persist:quota-p-stepfun', { cookies })
+    cookies.jar.push({ name: 'Oasis-Token', value: 'sf-refreshed', domain: 'platform.stepfun.com' })
+    const exprs: string[] = []
+    fake.state.execImpl = async (expr: string) => {
+      exprs.push(expr)
+      return 200
+    }
+    const result = refreshQuotaCookie({ fetcherId: 'stepfun', providerId: 'p-stepfun' }, { dataDir: () => tmpDir })
+    const win = await windowOf(result)
+    win.webContents.url = 'https://platform.stepfun.com/account-overview'
+
+    expect(await result).toEqual({ ok: true, cookieWritten: true })
+    // 探测表达式 = POST + 静态 body（connect RPC 端点 GET 回 405，必须同方法探测）
+    expect(exprs[0]).toContain(`fetch(${JSON.stringify(STEPFUN.apiUrl)},{method:'POST`,)
+    expect(readFileSync(cookiePath('p-stepfun'), 'utf-8')).toBe('Oasis-Token=sf-refreshed')
+  })
 })
 
 describe('refreshQuotaCookie：loadURL 中断处理', () => {

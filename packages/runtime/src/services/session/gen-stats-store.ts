@@ -9,10 +9,12 @@
  *     macOS 大小写不敏感 FS 的 `Glm`/`GLM` 均碰撞）；30 天 GC（写入时顺带清理）；
  *     日 key 本地时区（对蓝本 pi-statusline 的 UTC **有意偏离**：UTC 日边界对中文用户
  *     是本地 08:00，「今日」与直觉相悖）；tmp+rename 原子写。
- *   - §3.3 D6 聚合口径（对齐 pi-statusline）：速度 = 加权平均 Σtokens÷Σduration×1000
- *     （非算术平均）；命中率 = ΣcacheRead÷ΣpromptTotal×100，
- *     promptTotal = input + cacheRead + cacheWrite（不含 output，蓝本同）；TTFT = p50
- *     中位数（composer-genstats-ttft §3.3——延迟重尾，加权均值口径不适用，否决方案 D）。
+ *   - §3.3 D6 聚合口径：速度与 TTFT 的窗口聚合 = **逐样本分布五量**（avg / p50 / p99 /
+ *     max / min，见 summarizeDistribution；速度先逐样本算 output÷duration×1000 再汇总）；
+ *     命中率 = ΣcacheRead÷ΣpromptTotal×100，promptTotal = input + cacheRead + cacheWrite
+ *     （不含 output，蓝本同）——命中率不分位（总量加权口径）。
+ *     [HISTORICAL] 速度为旧「窗口总量加权平均」、TTFT 为旧「仅 p50 单值」：前者让极慢短请求
+ *     隐形、后者让尾部体感隐形，均已被分布取代。
  *   - §3.3 D7 bogus guard 阈值（照抄蓝本 pi-statusline index.ts:61-62，不自行放宽）：
  *     outputTokens > 50 && durationMs < 100ms 的速度样本判定为 bogus（缓存回放型异常）。
  *     本文件只提供阈值常量 + 纯判定谓词（SSOT），丢弃动作在 u3 GenStatsService
@@ -37,7 +39,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { getDataDir } from '@taiji/shared/paths'
-import type { GenStatsCacheMiss } from '@taiji/shared'
+import type { GenStatsCacheMiss, GenStatsDistribution } from '@taiji/shared'
 import { logger } from '../../infra/logger.js'
 import { atomicWrite } from '../../utils/fs-utils.js'
 
@@ -86,6 +88,15 @@ const MEDIAN_PARITY_MODULUS = 2
 
 /** 中位数折半因子：奇数样本中位下标 / 偶数样本双中位均值除数——折半语义，非元组长度 */
 const MEDIAN_HALVING_DIVISOR = 2
+
+/** 百分位标尺（percentile 的百分数分子，100 即「百分之 p」） */
+const PERCENTILE_SCALE = 100
+
+/** p99 的百分位值（最近秩法 rank = ceil(p × n)，见 percentileNearestRank） */
+const P99_PERCENTILE = 99
+
+/** 最近秩法下标扣减：rank 从 1 数，数组下标从 0 数 */
+const RANK_TO_INDEX_OFFSET = 1
 
 /** 合法日 key 形状（YYYY-MM-DD；GC 的字典序比较依赖该规范形） */
 const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -179,27 +190,87 @@ export function localDayKey(date: Date = new Date()): string {
   return `${y}-${m}-${d}`
 }
 
-// ── 聚合（D6，蓝本口径 + null 纪律）──────────────────────────────────
+// ── 聚合（D6 + 分布五量，null 纪律）────────────────────────────────
 
 /**
- * 加权平均速度（t/s）：ΣoutputTokens ÷ ΣdurationMs × 1000（非算术平均）。
- * 无有效样本（空 / ΣdurationMs ≤ 0）→ null；0 只在真实测量下出现。
- * 前置条件：条目形状已由 readDayRecords / 采样入口校验（本函数不再过滤）。
+ * 最近秩百分位（nearest-rank，**不插值**）：升序切片取下标 ceil(p/100 × n) - 1。
+ *
+ * 为什么不用线性插值：样本量小（单窗口内典型几次到几十次请求）时，插值会造出「样本里不存在
+ * 的数值」（[100,200] 的 p99 插值成 199 之类），读起来像实测其实是想像。最近秩恒返回真实样本，
+ * 代价是 n < 100 时 p99 必然等于 max——这是**如实呈现**，UI 侧并列显示不掩盖。
+ *
+ * 前置条件：sorted 非空且已升序（调用方负责；本函数不再排序/过滤）。
  */
-export function aggregateSpeed(records: readonly SpeedRecord[]): number | null {
-  let totalTokens = 0
-  let totalDuration = 0
-  for (const record of records) {
-    totalTokens += record[0]
-    totalDuration += record[1]
+export function percentileNearestRank(sorted: readonly number[], p: number): number {
+  const rank = Math.ceil((p / PERCENTILE_SCALE) * sorted.length)
+  const index = Math.max(0, Math.min(sorted.length - 1, rank - RANK_TO_INDEX_OFFSET))
+  return sorted[index]!
+}
+
+/**
+ * 样本值 → 五量分布（avg / p50 / p99 / max / min，全部 round 取整）。
+ *
+ * 空数组 → 五字段全 null（null 纪律：无数据不填 0）；其余情况五字段同生共死。
+ * p50 走**偶数双中位均值**（与历史 aggregateTtft 口径一致，便于与旧值对照），p99 走最近秩。
+ * 入参不被修改（内部排序副本）。
+ */
+export function summarizeDistribution(values: readonly number[]): GenStatsDistribution {
+  if (values.length === 0) {
+    return { avg: null, p50: null, p99: null, max: null, min: null }
   }
-  if (totalDuration <= 0) return null
-  return Math.round((totalTokens / totalDuration) * MS_PER_SEC)
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / MEDIAN_HALVING_DIVISOR)
+  const median =
+    sorted.length % MEDIAN_PARITY_MODULUS === 1
+      ? sorted[mid]!
+      : (sorted[mid - 1]! + sorted[mid]!) / MEDIAN_HALVING_DIVISOR
+  let total = 0
+  for (const v of sorted) total += v
+  return {
+    avg: Math.round(total / sorted.length),
+    p50: Math.round(median),
+    p99: Math.round(percentileNearestRank(sorted, P99_PERCENTILE)),
+    max: Math.round(sorted[sorted.length - 1]!),
+    min: Math.round(sorted[0]!),
+  }
+}
+
+/**
+ * 速度样本 → 逐样本速度分布（t/s）。
+ *
+ * 每个样本先算自己的 output ÷ duration × 1000（= 该次请求的实际速度），再对这组速度值
+ * 求 {@link summarizeDistribution}（等权平均 + 百分位 + 极值）。
+ *
+ * [HISTORICAL] 原口径 = 窗口总量加权（Σtokens ÷ Σduration × 1000）：长请求按耗时分摊
+ * 权重、主导结果，一次极慢的短请求几乎不可见——恰好是用户感知最强的那种卡顿。改为逐样本
+ * 分布后 p99/max 才能暴露尾部。两口径数学上不等（等权均值 vs 时长加权均值），勿误判为 bug。
+ * 前置条件：条目形状已校验且 duration > 0（采样入口 buildSpeedRecord 保证）。
+ */
+export function aggregateSpeedDistribution(records: readonly SpeedRecord[]): GenStatsDistribution {
+  const speeds: number[] = []
+  for (const [outputTokens, durationMs] of records) {
+    if (durationMs <= 0) continue
+    speeds.push((outputTokens / durationMs) * MS_PER_SEC)
+  }
+  return summarizeDistribution(speeds)
+}
+
+/**
+ * TTFT 样本 → 首字延迟分布（ms）。
+ *
+ * [HISTORICAL] 原口径 = 仅 p50 单值（刻意不用均值：TTFT 重尾，偶发慢请求拉飞均值）。
+ * 现扩为五量：均值仍在（作对照，不再是唯一读法），p99/max 补齐尾部体感——
+ * 「中位数看着正常、每百次卡一次几秒」这种体感以前完全不可见。
+ * 前置条件：条目形状已由 readDayRecords 按长度参数校验（本函数不再过滤）。
+ */
+export function aggregateTtftDistribution(records: readonly TtftRecord[]): GenStatsDistribution {
+  return summarizeDistribution(records.map((r) => r[0]))
 }
 
 /**
  * 加权命中率（%）：ΣcacheRead ÷ ΣpromptTotal × 100（非算术平均）。
  * 无有效样本（空 / ΣpromptTotal ≤ 0，如非 cache 模型全 0）→ null；全 miss 是真实 0。
+ * 命中率**不做分位**（口径本身就是总量加权，逐请求命中率的 p99 无解释意义）。
  */
 export function aggregateCacheRatio(records: readonly CacheRatioRecord[]): number | null {
   let totalRead = 0
@@ -210,24 +281,6 @@ export function aggregateCacheRatio(records: readonly CacheRatioRecord[]): numbe
   }
   if (totalPrompt <= 0) return null
   return Math.round((totalRead / totalPrompt) * PERCENT_SCALE)
-}
-
-/**
- * TTFT p50 中位数（ms，四舍五入取整）。空记录 → null；0 只在真实测量下出现
- * （ttftMs=0 合法，非 null 充数）。刻意不用均值：TTFT 重尾，偶发慢请求拉飞均值，
- * speed/cache 的加权均值口径不适用于延迟（composer-genstats-ttft §3.3，否决方案 D）。
- * 偶数样本取双中位均值再取整（[100,201] → 150.5 → 151）。
- * 前置条件：条目形状已由 readDayRecords 按长度参数校验（本函数不再过滤）。
- */
-export function aggregateTtft(records: readonly TtftRecord[]): number | null {
-  if (records.length === 0) return null
-  const sorted = records.map((r) => r[0]).sort((a, b) => a - b)
-  const mid = Math.floor(sorted.length / MEDIAN_HALVING_DIVISOR)
-  const median =
-    sorted.length % MEDIAN_PARITY_MODULUS === 1
-      ? sorted[mid]!
-      : (sorted[mid - 1]! + sorted[mid]!) / MEDIAN_HALVING_DIVISOR
-  return Math.round(median)
 }
 
 // ── GC（30 天，本地时区日 key）───────────────────────────────────────

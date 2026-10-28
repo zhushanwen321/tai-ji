@@ -46,9 +46,11 @@ export type QuotaTestStatus = 'idle' | 'loading' | 'success' | 'error'
  * - 'type'      : 尚未选择查询类型（或草稿类型不在 QUOTA_PRESETS）—— UI 走 D8 的
  *                 「只渲染下拉 + 一句说明」，不渲染按钮，故该值**不配 i18n 文案**，
  *                 只用于让契约自解释。
- * - 'cookie' / 'apiKey' / 'workspace' : 已选类型下的具体缺口，各配一条 i18n 提示。
+ * - 'cookie' / 'apiKey' / 'param' : 已选类型下的具体缺口，各配一条 i18n 提示。
+ *   'param'（2026-10 泛化，原 'workspace'）= 必填用户维度参数未填（具体键由
+ *   view.params[].required 可见，i18n 文案通用化不按键分叉）。
  */
-export type ReadinessMissing = 'type' | 'cookie' | 'apiKey' | 'workspace'
+export type ReadinessMissing = 'type' | 'cookie' | 'apiKey' | 'param'
 
 /** 类型下拉项（QUOTA_PRESETS 映射） */
 export interface QuotaFetcherOption {
@@ -58,8 +60,8 @@ export interface QuotaFetcherOption {
 
 /**
  * 齐备性派生量（D1）——「保存并测试」按钮禁用状态的唯一依据（ready）+ 字段徽标 / 提示的
- * 唯一真相源（missing）。missing 顺序 = 判定项构造序（凭证档在前、workspace 在后）：
- * 凭证类字段取「草稿 ∨ ¬类型已变 ∧ 已保存」并集，workspace 只看草稿（D13）。
+ * 唯一真相源（missing）。missing 顺序 = 判定项构造序（凭证档在前、param 在后）：
+ * 凭证类字段取「草稿 ∨ ¬类型已变 ∧ 已保存」并集，param 只看草稿（D13）。
  */
 export interface QuotaReadiness {
   ready: boolean
@@ -139,9 +141,12 @@ export interface QuotaDraftInput {
   /** 凭证来源选择（D3，api-key 类专用；cookie 类不适用）。切换只改这一个字段、
    *  不删专属 Key 文件（可逆） */
   credentialSource: QuotaCredentialSource
-  /** Workspace 地址输入草稿（资源维度 fetcher 如 opencode-go）。D13：明文回显、
-   *  判定只看草稿（屏幕即真相）；接受完整 URL 或裸 wrk_ id，保存时归一化 */
-  workspace: string
+  /**
+   * 用户维度隔离参数草稿（2026-10 泛化，原 workspace 单串）：键 = QuotaPreset.params 的
+   * param key。D13：明文回显、判定只看草稿（屏幕即真相）；归一化（URL 类）在保存时按
+   * spec.normalize 分流执行。
+   */
+  params: Record<string, string>
 }
 
 /** 展示派生逻辑（只读；全部由 module 派生，UI 只做 i18n 映射与布局） */
@@ -175,15 +180,28 @@ export interface QuotaSectionView {
     /** Provider 凭据警示分档（null = 不渲染） */
     providerWarning: QuotaProviderWarning | null
   }
-  /** workspace 地址区 */
-  workspace: {
-    /** 当前 fetcher 是否需要 workspace 配置（QuotaPreset.requiresWorkspace；false = 隐藏输入框） */
-    required: boolean
-  }
+  /** 用户维度参数区（2026-10 泛化，原 workspace 单输入框）：按 preset.params 逐项渲染 */
+  params: readonly QuotaParamView[]
   /** cookie 自动续期入口（cookie 形态且刷新目标在册时渲染；见 QuotaCookieRefreshView） */
   cookieRefresh: QuotaCookieRefreshView
   /** 帮助链接（基于当前选中 fetcher；null = 不渲染） */
   help: { url: string; text: string } | null
+}
+
+/**
+ * 用户维度参数输入项视图（UI 按 spec 渲染输入框；value 经 draft.params[key] v-model 直绑）。
+ */
+export interface QuotaParamView {
+  /** param 键（draft.params 的索引 + payload.params 的键）。 */
+  key: string
+  /** 输入框标签（spec.label ?? key）。 */
+  label: string
+  /** 占位提示（spec.placeholder）。 */
+  placeholder?: string
+  /** 输入框下方说明（spec.helpText）。 */
+  helpText?: string
+  /** 是否必填（spec.required ?? true）：false 不阻塞 readiness。 */
+  required: boolean
 }
 
 /** 测试结果侧（只读） */

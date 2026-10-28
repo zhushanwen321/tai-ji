@@ -432,13 +432,14 @@ export type {
   QuotaFetchFailureReason,
   QuotaFetchOutcome,
   QuotaFetcherConfig,
-  QuotaWorkspaceNormalizeResult,
+  QuotaParamNormalize,
+  QuotaParamNormalizeResult,
   // 凭证来源与 configure payload（D3/§7.1，coding-plan-quota-config-ux）
   QuotaCredentialSource,
   QuotaConfigurePayload,
 } from './quota-types'
-export { extractQuotaWorkspaceId, normalizeQuotaWorkspaceUrl, normalizeCookieHeader, mergeCookieHeader, resolveQuotaCredentialSource, supportsExclusiveCredential, formatQuotaPct, QUOTA_PCT_DECIMALS } from './quota-types'
-export type { QuotaPreset } from './quota-presets'
+export { extractQuotaWorkspaceId, normalizeQuotaParamValue, normalizeCookieHeader, mergeCookieHeader, resolveQuotaCredentialSource, supportsExclusiveCredential, formatQuotaPct, QUOTA_PCT_DECIMALS } from './quota-types'
+export type { QuotaPreset, QuotaParamSpec } from './quota-presets'
 export { QUOTA_PRESETS, isQuotaPreset, matchQuotaPreset, resolveQuotaPresets } from './quota-presets'
 // cookie 登录态刷新目标（quota:refresh-cookie 通道的导航信息 SSOT：main 隐藏窗口
 // 刷新器与 renderer 入口判定共用，与 runtime baseline-fetchers 的请求解析规则分治）
@@ -555,7 +556,7 @@ export { LAUNCH_RESULT_STATUSES, UPDATE_STALE_RELEASE } from './update'
 export type { UsageMetrics, UsageRow, UsageStatsResult } from './usage-stats'
 // Composer 生成指标类型 SSOT（帧 session.stats_update /
 // RPC session.getGenStats 的 type→payload 登记在 protocol.ts，形状经 GenStatsFrame 引用防漂移）
-export type { GenStatsSpeed, GenStatsCacheRatio, GenStatsCacheMiss, GenStatsTtft, GenStatsFrame } from './gen-stats'
+export type { GenStatsDistribution, GenStatsSpeed, GenStatsCacheRatio, GenStatsCacheMiss, GenStatsTtft, GenStatsFrame } from './gen-stats'
 // 迁移功能（从其他 agent 迁移配置）类型
 export type {
   ProviderSource,

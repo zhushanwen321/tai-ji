@@ -6,7 +6,7 @@
  * - quota.getCached：读缓存不请求（浮层首屏即时填充）
  * - quota.refresh：强制刷新（绕过 throttle），Settings 保存并测试用
  * - quota.configure：Settings 保存额度配置（payload 单对象整对象透传：providerId / enabled /
- *   fetcher / credentialSource / cookie / apiKey / workspace；后续 payload 加字段 handler 零改动）
+ *   fetcher / credentialSource / cookie / apiKey / params；后续 payload 加字段 handler 零改动）
  */
 
 import type { WebSocket as WsType } from 'ws'

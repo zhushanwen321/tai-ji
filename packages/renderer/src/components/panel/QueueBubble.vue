@@ -233,10 +233,12 @@ function rowTitleOf(row: QueueRow): string {
  * 不折叠，§3.4），其余按帧序填充剩余可见位；+N 只计被折叠的非 failed 行。
  * expanded = true 时全部行可见（overflowCount = 0）。
  */
-const folded = computed(() => foldQueueRows(props.rows, { expanded: props.expanded === true }))
+/** 收起态折叠（一份计算两处消费：收起态的 visible/overflow 直用；展开态仅取收起溢出计数） */
+const collapsedFold = computed(() => foldQueueRows(props.rows))
+const folded = computed(() => (props.expanded === true ? foldQueueRows(props.rows, { expanded: true }) : collapsedFold.value))
 const visibleRows = computed(() => folded.value.visible)
 const overflowCount = computed(() => folded.value.overflowCount)
 /** 收起态溢出计数（收起出口的显示条件：收起后仍有被折叠行才显示「收起」） */
-const collapsedOverflowCount = computed(() => foldQueueRows(props.rows).overflowCount)
+const collapsedOverflowCount = computed(() => collapsedFold.value.overflowCount)
 const failedCount = computed(() => props.rows.filter((r) => r.state === 'failed').length)
 </script>

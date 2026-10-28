@@ -38,11 +38,12 @@ usage() {
 用法:
   bash scripts/pr-pre-merge.sh                          # 默认：typecheck(仅 extensions) + lint + 三线测试全跑
   bash scripts/pr-pre-merge.sh --skip-tests             # static gate：typecheck 五处 + lint，测试全跳过
-  bash scripts/pr-pre-merge.sh --test-result PASS|FAIL  # 终局 gate：typecheck 四处 + lint + test:runtime 实跑，
+  bash scripts/pr-pre-merge.sh --test-result PASS|FAIL  # 终局 gate：typecheck 五处 + lint + test:runtime 实跑，
                                                         # 其余测试线以注入值计入 result
 通用参数: --quiet（只输出最终结果，等价 PR_PRE_MERGE_QUIET=1）
-          --base <ref>（注入值产物的 base 口径，默认 main；stacked PR（base≠main）必须传与
-          coverage-gate.py 相同的 --base，否则 --test-result 校验 base/headCommit 不一致 exit 2）
+          --base <ref>（判定基点，默认 main：coverage 注入产物的口径校验 + changeset-check 的
+          diff 口径都用它。PR base = 目标 dev 分支（DEV-WORKFLOW §3）——feature→dev 的 PR
+          必须传，否则分支增量混入整条 dev 线未发布内容；dev→main 终局 PR 用默认 main）
 USAGE
 }
 
@@ -277,7 +278,7 @@ MARKER
 
 # ── Step 1: typecheck（extensions 独立 tsconfig + 项目层）
 # extensions/ 有独立 tsconfig.json（noEmit），项目层暂无全局 typecheck script
-# 默认模式仅 extensions（向后兼容）；--skip-tests / --test-result 扩展为四处
+# 默认模式仅 extensions（向后兼容）；--skip-tests / --test-result 扩展为五处
 # （runtime / renderer 的 package.json 均声明 typecheck script：tsc / vue-tsc --noEmit；
 #  renderer 测试 tsconfig 走 typecheck:test——默认 tsconfig exclude 掉测试文件，
 #  测试桩与生产契约的漂移只有该 tsconfig 能编译期拦截）
@@ -343,7 +344,10 @@ fi
 check_changeset() {
     log "▸ Step: changeset check"
     local cs_json
-    if ! cs_json="$(node scripts/changeset-check.mjs --json)"; then
+    # --base 透传：stacked/base≠main 的 PR 按 PR base 举证（不透传则 WARN 混入 base 分支已有改动）
+    CS_ARGS=(--json)
+    [[ "$BASE" != "main" ]] && CS_ARGS+=(--base "$BASE")
+    if ! cs_json="$(node scripts/changeset-check.mjs "${CS_ARGS[@]}")"; then
         log "  ✗ changeset-check 工具错误："
         log "  $cs_json"
         RESULTS+=("FAIL changeset-check 0s (tool error)")

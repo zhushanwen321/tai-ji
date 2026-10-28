@@ -5,7 +5,7 @@
  *
  * 并入来源（基名）：
  *  - use-provider-oauth（oauth 四态状态机 + 来源路由 + presence，34 例）
- *  - use-quota-configure（readiness 矩阵 + 凭证归属 + payload 构造，55 例）
+ *  - use-quota-configure（readiness 矩阵 + 凭证归属 + payload 构造，56 例）
  *  - use-project-skills（cwd 触发加载 + Wave3 订阅失效信号，11 例）
  *
  * mock 注册与互斥核查：
@@ -896,6 +896,8 @@ describe('注册红线与 refCount（构建者白盒）', () => {
 
 // ═══════════ 来源节：use-quota-configure ═══════════
 
+
+// [C3] quota RPC 经 SettingsTransport seam 桩注入（getCachedQuota/configureQuota/refreshQuota
 // 逐名映射到本 mock 集，替换原 domains/quota 模块 mock；断言范围不变，仍打 quotaApi.*）。
 // fetchQuota 不在 seam 方法侧（useQuotaConfigure 结构上不可达），保留仅供「零查询调用」负向断言。
 const quotaApi = vi.hoisted(() => ({
@@ -952,7 +954,7 @@ function mountModule(
 
 // ── 高频基线装配（文件内单源）────────────────────────────────────────────────
 // 三类 fetcher 的「无覆写」provider 快照 + preset 组合是十余处用例的公共装配侧（差异全在
-// 断言侧动作与期望值）；基线收敛在此，变体形态（enabled 翻转 / 已保存 workspace /
+// 断言侧动作与期望值）；基线收敛在此，变体形态（enabled 翻转 / 已保存 param /
 // apiKeySet·credentialSource 覆写 / 未选类型等）仍直接走 mountModule 内联。
 
 /** 基线键 = fetcher 名（与 QUOTA_PRESETS 的 fetcher 对齐）。 */
@@ -969,7 +971,7 @@ const BASELINES: Record<BaselineKey, { preset: QuotaPreset | undefined; provider
     preset: KIMI_PRESET,
     providerInit: provider({ id: 'kimi-p', quota: { enabled: false, fetcher: 'kimi-coding' } }),
   },
-  // cookie+workspace 类基线：已保存 cookie、workspace 未保存
+  // cookie+param 类基线：已保存 cookie、param 未保存
   'opencode-go': {
     preset: OPENCODE_PRESET,
     providerInit: provider({ id: 'oc-p', quota: { enabled: false, fetcher: 'opencode-go', cookieSet: true } }),
@@ -997,25 +999,25 @@ const mockRow: NormalizedQuotaRow = {
   ],
 }
 
+beforeEach(() => {
+  setActivePinia(createPinia())
+  // W3c 后 presets 数据源 = runtime 下发的合并视图（store 默认空数组）；测试无 runtime，
+  // 灌编译期基线等价（基线正是无远程覆盖时的合并视图原样）
+  getSettingsStore().setQuotaPresets([...QUOTA_PRESETS])
+  vi.clearAllMocks()
+  vi.mocked(quotaApi.getCached).mockResolvedValue({ data: null, lastFetchAt: null })
+  vi.mocked(quotaApi.fetchQuota).mockResolvedValue({ data: null, lastFetchAt: null })
+  vi.mocked(quotaApi.refreshQuota).mockResolvedValue({ data: null, lastFetchAt: null })
+  vi.mocked(quotaApi.configure).mockResolvedValue({ ok: true })
+  provideSettingsTransport(makeSettingsTransportStub({
+    getCachedQuota: quotaApi.getCached,
+    refreshQuota: quotaApi.refreshQuota,
+    configureQuota: quotaApi.configure,
+  }))
+})
+
 // ── ① readiness 齐备性矩阵 ──────────────────────────────────────────────────
 describe('readiness 齐备性矩阵（D1 / D13）', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
-    // W3c 后 presets 数据源 = runtime 下发的合并视图（store 默认空数组）；测试无 runtime，
-    // 灌编译期基线等价（基线正是无远程覆盖时的合并视图原样）
-    getSettingsStore().setQuotaPresets([...QUOTA_PRESETS])
-    vi.clearAllMocks()
-    vi.mocked(quotaApi.getCached).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.fetchQuota).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.refreshQuota).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.configure).mockResolvedValue({ ok: true })
-    provideSettingsTransport(makeSettingsTransportStub({
-      getCachedQuota: quotaApi.getCached,
-      refreshQuota: quotaApi.refreshQuota,
-      configureQuota: quotaApi.configure,
-    }))
-  })
-
   it('未选类型 → missing [type] + type.undetermined（UI 走 D8 分支，不渲染按钮）', async () => {
     const { module } = mountModule(provider({ quota: undefined }))
     await Promise.resolve()
@@ -1047,7 +1049,7 @@ describe('readiness 齐备性矩阵（D1 / D13）', () => {
   })
 
   it('草稿类型不在 QUOTA_PRESETS（历史数据 / 手工编辑 providers.json）→ missing [type]，不静默按 api-key 放行', async () => {
-    // 未知 fetcher 无法判定凭证形态（是否 cookie 类 / 是否需要 workspace）：旧行为是
+    // 未知 fetcher 无法判定凭证形态（是否 cookie 类 / 是否声明用户维度参数）：旧行为是
     // isCookieAuth / needsWorkspace 双双落 false 后走 api-key 分支，provider 凭据可用时
     // readiness.ready=true → 放行一条带未知 fetcher 的 configure。按「类型缺失」处理（D8 同形态）。
     const { module } = mountModule(
@@ -1127,7 +1129,7 @@ describe('readiness 齐备性矩阵（D1 / D13）', () => {
     expect(noCookie.module.view.value.readiness).toEqual({ ready: false, missing: ['cookie'] })
   })
 
-  it('requiresWorkspace 只看草稿：已保存 workspace 不计入，清空即置灰（D13）', async () => {
+  it('params 必填项只看草稿：已保存值不计入，清空即置灰（D13）', async () => {
     const { module } = mountModule(
       provider({
         id: 'oc-p',
@@ -1135,51 +1137,34 @@ describe('readiness 齐备性矩阵（D1 / D13）', () => {
           enabled: false,
           fetcher: 'opencode-go',
           cookieSet: true,
-          workspace: 'https://opencode.ai/workspace/wrk_saved/go',
+          params: { workspaceUrl: 'https://opencode.ai/workspace/wrk_saved/go' },
         },
       }),
       { preset: OPENCODE_PRESET },
     )
     await Promise.resolve()
 
-    expect(module.draft.value.workspace).toBe('https://opencode.ai/workspace/wrk_saved/go')
+    expect(module.draft.value.params.workspaceUrl).toBe('https://opencode.ai/workspace/wrk_saved/go')
     expect(module.view.value.readiness).toEqual({ ready: true, missing: [] })
 
-    module.draft.value.workspace = ''
-    // 磁盘上仍有 workspace，但判定只看草稿 —— 两个密文字段才是并集规则
-    expect(module.view.value.readiness).toEqual({ ready: false, missing: ['workspace'] })
+    module.draft.value.params = { ...module.draft.value.params, workspaceUrl: '' }
+    // 磁盘上仍有 params，但判定只看草稿 —— 两个密文字段才是并集规则
+    expect(module.view.value.readiness).toEqual({ ready: false, missing: ['param'] })
   })
 
-  it('多个缺口按 cookie → workspace 顺序累积', async () => {
+  it('多个缺口按 cookie → param 顺序累积', async () => {
     const { module } = mountModule(
       provider({ id: 'oc-p', quota: { enabled: false, fetcher: 'opencode-go' } }),
       { preset: OPENCODE_PRESET },
     )
     await Promise.resolve()
 
-    expect(module.view.value.readiness).toEqual({ ready: false, missing: ['cookie', 'workspace'] })
+    expect(module.view.value.readiness).toEqual({ ready: false, missing: ['cookie', 'param'] })
   })
 })
 
 // ── ② 凭证归属（D5） ────────────────────────────────────────────────────────
 describe('凭证归属 typeChanged（D5）', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
-    // W3c 后 presets 数据源 = runtime 下发的合并视图（store 默认空数组）；测试无 runtime，
-    // 灌编译期基线等价（基线正是无远程覆盖时的合并视图原样）
-    getSettingsStore().setQuotaPresets([...QUOTA_PRESETS])
-    vi.clearAllMocks()
-    vi.mocked(quotaApi.getCached).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.fetchQuota).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.refreshQuota).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.configure).mockResolvedValue({ ok: true })
-    provideSettingsTransport(makeSettingsTransportStub({
-      getCachedQuota: quotaApi.getCached,
-      refreshQuota: quotaApi.refreshQuota,
-      configureQuota: quotaApi.configure,
-    }))
-  })
-
   it('savedFetcher undefined 不算类型已变（无既存归属可比）', async () => {
     const { module } = mountModule(
       provider({ id: 'mimo-p', quota: { enabled: false, cookieSet: true } }),
@@ -1203,8 +1188,8 @@ describe('凭证归属 typeChanged（D5）', () => {
     expect(module.view.value.readiness).toEqual({ ready: true, missing: [] })
 
     module.selectType('opencode-go')
-    module.draft.value.workspace = 'wrk_abc'
-    // 旧 MiMo cookie 不再算「已填」；workspace 草稿已填
+    module.draft.value.params = { workspaceUrl: 'wrk_abc' }
+    // 旧 MiMo cookie 不再算「已填」；param 草稿已填
     expect(module.view.value.readiness).toEqual({ ready: false, missing: ['cookie'] })
 
     module.draft.value.cookie = 'opencode-session'
@@ -1233,23 +1218,6 @@ describe('凭证归属 typeChanged（D5）', () => {
 
 // ── ③ saveAndTest payload 构造（§7.2 细节 4） ───────────────────────────────
 describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
-    // W3c 后 presets 数据源 = runtime 下发的合并视图（store 默认空数组）；测试无 runtime，
-    // 灌编译期基线等价（基线正是无远程覆盖时的合并视图原样）
-    getSettingsStore().setQuotaPresets([...QUOTA_PRESETS])
-    vi.clearAllMocks()
-    vi.mocked(quotaApi.getCached).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.fetchQuota).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.refreshQuota).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.configure).mockResolvedValue({ ok: true })
-    provideSettingsTransport(makeSettingsTransportStub({
-      getCachedQuota: quotaApi.getCached,
-      refreshQuota: quotaApi.refreshQuota,
-      configureQuota: quotaApi.configure,
-    }))
-  })
-
   it('cookie 类：草稿空 + 类型未变 → cookie 缺省；fetcher / credentialSource / enabled 恒传', async () => {
     const { module } = await mountBaseline('mimo')
 
@@ -1263,7 +1231,7 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
       credentialSource: 'provider',
       cookie: undefined,
       apiKey: undefined,
-      workspace: undefined,
+      params: undefined,
     })
   })
 
@@ -1289,7 +1257,7 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
       credentialSource: 'provider',
       cookie: '',
       apiKey: undefined,
-      workspace: undefined,
+      params: undefined,
     })
   })
 
@@ -1313,7 +1281,7 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
       credentialSource: 'exclusive',
       cookie: undefined,
       apiKey: 'sk-own',
-      workspace: undefined,
+      params: undefined,
     })
   })
 
@@ -1383,10 +1351,10 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
     expect(lastConfigurePayload()?.apiKey).toBeUndefined()
   })
 
-  it('workspace 必填：草稿非空 → 传归一化 URL（永不空串）', async () => {
+  it('param 必填：草稿非空 → 传归一化 URL（永不空串）', async () => {
     const { module } = await mountBaseline('opencode-go')
 
-    module.draft.value.workspace = 'wrk_newid77'
+    module.draft.value.params = { workspaceUrl: 'wrk_newid77' }
     await module.saveAndTest()
 
     expect(lastConfigurePayload()).toEqual({
@@ -1396,32 +1364,32 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
       credentialSource: 'provider',
       cookie: undefined,
       apiKey: undefined,
-      workspace: 'https://opencode.ai/workspace/wrk_newid77/go',
+      params: { workspaceUrl: 'https://opencode.ai/workspace/wrk_newid77/go' },
     })
   })
 
-  it('workspace 草稿空 → 本地拦截，不发 RPC（D13：不再有空串 = 清除通道）', async () => {
+  it('param 草稿空 → 本地拦截，不发 RPC（D13：不再有空串 = 清除通道）', async () => {
     const { module } = mountModule(
       provider({
         id: 'oc-p',
-        quota: { enabled: false, fetcher: 'opencode-go', cookieSet: true, workspace: 'https://opencode.ai/workspace/wrk_x/go' },
+        quota: { enabled: false, fetcher: 'opencode-go', cookieSet: true, params: { workspaceUrl: 'https://opencode.ai/workspace/wrk_x/go' } },
       }),
       { preset: OPENCODE_PRESET },
     )
     await Promise.resolve()
 
-    module.draft.value.workspace = ''
+    module.draft.value.params = { ...module.draft.value.params, workspaceUrl: '' }
     await module.saveAndTest()
 
     expect(quotaApi.configure).not.toHaveBeenCalled()
-    expect(module.view.value.configureError).toBe('T:settings.providerEdit.quotaWorkspaceRequired')
+    expect(module.view.value.configureError).toBe('T:settings.providerEdit.quotaParamRequired')
   })
 
-  it('非 requiresWorkspace 类型不传 workspace 键', async () => {
+  it('非 params 类型（账号维度 fetcher）不传 params 键', async () => {
     const { module } = await mountBaseline('kimi-coding')
 
     await module.saveAndTest()
-    expect(lastConfigurePayload()?.workspace).toBeUndefined()
+    expect(lastConfigurePayload()?.params).toBeUndefined()
   })
 
   it('保存成功不清空密文草稿；provider 广播重建后转掩码哨兵（D7）', async () => {
@@ -1446,7 +1414,7 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
       id: 'zhipu-p',
       quota: { enabled: false, fetcher: 'zhipu', apiKeySet: true, credentialSource: 'exclusive' },
     })
-    await vi.waitFor(() => { expect(module.draft.value.apiKey).toBe(QUOTA_SECRET_MASK) }, { interval: 1 })
+    await vi.waitFor(() => { expect(module.draft.value.apiKey).toBe(QUOTA_SECRET_MASK) })
   })
 
   it('落盘成功后触发一次查询（D2：保存并测试合一）', async () => {
@@ -1515,23 +1483,6 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
 
 // ── ④ setEnabled（D4） ──────────────────────────────────────────────────────
 describe('setEnabled 纯配置位（D4）', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
-    // W3c 后 presets 数据源 = runtime 下发的合并视图（store 默认空数组）；测试无 runtime，
-    // 灌编译期基线等价（基线正是无远程覆盖时的合并视图原样）
-    getSettingsStore().setQuotaPresets([...QUOTA_PRESETS])
-    vi.clearAllMocks()
-    vi.mocked(quotaApi.getCached).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.fetchQuota).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.refreshQuota).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.configure).mockResolvedValue({ ok: true })
-    provideSettingsTransport(makeSettingsTransportStub({
-      getCachedQuota: quotaApi.getCached,
-      refreshQuota: quotaApi.refreshQuota,
-      configureQuota: quotaApi.configure,
-    }))
-  })
-
   it('只发 { providerId, enabled } 且零查询调用（草稿类型 / 来源不被偷偷落盘）', async () => {
     const { module } = await mountBaseline('kimi-coding')
 
@@ -1553,7 +1504,7 @@ describe('setEnabled 纯配置位（D4）', () => {
       provider({ id: 'kimi-p', quota: { enabled: true, fetcher: 'kimi-coding' } }),
       { preset: KIMI_PRESET },
     )
-    await vi.waitFor(() => { expect(module.view.value.enabled).toBe(true) }, { interval: 1 })
+    await vi.waitFor(() => { expect(module.view.value.enabled).toBe(true) })
 
     await module.setEnabled(false)
 
@@ -1577,23 +1528,6 @@ describe('setEnabled 纯配置位（D4）', () => {
 
 // ── ⑤ 掩码哨兵（D7） ────────────────────────────────────────────────────────
 describe('掩码哨兵（D7）：已保存密文显示 QUOTA_SECRET_MASK', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
-    // W3c 后 presets 数据源 = runtime 下发的合并视图（store 默认空数组）；测试无 runtime，
-    // 灌编译期基线等价（基线正是无远程覆盖时的合并视图原样）
-    getSettingsStore().setQuotaPresets([...QUOTA_PRESETS])
-    vi.clearAllMocks()
-    vi.mocked(quotaApi.getCached).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.fetchQuota).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.refreshQuota).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.configure).mockResolvedValue({ ok: true })
-    provideSettingsTransport(makeSettingsTransportStub({
-      getCachedQuota: quotaApi.getCached,
-      refreshQuota: quotaApi.refreshQuota,
-      configureQuota: quotaApi.configure,
-    }))
-  })
-
   it('syncFromProvider 后已保存的 cookie / 专属 Key 显示掩码哨兵（密文本身不回传）', async () => {
     const { module } = mountModule(
       provider({
@@ -1633,34 +1567,35 @@ describe('掩码哨兵（D7）：已保存密文显示 QUOTA_SECRET_MASK', () =>
         enabled: false,
         fetcher: 'opencode-go',
         cookieSet: true,
-        workspace: 'https://opencode.ai/workspace/wrk_saved/go',
+        params: { workspaceUrl: 'https://opencode.ai/workspace/wrk_saved/go' },
       },
     })
 
-    await vi.waitFor(() => { expect(module.draft.value.workspace).toBe('https://opencode.ai/workspace/wrk_saved/go') }, { interval: 1 })
+    await vi.waitFor(() => { expect(module.draft.value.params.workspaceUrl).toBe('https://opencode.ai/workspace/wrk_saved/go') })
     expect(module.draft.value.cookie).toBe(QUOTA_SECRET_MASK)
+  })
+
+  it('旧版 workspace 单字段（泛化前持久化）读侧映射为 params.workspaceUrl 草稿', async () => {
+    const { module } = mountModule(
+      provider({
+        id: 'oc-p',
+        quota: {
+          enabled: false,
+          fetcher: 'opencode-go',
+          cookieSet: true,
+          workspace: 'https://opencode.ai/workspace/wrk_legacy/go',
+        },
+      }),
+      { preset: OPENCODE_PRESET },
+    )
+    await Promise.resolve()
+
+    expect(module.draft.value.params.workspaceUrl).toBe('https://opencode.ai/workspace/wrk_legacy/go')
   })
 })
 
 // ── ⑥ 类型草稿写入（D5 细节 2） ─────────────────────────────────────────────
 describe('类型草稿写入（D5 细节 2）', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
-    // W3c 后 presets 数据源 = runtime 下发的合并视图（store 默认空数组）；测试无 runtime，
-    // 灌编译期基线等价（基线正是无远程覆盖时的合并视图原样）
-    getSettingsStore().setQuotaPresets([...QUOTA_PRESETS])
-    vi.clearAllMocks()
-    vi.mocked(quotaApi.getCached).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.fetchQuota).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.refreshQuota).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.configure).mockResolvedValue({ ok: true })
-    provideSettingsTransport(makeSettingsTransportStub({
-      getCachedQuota: quotaApi.getCached,
-      refreshQuota: quotaApi.refreshQuota,
-      configureQuota: quotaApi.configure,
-    }))
-  })
-
   it('同值选中不重置凭证草稿、不发 RPC（reka Select 同值也 emit）', async () => {
     const { module } = await mountBaseline('mimo')
 
@@ -1671,7 +1606,7 @@ describe('类型草稿写入（D5 细节 2）', () => {
     expect(quotaApi.configure).not.toHaveBeenCalled()
   })
 
-  it('类型真变 → 清凭证草稿，但 Workspace 草稿保留（D13）', async () => {
+  it('类型真变 → 清凭证草稿，但 param 草稿保留（D13）', async () => {
     const { module } = mountModule(
       provider({
         id: 'oc-p',
@@ -1679,7 +1614,7 @@ describe('类型草稿写入（D5 细节 2）', () => {
           enabled: false,
           fetcher: 'opencode-go',
           cookieSet: true,
-          workspace: 'https://opencode.ai/workspace/wrk_saved/go',
+          params: { workspaceUrl: 'https://opencode.ai/workspace/wrk_saved/go' },
         },
       }),
       { preset: OPENCODE_PRESET },
@@ -1690,7 +1625,7 @@ describe('类型草稿写入（D5 细节 2）', () => {
     module.selectType('mimo')
 
     expect(module.draft.value.cookie).toBe('')
-    expect(module.draft.value.workspace).toBe('https://opencode.ai/workspace/wrk_saved/go')
+    expect(module.draft.value.params.workspaceUrl).toBe('https://opencode.ai/workspace/wrk_saved/go')
     expect(quotaApi.configure).not.toHaveBeenCalled()
   })
 
@@ -1708,23 +1643,6 @@ describe('类型草稿写入（D5 细节 2）', () => {
 
 // ── ⑦ loadCached reason（D6 影响面表修正） ──────────────────────────────────
 describe('loadCached reason 透传', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
-    // W3c 后 presets 数据源 = runtime 下发的合并视图（store 默认空数组）；测试无 runtime，
-    // 灌编译期基线等价（基线正是无远程覆盖时的合并视图原样）
-    getSettingsStore().setQuotaPresets([...QUOTA_PRESETS])
-    vi.clearAllMocks()
-    vi.mocked(quotaApi.getCached).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.fetchQuota).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.refreshQuota).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.configure).mockResolvedValue({ ok: true })
-    provideSettingsTransport(makeSettingsTransportStub({
-      getCachedQuota: quotaApi.getCached,
-      refreshQuota: quotaApi.refreshQuota,
-      configureQuota: quotaApi.configure,
-    }))
-  })
-
   it('data=null 但带 reason → 整体呈失败态（不再丢成 idle）', async () => {
     vi.mocked(quotaApi.getCached).mockResolvedValue({ data: null, lastFetchAt: 5000, reason: 'no-credential' })
     const { module } = mountModule(
@@ -1732,7 +1650,7 @@ describe('loadCached reason 透传', () => {
       { preset: MIMO_PRESET },
     )
 
-    await vi.waitFor(() => { expect(module.test.value.status).toBe('error') }, { interval: 1 })
+    await vi.waitFor(() => { expect(module.test.value.status).toBe('error') })
     expect(module.test.value.failure).toEqual({ kind: 'no-credential', cookieAuth: true, message: '' })
     expect(module.test.value.row).toBeNull()
     expect(module.test.value.lastFetchAt).toBe(5000)
@@ -1745,7 +1663,7 @@ describe('loadCached reason 透传', () => {
       { preset: KIMI_PRESET },
     )
 
-    await vi.waitFor(() => { expect(module.test.value.status).toBe('error') }, { interval: 1 })
+    await vi.waitFor(() => { expect(module.test.value.status).toBe('error') })
     expect(module.test.value.failure?.kind).toBe('unauthorized')
     expect(module.test.value.row).toEqual(mockRow)
   })
@@ -1756,7 +1674,7 @@ describe('loadCached reason 透传', () => {
       provider({ id: 'kimi-p', quota: { enabled: true, fetcher: 'kimi-coding' } }),
       { preset: KIMI_PRESET },
     )
-    await vi.waitFor(() => { expect(kimi.module.test.value.status).toBe('success') }, { interval: 1 })
+    await vi.waitFor(() => { expect(kimi.module.test.value.status).toBe('success') })
     expect(kimi.module.test.value.failure).toBeNull()
 
     vi.mocked(quotaApi.getCached).mockClear()
@@ -1772,23 +1690,6 @@ describe('loadCached reason 透传', () => {
 
 // ── ⑧ configureError 走 i18n（D9） ─────────────────────────────────────────
 describe('configureError i18n（D9）', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
-    // W3c 后 presets 数据源 = runtime 下发的合并视图（store 默认空数组）；测试无 runtime，
-    // 灌编译期基线等价（基线正是无远程覆盖时的合并视图原样）
-    getSettingsStore().setQuotaPresets([...QUOTA_PRESETS])
-    vi.clearAllMocks()
-    vi.mocked(quotaApi.getCached).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.fetchQuota).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.refreshQuota).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.configure).mockResolvedValue({ ok: true })
-    provideSettingsTransport(makeSettingsTransportStub({
-      getCachedQuota: quotaApi.getCached,
-      refreshQuota: quotaApi.refreshQuota,
-      configureQuota: quotaApi.configure,
-    }))
-  })
-
   it('saveAndTest 返回 ok:false 且带 error → 优先透传 error（跳过 i18n 兜底）', async () => {
     vi.mocked(quotaApi.configure).mockResolvedValue({ ok: false, error: 'disk full' })
     const { module } = await mountBaseline('kimi-coding')
@@ -1805,14 +1706,14 @@ describe('configureError i18n（D9）', () => {
     expect(module.view.value.configureError).toBe('T:settings.providerEdit.quotaSaveAndTestFail')
   })
 
-  it('workspace 非法输入 → i18n 文案且不发 RPC', async () => {
+  it('param 非法输入 → i18n 文案且不发 RPC', async () => {
     const { module } = await mountBaseline('opencode-go')
 
-    module.draft.value.workspace = 'https://evil.example.com/workspace/wrk_x/go'
+    module.draft.value.params = { workspaceUrl: 'https://evil.example.com/workspace/wrk_x/go' }
     await module.saveAndTest()
 
     expect(quotaApi.configure).not.toHaveBeenCalled()
-    expect(module.view.value.configureError).toBe('T:settings.providerEdit.quotaWorkspaceInvalid')
+    expect(module.view.value.configureError).toBe('T:settings.providerEdit.quotaParamInvalid')
   })
 
   it('cookie 无 name=value 对（DevTools 表格粘贴形态）→ 本地拦下：专属文案且不发任何 RPC（2026-10-18）', async () => {
@@ -1850,23 +1751,6 @@ describe('configureError i18n（D9）', () => {
 
 // ── ⑨ 既有回归：reason 透传 / preset 派生 ───────────────────────────────────
 describe('既有回归（reason 透传 / preset 派生）', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
-    // W3c 后 presets 数据源 = runtime 下发的合并视图（store 默认空数组）；测试无 runtime，
-    // 灌编译期基线等价（基线正是无远程覆盖时的合并视图原样）
-    getSettingsStore().setQuotaPresets([...QUOTA_PRESETS])
-    vi.clearAllMocks()
-    vi.mocked(quotaApi.getCached).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.fetchQuota).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.refreshQuota).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.configure).mockResolvedValue({ ok: true })
-    provideSettingsTransport(makeSettingsTransportStub({
-      getCachedQuota: quotaApi.getCached,
-      refreshQuota: quotaApi.refreshQuota,
-      configureQuota: quotaApi.configure,
-    }))
-  })
-
   it('saveAndTest 内查询失败 → failure 分档 + lastFetchAt = 最近成功时间', async () => {
     const { module } = await mountBaseline('kimi-coding')
     vi.mocked(quotaApi.refreshQuota).mockResolvedValue({ data: null, lastFetchAt: 5000, reason: 'network' })
@@ -1888,17 +1772,24 @@ describe('既有回归（reason 透传 / preset 派生）', () => {
     expect(module.test.value.failure).toEqual({ kind: 'generic', cookieAuth: false, message: 'transport unavailable' })
   })
 
-  it('凭证形态 / workspace 需求随草稿类型派生（view.credential.form / view.workspace.required）', async () => {
+  it('凭证形态 / param 需求随草稿类型派生（view.credential.form / view.params）', async () => {
     const { module } = await mountBaseline('kimi-coding')
 
     expect(module.view.value.type.selected).toBe('kimi-coding')
     expect(module.view.value.credential.form).toBe('apiKey')
     expect(module.view.value.credential.exclusiveApplicable).toBe(true)
-    expect(module.view.value.workspace.required).toBe(false)
+    expect(module.view.value.params).toEqual([])
 
     module.selectType('opencode-go')
     expect(module.view.value.credential.form).toBe('cookie')
-    expect(module.view.value.workspace.required).toBe(true)
+    expect(module.view.value.params).toEqual([
+      {
+        key: 'workspaceUrl',
+        label: 'Workspace 地址',
+        required: true,
+        helpText: expect.stringContaining('opencode.ai'),
+      },
+    ])
   })
 
   it('store quotaPresets 为空数组（RPC 未回包 / 拉取失败）→ 类型下拉回落编译期基线，不永久为空', async () => {
@@ -1919,23 +1810,6 @@ describe('既有回归（reason 透传 / preset 派生）', () => {
 
 // ── ⑩ 收拢进 implementation 的派生逻辑（C1） ──────────────────────────────────
 describe('派生逻辑收拢（C1：失败归一 / 警示分档 / 来源提示 / 类型分层）', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
-    // W3c 后 presets 数据源 = runtime 下发的合并视图（store 默认空数组）；测试无 runtime，
-    // 灌编译期基线等价（基线正是无远程覆盖时的合并视图原样）
-    getSettingsStore().setQuotaPresets([...QUOTA_PRESETS])
-    vi.clearAllMocks()
-    vi.mocked(quotaApi.getCached).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.fetchQuota).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.refreshQuota).mockResolvedValue({ data: null, lastFetchAt: null })
-    vi.mocked(quotaApi.configure).mockResolvedValue({ ok: true })
-    provideSettingsTransport(makeSettingsTransportStub({
-      getCachedQuota: quotaApi.getCached,
-      refreshQuota: quotaApi.refreshQuota,
-      configureQuota: quotaApi.configure,
-    }))
-  })
-
   it('失败原因归一：reason → 分档；无 reason / 未分类 reason → generic 带兜底消息', async () => {
     const reasonKind: Array<[QuotaFetchFailureReason, QuotaFailureKind]> = [
       ['unauthorized', 'unauthorized'],
@@ -2014,7 +1888,7 @@ describe('派生逻辑收拢（C1：失败归一 / 警示分档 / 来源提示 /
     module.selectType('opencode-go')
     expect(module.view.value.type.undetermined).toBe(false)
     expect(module.view.value.help?.url).toBe('https://opencode.ai/')
-    expect(module.view.value.workspace.required).toBe(true)
+    expect(module.view.value.params.map((p) => p.key)).toEqual(['workspaceUrl'])
   })
 })
 

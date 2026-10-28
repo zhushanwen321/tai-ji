@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { isQuotaPreset, matchQuotaPreset, resolveQuotaPresets, QUOTA_PRESETS } from '../quota-presets'
 
 describe('QUOTA_PRESETS', () => {
-  it('有 6 个预设', () => {
-    expect(QUOTA_PRESETS).toHaveLength(6)
+  it('有 7 个预设', () => {
+    expect(QUOTA_PRESETS).toHaveLength(7)
   })
 
   it('每个预设都有必需字段', () => {
@@ -64,11 +64,13 @@ describe('matchQuotaPreset', () => {
     expect(result?.fetcher).toBe('opendesign')
   })
 
-  it('opendesign preset 声明 cookie 认证 + requiresWorkspace（资源维度）', () => {
+  it('opendesign preset 声明 cookie 认证 + params（资源维度）', () => {
     const preset = QUOTA_PRESETS.find((p) => p.fetcher === 'opendesign')
     expect(preset).toBeDefined()
     expect(preset?.auth).toEqual(['cookie'])
-    expect(preset?.requiresWorkspace).toBe(true)
+    expect(preset?.params).toEqual([
+      expect.objectContaining({ key: 'workspaceUrl', normalize: 'opendesign-workspace' }),
+    ])
   })
 
   it('无匹配返回 undefined', () => {
@@ -140,6 +142,22 @@ describe('matchQuotaPreset', () => {
     const result = matchQuotaPreset({ name: 'my-glm-service' }, QUOTA_PRESETS)
     expect(result?.fetcher).toBe('zhipu')
   })
+
+  it('baseUrl 匹配 stepfun（api.stepfun.com 直连 / step_plan 套餐集群）', () => {
+    expect(matchQuotaPreset({ baseUrl: 'https://api.stepfun.com/v1' }, QUOTA_PRESETS)?.fetcher).toBe('stepfun')
+    expect(matchQuotaPreset({ baseUrl: 'https://api.stepfun.com/step_plan/v1' }, QUOTA_PRESETS)?.fetcher).toBe('stepfun')
+  })
+
+  it('name 匹配 stepfun（含中文名「阶跃星辰」）', () => {
+    expect(matchQuotaPreset({ name: 'StepFun' }, QUOTA_PRESETS)?.fetcher).toBe('stepfun')
+    expect(matchQuotaPreset({ name: '阶跃星辰 StepFun' }, QUOTA_PRESETS)?.fetcher).toBe('stepfun')
+  })
+
+  it('stepfun preset 声明 cookie 认证 + 无 params（账号维度：cookie 即账号）', () => {
+    const preset = QUOTA_PRESETS.find((p) => p.fetcher === 'stepfun')
+    expect(preset?.auth).toEqual(['cookie'])
+    expect(preset?.params).toBeUndefined()
+  })
 })
 
 // 读取侧空态回落（dmg-r3-1）：settings-store 的 quotaPresets 初值是 `[]`（非 undefined），
@@ -188,7 +206,7 @@ describe('isQuotaPreset', () => {
         match: { baseUrlPattern: 'example.com', namePattern: '\\bx\\b' },
         helpUrl: 'https://example.com/help',
         helpText: '获取凭证说明',
-        requiresWorkspace: true,
+        params: [{ key: 'workspaceUrl', normalize: 'opencode-workspace' }],
       }),
     ).toBe(true)
   })
@@ -239,10 +257,10 @@ describe('isQuotaPreset', () => {
     expect(isQuotaPreset({ ...minimal, match: { namePattern: true } })).toBe(false)
   })
 
-  it('可选字段提供即校验：helpUrl/helpText/requiresWorkspace 类型漂移 → false', () => {
+  it('可选字段提供即校验：helpUrl/helpText/params 类型漂移 → false', () => {
     expect(isQuotaPreset({ ...minimal, helpUrl: 42 })).toBe(false)
     expect(isQuotaPreset({ ...minimal, helpText: 42 })).toBe(false)
-    expect(isQuotaPreset({ ...minimal, requiresWorkspace: 'yes' })).toBe(false)
+    expect(isQuotaPreset({ ...minimal, params: 'yes' })).toBe(false)
   })
 
   it('未知字段放行（远程向后兼容：新形态不被旧版本整体拒用）', () => {

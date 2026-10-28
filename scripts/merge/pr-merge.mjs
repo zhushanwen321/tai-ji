@@ -5,11 +5,14 @@
  * pr-merge.mjs — merge 流程阶段 2：PR CI 等待 + 合并 + sync 本地 main
  *
  * 做什么：
- *   1. 等待 PR CI 通过（最多 10 分钟）
+ *   1. 等待 PR CI 通过（判定数据 = head SHA 的 workflow runs，与阶段 3 wait-for-ci
+ *      同源；等全部 run 完成才裁决，上限 30 分钟。机器人检查（Greptile 等 check
+ *      run）不进判定——CI 门禁只看本仓 workflow）
  *   2. gh pr merge --merge --delete-branch --match-head-commit <sha>（merge commit，
  *      绝不 squash；match-head-commit 保证「判定时的 head = 合并时的 head」——判定
  *      通过后 PR 又被推新提交时 gh 拒绝合并，封住客户端侧的检查-合并竞态窗口）
- *   3. sync 本地 main（fetch + reset --hard github/main）
+ *   3. sync 本地 main（fetch + 领先/脏树防护 + reset --hard github/main——本地 main
+ *      领先远端或工作区有未提交改动时 fail-fast，见 lib/sync.mjs）
  *   4. main 依赖补装（lockfile 变化时；一致时快速跳过）
  *
  * 前置：阶段 0（init）已执行，PR 处于 OPEN 状态
@@ -23,9 +26,11 @@ import { existsSync } from 'node:fs'
 import { run } from './lib/exec.mjs'
 import { RED, GREEN, YELLOW, BOLD, NC } from './lib/output.mjs'
 import { DEFAULT_REPO } from './lib/repo.mjs'
-import { waitForPrChecks } from './lib/gate.mjs'
+import { waitForRuns } from './lib/gate.mjs'
+import { makeFetchRuns } from './lib/fetch-runs.mjs'
 import { findWorkspaceRoot, mainWorktreePath } from './lib/workspace.mjs'
-import { writeMergeState } from './lib/state.mjs'
+import { writeMergeState, readMergeState, isPipelineBusy, buildMergedPatch } from './lib/state.mjs'
+import { syncMain } from './lib/sync.mjs'
 
 const GH_REMOTE = 'github'
 
@@ -70,46 +75,64 @@ if (PR_STATE === 'MERGED') {
   fail(`Error: PR 状态为 ${PR_STATE}，无法处理（需 OPEN 或 MERGED；gh 调用失败时也落此处——检查 gh 登录态）`)
   process.exit(1)
 } else {
-  // ── PR CI 门禁（判定实现 = lib/gate.mjs，结构性 null 判定）──
-  console.log('  检查 PR CI 状态...')
-  const fetchRollup = async () => {
-    const res = run(
-      'gh',
-      ['pr', 'view', PR_NUMBER, '--repo', DEFAULT_REPO, '--json', 'statusCheckRollup'],
-      { stdio: 'capture' },
-    )
-    if (!res.ok) {
-      console.log(`  ${YELLOW}Warning: 无法获取 CI 状态，按 checks 未注册处理${NC}`)
-      return []
-    }
-    try {
-      return JSON.parse(res.stdout).statusCheckRollup ?? []
-    } catch {
-      return []
-    }
+  // ── PR CI 门禁（判定实现 = lib/gate.mjs；数据源 = head SHA 的 workflow runs，
+  //    与阶段 3 wait-for-ci 同源——「有 runs 必等全部完成才裁决」，不依赖
+  //    check-rollup 的注册窗口形状；机器人检查 run（非本仓 workflow）不进判定）──
+  if (!HEAD_SHA) {
+    fail('Error: 未取到 PR head commit sha，无法按 commit 查询 CI runs（检查 gh 登录态）')
+    process.exit(1)
   }
+  console.log(`  检查 PR CI 状态（head ${HEAD_SHA.slice(0, 8)} 的 workflow runs）...`)
+  // gh run list 查询闭包：SSOT = lib/fetch-runs.mjs 的 makeFetchRuns（与阶段 3
+  // wait-for-ci 同一三态契约——查询失败返回 null，与「查询成功且空」的 [] 分流，
+  // gate.mjs 对 null 持续重试到 deadline 判 fetch-error，上方分支 exit 1 拒绝
+  // 合并，绝不归一成 [] 把工具错误混进 no-runs 语义）。WORKFLOW 传 '' 保留工厂
+  // 内置的 Dependabot 过滤（机器人红不阻塞合并判定）
+  const fetchRuns = makeFetchRuns({ REF: HEAD_SHA, WORKFLOW: '', GH_REPO: DEFAULT_REPO })
 
-  const verdict = await waitForPrChecks({ fetchRollup, log: (m) => console.log(`  ${m}`) })
+  const verdict = await waitForRuns({
+    fetchRuns,
+    // PR CI 最长 job 是 e2e-visual/e2e-behavior（timeout-minutes: 30），10min 默认
+    // 必然不够；30min 与最长 job 预算同值仍贴线（runner 排队另计），超时是 exit 1
+    // 人工介入语义，宁可宽
+    deadlineMs: 1_800_000,
+    log: (m) => console.log(`  ${m}`),
+  })
 
-  if (verdict.status === 'no-checks') {
-    fail('❌ CI checks 持续未注册（重查 4 次共 60s），无法确认 PR CI 状态')
+  if (verdict.status === 'no-runs') {
+    fail('❌ 30 秒内未检测到本次 head commit 触发的 workflow run，无法确认 PR CI 状态')
     console.log('  排查指引:')
-    console.log('    1. 取 PR head commit，确认是否触发了 CI（ci.yml 路径过滤如只改 docs/ 可能不触发）:')
-    console.log(`       gh pr view ${PR_NUMBER} --repo ${DEFAULT_REPO} --json headRefOid --jq .headRefOid`)
-    console.log(`       gh run list --repo ${DEFAULT_REPO} --commit ${HEAD_SHA || '<head-sha>'}`)
-    console.log('    2. 人工核实 checks 状态:')
-    console.log(`       gh pr view ${PR_NUMBER} --repo ${DEFAULT_REPO} --json statusCheckRollup`)
-    console.log('    3. 确认无需 CI 时人工执行合并，不依赖本脚本的自动判定')
+    console.log('    1. 确认是否触发了 CI（ci.yml 路径过滤：只改 docs/ 或 .md 可能不触发）:')
+    console.log(`       gh run list --repo ${DEFAULT_REPO} --commit ${HEAD_SHA}`)
+    console.log('    2. 确认无需 CI 时（如纯文档 PR）人工执行合并，不依赖本脚本的自动判定')
     process.exit(1)
   }
   if (verdict.status === 'fail') {
     fail('❌ PR CI 有失败项:')
-    for (const f of verdict.failing) console.log(`    ❌ ${f.name} (${f.conclusion})`)
+    for (const f of verdict.failing) {
+      console.log(`    ❌ ${f.name} (${f.conclusion})`)
+      if (f.databaseId != null) console.log(`       日志: gh run view ${f.databaseId} --repo ${DEFAULT_REPO} --log-failed`)
+    }
     process.exit(1)
   }
   if (verdict.status === 'timeout') {
-    fail('❌ PR CI 在 10 分钟内未完成（checks 仍无结论）')
-    console.log(`  排查: gh pr view ${PR_NUMBER} --repo ${DEFAULT_REPO} --json statusCheckRollup`)
+    fail('❌ PR CI 在 30 分钟内未完成（runs 仍未全部结束）')
+    console.log(`  排查: gh run list --repo ${DEFAULT_REPO} --commit ${HEAD_SHA}`)
+    process.exit(1)
+  }
+  if (verdict.status === 'fetch-error') {
+    fail('❌ CI 状态查询持续失败（fetch-error 工具错误），无法确认 PR CI')
+    console.log('  gh run list 全程查询失败（网络中断/API 限流/登录态失效），与「未触发 CI」分流处理:')
+    console.log('  排查:')
+    console.log('    1. gh auth status（确认登录态与 API 限额）')
+    console.log(`    2. gh run list --commit ${HEAD_SHA} --limit 5（手动确认该 commit 的 CI 状态）`)
+    console.log('    3. 网络恢复后重跑本脚本（幂等，已合并的 PR 会跳过合并步骤）')
+    process.exit(1)
+  }
+  // 白名单：gate.mjs 契约的全部终态已在上方逐一消费，此处仅 status === 'pass'
+  // 可达——防御 gate 未来新增终态未被本消费方枚举时的落穿放行（合并动作绝不默认执行）
+  if (verdict.status !== 'pass') {
+    fail(`❌ PR CI 判定返回未知终态 ${String(verdict.status)}，拒绝合并（gate.mjs 新增终态需同步补本消费分支）`)
     process.exit(1)
   }
 
@@ -148,23 +171,29 @@ if (!existsSync(MAIN_WT)) {
   process.exit(1)
 }
 
-run('git', ['-C', MAIN_WT, 'fetch', GH_REMOTE, 'main'])
-
-// 强制切到 main 分支（reset --hard 只移动当前分支 HEAD，不切换分支。
-// 若 main worktree checkout 在其他分支，reset 会把该分支指针移到 github/main，
-// 导致后续 bump/commit/push 落错分支 + tag 指向错误分支）
-run('git', ['-C', MAIN_WT, 'checkout', 'main'])
-run('git', ['-C', MAIN_WT, 'reset', '--hard', `${GH_REMOTE}/main`])
-
-// 校验当前分支确实是 main（checkout 失败时 reset 仍会移动错误分支指针）
-const branchRes = run('git', ['-C', MAIN_WT, 'branch', '--show-current'], { stdio: 'capture' })
-const CURRENT_BRANCH = branchRes.stdout.trim()
-if (CURRENT_BRANCH !== 'main') {
-  fail(`Error: main worktree 当前分支为 ${CURRENT_BRANCH}（非 main）`)
-  console.log(`  reset 无法切换分支，手动执行: git -C ${MAIN_WT} checkout main`)
+const sync = syncMain({ run, mainWt: MAIN_WT, ghRemote: GH_REMOTE })
+if (!sync.ok) {
+  if (sync.step === 'ahead-guard') {
+    fail(`Error: 本地 main 领先 ${GH_REMOTE}/main ${sync.ahead} 个未 push 的 commit，reset --hard 会丢弃它们（仅 reflog 可恢复）`)
+    console.log('  领先 = 疑似发布在途（阶段 4 bump / 阶段 5 notes 已 commit 未 push）或未知本地改动。处置:')
+    console.log(`    1. 在途发布: 先完成后续阶段（push: git -C ${MAIN_WT} push ${GH_REMOTE} main），再重跑本脚本`)
+    console.log(`    2. 确认丢弃: git -C ${MAIN_WT} reset --hard ${GH_REMOTE}/main（丢弃后重跑，幂等）`)
+  } else if (sync.step === 'dirty-tree') {
+    fail(`Error: main worktree（${MAIN_WT}）有未提交的 tracked 改动，reset --hard 会丢弃它们（reflog 不可恢复）`)
+    console.log('  未提交的 tracked 改动 = 疑似阶段 4 bump 中途崩溃的半成品、或人工/AI 留下的工作区改动。处置:')
+    console.log(`    1. 查看: git -C ${MAIN_WT} status && git -C ${MAIN_WT} diff`)
+    console.log('    2. 保留: 先 commit 或 stash 后重跑本脚本（幂等，已合并的 PR 会跳过合并步骤）')
+    console.log(`    3. 确认丢弃: git -C ${MAIN_WT} reset --hard ${GH_REMOTE}/main（丢弃后重跑，幂等）`)
+    console.log('  （本检查只覆盖 tracked 改动——untracked 文件 reset --hard 不删、无需处理；确要清理 untracked 用 git clean）')
+  } else if (sync.hint !== undefined) {
+    fail(`Error: main 同步在 ${sync.step} 步失败`)
+    console.log(`  手动恢复后重跑本脚本（幂等，已合并的 PR 会跳过合并步骤）: ${sync.hint}`)
+  } else {
+    fail(`Error: main 同步在 ${sync.step} 步失败——手动检查: git -C ${MAIN_WT} status`)
+  }
   process.exit(1)
 }
-console.log(`${GREEN}✅ 本地 main 已同步到 ${GH_REMOTE}/main${NC}`)
+console.log(`${GREEN}✅ 本地 main 已同步到 ${GH_REMOTE}/main（HEAD ${sync.mainSha.slice(0, 8)}）${NC}`)
 
 // 依赖一致性：合入可能前进 main 的 lockfile（集成分支带新依赖/版本 bump），
 // node_modules 已存在时 pre-merge-check 的缺失性安装不会触发——此处按 lockfile 补装。
@@ -189,14 +218,27 @@ if (!installRes.ok) {
 }
 console.log(`${GREEN}✅ main 依赖与 lockfile 一致${NC}`)
 
-// ── 状态落盘（供后续阶段消费：wait-for-ci 缺省 sha 时读取 headSha）──
-const written = writeMergeState(WS_ROOT, {
-  branch: HEAD_BRANCH,
-  pr: Number(PR_NUMBER),
+// ── 状态落盘（供后续阶段消费：wait-for-ci 无参时校验 stage=merged 后读 mergeSha）──
+// reset 开启：清掉上一轮 release 的 tag/releasedAt 等字段（跨轮残留会让读者无法分辨
+// 管线归属）。此处是第二个能开启新管线的入口（init 之外），写前两项判定（在
+// lib/state.mjs，与 init 入口同源）：
+//   1. 发布互斥 isPipelineBusy：在途管线（非终态 + 12h 窗口）且 pr 不同号 → 拒绝，
+//      防静默覆盖在途管线（init 的 BUSY 防线只护 init 一个入口）
+//   2. 身份归属 buildMergedPatch：prevState 属于本管线（init 正常跑过）才延续
+//      pipelineId/branch/headSha，上一轮残留一律按新管线
+const prevState = readMergeState(WS_ROOT)
+if (isPipelineBusy(prevState) && prevState.pr !== Number(PR_NUMBER)) {
+  fail('Error: 检测到疑似进行中的发布管线，拒绝并发启动')
+  console.log(`  既有管线: ${JSON.stringify({ stage: prevState.stage, branch: prevState.branch, pr: prevState.pr, updatedAt: prevState.updatedAt })}`)
+  console.log(`  处置: 先完成该管线；确认废弃后手动删除 ${WS_ROOT}/.merge-state/current.json 再发起`)
+  process.exit(1)
+}
+const written = writeMergeState(WS_ROOT, buildMergedPatch(prevState, {
+  prNumber: Number(PR_NUMBER),
+  headBranch: HEAD_BRANCH,
   headSha: HEAD_SHA,
-  stage: 'merged',
-  mergedAt: new Date().toISOString(),
-})
+  mergeSha: sync.mainSha,
+}), { reset: true })
 if (written === null) {
   console.log(`  ${YELLOW}Warning: merge 状态写入失败（不影响本阶段；后续阶段需手传 commit sha）${NC}`)
 }

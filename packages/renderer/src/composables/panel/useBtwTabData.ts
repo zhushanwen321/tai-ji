@@ -411,6 +411,7 @@ export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
       // 「该主会话名下线列表」（runtime 侧组内按 createdAt 升序，最新线在末位）。
       const groups = await session.listSessions({ surface: 'btw', mainSessionId: captured })
       const threads = groups.flatMap((g) => g.sessions)
+      const lineIds = threads.map((th) => th.id)
       let fresh = false
       scoped.updateFor(captured, (s) => {
         if (s.loadSeq !== seq) return // 同分区旧响应丢弃（双触发并发乱序检查）
@@ -418,19 +419,17 @@ export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
         s.loading = false
         s.threads = threads
         // 权威列表剪枝：出册线的残留未读字段一并清（badge Σ 分母面 = threads）
+        const lineIdSet = new Set(lineIds)
         for (const key of Object.keys(s.unreadBySessionId)) {
-          if (!threads.some((th) => th.id === key)) delete s.unreadBySessionId[key]
+          if (!lineIdSet.has(key)) delete s.unreadBySessionId[key]
         }
       })
       if (!fresh) return // 旧响应：不触碰观察范围与登记范围（新响应各自负责）
       // W4b 收编：本拉取产物喂入抑制类成员判别缓存（同一 session.list 来源，不另起 RPC；
       // merge 口径见 btw-line-membership 模块头）。抽屉打开即是一条拉取时机（设计 §5-W4b ①）。
-      noteBtwLinesPulled(threads.map((th) => th.id))
+      noteBtwLinesPulled(lineIds)
       syncWatchedLines(captured, threads)
-      reconcileBtwSessionKeys(
-        captured,
-        threads.map((th) => th.id),
-      )
+      reconcileBtwSessionKeys(captured, lineIds)
     } catch (e) {
       // 降级可见留痕（STANDARDS §11 辅助面降级 + 静默丢弃必须登记）：console.warn 对齐
       // btw-replay 同型失败形态（带会话 key 上下文），不抛不刷屏——composer 主链路不受

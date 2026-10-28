@@ -1,5 +1,13 @@
 # @zhushanwen/pi-subagent-workflow
 
+## 10.2.0
+
+### Minor Changes
+
+- da658a786: TUI 运行详情与导出格式新增 cancelled（已取消）中性状态档：run 终局收尾的在途成员不再显示为 failed，与执行 trace 七态对齐（「未交付且非失败」中性灰）。
+
+- da658a786: workflow 完成通知携带成员级结算明细（失败成员原因与部分交付缺失清单，`details` 新增 `failedMembers`/`partialMembers`）；TUI 运行徽标新增 partial（部分成功）独立档，导出 trace 的 Status 行附带终局原因，运行重建时恢复 agent 声明入参供预算展示。
+
 ## 10.1.0
 
 ### Minor Changes

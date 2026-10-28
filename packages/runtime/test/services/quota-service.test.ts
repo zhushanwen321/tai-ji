@@ -1011,10 +1011,12 @@ describe('QuotaService — U2②: cookie 空串 = 清除（§7.5 清单 / 改动
     expect(svc.getCached('p').data).toBeNull()
   })
 
-  it('校验失败（workspace 非法）时 secrets 未被删除：先校验计算 → persist → 成功后才写/删 secrets', async () => {
+  it('校验失败（param 非法）时 secrets 未被删除：先校验计算 → persist → 成功后才写/删 secrets', async () => {
     // 防的回归：旧顺序是「写/删 secrets → 归一化 workspace → persist」，后两步任一失败时
     // 凭证已被物理删除而 providers.json 未更新（renderer 只回滚本地 fetcherId），文件不可
-    // 回滚。重排后：workspace 非法在 persist 之前 fail-fast，secrets 零触碰。
+    // 回滚。重排后：param 非法在 persist 之前 fail-fast，secrets 零触碰。
+    // （2026-10 泛化：非法性由 param spec 的 normalize 分流判定——opencode-go 的
+    // workspaceUrl 走 host 白名单；无 spec 的 fetcher 对未知键 raw 透传不构成非法输入）
     const svc = new QuotaService({
       providerCredentialResolver: makeResolver(),
       dataDir: tmpDir,
@@ -1025,13 +1027,13 @@ describe('QuotaService — U2②: cookie 空串 = 清除（§7.5 清单 / 改动
     await svc.configure({ providerId: 'mimo-id', enabled: true, cookie: 'session=abc', fetcher: 'mimo' })
     expect(existsSync(cookiePath)).toBe(true)
 
-    // 同时传 cookie=''（清除）与非法 workspace：若 secrets 段先执行，文件会被删掉
+    // 同时传 cookie=''（清除）与非法 param：若 secrets 段先执行，文件会被删掉
     const result = await svc.configure({
       providerId: 'mimo-id',
       enabled: true,
-      fetcher: 'mimo',
+      fetcher: 'opencode-go',
       cookie: '',
-      workspace: 'https://evil.example.com',
+      params: { workspaceUrl: 'https://evil.example.com' },
     })
 
     expect(result.ok).toBe(false)

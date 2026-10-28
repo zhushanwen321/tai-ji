@@ -149,11 +149,6 @@ export declare function reconcileIssues(
     stuckThreshold: number;
   },
 ): { issues: Record<string, IssueEntry>; stuck: boolean; knownRemaining: string[]; [key: string]: unknown };
-export declare function applyCarryoverRegression(
-  tracked: { status?: string; fixAttempts?: number; openStreak?: number; severity?: string; title?: string; history?: Array<{ round?: number; status?: string; [key: string]: unknown }>; [key: string]: unknown },
-  entry: { id: string; severity: string; title?: string; [key: string]: unknown },
-  round: number,
-): void;
 export declare function normalizeReviewResult(raw: unknown): {
   report_file?: string;
   report_content?: string;
@@ -214,10 +209,6 @@ export interface AggMustFixEntry {
   [key: string]: unknown;
 }
 
-export declare function inheritCarryoverFields(
-  tracked: { title?: string; severity?: string; [key: string]: unknown },
-  entry: AggMustFixEntry,
-): boolean;
 export declare function dormantRevivalTitle(
   dormantHit: { title?: string; [key: string]: unknown } | undefined | null,
   entry: AggMustFixEntry,

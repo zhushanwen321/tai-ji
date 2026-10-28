@@ -372,11 +372,19 @@ export default {
     // 「本次」label 的 hover 补句（C4）：current 无窗口过滤且为会话私有样本（本会话最近一次请求）
     genStatsCurrentNote: '本会话最近一次请求的记录',
     genStatsCurrentReq: '本次请求',
-    genStatsDay: '今日均值（此模型）',
-    genStatsD7: '近 7 天',
-    genStatsD30: '近 30 天',
     genStatsDayShort: '今日加权（此模型）',
-    genStatsSpeedNote: '「本次」为本会话最近一次请求；今日/7 天/30 天为该模型跨会话累计（加权平均）；按单次 LLM 请求耗时计算，不含工具执行时间',
+    // 分布矩阵（2026-10-24 用户裁决）：5 统计量列 × 3 窗口行。列头只写一次，
+    // 行头只写窗口名——同一尺寸下信息量比「每窗口一行单值」高一个量级。
+    genStatsColAvg: '平均',
+    genStatsColP50: 'P50',
+    genStatsColP99: 'P99',
+    genStatsColP99Note: '最近秩百分位：样本不足 100 次时 P99 等于最大值（不插值，如实呈现）',
+    genStatsColMax: '最大',
+    genStatsColMin: '最小',
+    genStatsWindowDay: '今日',
+    genStatsWindowD7: '7 天',
+    genStatsWindowD30: '30 天',
+    genStatsSpeedNote: '「本次」为本会话最近一次请求；今日/7 天/30 天为该模型跨会话累计，逐请求速度的五量分布（等权平均，非按耗时分摊）；按单次 LLM 请求耗时计算，不含工具执行时间',
     genStatsCacheNote: '「本次」为本会话最近一次请求；今日加权为该模型跨会话累计；cacheRead ÷ (input + cacheRead + cacheWrite)；模型不支持缓存时显示「—」',
     // 归因降噪（2026-09-19 D-A）：预期内 0% 的成因文案——三值均非故障，以中性色呈现
     genStatsCacheMissColdStart: '首次请求',
@@ -390,13 +398,11 @@ export default {
     // [RD-2#7] runtime 领先 renderer 的协议漂移（未知 reason）→ 通用文案兜底（default 分支 + warn）
     genStatsCacheMissUnknown: '缓存未命中',
     genStatsNoData: '暂无数据',
-    // composer-genstats-ttft TTFT 触发器（U4）。p50 行 label 独立成键，不复用 genStatsDay
-    //（「今日均值」与 p50 中位数语义矛盾，设计 §3.1）；「本次」行 label/补句复用 genStatsCurrent 系（同语义）
+    // composer-genstats-ttft TTFT 卡（U4）。[HISTORICAL] 原有 genStatsTtftDay/D7/D30 三个
+    // 「今日 p50（此模型）」式行 label，随分布矩阵（2026-10-24）退役——窗口名走共用
+    // genStatsWindowDay/D7/D30，统计量名走共用 genStatsCol*，两侧语义不再需要专属键
     genStatsTtftTitle: '首字延迟 TTFT',
-    genStatsTtftDay: '今日 p50（此模型）',
-    genStatsTtftD7: '近 7 天 p50',
-    genStatsTtftD30: '近 30 天 p50',
-    genStatsTtftNote: '「本次」为本会话最近一次请求；今日/7 天/30 天为该模型跨会话累计（p50 中位数）；「请求发出 → 首个输出 token 到达」的延迟，按单次 LLM 请求计算，不含工具执行时间',
+    genStatsTtftNote: '「本次」为本会话最近一次请求；今日/7 天/30 天为该模型跨会话累计，逐请求延迟的五量分布；P50 是典型体验、P99/最大是尾部体感（重尾分布下两者会明显背离）；「请求发出 → 首个输出 token 到达」的延迟，按单次 LLM 请求计算，不含工具执行时间',
   },
   sideDrawer: {
     title: '侧边抽屉',

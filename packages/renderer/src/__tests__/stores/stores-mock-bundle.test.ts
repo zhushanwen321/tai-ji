@@ -2232,7 +2232,7 @@ describe('useQuotaStore', () => {
   beforeEach(() => setActivePinia(createPinia()))
 
   const mockRow: NormalizedQuotaRow = {
-    label: '智谱 GLM Coding Plan',
+    label: 'Zhipu Coding Plan',
     wins: [
       { pct: 68, resetSec: 4980 },
       { pct: 42, resetSec: 266400 },

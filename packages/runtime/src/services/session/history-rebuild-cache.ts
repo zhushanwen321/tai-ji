@@ -608,8 +608,10 @@ export class SessionHistoryReader {
     // getLatestWindow/getIncrementalHistory 的 RPC catch 降级到此处）同样不得透传
     // interrupted——「会话未附着」是判定的成立前提，与线类型无关（F1 修复：早退分支
     // 曾绕过剥除行，把 tailReadHistory 判出的 interrupted 原样出场）。
-    const result = this.deps.resolveBtwThreadFile?.(sessionId) !== undefined
-      ? await this.tailReadBtwOffline(sessionId, query)
+    // btw 线文件只解析一次，分支判定与线下读共用同一结果（注册表纯查询，双调冗余）。
+    const btwFile = this.deps.resolveBtwThreadFile?.(sessionId)
+    const result = btwFile !== undefined
+      ? await this.tailReadBtwOffline(sessionId, btwFile, query)
       : await getHistoryTailFromFile(
         sessionId,
         this.deps.sessionStore,
@@ -622,18 +624,22 @@ export class SessionHistoryReader {
   }
 
   /**
-   * btw 线离线尾读（btw 面解析路径）：线文件路径查注册表（resolveBtwThreadFile，组合根接
-   * BtwService 注册表）→ 命中且文件在场 → 与通用链同一 tailReadHistory（同一预算窗口 /
-   * cursor 定位 / entry 转换链）；文件缺失 / 注册表 miss → warn + 空页。
+   * btw 线离线尾读（btw 面解析路径）：线文件路径由调用方 tailReadOffline 经注册表
+   * （resolveBtwThreadFile，组合根接 BtwService 注册表）解析后传入 → 命中且文件在场 →
+   * 与通用链同一 tailReadHistory（同一预算窗口 / cursor 定位 / entry 转换链）；文件缺失 /
+   * 注册表 miss → warn + 空页。
    *
    * 异常态口径（与「合法空线」区分）：合法空线 = 文件在场但无 turn（tailReadHistory 静默
    * 空页）；异常态 = 线文件缺失（pi 从未 flush 的分支②回落线被删 / 目录被外部清理 /
    * 注册表与磁盘不一致）——轻量 warn 留痕含线 session id 与期望路径 + 恢复动作，不做 UI 错误条
    * （renderer 侧空历史另有对等 warn，btw-replay）。
    */
-  private async tailReadBtwOffline(sessionId: string, query?: HistoryWindowQuery): Promise<HistoryWindowResult> {
+  private async tailReadBtwOffline(
+    sessionId: string,
+    file: string,
+    query?: HistoryWindowQuery,
+  ): Promise<HistoryWindowResult> {
     const emptyPage: HistoryWindowResult = { messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 }
-    const file = this.deps.resolveBtwThreadFile?.(sessionId)
     if (!file) {
       console.warn(
         `[session-history] btw line history unavailable: no registry entry for ${sessionId} — ` +

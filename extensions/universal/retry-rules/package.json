@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-retry-rules",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Retryable error rules for Pi — message_end rewrite triggers the native retry loop for throttling-class provider errors, with configurable rules (builtin baseline ⊕ remote overlay ⊕ user custom) and ReDoS-guarded matching.",
   "type": "module",
   "main": "index.ts",

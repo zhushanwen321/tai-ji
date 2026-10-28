@@ -81,8 +81,8 @@ export const opendesignFetcher: ProviderQuotaFetcher = {
     const cookie = normalizeCookieHeader(credential)
     if (!cookie) return { ok: false, reason: 'unauthorized' }
 
-    // 未配置 workspace = 可区分失败 not_configured，不发任何 HTTP 请求（对齐 opencode D1-3）
-    const workspaceUrl = config?.workspaceUrl
+    // 未配置 workspace 参数 = 可区分失败 not_configured，不发任何 HTTP 请求（对齐 opencode D1-3）
+    const workspaceUrl = config?.quotaParams?.workspaceUrl
     if (!workspaceUrl) return { ok: false, reason: 'not_configured' }
 
     const result = await fetchQuotaJson(

@@ -1834,18 +1834,8 @@ export function createSessionDeliveryRegistry(
         if (first.tombstone.state === 'cancelled') {
           // 他径已兑现为 cancelled（Q1 窄缝：RPC 到达与首次 handle.cancel 之间被对账
           // 器/断连兑现）：查移交表命中即按撤销成功应答（消费移交全文）
-          const redeemed = rt.redeemedRevokes.get(clientUuid)
-          if (redeemed) {
-            rt.redeemedRevokes.delete(clientUuid)
-            rt.pendingRevoke.delete(clientUuid)
-            return {
-              cancelled: true,
-              content: redeemed.content,
-              ...((segmentsSnapshot ?? redeemed.segments) !== undefined
-                ? { segments: (segmentsSnapshot ?? redeemed.segments) as Segment[] }
-                : {}),
-            }
-          }
+          const redeemed = redeemRevokeOutcome(rt, clientUuid, segmentsSnapshot)
+          if (redeemed) return redeemed
         }
         return { cancelled: false, reason: `already ${first.tombstone.state}` }
       }
@@ -2175,19 +2165,9 @@ export function createSessionDeliveryRegistry(
     }
     if (second.kind === 'already-final' && second.tombstone.state === 'cancelled') {
       // 他径已兑现为 cancelled（Q1：断连 onPiDisconnected 兑现在先，cancel 应答后到）
-      // ——查移交表命中即按撤销成功应答
-      const redeemed = rt.redeemedRevokes.get(clientUuid)
-      if (redeemed) {
-        rt.redeemedRevokes.delete(clientUuid)
-        rt.pendingRevoke.delete(clientUuid)
-        return {
-          cancelled: true,
-          content: redeemed.content,
-          ...((segmentsSnapshot ?? redeemed.segments) !== undefined
-            ? { segments: (segmentsSnapshot ?? redeemed.segments) as Segment[] }
-            : {}),
-        }
-      }
+      // ——查移交表命中即按撤销成功应答（消费移交全文，与 cancel 主链同一 helper）
+      const redeemed = redeemRevokeOutcome(rt, clientUuid, segmentsSnapshot)
+      if (redeemed) return redeemed
     }
     // 非撤销终结（delivered 等）或条目已消失：意图一并了结防残留（无条目可留守）
     rt.pendingRevoke.delete(clientUuid)

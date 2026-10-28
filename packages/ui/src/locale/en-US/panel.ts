@@ -380,11 +380,20 @@ export default {
     // hover note for the "Last turn" label (C4): current has no window filter and is session-scoped (this session's most recent request)
     genStatsCurrentNote: "From this session's most recent request",
     genStatsCurrentReq: 'Last request',
-    genStatsDay: 'Today avg (this model)',
-    genStatsD7: 'Last 7 days',
-    genStatsD30: 'Last 30 days',
     genStatsDayShort: 'Today weighted (this model)',
-    genStatsSpeedNote: '"Last turn" is this session\'s most recent request; day/7d/30d aggregate across all sessions on this model (weighted avg); based on single LLM request duration, excluding tool execution time',
+    // Distribution matrix (2026-10-24 user decision): 5 statistical columns × 3 window rows.
+    // Column header states the stat once, row header states the window once — an order of
+    // magnitude more information than "one single value per window row" at the same size.
+    genStatsColAvg: 'Avg',
+    genStatsColP50: 'P50',
+    genStatsColP99: 'P99',
+    genStatsColP99Note: 'Nearest-rank percentile: with fewer than 100 samples P99 equals the max (no interpolation — reported as-is)',
+    genStatsColMax: 'Max',
+    genStatsColMin: 'Min',
+    genStatsWindowDay: 'Today',
+    genStatsWindowD7: '7d',
+    genStatsWindowD30: '30d',
+    genStatsSpeedNote: '"Last turn" is this session\'s most recent request; day/7d/30d aggregate across all sessions on this model as a five-statistic distribution of per-request speed (equal-weighted average, not duration-weighted); based on single LLM request duration, excluding tool execution time',
     genStatsCacheNote: '"Last turn" is this session\'s most recent request; "Today weighted" aggregates across all sessions on this model; cacheRead ÷ (input + cacheRead + cacheWrite); shows "—" when the model does not support caching',
     // Miss attribution (2026-09-19 D-A): expected 0% causes — all non-fault, rendered in neutral tone
     genStatsCacheMissColdStart: 'First request',
@@ -398,14 +407,12 @@ export default {
     // [RD-2#7] runtime-ahead-of-renderer protocol drift (unknown reason) — generic fallback copy (default branch + warn)
     genStatsCacheMissUnknown: 'Cache miss',
     genStatsNoData: 'No data yet',
-    // composer-genstats-ttft TTFT trigger (U4). p50 row labels get dedicated keys, not
-    // reusing genStatsDay ("Today avg" contradicts p50 median semantics, design §3.1);
-    // the "Last turn" row reuses genStatsCurrent* keys (same semantics)
+    // composer-genstats-ttft TTFT card (U4). [HISTORICAL] The dedicated genStatsTtftDay/D7/D30
+    // row labels ("Today p50 (this model)") were retired with the distribution matrix (2026-10-24):
+    // window names now use the shared genStatsWindowDay/D7/D30 keys and statistic names the shared
+    // genStatsCol* keys, so the two sides no longer need their own label keys
     genStatsTtftTitle: 'First token latency (TTFT)',
-    genStatsTtftDay: 'Today p50 (this model)',
-    genStatsTtftD7: 'Last 7 days p50',
-    genStatsTtftD30: 'Last 30 days p50',
-    genStatsTtftNote: '"Last turn" is this session\'s most recent request; day/7d/30d aggregate across all sessions on this model (p50 median); latency from request dispatch to the first output token, based on single LLM requests, excluding tool execution time',
+    genStatsTtftNote: '"Last turn" is this session\'s most recent request; day/7d/30d aggregate across all sessions on this model as a five-statistic distribution of per-request latency; P50 is the typical experience, P99/max are the tail (on a heavy-tailed distribution these diverge sharply); latency from request dispatch to the first output token, based on single LLM requests, excluding tool execution time',
   },
   sideDrawer: {
     title: 'Side drawer',

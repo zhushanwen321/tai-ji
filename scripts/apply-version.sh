@@ -129,45 +129,20 @@ function git(args) {
 }
 function shortSha() { try { return git(['rev-parse', '--short', 'HEAD']); } catch { return 'HEAD'; } }
 
-// --- 包发现（与 check 脚本同构）---
-function listDirs(rel) {
-  const p = path.join(ROOT, rel);
-  if (!fs.existsSync(p)) return [];
-  return fs.readdirSync(p, { withFileTypes: true })
-    .filter(e => e.isDirectory() && e.name !== 'node_modules').map(e => e.name);
+// --- 包发现：单一 CLI（scripts/versionable-packages.mjs；枚举唯一源 = workspace globs
+//     (@manypkg) + config.ignore——与 check-version-changes.sh 同修收敛，四份平行枚举归一）---
+const wsData = JSON.parse(execFileSync(
+  'node', [path.join(ROOT, 'scripts', 'versionable-packages.mjs'), '--json'],
+  { cwd: ROOT, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'] },
+));
+const packages = {}; // name -> { dir, version, private, wsDeps:[{dep,range,depType}] }
+for (const p of wsData.packages) {
+  packages[p.name] = { name: p.name, dir: p.dir, version: p.version, private: p.private, versionable: p.versionable, wsDeps: p.wsDeps };
 }
-function readPkg(rel) {
-  const p = path.join(ROOT, rel);
-  return JSON.parse(fs.readFileSync(p, 'utf8'));
-}
-const pkgJsons = [];
-// extensions 分组布局（taiji/universal）：分组目录 + 顶层兜底（与 check-version-changes.sh 同修）
-for (const base of ['extensions/taiji', 'extensions/universal', 'extensions', 'packages', 'apps']) {
-  for (const name of listDirs(base)) {
-    if (base === 'extensions' && ['shared', 'taiji', 'universal'].includes(name)) continue;
-    if (fs.existsSync(path.join(ROOT, base, name, 'package.json'))) pkgJsons.push(`${base}/${name}/package.json`);
-  }
-}
-for (const name of listDirs('extensions/shared')) {
-  if (fs.existsSync(path.join(ROOT, 'extensions/shared', name, 'package.json'))) pkgJsons.push(`extensions/shared/${name}/package.json`);
-}
+// fixed/linked 组仍读 config（ignore 判定已上收到 CLI 的 versionable 标记）
 const configPath = path.join(ROOT, '.changeset/config.json');
 const config = fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, 'utf8')) : {};
-const ignoreSet = new Set(config.ignore || []);
-const packages = {}; // name -> { dir, version, private, wsDeps:[{dep,range,depType}], pkgPath }
-for (const rel of pkgJsons) {
-  const raw = readPkg(rel);
-  if (!raw.name) continue;
-  const dir = path.dirname(rel);
-  const wsDeps = [];
-  for (const depType of ['dependencies', 'peerDependencies', 'optionalDependencies']) {
-    for (const [dep, range] of Object.entries(raw[depType] || {})) {
-      if (typeof range === 'string' && range.startsWith('workspace')) wsDeps.push({ dep, range, depType });
-    }
-  }
-  packages[raw.name] = { name: raw.name, dir, version: raw.version, private: !!raw.private, wsDeps, pkgPath: rel };
-}
-const isVersionable = (name) => packages[name] && !packages[name].private && !ignoreSet.has(name);
+const isVersionable = (name) => !!packages[name] && !!packages[name].versionable;
 
 // --- 解析 .changeset/*.md（body 供 CHANGED 包 CHANGELOG 条目）---
 const changesetDir = path.join(ROOT, '.changeset');
@@ -444,11 +419,11 @@ const touchedFiles = [];
 for (const name of Object.keys(plan)) {
   const p = packages[name];
   // package.json
-  const pjAbs = path.join(ROOT, p.pkgPath);
-  writeJsonPreserve(pjAbs, (obj) => { obj.version = plan[name].newVer; });
-  touchedFiles.push(p.pkgPath);
+  const pkgJsonRel = `${p.dir}/package.json`;
+  writeJsonPreserve(path.join(ROOT, pkgJsonRel), (obj) => { obj.version = plan[name].newVer; });
+  touchedFiles.push(pkgJsonRel);
   // CHANGELOG
-  const { filePath: clAbs, out: clOut } = prependChangelog(p.pkgPath, name, buildSection(name));
+  const { filePath: clAbs, out: clOut } = prependChangelog(pkgJsonRel, name, buildSection(name));
   fs.writeFileSync(clAbs, clOut);
   touchedFiles.push(path.relative(ROOT, clAbs));
 }

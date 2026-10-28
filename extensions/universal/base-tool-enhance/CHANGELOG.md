@@ -1,5 +1,11 @@
 # @zhushanwen/pi-base-tool-enhance
 
+## 0.10.2
+
+### Patch Changes
+
+- da658a786: 适配 pi-delivery-port 边沿即投契约：移除 `hasRunningBackground` 攒批条件注入，后台任务完成通知不再等待合批窗口。
+
 ## 0.10.1
 
 ### Patch Changes

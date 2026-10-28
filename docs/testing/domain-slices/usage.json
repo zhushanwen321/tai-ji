@@ -9,6 +9,7 @@
   ],
   "scope": {
     "runtime": [
+      "packages/runtime/src/services/quota-params.ts",
       "packages/runtime/src/services/usage/**",
       "packages/runtime/src/services/quota-service.ts",
       "packages/runtime/src/services/quota-cache.ts",

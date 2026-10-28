@@ -30,6 +30,7 @@ import type {
   ReplyPayloadMap,
 } from '../protocol'
 import type {
+  GenStatsDistribution,
   GenStatsSpeed,
   GenStatsCacheRatio,
   GenStatsCacheMiss,
@@ -65,9 +66,20 @@ type _Assert_Rpc_reply_shape = AssertExtends<ReplyPayloadMap['session.getGenStat
 // ── 类型字段与设计 §3.4 逐字一致（键集合 + 字段类型均精确断言）──
 type _Assert_Speed_keys = AssertExact<keyof GenStatsSpeed, 'current' | 'day' | 'd7' | 'd30'>
 type _Assert_Speed_current = AssertExact<GenStatsSpeed['current'], number | null>
-type _Assert_Speed_day = AssertExact<GenStatsSpeed['day'], number | null>
-type _Assert_Speed_d7 = AssertExact<GenStatsSpeed['d7'], number | null>
-type _Assert_Speed_d30 = AssertExact<GenStatsSpeed['d30'], number | null>
+type _Assert_Speed_day = AssertExact<GenStatsSpeed['day'], GenStatsDistribution>
+type _Assert_Speed_d7 = AssertExact<GenStatsSpeed['d7'], GenStatsDistribution>
+type _Assert_Speed_d30 = AssertExact<GenStatsSpeed['d30'], GenStatsDistribution>
+
+// 分布五量：键集合与字段类型精确锁（漏一个量 = 消费侧读不到该统计量）
+type _Assert_Distribution_keys = AssertExact<
+  keyof GenStatsDistribution,
+  'avg' | 'p50' | 'p99' | 'max' | 'min'
+>
+type _Assert_Distribution_avg = AssertExact<GenStatsDistribution['avg'], number | null>
+type _Assert_Distribution_p50 = AssertExact<GenStatsDistribution['p50'], number | null>
+type _Assert_Distribution_p99 = AssertExact<GenStatsDistribution['p99'], number | null>
+type _Assert_Distribution_max = AssertExact<GenStatsDistribution['max'], number | null>
+type _Assert_Distribution_min = AssertExact<GenStatsDistribution['min'], number | null>
 
 type _Assert_Cache_keys = AssertExact<keyof GenStatsCacheRatio, 'current' | 'day' | 'currentMiss'>
 type _Assert_Cache_current = AssertExact<GenStatsCacheRatio['current'], number | null>
@@ -79,9 +91,9 @@ type _Assert_Cache_currentMiss = AssertExact<
 
 type _Assert_Ttft_keys = AssertExact<keyof GenStatsTtft, 'current' | 'day' | 'd7' | 'd30'>
 type _Assert_Ttft_current = AssertExact<GenStatsTtft['current'], number | null>
-type _Assert_Ttft_day = AssertExact<GenStatsTtft['day'], number | null>
-type _Assert_Ttft_d7 = AssertExact<GenStatsTtft['d7'], number | null>
-type _Assert_Ttft_d30 = AssertExact<GenStatsTtft['d30'], number | null>
+type _Assert_Ttft_day = AssertExact<GenStatsTtft['day'], GenStatsDistribution>
+type _Assert_Ttft_d7 = AssertExact<GenStatsTtft['d7'], GenStatsDistribution>
+type _Assert_Ttft_d30 = AssertExact<GenStatsTtft['d30'], GenStatsDistribution>
 
 type _Assert_Frame_keys = AssertExact<keyof GenStatsFrame, 'sessionId' | 'speed' | 'cacheRatio' | 'ttft' | 'model'>
 type _Assert_Frame_sessionId = AssertExact<GenStatsFrame['sessionId'], string>
@@ -107,6 +119,12 @@ const _genStatsProtocolAssertsEnforced = [
   _enforceTrue<_Assert_Speed_day>(),
   _enforceTrue<_Assert_Speed_d7>(),
   _enforceTrue<_Assert_Speed_d30>(),
+  _enforceTrue<_Assert_Distribution_keys>(),
+  _enforceTrue<_Assert_Distribution_avg>(),
+  _enforceTrue<_Assert_Distribution_p50>(),
+  _enforceTrue<_Assert_Distribution_p99>(),
+  _enforceTrue<_Assert_Distribution_max>(),
+  _enforceTrue<_Assert_Distribution_min>(),
   _enforceTrue<_Assert_Cache_keys>(),
   _enforceTrue<_Assert_Cache_current>(),
   _enforceTrue<_Assert_Cache_day>(),
@@ -125,6 +143,12 @@ const _genStatsProtocolAssertsEnforced = [
 ]
 void _genStatsProtocolAssertsEnforced
 
+/** 分布全 null 形态（无样本时的窗口字段值） */
+const NULL_DIST: GenStatsDistribution = { avg: null, p50: null, p99: null, max: null, min: null }
+
+/** 分布样例（五量各有不同值——能抓「字段错位」类漂移，如 p99 读到 max 的位置） */
+const SAMPLE_DIST: GenStatsDistribution = { avg: 75, p50: 75, p99: 100, max: 100, min: 50 }
+
 // ── 运行期测试（payload 可赋值 + null/0 语义可区分）──────────────────
 
 describe('session.stats_update 帧登记', () => {
@@ -134,17 +158,18 @@ describe('session.stats_update 帧登记', () => {
       id: 'rpc-1',
       payload: {
         sessionId: 's1',
-        speed: { current: null, day: null, d7: null, d30: null },
+        speed: { current: null, day: NULL_DIST, d7: NULL_DIST, d30: NULL_DIST },
         cacheRatio: { current: null, day: null },
-        ttft: { current: null, day: null, d7: null, d30: null },
+        ttft: { current: null, day: NULL_DIST, d7: NULL_DIST, d30: NULL_DIST },
       },
     }
     expect(msg.type).toBe('session.stats_update')
     expect(msg.payload.sessionId).toBe('s1')
     expect(msg.payload.speed.current).toBeNull()
-    expect(msg.payload.speed.d30).toBeNull()
+    // 窗口字段现在是分布对象：无数据 = 对象内五量全 null（不是字段本身为 null）
+    expect(msg.payload.speed.d30).toEqual(NULL_DIST)
     expect(msg.payload.cacheRatio.day).toBeNull()
-    expect(msg.payload.ttft.d30).toBeNull()
+    expect(msg.payload.ttft.d30).toEqual(NULL_DIST)
     expect(msg.payload.model).toBeUndefined()
   })
 
@@ -154,30 +179,32 @@ describe('session.stats_update 帧登记', () => {
       seq: 7,
       payload: {
         sessionId: 's1',
-        speed: { current: 0, day: 28.4, d7: 22, d30: 19 },
+        speed: { current: 0, day: { ...SAMPLE_DIST, avg: 28.4 }, d7: SAMPLE_DIST, d30: SAMPLE_DIST },
         cacheRatio: { current: 0, day: 87 },
-        ttft: { current: 820, day: 910, d7: 1050, d30: 980 },
+        ttft: { current: 820, day: { ...SAMPLE_DIST, p50: 910 }, d7: { ...SAMPLE_DIST, p50: 1050 }, d30: { ...SAMPLE_DIST, p50: 980 } },
         model: 'zai-coding-cn/glm-5.3',
       },
     }
     expect(msg.payload.speed.current).toBe(0)
     expect(msg.payload.cacheRatio.current).toBe(0)
-    expect(msg.payload.speed.day).toBe(28.4)
+    expect(msg.payload.speed.day.avg).toBe(28.4)
     expect(msg.payload.ttft.current).toBe(820)
-    expect(msg.payload.ttft.d30).toBe(980)
+    expect(msg.payload.ttft.d30.p50).toBe(980)
     expect(msg.payload.model).toBe('zai-coding-cn/glm-5.3')
   })
 
   it('null 与 0 运行时可区分（无值编码纪律：禁止把无数据伪装成测得 0）', () => {
-    const noData: GenStatsSpeed = { current: null, day: null, d7: null, d30: null }
-    const measuredZero: GenStatsSpeed = { current: 0, day: null, d7: null, d30: null }
+    const noData: GenStatsSpeed = { current: null, day: NULL_DIST, d7: NULL_DIST, d30: NULL_DIST }
+    const measuredZero: GenStatsSpeed = { current: 0, day: NULL_DIST, d7: NULL_DIST, d30: NULL_DIST }
     expect(noData.current === null).toBe(true)
     expect(measuredZero.current === null).toBe(false)
     expect(measuredZero.current === 0).toBe(true)
     // ttft 同纪律（composer-genstats-ttft：无结算 ≠ 测得 0ms）
-    const ttftNoData: GenStatsTtft = { current: null, day: null, d7: null, d30: null }
-    const ttftMeasuredZero: GenStatsTtft = { current: 0, day: null, d7: null, d30: null }
-    expect(ttftNoData.day === null).toBe(true)
+    const ttftNoData: GenStatsTtft = { current: null, day: NULL_DIST, d7: NULL_DIST, d30: NULL_DIST }
+    const ttftMeasuredZero: GenStatsTtft = { current: 0, day: NULL_DIST, d7: NULL_DIST, d30: NULL_DIST }
+    // 分布口径的无数据 = 五量全 null（对象存在但无值），与数值字段的 null 同义
+    expect(ttftNoData.day.p50 === null).toBe(true)
+    expect(ttftMeasuredZero.day.p50 === null).toBe(true)
     expect(ttftMeasuredZero.current === null).toBe(false)
     expect(ttftMeasuredZero.current === 0).toBe(true)
   })
@@ -187,9 +214,9 @@ describe('session.stats_update 帧登记', () => {
       type: 'session.stats_update',
       payload: {
         sessionId: 's1',
-        speed: { current: 35, day: null, d7: null, d30: null },
+        speed: { current: 35, day: SAMPLE_DIST, d7: SAMPLE_DIST, d30: SAMPLE_DIST },
         cacheRatio: { current: 91, day: 87 },
-        ttft: { current: 640, day: null, d7: null, d30: null },
+        ttft: { current: 640, day: SAMPLE_DIST, d7: SAMPLE_DIST, d30: SAMPLE_DIST },
         model: 'm',
       },
     }
@@ -214,19 +241,19 @@ describe('session.getGenStats RPC 登记', () => {
   it('reply 与 session.stats_update payload 同形（payload 消费型）', () => {
     const reply: ReplyPayloadMap['session.getGenStats'] = {
       sessionId: 's1',
-      speed: { current: 35, day: 28, d7: 22, d30: 19 },
+      speed: { current: 35, day: SAMPLE_DIST, d7: SAMPLE_DIST, d30: SAMPLE_DIST },
       cacheRatio: { current: 91, day: 87 },
-      ttft: { current: 1240, day: 1100, d7: 990, d30: 1020 },
+      ttft: { current: 1240, day: { ...SAMPLE_DIST, p50: 1100 }, d7: SAMPLE_DIST, d30: SAMPLE_DIST },
       model: 'xiaomi-token-plan-cn/mimo-v2.6-flash',
     }
     expect(reply.model).toBe('xiaomi-token-plan-cn/mimo-v2.6-flash')
-    expect(reply.ttft.day).toBe(1100)
+    expect(reply.ttft.day.p50).toBe(1100)
     // 无任何数据时：全 null + model 缺省（D4 恢复路径兜底形态）
     const empty: ReplyPayloadMap['session.getGenStats'] = {
       sessionId: 's1',
-      speed: { current: null, day: null, d7: null, d30: null },
+      speed: { current: null, day: NULL_DIST, d7: NULL_DIST, d30: NULL_DIST },
       cacheRatio: { current: null, day: null },
-      ttft: { current: null, day: null, d7: null, d30: null },
+      ttft: { current: null, day: NULL_DIST, d7: NULL_DIST, d30: NULL_DIST },
     }
     expect(empty.model).toBeUndefined()
     expect(empty.speed.current).toBeNull()

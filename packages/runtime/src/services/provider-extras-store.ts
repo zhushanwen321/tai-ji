@@ -52,8 +52,14 @@ export interface ProviderExtras {
      */
     credentialSource?: QuotaCredentialSource
     /**
-     * 资源维度 fetcher（opencode）的 workspace 归一化地址（规范 URL，非凭证明文存储——
+     * 用户维度隔离参数（2026-10 泛化，原 workspace 单字段）：键 = QuotaPreset.params 声明
+     * 的 param key（如 opencode/opendesign 的 workspaceUrl 规范 URL，非凭证明文存储——
      * 用户浏览器地址栏可见的同一 URL，timeout-audit-hygiene-batch D1-1）。
+     */
+    params?: Record<string, string>
+    /**
+     * @deprecated 旧版单 workspace 字段（泛化前持久化）。读侧映射为 params.workspaceUrl
+     * 兼容（见 quota-service resolveParamsForFetch/resolveParamsValue）；写侧不再产出。
      */
     workspace?: string
   }

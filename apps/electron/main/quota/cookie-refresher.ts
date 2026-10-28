@@ -191,7 +191,7 @@ async function pollUntilApiOk(win: BrowserWindow, target: QuotaRefreshTarget): P
       loginSince = null
     }
 
-    const status = await probeApi(win, target.apiUrl)
+    const status = await probeApi(win, target)
     if (status === HTTP_OK) return { ok: true }
 
     if (Date.now() >= deadline) {
@@ -206,10 +206,16 @@ async function pollUntilApiOk(win: BrowserWindow, target: QuotaRefreshTarget): P
   }
 }
 
-/** 页面上下文内 fetch 目标 API，返回 HTTP status（异常/非数值归一为 0）。 */
-async function probeApi(win: BrowserWindow, apiUrl: string): Promise<number> {
+/** 页面上下文内 fetch 目标 API，返回 HTTP status（异常/非数值归一为 0）。
+ *  POST 端点（connect RPC 形态）按 target.apiMethod/apiBody 发探测——与真实额度
+ *  请求同方法，GET 探测会被 405 误判为登录态失效。 */
+async function probeApi(win: BrowserWindow, target: QuotaRefreshTarget): Promise<number> {
   try {
-    const expr = `fetch(${JSON.stringify(apiUrl)}).then(r => r.status).catch(() => 0)`
+    const init =
+      target.apiMethod === 'POST'
+        ? `{method:'POST',body:${JSON.stringify(target.apiBody ?? '{}')}}`
+        : ''
+    const expr = `fetch(${JSON.stringify(target.apiUrl)},${init}).then(r => r.status).catch(() => 0)`
     const status = await win.webContents.executeJavaScript(expr)
     return typeof status === 'number' ? status : 0
   } catch {
@@ -232,11 +238,13 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-/** loadURL 的 ERR_ABORTED(-3)：页面 JS 发起的新导航打断了初始加载（SSO 链标准形态）。 */
+/** Electron net 错误码 ERR_ABORTED：页面 JS 发起新导航打断初始加载（SSO 链标准形态）。 */
+const NET_ERR_ABORTED = -3
+
 function isAbortedNavigation(err: unknown): boolean {
   if (!(err instanceof Error)) return false
   const code = (err as { code?: unknown }).code
-  return code === -3 || /ERR_ABORTED/.test(err.message)
+  return code === NET_ERR_ABORTED || /ERR_ABORTED/.test(err.message)
 }
 
 // ── 导出写回（partition → secrets 文件）──────────────────────────────────────

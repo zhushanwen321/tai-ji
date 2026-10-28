@@ -203,12 +203,15 @@
         "cookie"
       ],
       "credential": "cookie",
-      "precondition": {
-        "from": "workspaceUrl",
-        "extractor": "quotaWorkspaceId",
-        "header": "x-org-id",
-        "failReason": "not_configured"
-      },
+      "headerFroms": [
+        {
+          "from": "params",
+          "key": "workspaceUrl",
+          "extractor": "quotaWorkspaceId",
+          "header": "x-org-id",
+          "failReason": "not_configured"
+        }
+      ],
       "requests": [
         {
           "name": "main",
@@ -270,6 +273,130 @@
             "limit": "access.meters.month.limitMicroCents",
             "unit": "credits",
             "output": false
+          }
+        }
+      ]
+    },
+    "stepfun": {
+      "label": "StepFun Step Plan",
+      "auth": [
+        "cookie"
+      ],
+      "credential": "cookie",
+      "extraHeaders": {
+        "oasis-appid": "10300",
+        "oasis-platform": "web"
+      },
+      "headerFroms": [
+        {
+          "from": "cookie",
+          "key": "Oasis-Webid",
+          "header": "oasis-webid"
+        }
+      ],
+      "requests": [
+        {
+          "name": "main",
+          "method": "POST",
+          "body": "{}",
+          "url": "https://platform.stepfun.com/api/step.openapi.devcenter.Dashboard/QueryStepPlanRateLimit"
+        }
+      ],
+      "bodyCode": {
+        "path": "status",
+        "success": [
+          "CODE_OK",
+          "OK",
+          1
+        ],
+        "map": {
+          "CODE_PERMISSION_DENIED": "unauthorized"
+        },
+        "else": "no-subscription",
+        "missing": "parse"
+      },
+      "windows": [
+        {
+          "slot": "fiveHour",
+          "gateValue": {
+            "path": [
+              "planFamily",
+              "plan_family"
+            ],
+            "notEquals": 2
+          },
+          "pct": {
+            "path": [
+              "fiveHourUsageLeftRate",
+              "five_hour_usage_left_rate"
+            ],
+            "via": "fractionRemainingToUsed"
+          },
+          "resetSec": {
+            "path": [
+              "fiveHourUsageResetTime",
+              "five_hour_usage_reset_time"
+            ],
+            "mode": "epochSecOrMs"
+          }
+        },
+        {
+          "slot": "week",
+          "gateValue": {
+            "path": [
+              "planFamily",
+              "plan_family"
+            ],
+            "notEquals": 2
+          },
+          "pct": {
+            "path": [
+              "weeklyUsageLeftRate",
+              "weekly_usage_left_rate"
+            ],
+            "via": "fractionRemainingToUsed"
+          },
+          "resetSec": {
+            "path": [
+              "weeklyUsageResetTime",
+              "weekly_usage_reset_time"
+            ],
+            "mode": "epochSecOrMs"
+          }
+        },
+        {
+          "slot": "month",
+          "gateValue": {
+            "path": [
+              "planFamily",
+              "plan_family"
+            ],
+            "equals": 2
+          },
+          "pct": {
+            "path": [
+              "planCreditRateLimit.subscriptionCreditLeftRate",
+              "plan_credit_rate_limit.subscription_credit_left_rate"
+            ],
+            "via": "fractionRemainingToUsed"
+          },
+          "resetSec": {
+            "path": [
+              "planCreditRateLimit.subscriptionCreditResetTime",
+              "plan_credit_rate_limit.subscription_credit_reset_time"
+            ],
+            "mode": "epochSecOrMs"
+          },
+          "usedLimit": {
+            "limit": [
+              "planCreditRateLimit.creditBuckets[type=1].creditTotal",
+              "plan_credit_rate_limit.credit_buckets[type=1].credit_total"
+            ],
+            "remaining": [
+              "planCreditRateLimit.creditBuckets[type=1].creditResidual",
+              "plan_credit_rate_limit.credit_buckets[type=1].credit_residual"
+            ],
+            "unit": "credits"
           }
         }
       ]

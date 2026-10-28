@@ -2,16 +2,21 @@
 /**
  * wait-for-ci.mjs — 等待 GitHub Actions CI 完成（.agents/skills/merge/scripts/wait-for-ci.sh 的 Node 移植）
  *
- * 用法: wait-for-ci.mjs [<commit-sha>] [--timeout 600] [--workflow <name>] [--verify-release <tag>] [--repo <owner/repo>]
- *   commit-sha 可省略：读 merge 状态文件（<workspace 根>/.merge-state/current.json，pr-merge
- *   阶段落盘）的 headSha；状态缺失时按 usage 错误退出。
+ * 用法: wait-for-ci.mjs [<commit-sha>] [--timeout 2400] [--workflow <name>] [--verify-release <tag>] [--repo <owner/repo>]
+ *   commit-sha 可省略：读 merge 状态文件（<workspace 根>/.merge-state/current.json）的
+ *   mergeSha——且仅当 stage === 'merged' 时消费（merge commit 的 push CI 才是阶段 3 的
+ *   判定对象；headSha 是 PR head，判的是阶段 2 已裁决过的 PR 侧 runs，禁止复用）。
+ *   状态缺失/未到 merged 态时按 usage 错误退出（要求显式传 sha）。
  *
  * 场景 1: gh pr merge 后，push 到 main 触发 ci.yml
  * 场景 2: 推送修复后等待 CI 重新运行
  * 场景 3: CI 通过后验证 Draft Release 产物（--verify-release v1.2.3）
  *
- * 退出码：0 = CI 通过（或 30s 无 run 视为未触发 CI 放行）/ 1 = CI 失败、参数或前置检查错误、
- *         Release 验证失败 / 2 = 等待超时（timeout，AI 应询问用户）
+ * 退出码：0 = CI 通过（或 30s 内「查询成功且无 run」——视为该 commit 未触发 CI 放行）/
+ *         1 = CI 失败、参数或前置检查错误、Release 验证失败 /
+ *         2 = 等待超时（timeout）、CI 状态查询持续失败（fetch-error 工具错误——
+ *             gh 网络/限流导致全程查不到 runs，与「未触发 CI」分流，AI 应询问用户）、
+ *             gate 判定返回未知终态（白名单防御不落穿放行，见 main 的 pass 前分支）
  *
  * AI 行为约束：
  *   - 此脚本不可跳过
@@ -31,12 +36,13 @@ import { fileURLToPath } from 'node:url'
 import { run } from './lib/exec.mjs'
 import { RED, GREEN, YELLOW, BOLD, NC } from './lib/output.mjs'
 import { DEFAULT_REPO } from './lib/repo.mjs'
-import { filterDependabot, waitForRuns } from './lib/gate.mjs'
+import { waitForRuns } from './lib/gate.mjs'
+import { makeFetchRuns } from './lib/fetch-runs.mjs'
 import { findWorkspaceRoot } from './lib/workspace.mjs'
 import { readMergeState } from './lib/state.mjs'
 
 const USAGE =
-  'Usage: wait-for-ci.mjs [<commit-sha>] [--timeout 600] [--workflow <name>] [--verify-release <tag>] [--repo <owner/repo>]'
+  'Usage: wait-for-ci.mjs [<commit-sha>] [--timeout 2400] [--workflow <name>] [--verify-release <tag>] [--repo <owner/repo>]'
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -47,9 +53,11 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
  * 与原 bash 一致：位置参数唯一，多余位置参数与未识别参数一律 Unknown option。
  * 增强点：--timeout 解析期校验为有限数字——原 bash 对非数字值会在数值比较处崩出
  * 晦涩错误，Node 侧 NaN 比较恒 false 会让超时判定永不触发（防线失效），必须前置拒绝。
+ * 默认 2400s：main push CI 含 e2e-visual / e2e-behavior 两个 timeout-minutes: 30 的
+ * job，600s 必超时（旧默认，已上调——超时应是异常而非常态首跑体验）。
  */
 export function parseArgs(argv) {
-  const out = { sha: '', timeout: 600, workflow: '', verifyReleaseTag: '', repo: '' }
+  const out = { sha: '', timeout: 2400, workflow: '', verifyReleaseTag: '', repo: '' }
   const rest = [...argv]
   while (rest.length > 0) {
     const a = rest.shift()
@@ -107,7 +115,16 @@ function makeCiLog(file) {
   }
 }
 
-/** gh release view 的 JSON 映射为 { tag, draft, asset_count, assets:[name] }；失败/未创建 → null。 */
+/**
+ * gh release view 的 JSON 映射为 { tag, draft, asset_count, assets:[name] }；失败/未创建 → null。
+ *
+ * 设计裁决（保留两态，不改三态，与 release.mjs fetchExistingRelease 同款）：
+ * gh release view 退出码无法区分「不存在」与「查询故障」（均 exit 1），三态化
+ * 只能依赖 stderr 文案匹配（脆弱、随 gh 版本漂移）。残余风险 = 查询通道故障
+ * （网络/限流/登录态）误判「未创建」→ verifyDraftRelease 空转 120s 后 exit 1
+ * 报 missing，方向失败安全（无放行路径；missing 分支的第 4 条排查提示即为此
+ * 分流登记）。
+ */
 function fetchReleasePayload(tag, repo) {
   const args = ['release', 'view', tag]
   if (repo !== '') args.push('--repo', repo)
@@ -123,19 +140,36 @@ function fetchReleasePayload(tag, repo) {
   }
 }
 
-/** ── 定位 commit：显式 sha 优先；缺省读 merge 状态文件（pr-merge 阶段落盘的 headSha）── */
+/**
+ * 无参路径的判定对象裁决（纯函数，供测试导入）。
+ * 只接受 stage === 'merged' 且有 mergeSha 的状态——merge commit 的 push CI 才是
+ * 阶段 3 要等的对象；headSha（PR head）是阶段 2 已裁决过的 PR 侧 runs，禁止复用。
+ */
+export function resolveShaFromState(state) {
+  if (state?.stage === 'merged' && typeof state?.mergeSha === 'string' && state.mergeSha !== '') {
+    return { ok: true, sha: state.mergeSha, pr: state.pr ?? null }
+  }
+  return {
+    ok: false,
+    reason: state?.stage === 'merged'
+      ? '状态已到 merged 但无 mergeSha（pr-merge 旧版写入，或写入失败）'
+      : `状态 stage 为 ${state?.stage ?? '无'}（未到 merged——阶段 2 未跑或状态属上一轮管线）`,
+  }
+}
+
+/** ── 定位 commit：显式 sha 优先；缺省读 merge 状态文件的 mergeSha（经 stage 门）── */
 function resolveRefOrFail(parsed) {
   if (parsed.sha) return parsed.sha
   const root = findWorkspaceRoot()
-  const headSha = root === null ? null : readMergeState(root)?.headSha ?? null
-  if (!headSha) {
+  const resolved = resolveShaFromState(root === null ? null : readMergeState(root))
+  if (!resolved.ok) {
     console.error(USAGE)
-    console.error('（未提供 commit-sha，且 merge 状态文件缺失或无 headSha）')
+    console.error(`（未提供 commit-sha，且 merge 状态不可作为判定对象：${resolved.reason}）`)
+    console.error('  恢复：显式传入 main 最新 commit sha 重跑——git -C <main-worktree> rev-parse HEAD')
     process.exit(1)
   }
-  const REF = headSha
-  console.log(`  从 merge 状态读取 commit=${REF}`)
-  return REF
+  console.log(`  从 merge 状态读取 mergeSha=${resolved.sha}（PR #${resolved.pr ?? '?'} 的 merge commit）`)
+  return resolved.sha
 }
 
 /** ── 前置检查：gh 安装/登录（原 bash 的 jq 检查随 JSON.parse 移除，见文件头）── */
@@ -152,35 +186,24 @@ function assertGhCliReady() {
   }
 }
 
-/** gh run list 查询闭包：gh 失败按无 runs 处理（走 30s 触发宽限路径）。 */
-function makeFetchRuns({ REF, WORKFLOW, GH_REPO }) {
-  return async () => {
-    const args = ['run', 'list', '--commit', REF]
-    if (WORKFLOW !== '') args.push('--workflow', WORKFLOW)
-    if (GH_REPO !== '') args.push('--repo', GH_REPO)
-    args.push('--json', 'databaseId,status,conclusion,name,workflowName')
-    const res = run('gh', args, { stdio: 'capture' })
-    // 对应原 bash `|| echo "[]"`：gh 失败按无 runs 处理（走 30s 触发宽限路径）
-    if (!res.ok) return []
-    try {
-      const runs = JSON.parse(res.stdout)
-      if (!Array.isArray(runs)) return []
-      // [2026-10-13] 过滤 Dependabot Updates：event=dynamic 的平台侧依赖机器人任务
-      // （updater 容器对个别依赖如 electron 偶发 unknown_error 失败），不是本次合并的
-      // 代码验证线——计入判定会让发布恒被与代码无关的机器人红阻塞。
-      // WORKFLOW 显式指定时不过滤（用户点名）。
-      return WORKFLOW !== '' ? runs : filterDependabot(runs)
-    } catch {
-      return []
-    }
-  }
-}
-
 function printNoRunsDetected() {
-  console.log(`  ${YELLOW}⚠️  30秒后仍未检测到 CI workflow。${NC}`)
+  console.log(`  ${YELLOW}⚠️  30秒内查询成功但未检测到 CI workflow。${NC}`)
   console.log(`  ${YELLOW}可能该 commit 没有触发 CI（如 ci.yml 只在 PR 时运行）。${NC}`)
   console.log(`  ${YELLOW}跳过 CI 等待，继续后续流程。${NC}`)
   process.exit(0)
+}
+
+/** 查询失败终态：与「未触发 CI」分流——无法判定 ≠ 不需要验证，按工具错误 exit 2（AI 应询问用户）。 */
+function printQueryFailed(TIMEOUT, REF, ciLog) {
+  console.log('')
+  console.log(`${RED}${BOLD}⛔ CI 状态查询持续失败（${TIMEOUT}s 内无一成功），无法确认 main push CI 结果，不放行。${NC}`)
+  ciLog('CI 查询持续失败，无法判定')
+  console.log('  gh run list 全程查询失败（网络中断/API 限流/登录态失效），与「该 commit 未触发 CI」分流处理：')
+  console.log('  排查:')
+  console.log('    1. gh auth status（确认登录态与 API 限额）')
+  console.log(`    2. gh run list --commit ${REF} --limit 5（手动确认该 commit 的 CI 状态）`)
+  console.log('    3. 网络恢复后重跑本脚本（幂等，已完成的 runs 会被直接裁决）')
+  process.exit(2)
 }
 
 function printCiFailure(verdict, ciLog) {
@@ -217,7 +240,7 @@ function printCiTimeout(verdict, TIMEOUT, REF, ciLog) {
   console.log('')
   console.log('  建议:')
   console.log(`    1. 手动检查: gh run list --commit ${REF}`)
-  console.log(`    2. 增加超时: wait-for-ci.mjs ${REF} --timeout 1200`)
+  console.log(`    2. 增加超时: wait-for-ci.mjs ${REF} --timeout 3600`)
   console.log('    3. 确认通过后继续后续流程')
   process.exit(2) // exit 2 = timeout, AI 应询问用户
 }
@@ -249,6 +272,7 @@ async function verifyDraftRelease(VERIFY_RELEASE_TAG, GH_REPO, ciLog) {
     console.log('    1. CI 的 release job 创建了错误 tag 的 release（版本号不一致）')
     console.log('    2. release job 被跳过或失败')
     console.log('    3. tag 未正确推送')
+    console.log('    4. gh 查询通道故障误判为未创建（网络/限流/登录态）——先 gh release view <TAG> --repo <repo> 核实再处置')
     console.log('')
     console.log('  排查命令:')
     // 原 bash 直接拼 $GH_REPO，未设 --repo 时会拼出 repos//releases 空段——移植时以
@@ -283,7 +307,7 @@ async function verifyDraftRelease(VERIFY_RELEASE_TAG, GH_REPO, ciLog) {
   ciLog(`Release 验证通过: tag=${VERIFY_RELEASE_TAG}, assets=${payload.asset_count}`)
 }
 
-async function main() {
+export async function main() {
   const parsed = parseArgs(process.argv.slice(2))
   if (!parsed.ok) {
     console.error(parsed.error)
@@ -319,11 +343,23 @@ async function main() {
   // 耗时用于 CI 通过的日志行（原 bash 为 poll 间隔累计值，此处取墙钟差，语义等价）
   const waitElapsedS = Math.round((Date.now() - waitStartMs) / 1000)
 
+  if (verdict.status === 'fetch-error') printQueryFailed(TIMEOUT, REF, ciLog)
+
   if (verdict.status === 'no-runs') printNoRunsDetected()
 
   if (verdict.status === 'fail') printCiFailure(verdict, ciLog)
 
   if (verdict.status === 'timeout') printCiTimeout(verdict, TIMEOUT, REF, ciLog)
+
+  // 白名单：gate.mjs 契约的全部终态已在上方逐一消费，此处仅 status === 'pass'
+  // 可达——防御 gate 未来新增终态未被本消费方枚举时的落穿放行（未知终态打印成
+  // 「CI 全部通过」并 exit 0 = 假绿，对齐 pr-merge.mjs 合并前的同款白名单防御）。
+  // exit 2 = 工具错误语义，与本文件 fetch-error 处理一致
+  if (verdict.status !== 'pass') {
+    console.error(`${RED}未知终态 ${String(verdict.status)}，不落穿放行（gate.mjs 新增终态需同步补本消费分支）${NC}`)
+    ciLog(`CI 判定返回未知终态: ${String(verdict.status)}`)
+    process.exit(2)
+  }
 
   // status === 'pass'
   console.log('')

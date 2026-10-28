@@ -46,7 +46,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import * as events from '@taiji/core/transport/api'
 import { Turn, Block } from '@taiji/ui'
-import type { Message, ToolCall, FileNode, GenStatsFrame } from '@taiji/shared'
+import type { Message, ToolCall, FileNode, GenStatsDistribution, GenStatsFrame } from '@taiji/shared'
 import { useChatStore } from '@/stores/chat'
 import { useToast } from '@/composables/useToast'
 import type { MessageTurn } from '@/composables/logic/messageTurns'
@@ -822,6 +822,9 @@ afterEach(() => {
   const SID = 's-stats'
   const PENDING_SID = 's-pending'
 
+  /** 分布全 null 形态（触发器形态无浮层内容断言，窗口分布不参与可见性判据） */
+  const NULL_DIST: GenStatsDistribution = { avg: null, p50: null, p99: null, max: null, min: null }
+
   function frameOf(over: {
     ttft?: number | null
     speed?: number | null
@@ -829,9 +832,9 @@ afterEach(() => {
   }): GenStatsFrame {
     return {
       sessionId: SID,
-      speed: { current: over.speed ?? null, day: null, d7: null, d30: null },
+      speed: { current: over.speed ?? null, day: NULL_DIST, d7: NULL_DIST, d30: NULL_DIST },
       cacheRatio: { current: over.cache ?? null, day: null },
-      ttft: { current: over.ttft ?? null, day: null, d7: null, d30: null },
+      ttft: { current: over.ttft ?? null, day: NULL_DIST, d7: NULL_DIST, d30: NULL_DIST },
     } as GenStatsFrame
   }
 

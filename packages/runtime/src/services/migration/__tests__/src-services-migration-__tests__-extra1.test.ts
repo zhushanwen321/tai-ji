@@ -816,7 +816,7 @@ describe('provider-importer · coding-plan 额度显示自动开启（导入即�
     // matchQuotaPreset 已 mock，命中结果由 mockReturnValue 注入。
     const base = { fetcher: 'synthetic', label: 'Synthetic', auth: ['api-key'] as const, match: {} }
     vi.mocked(matchQuotaPreset)
-      .mockReturnValueOnce({ ...base, requiresWorkspace: true } satisfies QuotaPreset)
+      .mockReturnValueOnce({ ...base, params: [{ key: 'workspaceUrl', normalize: 'opencode-workspace' }] } satisfies QuotaPreset)
       .mockReturnValueOnce({ ...base } satisfies QuotaPreset)
 
     expect(matchAutoEnablePreset({ baseUrl: 'https://synthetic.example' }, 'plaintext', QUOTA_PRESETS)).toBeUndefined()

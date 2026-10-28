@@ -1104,3 +1104,51 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **依据**：羊毛管理侧模块零 pi 值依赖（`keychain-extract.ts` 仅 Node 内置模块；`manage-protocol.ts` 对 pi 只有 `import type`）；渲染链零 session 依赖（`resolveComponent` 与 `GuiComponentRenderer` 搜索 session 零命中），耦合面 = 存储分区两处 + 活推送链三处（「无活跃会话即丢弃」判断已随盖戳猜测路径删除，终态同步修正计数）；`setProvider` 是写策略载体；`provider-credential-resolver` 是凭据读取唯一通道；沙箱 `RpcIdentity.pluginId` 必有（fork 与 pluginId 一对一）；`WoolManager` 七个借道调用点已定位。插件首次可读写本机文件、发网络请求、起子进程的安全边界变更按 D3 的代价段接受（边界 = 安装动作，清单策展 + 安装知情为缓解）。
 
 **登记**：实装（主仓）—— `packages/shared/src/protocol.ts`（`plugin.invoke` / `plugin:event` / `plugin.uiEvent` / `plugin.listAvailable` / `plugin.catalog` 帧；`wool.*` 三帧删除）、`packages/shared/src/plugin-view-scope.ts`（scope 契约）、`packages/shared/src/plugin-namespace.ts`（`deriveNamespace` / `validateNamespaceBinding`）、`packages/shared/src/plugin-capability-map.ts`（能力词 → 模块集）、`packages/plugin-sdk/src/types.ts`（`capabilities` / `readPaths` / `namespace`）、`packages/runtime/src/services/plugin-service/`（能力放行 `plugin-blocked-builtins.cjs` / `plugin-esm-loader.cjs` / `plugin-fs-guard.ts`、`installed-store.ts`、`plugin-catalog.ts`）与 `packages/runtime/src/services/plugin-service/api/`（`commands-executor.ts`、`views-api.ts`）、`packages/runtime/src/infra/installers/plugin-installer-adapter.ts`（安装器，infra 层非 plugin-service/ 目录）、`packages/runtime/src/services/provider-write-proxy.ts`（D4 三 RPC + 命名空间校验 + manifest 读取）、`packages/runtime/src/services/wool-extension-installer.ts`（pi 扩展安装编排 + 版本配对）、`packages/runtime/src/index.ts`（代理注册 + `wool-catalog.json` 存量清理）、`packages/extension-protocol/src/core/types.ts` + `packages/ui/src/rendering-protocol/primitives/TextInput.vue`（`text-input`）、`packages/core/src/transport/mock`（mock 域段）、renderer Provider 页（来源类型 / 家族卡 / 挂载位容器 / 条目扩展区 / 安装确认卡）。独立仓 tai-ji-plugin —— `packages/plugin-wool-{qoder,trae,workbuddy}/`（管理方法 + `GuiComponent` 树）、`packages/wool-shared/`（管理内核下沉）、`packages/pi-wool-*/src/index.ts` 瘦身为 provider 注册 + 协议翻译。约束登记：C-ext-32 羊毛豁免、C-proc-14 / C-proc-15 代理归属说明（`docs/constraints.json`）。插件开发文档：`docs/plugins/built-in-plugin-guide.md`（manifest 三字段 + `providers.*` 三 RPC + 凭据存储约定）。设计过程产物（tech-design 归档），本条即该决策的现行登记处。
+
+### ADR-0170 合并判定唯一数据源 = head SHA 的 workflow runs，check-rollup 轨删除（2026-10-26 发布门禁收敛，gate-verdict-ssot §6.1）
+
+**决策**：pr-merge 阶段 2 的 PR CI 判定数据从 `gh pr view --json statusCheckRollup`（平台聚合的二手视图）换为 `gh run list --commit <head SHA>`（一手拉取），经 waitForRuns「有 runs 必等全部完成才裁决」；deadline 30 分钟；judgeRollup/waitForPrChecks 删除（与 wait-for-ci 双轨归一，merge-gate.test.mjs 固化半注册窗口与 PR #45 同族回归）。
+
+**否决记录**：rollup 轨加「pass 后延迟 30s 复查」的稳定期——启发式，判定数据本身不是权威源，下一个窗口形状仍会漏（v0.11.16 实测：半注册窗口 + rollup 只含已结论的 Greptile 机器人检查，16 秒即判「全绿」合并）；点名 ci.yml job 名清单作期望集合——新增 job 漏登记 = 新的形状依赖。行为变化：机器人 check run 不再阻塞合并（CI 门禁只看本仓 workflow）。
+
+**效果**：注册窗口这一类形状被机制整体消灭而非逐形状补防；合并前后用同一判定器，修一处两边同时受益。
+
+### ADR-0171 「哪些包需要 changeset」收敛为 versionable-packages 单一出口（2026-10-26 发布门禁收敛，gate-verdict-ssot §6.2）
+
+**决策**：新增 scripts/versionable-packages.mjs（@manypkg 枚举 workspace globs + config.ignore，输出 name/dir/version/private/ignored/versionable/wsDeps）；check-version-changes.sh 与 apply-version.sh 的硬编码目录枚举替换为消费该 CLI；changeset-check.mjs 方向①（漏声明）的扫描范围从 extensions/ 正则改为按 registry 包目录最长前缀匹配（仅 `<dir>/src/`、仅可版本化包）。行为对拍验收：新旧脚本同 range 输出逐字节一致。
+
+**否决记录**：正则扩到 packages/ 前缀——形状驱动，apps/ 与未来新顶层目录继续漏（v0.11.16 六包漏声明直穿终局 PR 的结构性根因：dev 边界用的恰是四份平行枚举里最窄的 extensions/ 正则）；check-version-changes.sh 整体前置到 dev 边界——终局决策面（逐包人工定 type），搬进 dev 内环过重。
+
+**效果**：目录布局变化自动跟随 workspace 定义；dev 边界开始拦 packages/ 漏声明；private/ignore 包不再出现在漏声明警告（与 pkgOf 口径对齐）。
+
+### ADR-0172 测试族清单单一登记（SUITES）+ 机器对账器 + dev 边界执行（2026-10-26 发布门禁收敛，gate-verdict-ssot §6.3/§6.4）
+
+**决策**：scripts/test-suites.mjs 登记快速守卫测试族（taste-lint / resources-plugins / builtin-ext-bundle / scripts-guards，命令文本与 ci.yml 步骤精确一致由对账器保证）；scripts/check-test-suite-wiring.mjs 断言①清单命令 ↔ ci.yml 步骤文本、②scripts/__tests__ 文件全集 − 清单引用 − 显式豁免 = 空，挂 CI Invariants + pre-commit 双接线；quality-gates 新增恒跑 gate 5 执行 devGate 族（dev 合入边界 ~+20s，过期测试当天红）。
+
+**否决记录**：dev 集成分支触发全量 CI（push 加 dev-*）——每次合入 15-20 分钟全量（含 e2e）成本高且无门禁消费其结果，快速族前置已覆盖「终局 PR 才第一次跑」的主痛点，全量留终局 PR 是有意的分层；ci.yml 动态生成 steps——GitHub Actions 不支持运行时读仓库文件生成。
+
+**效果**：清单漂移与零执行点测试（v0.11.16 实测 6 个）从静默分叉变红灯；CI 测试步骤解掩蔽（continue-on-error + 聚合）使一次 run 暴露全部失败。
+
+### ADR-0173 判定基点单一权威 PR_BASE（2026-10-26 merge 流程架构审查·发现 1）
+
+**决策**：「本 PR 增量」的 diff 基点以单一变量 PR_BASE 贯通全部机器门禁：pr-cr-fix SKILL 开局先定（= 目标 dev 分支，DEV-WORKFLOW §3；dev→main 终局 PR 才为 main）；changeset-check.mjs 新增 `--base`（显式基点解析失败 exit 2，不静默 skip 成「无检查即绿」）；pr-pre-merge.sh 的 `--base` 透传给 changeset-check（原只用于 coverage 口径校验）；coverage/metrics/select-constraints/select-affected-e2e 的命令示例与 pr-lifecycle 的 `args.base` 同步改传 PR_BASE。缺省回退 main 仅供历史形态（dev→main 终局 PR 与无参调用）。
+
+**否决记录**：门禁继续按 main 累积口径——随发布周期推进，每个 feature PR 为整条 dev 线未发布内容重复举证（coverage 增量按 dev 全线行数、changeset WARN 反复列 dev 线包、Gate-1a.5 为非本 PR 的包起草多余 changeset），pr-lifecycle 已被迫用 prompt 散文纠偏机器判错的集合（机器判错、人工兜住），周期后段误判率必然上升。
+
+**效果**：基点错位（政策 base=dev vs 机器 base=main）消除；DEV-WORKFLOW §10 两条过期登记（dev-merge changeset 缺口、skill --base main 待修）随本决策落地清理。
+
+### ADR-0174 merge 管线状态机最小落地 + main 同步防护 + 发布互斥（2026-10-26 merge 流程架构审查·发现 2/3/7/8/17）
+
+**决策**：①管线状态（.merge-state/current.json）升级为带身份的最小状态机：阶段 0 init 以 `{reset:true}` 开启新管线（pipelineId + stage=init，清上一轮 release 字段防跨轮残留）；阶段 2 pr-merge 落 mergeSha（merge commit）+ stage=merged；wait-for-ci 无参路径经 stage 门只消费 stage=merged 的 mergeSha——headSha 是 PR head（判的是阶段 2 已裁决过的 PR 侧 runs），禁止复用为阶段 3 判定对象；release 落 stage=released（终态）。②阶段 2 的 main 同步（lib/sync.mjs）加数据丢失防护：fetch/checkout 退出码逐一检查，reset --hard 前判本地 main 是否领先远端（领先 = 发布在途 bump/notes 未 push 或未知改动，fail-fast 给处置指引，绝不拨回仅 reflog 可救的 commit）。③init 以「非终态 + 12h 活跃窗」作发布互斥（两会话并发启动发布链是 bump/tag/push 写操作的并发数据丢失源）。④wait-for-ci 默认超时 600s→2400s（main push CI 含两个 30 分钟档 e2e job，旧默认常态首跑必超时）。
+
+**否决记录**：wait-for-ci 无参继续读 headSha（PR head）——阶段 3 是合并后唯一 CI 验证点，判错对象 = 验证了个已裁决过的东西，post-merge main CI 从未进判定（PR #61 实测 head sha 与 merge commit 对应不同 runs）；无条件 reset --hard——发布流程自身制造领先窗口（阶段 4/5 commit 后 push 前），误清在途发布产物。
+
+**效果**：跨管线字段残留（磁盘实证 pr:61 与 tag:v0.11.15 叠在同一对象）、判定对象错位、reset 数据丢失三类形态各有回归测试（merge-sync / merge-state / merge-wait-for-ci 三文件）。
+
+### ADR-0175 验证出口收敛 quality-gates（--only）+ CI 解掩蔽全 job 化 + 内联镜像退役 + repo slug 单源对账（2026-10-26 merge 流程架构审查·发现 4/6/11/12/13）
+
+**决策**：①merge 阶段 1 的 pre-merge-check.sh 收敛为 taiji 专用（退役 npm/frontend 通用分支——其自引保留依据「AGENTS.md §5」已不存在），类型检查与守卫测试出口改为 `quality-gates.mjs --only typecheck,test`；quality-gates 新增 `--only` 门组过滤（排除 py 门时不做 py 实体检查/不解析 base），全量单测不在阶段 1 本地重跑（同一 commit 的完整 CI 由阶段 2 PR CI 等待承担）。②CI 解掩蔽（continue-on-error + if:always() 聚合步）从 2 个 job 扩到全部：typecheck（11 检查步）与 invariants（29 检查步），前置依赖步（checkout/安装/Materialize .agents/Build dist）保持阻塞语义。③invariants job 两段 ci.yml 内联镜像（runtime CJS 禁令 + noExternal 对账，原注释自认「与 validate-runtime-bundle.sh 同步维护」）退役为直调 `validate-runtime-bundle.sh --static-only`（静态段函数化，等效性经本地对拍验证）。④仓库标识 slug 收敛：Node 消费方 import repo.mjs 的 DEFAULT_REPO、shell 消费方从 `git remote get-url github` 一手推导、check-repo-literal.test.mjs 对账白名单外零字面量（verify-plugin-contract 与 verify-taiji 场景作为 runtime 常量镜像登记在案）。⑤ci.yml run 值解析器收敛 scripts/lib/ci-yaml-runs.mjs 单实现双口径（命令清点 ' && ' / 文本对账 ' '），双侧 import 再导出。
+
+**否决记录**：阶段 1 保留自带 tsconfig 扫描——find -maxdepth 2 只能发现 extensions 一个 tsconfig（包级在深度 3），类型检查范围结构性小于 pr-cr-fix 静态门，是「本地验证门」的第 4 份平行清单且无对账；阶段 1 本地全量 pnpm test——与阶段 2 PR CI（同一 commit 全量 test job）完全重复，只加时长不加覆盖。
+
+**效果**：「修一轮才见下一个失败」的 CI 形态在全部 job 消除；无对账双实现（ci 内联、双解析器、散落 slug）各收敛为单一来源或红灯对账。

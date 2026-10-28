@@ -17,11 +17,12 @@ import type {
   NormalizedQuotaRow,
   QuotaConfigurePayload,
   QuotaCredentialSource,
+  QuotaParamSpec,
   QuotaPreset,
   QuotaAuthKind,
   QuotaFetchFailureReason,
 } from '@taiji/shared'
-import { normalizeCookieHeader, normalizeQuotaWorkspaceUrl, getQuotaRefreshTarget, resolveQuotaCredentialSource, resolveQuotaPresets, supportsExclusiveCredential } from '@taiji/shared'
+import { normalizeCookieHeader, normalizeQuotaParamValue, getQuotaRefreshTarget, resolveQuotaCredentialSource, resolveQuotaPresets, supportsExclusiveCredential } from '@taiji/shared'
 // W3c：presets 数据源从编译期基线切到 runtime 下发的合并视图（remote-config 域 2）
 import { getSettingsStore } from '@taiji/core'
 import type {
@@ -30,6 +31,7 @@ import type {
   QuotaCookieRefreshView,
   QuotaDraftInput,
   QuotaFailureKind,
+  QuotaParamView,
   QuotaReadiness,
   QuotaSectionView,
   QuotaSourceHint,
@@ -44,25 +46,25 @@ import { refreshQuotaCookie } from '@/lib/ipc'
 import { quotaFailReasonText } from '@/composables/features/model/useQuotaQuery'
 
 /**
- * Workspace 草稿的保存前归一化（模块级辅助）。
+ * 用户维度参数草稿的保存前归一化（模块级辅助，2026-10 泛化，原 normalizeWorkspaceDraft）。
  * - 空 → required 报错（不发 RPC）。D13：空不再解释为「清除」，UI 侧由 readiness 置灰
  *   拦住这条路，这里只是对称的防御（直接调用 saveAndTest 时也不会产出空串）
- * - 非空 → shared 归一化校验（按 fetcher 分流：完整 URL / 裸 id → 规范额度查询 URL）
+ * - 非空 → shared 归一化校验（按 spec.normalize 分流：完整 URL / 裸 id → 规范值；raw 透传）
  * - 非法输入 → invalid 报错（不发 RPC）；errorKey 由调用方经 i18n 渲染
  */
-function normalizeWorkspaceDraft(
+function normalizeParamDraft(
+  spec: QuotaParamSpec,
   raw: string,
-  fetcherId: string | undefined,
 ): { ok: true; payload: string } | { ok: false; errorKey: string } {
   const trimmed = raw.trim()
   if (!trimmed) {
-    return { ok: false, errorKey: 'settings.providerEdit.quotaWorkspaceRequired' }
+    return { ok: false, errorKey: 'settings.providerEdit.quotaParamRequired' }
   }
-  const normalized = normalizeQuotaWorkspaceUrl(trimmed, fetcherId)
+  const normalized = normalizeQuotaParamValue(spec.normalize ?? 'raw', trimmed)
   if (!normalized.ok) {
-    return { ok: false, errorKey: 'settings.providerEdit.quotaWorkspaceInvalid' }
+    return { ok: false, errorKey: 'settings.providerEdit.quotaParamInvalid' }
   }
-  return { ok: true, payload: normalized.url }
+  return { ok: true, payload: normalized.value }
 }
 
 /**
@@ -108,14 +110,15 @@ interface ReadinessSignals {
   exclusiveSupported: boolean
   /** provider 侧是否有可用凭据（ProviderInfo.apiKeySet） */
   providerCredentialAvailable: boolean
-  needsWorkspace: boolean
+  /** 当前 fetcher 声明的用户维度参数 spec（2026-10 泛化，原 needsWorkspace 单布尔） */
+  paramSpecs: readonly QuotaParamSpec[]
   /** 归属判据：savedFetcher !== undefined && draft.fetcher !== savedFetcher */
   typeChanged: boolean
   cookieDraft: string
   apiKeyDraft: string
   cookieSaved: boolean | undefined
   apiKeySaved: boolean | undefined
-  workspaceDraft: string
+  paramsDraft: Record<string, string>
 }
 
 /**
@@ -134,12 +137,13 @@ function credentialCheck(s: ReadinessSignals): ReadinessCheck {
   return { field: 'apiKey', satisfied: s.providerCredentialAvailable }
 }
 
-/** 判定项清单：凭证档在前、workspace 在后（missing 顺序 = 本清单顺序）。 */
+/** 判定项清单：凭证档在前、param 在后（missing 顺序 = 本清单顺序）。 */
 function readinessChecks(s: ReadinessSignals): ReadinessCheck[] {
   const checks: ReadinessCheck[] = [credentialCheck(s)]
-  // workspace 是明文且始终回显 → 判定只看草稿（D13：屏幕即真相）
-  if (s.needsWorkspace) {
-    checks.push({ field: 'workspace', satisfied: s.workspaceDraft.trim() !== '' })
+  // param 是明文且始终回显 → 判定只看草稿（D13：屏幕即真相）；逐必填项一条判定
+  for (const spec of s.paramSpecs) {
+    if (spec.required === false) continue
+    checks.push({ field: 'param', satisfied: (s.paramsDraft[spec.key] ?? '').trim() !== '' })
   }
   return checks
 }
@@ -151,6 +155,38 @@ function toMissingFields(checks: ReadinessCheck[]): ReadinessMissing[] {
     if (!check.satisfied) missing.push(check.field)
   }
   return missing
+}
+
+/** preset params spec → UI 参数区视图（label 缺省回落 key；placeholder/helpText 按声明透传）。 */
+function toParamViews(specs: readonly QuotaParamSpec[]): QuotaParamView[] {
+  return specs.map((spec) => ({
+    key: spec.key,
+    label: spec.label ?? spec.key,
+    ...(spec.placeholder !== undefined ? { placeholder: spec.placeholder } : {}),
+    ...(spec.helpText !== undefined ? { helpText: spec.helpText } : {}),
+    required: spec.required !== false,
+  }))
+}
+
+/** 用户维度参数草稿 → payload 段（明文回显字段，逐必填项取归一化后的草稿值；
+ *  D13：永不传 ''——空/非法本地拦截。必填项空值只在 readiness 被放行的不可能路径到达
+ *  （直接调用 saveAndTest 的对称防御）。 */
+function buildParamsPayloadFrom(
+  specs: readonly QuotaParamSpec[],
+  paramsDraft: Record<string, string>,
+): { ok: true; params: Record<string, string> } | { ok: false; errorKey: string } {
+  const params: Record<string, string> = {}
+  for (const spec of specs) {
+    const raw = paramsDraft[spec.key]
+    if (raw === undefined || raw.trim() === '') {
+      if (spec.required !== false) return { ok: false, errorKey: 'settings.providerEdit.quotaParamRequired' }
+      continue
+    }
+    const normalized = normalizeParamDraft(spec, raw)
+    if (!normalized.ok) return { ok: false, errorKey: normalized.errorKey }
+    params[spec.key] = normalized.payload
+  }
+  return { ok: true, params }
 }
 
 // ── 失败原因归一（A2-4）──
@@ -275,7 +311,7 @@ function createCookieRefreshController(inputs: CookieRefreshInputs): {
   const fetcherIdDraft = ref<string | undefined>(undefined)
   /**
    * 输入草稿（D7 掩码哨兵：已保存的密文以 QUOTA_SECRET_MASK 展示；真实输入随时覆盖哨兵）。
-   * D13 已知代价（设计 §6.14）：UI 不支持清除已保存 workspace（清空草稿 → readiness 置灰
+   * D13 已知代价（设计 §6.14）：UI 不支持清除已保存 param（清空草稿 → readiness 置灰
    * 保存不出去）；换地址直接覆盖、停用关开关。显式清除按钮是登记的重审触发条件，勿在
    * readiness 里单独开「空串 = 清除」后门。
    */
@@ -283,7 +319,7 @@ function createCookieRefreshController(inputs: CookieRefreshInputs): {
     cookie: '',
     apiKey: '',
     credentialSource: 'provider',
-    workspace: '',
+    params: {},
   })
   const testStatus = ref<QuotaTestStatus>('idle')
   const testError = ref('')
@@ -346,11 +382,11 @@ function createCookieRefreshController(inputs: CookieRefreshInputs): {
     return preset.value?.auth.includes('cookie') ?? false
   })
 
-  /** 当前选中 fetcher 对应的预设（用于 helpUrl/helpText/requiresWorkspace）。 */
+  /** 当前选中 fetcher 对应的预设（用于 helpUrl/helpText/params）。 */
   const activePreset = computed<QuotaPreset | undefined>(() => findPreset(fetcherIdDraft.value, preset.value))
 
-  /** 当前 fetcher 是否需要 workspace 配置（D1-1：资源维度 fetcher 如 opencode-go） */
-  const needsWorkspace = computed<boolean>(() => activePreset.value?.requiresWorkspace ?? false)
+  /** 当前 fetcher 声明的用户维度参数 spec（2026-10 泛化，原 needsWorkspace 单布尔） */
+  const paramSpecs = computed<readonly QuotaParamSpec[]>(() => activePreset.value?.params ?? [])
 
   /**
    * 当前选中 fetcher 的凭证能力声明（B-3）：fetcherId 优先、fallback 自动匹配 preset。
@@ -388,10 +424,11 @@ function createCookieRefreshController(inputs: CookieRefreshInputs): {
   const readiness = computed<QuotaReadiness>(() => {
     const fid = fetcherIdDraft.value
     // 草稿类型不在 QUOTA_PRESETS（仅历史数据 / 手工编辑 providers.json 可达，下拉只列预设）：
-    // 未知 fetcher 无法判定该类型的凭证形态（是否 cookie 类、是否需要 workspace），isCookieAuth /
-    // needsWorkspace 会双双落 false 后静默走 api-key 分支 —— providerCredentialAvailable 为 true 时
-    // 就放行一条带未知 fetcher 的 configure。按「类型缺失」处理（与 D8「类型未选」同形态），
-    // 让用户重选一个有效类型，而不是让未知值借 api-key 分支混过门控。
+    // 未知 fetcher 无法判定该类型的凭证形态（是否 cookie 类、是否声明用户维度参数），
+    // isCookieAuth / paramSpecs 会双双落空后静默走 api-key 分支 ——
+    // providerCredentialAvailable 为 true 时就放行一条带未知 fetcher 的 configure。按「类型
+    // 缺失」处理（与 D8「类型未选」同形态），让用户重选一个有效类型，而不是让未知值借
+    // api-key 分支混过门控。
     if (!fid || !activePreset.value) return { ready: false, missing: ['type'] }
 
     const quota = providerRef.value?.quota
@@ -400,13 +437,13 @@ function createCookieRefreshController(inputs: CookieRefreshInputs): {
       credentialSource: draft.value.credentialSource,
       exclusiveSupported: supportsExclusiveCredential(authKinds.value),
       providerCredentialAvailable: providerCredentialAvailable.value,
-      needsWorkspace: needsWorkspace.value,
+      paramSpecs: paramSpecs.value,
       typeChanged: quota?.fetcher !== undefined && fid !== quota.fetcher,
       cookieDraft: draft.value.cookie,
       apiKeyDraft: draft.value.apiKey,
       cookieSaved: quota?.cookieSet,
       apiKeySaved: quota?.apiKeySet,
-      workspaceDraft: draft.value.workspace,
+      paramsDraft: draft.value.params,
     }))
 
     return { ready: missing.length === 0, missing }
@@ -446,7 +483,7 @@ function createCookieRefreshController(inputs: CookieRefreshInputs): {
         sourceHint,
         providerWarning,
       },
-      workspace: { required: needsWorkspace.value },
+      params: toParamViews(paramSpecs.value),
       cookieRefresh: cookieRefresh.view.value,
       help: helpUrl ? { url: helpUrl, text: activePreset.value?.helpText ?? '' } : null,
     }
@@ -474,7 +511,7 @@ function createCookieRefreshController(inputs: CookieRefreshInputs): {
       // fetcherId 默认值：provider.quota.fetcher > 自动匹配的 preset.fetcher > undefined
       applyFetcherId(preset.value?.fetcher)
       // 无 quota 条目 = 读侧兜底 'provider'（与 runtime resolveQuotaCredentialSource 同源）
-      draft.value = { cookie: '', apiKey: '', credentialSource: resolveQuotaCredentialSource(undefined), workspace: '' }
+      draft.value = { cookie: '', apiKey: '', credentialSource: resolveQuotaCredentialSource(undefined), params: {} }
       testStatus.value = 'idle'
       testError.value = ''
       testFailReason.value = null
@@ -486,13 +523,16 @@ function createCookieRefreshController(inputs: CookieRefreshInputs): {
     // fetcherId 初始值：手动指定的 quota.fetcher 优先，未设置时 fallback 到自动匹配值
     applyFetcherId(p.quota.fetcher ?? preset.value?.fetcher)
     // D7 掩码哨兵：runtime 不回传密文，已保存的 cookie / 专属 Key 以 QUOTA_SECRET_MASK 展示
-    // 「已保存密文在此」；workspace 非凭证（用户浏览器地址栏可见的 URL），明文回显供编辑
+    // 「已保存密文在此」；param 非凭证（用户浏览器地址栏可见的 URL 等），明文回显供编辑
     // D3 读侧：未显式设置时按既存标记推断（历史数据兼容）；两端调用同一函数避免推断背离
+    // params 读兼容：extras params 优先，旧版 workspace 单字段映射为 workspaceUrl（runtime 同映射）
+    const savedParams: Record<string, string> = { ...(p.quota.params ?? {}) }
+    if (p.quota.workspace && savedParams.workspaceUrl === undefined) savedParams.workspaceUrl = p.quota.workspace
     draft.value = {
       cookie: p.quota.cookieSet ? QUOTA_SECRET_MASK : '',
       apiKey: p.quota.apiKeySet ? QUOTA_SECRET_MASK : '',
       credentialSource: resolveQuotaCredentialSource(p.quota),
-      workspace: p.quota.workspace ?? '',
+      params: savedParams,
     }
     // 如果已启用，尝试读缓存
     if (p.quota.enabled) {
@@ -570,8 +610,32 @@ function createCookieRefreshController(inputs: CookieRefreshInputs): {
   }
 
   /**
+   * cookie 粘贴格式前置校验（2026-10-18，用户手动复制路径）：归一化后为空（不含任何
+   * name=value 对，典型 = 从 DevTools Application → Cookies 表格复制的制表符文本）
+   * 当场拦下并给精确指引——不发 RPC，不落入 runtime 侧「凭证可能已失效」的误报。
+   * 归一化实现 SSOT 在 shared（与 runtime fetcher 同一函数，两端判据不得各写一份）。
+   * 掩码哨兵无 k=v 形态但不是用户输入，跳过校验。
+   */
+  function cookiePasteInvalid(cookieDraft: string): boolean {
+    return (
+      isCookieAuth.value &&
+      cookieDraft !== '' &&
+      cookieDraft !== QUOTA_SECRET_MASK &&
+      normalizeCookieHeader(cookieDraft) === ''
+    )
+  }
+
+  /**
+   * 用户维度参数草稿 → payload 段（2026-10 泛化，原 workspace）：委托模块级纯函数，
+   * spec 清单与草稿值由当前响应式状态传入（归一化分流与 runtime 侧同源）。
+   */
+  function buildParamsPayload(): { ok: true; params: Record<string, string> } | { ok: false; errorKey: string } {
+    return buildParamsPayloadFrom(paramSpecs.value, draft.value.params)
+  }
+
+  /**
    * 保存 payload 构造段（§7.2 细节 4 的构造表；从 saveAndTest 拆出，语义注释在彼处）。
-   * cookie 粘贴格式 / workspace 归一化两类本地校验失败 = { ok:false, errorKey }，
+   * cookie 粘贴格式 / param 归一化两类本地校验失败 = { ok:false, errorKey }，
    * 调用方落错误终止（不发 RPC）。
    */
   function buildConfigurePayload(p: { id: string }, typeChanged: boolean): { ok: true; payload: QuotaConfigurePayload } | { ok: false; errorKey: string } {
@@ -583,23 +647,13 @@ function createCookieRefreshController(inputs: CookieRefreshInputs): {
     const cookieMasked = cookieDraft === QUOTA_SECRET_MASK
     const apiKeyMasked = apiKeyDraft === QUOTA_SECRET_MASK
 
-    // cookie 粘贴格式前置校验（2026-10-18，用户手动复制路径）：归一化后为空（不含任何
-    // name=value 对，典型 = 从 DevTools Application → Cookies 表格复制的制表符文本）
-    // 当场拦下并给精确指引——不发 RPC，不落入 runtime 侧「凭证可能已失效」的误报。
-    // 归一化实现 SSOT 在 shared（与 runtime fetcher 同一函数，两端判据不得各写一份）。
-    // 掩码哨兵无 k=v 形态但不是用户输入，跳过校验
-    if (isCookieAuth.value && cookieDraft && !cookieMasked && normalizeCookieHeader(cookieDraft) === '') {
+    if (cookiePasteInvalid(cookieDraft)) {
       return { ok: false, errorKey: 'settings.providerEdit.quotaCookieFormatInvalid' }
     }
 
-    // Workspace：明文回显字段，传归一化后的草稿（D13：永不传 ''）；空 / 非法输入本地拦截。
-    // 归一化分流按当前草稿 fetcher（与 runtime 侧同源：同 input 同 fetcher 同规则）
-    let workspacePayload: string | undefined
-    if (needsWorkspace.value) {
-      const normalized = normalizeWorkspaceDraft(draft.value.workspace, fetcherIdDraft.value ?? activePreset.value?.fetcher)
-      if (!normalized.ok) return { ok: false, errorKey: normalized.errorKey }
-      workspacePayload = normalized.payload
-    }
+    const params = buildParamsPayload()
+    if (!params.ok) return params
+    const paramsPayload = params.params
 
     return {
       ok: true,
@@ -615,7 +669,8 @@ function createCookieRefreshController(inputs: CookieRefreshInputs): {
         cookie: cookieMasked ? undefined : (cookieDraft || (typeChanged ? '' : undefined)),
         // 专属 Key 永不传 ''：失效由 credentialSource 表达，删文件不可逆（D3）
         apiKey: source === 'exclusive' && apiKeyDraft && !apiKeyMasked ? apiKeyDraft : undefined,
-        workspace: workspacePayload,
+        // 用户维度参数：仅传有值的键（D13 无清除语义——空键缺省 = 不动，与旧 workspace 一致）
+        params: Object.keys(paramsPayload).length > 0 ? paramsPayload : undefined,
       },
     }
   }

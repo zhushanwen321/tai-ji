@@ -255,11 +255,11 @@ test('ReturnStatement：对象方法工厂经解构调用命中', () => {
       'const holders = { grab() { return useChatStore() } }',
       'const { grab } = holders',
       'const chat = grab()',
-      'chat.setHandingOff("s1", true)',
+      'chat.setOccupancy("s1", { handingOff: true })',
     ].join('\n')),
   );
   expect(messages).toHaveLength(1);
-  expect(messages[0].message).toContain('setHandingOff');
+  expect(messages[0].message).toContain('setOccupancy');
 });
 
 test('ReturnStatement：return 非 store 表达式的包装函数放行', () => {
