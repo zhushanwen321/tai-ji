@@ -136,6 +136,40 @@ function isScalarParam(value: unknown): value is string | number | boolean {
   return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
 }
 
+/**
+ * ① params 标量校验与归一（落点契约输入段）：一遍循环同时完成校验与归一
+ * （标量落地 + 坏键收集），后续段只消费 scalar；坏键由调用方统一拒绝。
+ */
+function normalizeScalarParams(
+  raw: Record<string, unknown>,
+): { scalar: Record<string, string | number | boolean>; badKeys: string[] } {
+  const scalar: Record<string, string | number | boolean> = {}
+  const badKeys: string[] = []
+  for (const [key, value] of Object.entries(raw)) {
+    if (isScalarParam(value)) scalar[key] = value
+    else badKeys.push(key)
+  }
+  return { scalar, badKeys }
+}
+
+/**
+ * ⑥ 已知键过滤（落点契约动作段：未知键忽略不阻断）+ warning 文案的已知键描述。
+ * knownDesc = 「该族认识的键」的人读形态（该族未登记 / 逗号清单 / 空表占位）。
+ */
+function filterKnownParams(
+  scalar: Record<string, string | number | boolean>,
+  knownKeys: readonly string[] | undefined,
+): { filtered: Record<string, string | number | boolean>; unknownKeys: string[]; knownDesc: string } {
+  const filtered: Record<string, string | number | boolean> = {}
+  const unknownKeys: string[] = []
+  for (const [key, value] of Object.entries(scalar)) {
+    if (knownKeys !== undefined && knownKeys.includes(key)) filtered[key] = value
+    else unknownKeys.push(key)
+  }
+  const knownDesc = knownKeys === undefined ? '该族未登记' : knownKeys.join(', ') || '（无）'
+  return { filtered, unknownKeys, knownDesc }
+}
+
 export class ContainerNavigationExecutor {
   constructor(private readonly deps: ContainerNavigationDeps) {}
 
@@ -146,14 +180,7 @@ export class ContainerNavigationExecutor {
   navigate(action: HostContainerAction, options?: NavigateOptions): ContainerNavigationResult {
     // ① params 标量校验（输入合法性先行：畸形参数连目标解析都不该发生）。
     // 显式 unknown：`action.params ?? {}` 的联合含 `{}` 分支，entries 值会上抛成 unknown。
-    // 一遍循环同时完成校验与归一（坏键收集 + 标量落地），后续段只消费 scalarParams。
-    const rawParams: Record<string, unknown> = action.params ?? {}
-    const scalarParams: Record<string, string | number | boolean> = {}
-    const badKeys: string[] = []
-    for (const [key, value] of Object.entries(rawParams)) {
-      if (isScalarParam(value)) scalarParams[key] = value
-      else badKeys.push(key)
-    }
+    const { scalar: scalarParams, badKeys } = normalizeScalarParams(action.params ?? {})
     if (badKeys.length > 0) {
       return this.fail('invalid-params', action, `params 含非标量值（键：${badKeys.join(', ')}）——值只许 string/number/boolean，禁嵌套对象；插件侧修正 params 形状`)
     }
@@ -190,16 +217,10 @@ export class ContainerNavigationExecutor {
     }
 
     // ⑥ 全通过 → 动作：未知 params 键过滤（忽略 + 一行 warning，不阻断动作；§5.4 行 8）
-    const knownKeys = KNOWN_PARAMS_KEYS_BY_PLACEMENT[target.placement]
-    const filtered: Record<string, string | number | boolean> = {}
-    const unknownKeys: string[] = []
-    for (const [key, value] of Object.entries(scalarParams)) {
-      if (knownKeys !== undefined && knownKeys.includes(key)) filtered[key] = value
-      else unknownKeys.push(key)
-    }
+    const { filtered, unknownKeys, knownDesc } = filterKnownParams(scalarParams, KNOWN_PARAMS_KEYS_BY_PLACEMENT[target.placement])
     if (unknownKeys.length > 0) {
       console.warn(
-        `[container-navigation] 未知 params 键已忽略（目标 '${action.tabId}' 认识：${knownKeys === undefined ? '该族未登记' : knownKeys.join(', ') || '（无）'}；忽略：${unknownKeys.join(', ')}）——${FAILURE_JUDGEMENT_TABLE['unknown-params-key'].recovery}`,
+        `[container-navigation] 未知 params 键已忽略（目标 '${action.tabId}' 认识：${knownDesc}；忽略：${unknownKeys.join(', ')}）——${FAILURE_JUDGEMENT_TABLE['unknown-params-key'].recovery}`,
       )
     }
     if (action.kind === 'drawer') this.deps.sink.openDrawerTab(sessionId, action.tabId, filtered)

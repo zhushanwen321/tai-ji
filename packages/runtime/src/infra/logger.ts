@@ -574,6 +574,38 @@ export function migratePiSessionLogTree(oldSessionId: string, newSessionId: stri
   } catch {
     return
   }
+  moveLogFiles(from, to, entries)
+  try {
+    const rest = readdirSync(from)
+    if (rest.length > 0) {
+      // 安全条件② 不满足（logs/ 未迁空：rename 失败/同名冲突留文件，逐文件 warn 已发声）
+      // → 父目录同留 + 聚合 warn 留痕（不静默）
+      writeLogEntry('warn', '[logger] migratePiSessionLogTree: parent dir kept (logs not fully migrated)', {
+        parent: parentDir,
+        remaining: rest,
+      })
+      return
+    }
+    // logs/ 已迁空 → 父目录回收判定（rmdir 非递归 + 安全条件①；见 reclaimMigratedLogTree）
+    reclaimMigratedLogTree(from, parentDir)
+  } catch (e) {
+    // 清理失败不抛（半空目录无害）；留痕满足 no-silent-catch
+    writeLogEntry('warn', '[logger] log tree cleanup ignored (best-effort)', { from, error: String(e) })
+  }
+  // 旧树 <oldId>/ 空壳清理：logs/ 删除后上级目录若已空同样移除——否则 tempId 空壳目录
+  // 残留成 ext-sessions 孤儿（D3 验收 A15a 发现：管理会话每次编排泄漏一个空目录）。
+  // 只在确认空后删（readdirSync 抛错 = 不可判定，跳过）。
+  try {
+    const oldTreeRoot = dirname(from)
+    if (readdirSync(oldTreeRoot).length === 0) rmSync(oldTreeRoot, { recursive: true, force: true })
+  } catch (e) {
+    writeLogEntry('warn', '[logger] temp-id tree shell cleanup ignored (best-effort)', { from: dirname(from), error: String(e) })
+  }
+}
+
+/** 逐文件 mv 旧树 logs/ → 新树 logs/：同名冲突（restore 场景）跳过 + warn 不覆盖；
+ *  rename 失败文件留旧树 + warn（两边 boundary 行都在，排障者人工拼接）。 */
+function moveLogFiles(from: string, to: string, entries: string[]): void {
   for (const name of entries) {
     const src = join(from, name)
     const dst = join(to, name)
@@ -594,48 +626,29 @@ export function migratePiSessionLogTree(oldSessionId: string, newSessionId: stri
       })
     }
   }
+}
+
+/** logs/ 已迁空后的父目录回收：先 rmdir logs/（非递归，竞态下非空即 ENOTEMPTY 上抛，
+ *  不会误删），再按安全条件① 判定——dirname(from) 内除 logs/ 外无任何条目才连父目录
+ *  一起回收；有兄弟域（subagents/ / workflow/ 等）保留 + warn（兄弟树随会话删除走
+ *  ADR-0141 整树回收，此处禁越权删）。抛错由调用方 best-effort 捕获。 */
+function reclaimMigratedLogTree(from: string, parentDir: string): void {
+  rmdirSync(from)
+  let siblings: string[]
   try {
-    const rest = readdirSync(from)
-    if (rest.length > 0) {
-      // 安全条件② 不满足（logs/ 未迁空：rename 失败/同名冲突留文件，逐文件 warn 已发声）
-      // → 父目录同留 + 聚合 warn 留痕（不静默）
-      writeLogEntry('warn', '[logger] migratePiSessionLogTree: parent dir kept (logs not fully migrated)', {
-        parent: parentDir,
-        remaining: rest,
-      })
-      return
-    }
-    // logs/ 已迁空：rmdir 非递归（竞态下非空即 ENOTEMPTY 上抛，不会误删）
-    rmdirSync(from)
-    let siblings: string[]
-    try {
-      siblings = readdirSync(parentDir)
-    } catch {
-      return // 父目录已不存在（并发回收）→ 回收目标已达成
-    }
-    if (siblings.length === 0) {
-      // 安全条件① 成立（dirname(from) 内除 logs/ 外无任何条目）→ 连父目录一起回收
-      rmdirSync(parentDir)
-    } else {
-      // 安全条件① 不满足：会话树内还有兄弟域 → 保留父目录 + warn 留痕（不静默）；
-      // 兄弟域随会话删除走 ADR-0141 整树回收，此处禁越权删
-      writeLogEntry('warn', '[logger] migratePiSessionLogTree: parent dir kept (sibling domains present; removal follows ADR-0141 whole-tree reclaim)', {
-        parent: parentDir,
-        siblings,
-      })
-    }
-  } catch (e) {
-    // 清理失败不抛（半空目录无害）；留痕满足 no-silent-catch
-    writeLogEntry('warn', '[logger] log tree cleanup ignored (best-effort)', { from, error: String(e) })
+    siblings = readdirSync(parentDir)
+  } catch {
+    return // 父目录已不存在（并发回收）→ 回收目标已达成
   }
-  // 旧树 <oldId>/ 空壳清理：logs/ 删除后上级目录若已空同样移除——否则 tempId 空壳目录
-  // 残留成 ext-sessions 孤儿（D3 验收 A15a 发现：管理会话每次编排泄漏一个空目录）。
-  // 只在确认空后删（readdirSync 抛错 = 不可判定，跳过）。
-  try {
-    const oldTreeRoot = dirname(from)
-    if (readdirSync(oldTreeRoot).length === 0) rmSync(oldTreeRoot, { recursive: true, force: true })
-  } catch (e) {
-    writeLogEntry('warn', '[logger] temp-id tree shell cleanup ignored (best-effort)', { from: dirname(from), error: String(e) })
+  if (siblings.length === 0) {
+    // 安全条件① 成立（dirname(from) 内除 logs/ 外无任何条目）→ 连父目录一起回收
+    rmdirSync(parentDir)
+  } else {
+    // 安全条件① 不满足：会话树内还有兄弟域 → 保留父目录 + warn 留痕（不静默）
+    writeLogEntry('warn', '[logger] migratePiSessionLogTree: parent dir kept (sibling domains present; removal follows ADR-0141 whole-tree reclaim)', {
+      parent: parentDir,
+      siblings,
+    })
   }
 }
 

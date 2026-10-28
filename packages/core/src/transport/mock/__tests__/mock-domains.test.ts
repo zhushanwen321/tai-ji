@@ -697,6 +697,31 @@ describe('mock model / extension / plugin / composer / search domain', () => {
     expect(await composer.getFileCandidatesByCwd('/any')).toEqual({ files: [], truncated: false })
   })
 
+  it('provider-plugin-access D8/D9/U5 stub 族：invoke/uiEvent/executeCommand ack + onPluginEvent 空订阅 + 清单空态 + 两段式安装演示成功', async () => {
+    // D8：invoke 返回 undefined（mock 无插件业务方法可调）；uiEvent / executeCommand ack 型 stub
+    await expect(plugin.invokePlugin('p1', 'getToken', {})).resolves.toBeUndefined()
+    await expect(plugin.sendPluginUiEvent({ pluginId: 'p1', viewId: 'v', componentId: 'c', event: 'change', value: 1 })).resolves.toBeUndefined()
+    await expect(plugin.executePluginCommand({ pluginId: 'p1', commandId: 'cmd' })).resolves.toBeUndefined()
+    // D9：plugin:event 订阅骨架（恒空，无生产方）
+    const pluginEvents: unknown[][] = []
+    const unEvent = plugin.onPluginEvent((p) => pluginEvents.push([p]))
+    await waitFor(() => pluginEvents.length > 0)
+    expect(pluginEvents[0]).toEqual([{ pluginId: '', channel: '', payload: null }])
+    unEvent()
+    // 清单域：mock 无远程清单基建，恒空清单（UI 按空态渲染）
+    await expect(plugin.listAvailablePlugins()).resolves.toEqual({ plugins: [] })
+    await expect(plugin.getPluginCatalog()).resolves.toEqual({ entries: [] })
+    // U4/U6 两段式安装：prepare 返回最小知情面（确认卡「无声明」）；confirm 演示成功；cancel ack
+    await expect(plugin.preparePluginInstall('demo-pkg')).resolves.toEqual({
+      pluginId: 'demo-pkg', packageName: 'demo-pkg', version: '0.0.0', capabilities: [], readPaths: [], permissions: [],
+    })
+    await expect(plugin.confirmPluginInstall('demo-pkg')).resolves.toEqual({ success: true })
+    await expect(plugin.cancelPluginInstall('demo-pkg')).resolves.toBeUndefined()
+    // U2：快照拉取 scope 二选一过滤参数形态（mock 恒空快照）
+    await expect(plugin.getPluginUiSnapshot({ sessionId: 's1' })).resolves.toEqual({ headerActions: [], views: [] })
+    await expect(plugin.getPluginUiSnapshot({ mountId: 'provider.authorize', pluginId: 'p1' })).resolves.toEqual({ headerActions: [], views: [] })
+  })
+
   it('search：空查询返回 recent+suggested；有查询按四类过滤', async () => {
     const empty = await search.query('  ')
     expect(empty.map((s) => s.kind)).toEqual(['recent', 'suggested'])

@@ -19,6 +19,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { h, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import AgentStreamDrawer from '../panel/AgentStreamDrawer.vue'
+import { openShieldingSurfaces, resetModalSurfaceRegistry } from '@/composables/features/app/modal-surface-registry/registry'
 import type { WorkflowAgentCall, WorkflowRunRecord } from '@taiji/shared'
 
 // ── mock：RPC 域 + @/api 门面回指（AgentTabContent 挂载链需要 store + api）────────
@@ -272,5 +273,38 @@ describe('AgentStreamDrawer · 快照刷新与错误态（AgentTabContent 链保
     await flushPromises()
     expect(wrapper.find('[data-testid="wf-viz-agent-error"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="message-stream-stub"]').exists()).toBe(true)
+  })
+})
+
+describe('AgentStreamDrawer · 模态表面聚合注册（§6.7 agent-stream-drawer 族）', () => {
+  beforeEach(() => {
+    // 注册表是模块级单例：本 describe 用例自持挂载实例，先复位防跨用例条目残留
+    resetModalSurfaceRegistry()
+  })
+
+  it('挂载即注册 view 遮蔽族（intersecting）：开合态直读 open 本体，rect 读抽屉根元素实测', async () => {
+    const wrapper = await mountDrawer()
+    // 收起（open=false）：不在遮蔽报告内
+    expect(openShieldingSurfaces().some((s) => s.id === 'agent-stream-drawer')).toBe(false)
+    // 展开：intersecting 档 + rect 读点直读 DOM（jsdom 下 getBoundingClientRect 全 0，非 null 即读点接通）
+    ;(wrapper.vm as unknown as DrawerVM).openAgent(makeCall({ id: 0 }))
+    await flushPromises()
+    const entry = openShieldingSurfaces().find((s) => s.id === 'agent-stream-drawer')
+    expect(entry).toBeDefined()
+    expect(entry?.mode).toBe('intersecting')
+    expect(entry?.rect).toEqual({ x: 0, y: 0, width: 0, height: 0 })
+    // 收起后恢复「不在报告内」（开合态与 open 本体绑定）
+    await wrapper.find('[data-testid="wf-viz-agent-drawer-collapse"]').trigger('click')
+    await flushPromises()
+    expect(openShieldingSurfaces().some((s) => s.id === 'agent-stream-drawer')).toBe(false)
+  })
+
+  it('卸载即注销（onBeforeUnmount dispose）：条目从注册表摘除', async () => {
+    const wrapper = await mountDrawer()
+    ;(wrapper.vm as unknown as DrawerVM).openAgent(makeCall({ id: 0 }))
+    await flushPromises()
+    expect(openShieldingSurfaces().some((s) => s.id === 'agent-stream-drawer')).toBe(true)
+    wrapper.unmount()
+    expect(openShieldingSurfaces().some((s) => s.id === 'agent-stream-drawer')).toBe(false)
   })
 })
