@@ -238,7 +238,7 @@ describe('collectFilePaths', () => {
  * - background-task-bucket 分桶 / 筛选 / 计数 / statusIcon SSOT
  * - partitioned-session-records 共享分区工厂行为直测
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/lib/file-type.test.ts
+ * 运行：cd packages/renderer && npx vitest run src/__tests__/wave3/node-47-lib-use-chat-dispose.test.ts（file-type 节）
  */
 describe('detectFileKind', () => {
   describe('markdown', () => {

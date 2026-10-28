@@ -480,7 +480,7 @@ describe('bg 分层方向（场景 1① 纯计算形态，§3.1 分层/镜像规
  *   cancelled+interrupted 同中性——用词区分由 shared WORKFLOW_RUN_OUTCOME_LABELS
  *   承载，文案断言段见「中文显示名词表单源」describe）；reopened 中性色修正锚。
  *
- * 运行：cd packages/renderer && pnpm vitest run src/__tests__/state-tone-lock.test.ts
+ * 运行：cd packages/renderer && pnpm vitest run src/__tests__/root-node.test.ts（state-tone-lock 节）
  */
 import {
   SUBAGENT_STATUS_ALL,
@@ -635,7 +635,7 @@ describe('SUBAGENT_DOT_RULES 全集锁（[W2 D8] 状态点规则按 status 分�
  * - countThinking/countToolCalls/hasFailedTool：badge 统计 + 失败检测
  * - chat store：thinking/tool_call 流式块追加、hydrate 历史注入、error 块
  *
- * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/fg5-message-stream.test.ts
+ * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/root-node.test.ts（fg5-message-stream 节）
  */
 import {
   toRenderItems,
@@ -1310,7 +1310,7 @@ describe('extension domain setAutoUpgrade', () => {
  * 真用 useSessionStore（验证 applySnapshot 落点）+ useChat（被测入口）。
  * 注：useChat streamSubscriptions 是模块级单例，同文件各用例 sid 必须唯一。
  *
- * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/session-renamed-sync.test.ts
+ * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/root-node.test.ts（session-renamed-sync 节）
  */
 // '@/api' mock 工厂解引用的 helper import 必须先于触发工厂执行的 import（useChat 链）求值
 // mock 实例（工厂内创建）的清除入口：经 mock 后的 '@/api' 取引用（同 settings quota 域范式）
@@ -1567,7 +1567,7 @@ describe('session.thinkingLevelSet 事件 → 状态层 thinkingLevel 同步', (
  * session-api——mock 正交（本节 mock '@/api' 门面；session-api 节不 mock @/api，
  * 只 mock core ws-client 与 core pending 相对路径，core domains/session 真实实现
  * 不经门面），零冲突。各节以裸块隔离。
- * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/new-task/workspace-store.test.ts
+ * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/root-node.test.ts（workspace-store 节）
  */
 
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -1589,7 +1589,7 @@ import { workspace } from '@/api'
  * （直接测 domains/session 真实实现）。request 已下沉 core（tc u1），mock 目标须与
  * core 内相对 import 同一模块 ID 才能拦截。
  *
- * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/new-task/session-api.test.ts
+ * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/root-node.test.ts（session-api 节）
  */
 
 import { create } from '@taiji/core/transport/api/domains/session'

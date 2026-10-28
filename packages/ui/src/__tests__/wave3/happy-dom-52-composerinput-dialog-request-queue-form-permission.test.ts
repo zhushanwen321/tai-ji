@@ -1357,7 +1357,7 @@ describe('composer-input-chip-mousedown', () => {
  * 只能在被 find 的元素上派发，无法把 e.target 指到 chip 子元素）。deps 经 ComposerInputDeps
  * provide 注入（W4 契约）。
  *
- * 运行：cd packages/ui && npx vitest run src/features/composer/__tests__/composer-input-chip-mousedown.test.ts
+ * 运行：cd packages/ui && npx vitest run src/__tests__/wave3/happy-dom-52-composerinput-dialog-request-queue-form-permission.test.ts（composer-input-chip-mousedown 节）
  */
 
 const deps: ComposerInputDeps = {
@@ -1560,7 +1560,7 @@ describe('composer-input-trigger-forward', () => {
  * renderer 侧同名场景测试（composer-hash-trigger.test.ts）在 renderer 包跑 coverage，
  * 本文件落 ui 包内，补 ui 包对 ComposerInput.vue 的行覆盖。
  *
- * 运行：cd packages/ui && npx vitest run src/features/composer/__tests__/composer-input-trigger-forward.test.ts
+ * 运行：cd packages/ui && npx vitest run src/__tests__/wave3/happy-dom-52-composerinput-dialog-request-queue-form-permission.test.ts（composer-input-trigger-forward 节）
  */
 
 const deps: ComposerInputDeps = {

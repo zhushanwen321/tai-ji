@@ -858,7 +858,7 @@ describe('composer-injection text 扩展（Phase 4 联动 1）', () => {
  * （令牌断言 / git composable / i18n 冒烟），异域剔除保持独立；动画源码静态扫描不属
  * 单测层，归 `scripts/check-animation-source-guards.mjs`。
  *
- * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/terminal/terminal-themes.test.ts --pool=threads
+ * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/composables/features/terminal/__tests__/use-terminal.test.ts --pool=threads
  */
 
 // ══════════ 节 1/2 — 来源: terminal-themes.test.ts ══════════

@@ -498,7 +498,7 @@ describe('chat store 瞬态状态收尾（W3：finalizeAllStreaming 应全收尾
  * 修复：tool_call_end/update 用 findToolCallOwner（按 toolCallId 全局查找）锚定；
  * message.complete 把残留 running 收尾为 end_not_received（正常 stop）/ error（error stop）。
  *
- * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/stores/toolcall-anchor.test.ts
+ * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/chat-store-reset.test.ts（toolcall-anchor 节）
  */
 
 describe('findToolCallOwner — ID 锚定查找', () => {
@@ -725,7 +725,7 @@ describe('W1: isActive 作为 UI 层 SSOT — deriveStatus 消费 isActive（含
  * scope.stop() 触发 onScopeDispose 退订。beforeEach 重建 scope + afterEach stop 兜底清干净
  * （events.ts 的 globalTypeHandlers 是模块级 Map，scope.stop 经 onScopeDispose 从中删除 handler）。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/useHandoffEffect.test.ts
+ * 运行：cd packages/renderer && npx vitest run src/__tests__/chat-store-reset.test.ts（useHandoffEffect 节）
  */
 
 
@@ -1043,7 +1043,7 @@ describe('M7 FR-5: deleteSession 时序 evict 在 dispose 前', () => {
  * - invalidateStatusCache() 无参清除全部
  * - deleteSession 集成：disposeSession 后调 invalidate 清理
  *
- * 运行：npx vitest run src/__tests__/composables/status-cache.test.ts
+ * 运行：npx vitest run src/__tests__/chat-store-reset.test.ts（status-cache 节）
  */
 
 describe('W3: derivedStatus 缓存复用（AC-2）', () => {
@@ -1126,7 +1126,7 @@ describe('W3: invalidateStatusCache', () => {
  * executingBash）——W1T3b 的「streaming bash 消息」种子改为手动 setMessages 注入
  * （防御场景：entry 化后正常流转不产生 streaming bash 消息，仅手动种子可触发该路径）。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/stores/chat-bash-effects.test.ts
+ * 运行：cd packages/renderer && npx vitest run src/__tests__/chat-store-reset.test.ts（chat-bash-effects 节）
  */
 
 /** 手动种子：streaming bash 消息（entry 化后正常流转不产生，仅手动注入可达） */
@@ -1233,7 +1233,7 @@ describe('w1 bash 收尾链（entry 化 + markBashError 兜底，bash timer 契�
  * 渲染数据，经 customStart effect 构造的 system Message 时，details 字段被原样保留，
  * 前端可据此路由到 GuiComponentRenderer。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/effects/custom-start-details.test.ts
+ * 运行：cd packages/renderer && npx vitest run src/__tests__/chat-store-reset.test.ts（custom-start-details 节）
  */
 
 describe('customStart details 保留（审计项 A）', () => {

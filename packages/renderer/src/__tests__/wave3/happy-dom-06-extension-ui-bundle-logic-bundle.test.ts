@@ -66,7 +66,7 @@ import { computed, createApp, defineComponent, effectScope, inject, nextTick, re
  *    afterEach restoreAllMocks 复位（spy 模块导出形态先例：chat-shell-bundle 的
  *    spyOn(events, 'onGlobalType')）。
  *
- * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/composables/extension-ui-bundle.test.ts
+ * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/wave3/happy-dom-06-extension-ui-bundle-logic-bundle.test.ts（extension-ui-bundle 节）
  */
 // ── use-btw-tab-data 节的 '@/api' 门面局部 mock：替换 badge 数据源（W4b 起 =
 //    session.listSessions）+ 回放链 getHistory 桩 ──

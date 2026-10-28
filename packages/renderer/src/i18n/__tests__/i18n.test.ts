@@ -45,7 +45,7 @@ import { fileURLToPath } from 'node:url'
  * - landing 模式改名（D4）值的回归锁定：`newTask.presetSelect.*` 用「模式」措辞
  *   （R3 补完——landing 侧曾漏改，改名落地无测试覆盖即会再次回退）
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/i18n/i18n-value-smoke.test.ts
+ * 运行：cd packages/renderer && npx vitest run src/i18n/__tests__/i18n.test.ts（i18n-value-smoke 节）
  */
 import i18n, { setLocale } from '@/i18n'
 import zhCN from '@/i18n/locales/zh-CN/sidebar'
@@ -593,7 +593,7 @@ describe('U9: locale 消息无裸 @（linked-message 语法冲突检查）', () 
  * 相对上溯（合并文件仍在本目录，推导不变），扫描器均排除 __tests__（不自扫）。
  * 各节以裸块隔离节内常量与 helper（REPO_ROOT / SKIP_DIRS 等同名异值常量不串）。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/i18n/locale-key-usage-guard.test.ts
+ * 运行：cd packages/renderer && npx vitest run src/i18n/__tests__/i18n.test.ts（locale-key-usage-guard 节）
  */
 import zhPanel from '@taiji/ui/locale/zh-CN/panel'
 import enPanel from '@taiji/ui/locale/en-US/panel'
