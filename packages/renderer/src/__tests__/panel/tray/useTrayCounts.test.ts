@@ -2,8 +2,9 @@
  * useTrayCounts 数据范围测试（u-tray-native，设计 docs/design/composer-task-tray.md §3.3 D2/D13，已删除 git 可追溯）。
  *
  * [容器扩展点统一 §6.6/U9+U10] subagent / workflow 两件已迁插件推 widget 树，本文件的
- * workflow 计数/分桶/首拉/错误态/retry 用例随宿主自建面退役——托盘两件的判定镜像单测
- * 落扩展侧 interface/gui/（tray-widget.ts / workflow-tray-widget.ts）。
+ * workflow 计数/分桶/首拉/错误态/retry 用例随宿主自建面退役——托盘两件的判定单测
+ * 落扩展侧 interface/gui/（tray-widget.ts / workflow-tray-widget.ts；subagent 件
+ * 判据本体在 extension-protocol subagent-projection 单点）。
  *
  * 三视角（TEST-STRATEGY §3）：
  * - 构建者（白盒）：件计数口径与谓词边界——bash 两视图由 background-task-bucket SSOT

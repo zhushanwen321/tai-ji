@@ -8,10 +8,13 @@
  * countSubagents / DEFAULT_SUBAGENT_FILTER 及其类型）随托盘「已收起」桶退役删除，
  * 其用例一并退役——已结束桶判据 = !isRunningProjection（「已收起」机制现已全链路删除，
  * intent 字段不复存在），口径断言现承载于 `__tests__/panel/tray/useTrayCounts.test.ts`。
- * 本文件保留判据与展示 helper 本体的完整断言体系：
+ * 本文件保留判据与展示 helper 本体的完整断言体系（判据本体已下沉
+ * @zhushanwen/extension-protocol subagent-projection/predicates.ts——[dmg-r1-4]，本
+ * 测试经 @/lib/subagent-bucket 的 re-export 锚定同一实现，插件侧托盘 widget 同源
+ * import，扩值评估两侧同批）：
  * [容器扩展点统一 §6.6/U9] 原「失败红点判据四形态 / subagentDotClass 兜底」两段随
  * 托盘 subagent 件迁移退役（宿主托盘行删，状态点规则表删除）——四形态 fixture 迁插件
- * 侧 interface/gui/tray-widget.ts 单测承载（判定镜像，两侧同批扩值）。
+ * 侧 interface/gui/tray-widget.ts 单测承载。
  *
  * 三视角：
  * - 白盒：isRunningProjection 占用谓词（SUBAGENT_STATUS_ALL 全集 × 占用矩阵 + P1 形态矩阵）

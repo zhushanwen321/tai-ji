@@ -18,8 +18,11 @@
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
+  failedRoundOf,
+  failureCauseLabel,
   guiComponent,
   guiResult,
+  isRunningProjection,
   setWidgetDual,
   type DualWidgetContent,
   type GuiComponent,
@@ -35,32 +38,10 @@ export const SUBAGENT_TRAY_VIEW_ID = "subagent";
 /** 单次推送的记录上限（托盘是概览面不是全量列表；行数超限按查询面排序截断）。 */
 const TRAY_RECORD_LIMIT = 50;
 
-// ── 判据（宿主侧 renderer lib/subagent-bucket SSOT 的插件侧镜像）──────────────
-// 两域判据同形不同源：core 不依赖宿主 renderer，宿主不进插件进程——镜像由两侧
-// 单测各自锚定（本文件 tray-widget.test / renderer subagent-bucket.test），词表
-// 扩值时两侧同批评估（shared SubagentRecord 词表纪律同款）。
-
-/** 占用判据：running 且无轮收条停因（「轮收条已写 = 本轮不在途」的等价信号）。 */
-function isRunningProjection(record: SubagentRecord): boolean {
-  return record.status === "running" && record.stopReason === undefined;
-}
-
-/**
- * 失败轮判据：lastRound.failure 存在且非 user.cancelled（FailureCause 存在即失败轮；
- * user.cancelled 是用户主动中止非失败）。返回该 failure 供展示消费；非失败轮返回
- * undefined。
- */
-function failedRoundOf(record: SubagentRecord): SubagentRecord["lastRound"] | undefined {
-  const failure = record.lastRound?.failure;
-  if (failure === undefined) return undefined;
-  if (failure.class === "user" && failure.kind === "cancelled") return undefined;
-  return record.lastRound;
-}
-
-/** 失败分类展示词："<class>.<kind>" 点拼（与 run 终局 failedMembers[].cause 序列化形态同形）。 */
-function failureCauseLabel(failure: { class: string; kind: string }): string {
-  return `${failure.class}.${failure.kind}`;
-}
+// ── 判据（单点 = extension-protocol subagent-projection：isRunningProjection /
+//    failedRoundOf / failureCauseLabel 本模块 import 消费，与宿主 renderer 侧
+//    lib/subagent-bucket 同源——判据本体与语义注释见协议包 predicates.ts，
+//    扩值评估两侧同批）──────────────────────────────────────────────
 
 // ── widget 树构造（纯函数，单测锚点）─────────────────────────────────────────
 

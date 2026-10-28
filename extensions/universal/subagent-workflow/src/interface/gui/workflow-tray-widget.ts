@@ -41,9 +41,10 @@ export const WORKFLOW_TRAY_VIEW_ID = "workflow";
 /** 单次推送的 run 行上限（托盘是概览面不是全量列表；序 = runs Map 插入序截断）。 */
 const TRAY_RUN_LIMIT = 50;
 
-// ── 行级判据（宿主侧 tray-tone workflow 档的插件侧镜像）───────────────────────
-// 与 subagent 件同款「两域判据同形不同源」：宿主 renderer 不进插件进程，本文件在
-// 插件侧独立承载判定；词表扩值时两侧同批评估（core runSummary 三态 + DoneReason）。
+// ── 行级判据（宿主侧 tray-tone workflow 档的插件侧承载；run 级判据，消费
+//    core runSummary/DoneReason 词表——与 subagent 件的 record 级投影判据不同组：
+//    那组判据已下沉 extension-protocol 单点（subagent-projection/predicates.ts），
+//    本组以 runSummary 为输入、仅本文件承载，词表扩值时与 core runSummary 同批评估。──
 
 /**
  * 单个 run 的成员进度计数（N/M）：N = 已落定 call 数（result 已设置——markDone

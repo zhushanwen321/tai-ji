@@ -9,8 +9,10 @@
 //     onChange 事件驱动重推（微任务合并）+ detach 退订；
 //   ③观察者——纯函数入参出参；推送失败不反噬调用方（warn 留痕后继续）。
 //
-// 判据镜像关系：本文件的占用/失败判据与 renderer lib/subagent-bucket SSOT 同形不同源
-// （core 不依赖宿主 renderer），词表扩值时两侧同批评估（源文件头注登记）。
+// 判据单点：本文件的占用/失败判据与 renderer lib/subagent-bucket 同源——判据本体
+// 在 @zhushanwen/extension-protocol（extensions/subagent-projection/predicates.ts），
+// 两侧 import 同一实现（[dmg-r1-4] 下沉，镜像手抄退役），词表扩值评估两侧同批
+// （shared/core record 词表纪律不变）。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -185,7 +187,7 @@ describe("buildSubagentTrayWidget 树构造（纯函数）", () => {
     expect(result?.gui.meta?.status).toBe("done");
   });
 
-  it("占用判据镜像：running + 轮收条停因（stopReason 已写）落已结束段（「轮收条已写 = 本轮不在途」）", () => {
+  it("占用判据（protocol 单点）：running + 轮收条停因（stopReason 已写）落已结束段（「轮收条已写 = 本轮不在途」）", () => {
     const result = buildSubagentTrayWidget([
       makeRecord({ id: "r-dead", status: "running", stopReason: "failed" }),
       makeRecord({ id: "r-live", status: "running", stopReason: undefined }),
