@@ -933,18 +933,16 @@ export class PluginService implements IPluginService {
 
   /**
    * 清单可安装视图（provider-plugin-access U5，plugin.listAvailable 的 runtime 侧）。
-   * R-2 裁决（2026-10-24）：service 返回的拉取元数据（available/stale/reason，S15①②
-   * 两态呈现判据）原样透传进 reply 本体出 wire，不再丢弃。
+   * R-2 裁决（2026-10-24）：拉取元数据（available/stale/reason，S15①②两态呈现判据）
+   * 由 catalog service 的 replyMeta 组装进 reply 本体，本方法纯透传出 wire。
    */
   async listAvailablePlugins(): Promise<PluginListAvailableReply> {
-    const { reply, available, stale, reason } = await this.catalogService.listAvailable()
-    return { ...reply, available, stale, ...(reason !== undefined ? { reason } : {}) }
+    return (await this.catalogService.listAvailable()).reply
   }
 
   /** 清单原始目录条目（provider-plugin-access U5，plugin.catalog 的 runtime 侧）；元数据透传同 listAvailablePlugins。 */
   async getPluginCatalog(): Promise<PluginCatalogReply> {
-    const { reply, available, stale, reason } = await this.catalogService.catalog()
-    return { ...reply, available, stale, ...(reason !== undefined ? { reason } : {}) }
+    return (await this.catalogService.catalog()).reply
   }
 
   /** plugin:event 广播 id 单调计数（碰撞面见 createPluginEventIdGenerator） */
