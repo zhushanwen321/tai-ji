@@ -1427,6 +1427,97 @@ describe('SubagentRow: running / failed / unfinished 态', () => {
   })
 })
 
+// ── [容器扩展点统一 §7.4 U9 层 2] 行内呈现两分支：details.__gui__ 存在 → 内层呈现替换为
+//    插件树（GuiComponentRenderer 真渲染），点击仍归本行外壳（openSubagent 需要 virtualId，
+//    树内传不出去——三问答案②）；无树 → 保留现有解析（宿主单行摘要）。──────────────
+
+import { guiComponent, guiResult, PROTOCOL_VERSION } from '@zhushanwen/extension-protocol';
+
+/** 构造合法 __gui__ 渲染载荷（版本协商字段必须与协议一致，extractGui 校验 v）。 */
+function makeGuiDetails() {
+  return {
+    __gui__: guiResult(
+      guiComponent('card', {
+        header: 'research-trace-ui',
+        body: [guiComponent('stats-line', { items: [{ label: 'status', value: 'running', severity: 'ok' }] })],
+      }),
+    ),
+  }
+}
+
+describe('SubagentRow: 行内呈现两分支（§7.4 层 2 接树）', () => {
+  it('有 __gui__ → 渲插件树（插件 card/stats-line 真渲染可见），宿主单行解析不渲染', () => {
+    const wrapper = mount(SubagentRow, {
+      props: { tool: makeSubagent({ details: makeGuiDetails() }), sessionId: 's1' },
+    })
+    // 用户可见断言：插件树内容在行内（card header = slug + stats-line 值）
+    expect(wrapper.find('[data-testid="gui-card"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="gui-stats-line"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('research-trace-ui')
+    expect(wrapper.text()).toContain('running')
+    // 宿主解析行不并存（内层呈现已替换为插件树）
+    expect(wrapper.text()).not.toContain('researcher')
+    expect(wrapper.text()).not.toContain('子代理')
+  })
+
+  it('有 __gui__ 时点击仍开抽屉（点击不交给插件树——virtualId 从树内传不出，外壳 @click 保留）', async () => {
+    const wrapper = mount(SubagentRow, {
+      props: {
+        tool: makeSubagent({
+          details: makeGuiDetails(),
+          output: JSON.stringify({ action: 'start', subagentId: '1338dda5', slug: 'rs' }),
+        }),
+        sessionId: 's1',
+      },
+    })
+    await wrapper.find('[data-testid="subagent-block"] > div').trigger('click')
+    expect(openSubagentMock).toHaveBeenCalledTimes(1)
+    expect(openSubagentMock).toHaveBeenCalledWith({
+      virtualId: subagentVirtualId('s1', '1338dda5'),
+    })
+  })
+
+  it('无 __gui__ → 保留现有解析（宿主单行摘要：agent/slug 在场，树节点不存在）', () => {
+    const wrapper = mount(SubagentRow, {
+      props: { tool: makeSubagent(), sessionId: 's1' },
+    })
+    expect(wrapper.find('[data-testid="gui-card"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('researcher')
+    expect(wrapper.text()).toContain('research-trace-ui')
+  })
+
+  it('details.__gui__ 版本不符 → 不渲树（走无树分支，防过期协议组件上屏）', () => {
+    const details = makeGuiDetails()
+    ;(details.__gui__ as { v: number }).v = PROTOCOL_VERSION + 1
+    const wrapper = mount(SubagentRow, {
+      props: { tool: makeSubagent({ details }), sessionId: 's1' },
+    })
+    expect(wrapper.find('[data-testid="gui-card"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('researcher')
+  })
+
+  it('running 态 streaming detail.__gui__ 兜底：终态 details 无树时渲 streaming 树', () => {
+    const wrapper = mount(SubagentRow, {
+      props: {
+        tool: makeSubagent({ status: 'running', detail: makeGuiDetails() }),
+        sessionId: 's1',
+      },
+    })
+    expect(wrapper.find('[data-testid="gui-card"]').exists()).toBe(true)
+  })
+
+  it('终态（非 running）无 details.__gui__ 时 streaming detail 残留不作为渲染源', () => {
+    const wrapper = mount(SubagentRow, {
+      props: {
+        tool: makeSubagent({ status: 'completed', detail: makeGuiDetails() }),
+        sessionId: 's1',
+      },
+    })
+    expect(wrapper.find('[data-testid="gui-card"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('researcher')
+  })
+})
+
 // ======================================================================
 // ← features/composer/__tests__/ComposerInput.test.ts
 // ======================================================================

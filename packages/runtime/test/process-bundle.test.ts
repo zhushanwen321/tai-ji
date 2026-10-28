@@ -183,7 +183,7 @@ const DATA_DIR = '/data/taiji'
 
 
 /** spawn 清单 fixture 值（staged 形态即可，本文件只测状态机，形态覆盖在 src 版专测）。 */
-const MARKER = '/data/taiji/extensions/pi-agent-ext'
+const MARKER = '/data/taiji/extensions/pi-host-internals'
 
 
 function orphanRow(pid: number): string {

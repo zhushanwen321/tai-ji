@@ -435,7 +435,7 @@ describe.skipIf(!PI_DIST_m2_m2_m2_m2_m2_m2_d1)(
       const splitIdx = win.indexOf('const spaceIndex = text.indexOf(" ");')
       expect(
         splitIdx,
-        'PS-63 漂移：首空格切分（indexOf(" ")）消失/改形——agent-ext __taiji_nav__ 的 entryId 投递前提变化，复审 PS-63',
+        'PS-63 漂移：首空格切分（indexOf(" ")）消失/改形——host-internals __taiji_nav__ 的 entryId 投递前提变化，复审 PS-63',
       ).toBeGreaterThanOrEqual(0)
       const argsIdx = win.indexOf('text.slice(spaceIndex + 1)')
       expect(
@@ -574,11 +574,11 @@ describe.skipIf(SKIP_REASON_m2_m2_m2_m2 !== '')(
       const sharedSrc = readFileSync(join(REPO_ROOT as string, 'packages', 'shared', 'src', 'message.ts'), 'utf-8')
       const coreSrc = readFileSync(join(REPO_ROOT as string, 'packages', 'core', 'src', 'domain', 'chat', 'apply-entry-convert.ts'), 'utf-8')
       const rtSrc = readFileSync(join(REPO_ROOT as string, 'packages', 'runtime', 'src', 'infra', 'pi', 'entry-tree-builder.ts'), 'utf-8')
-      const extSrc = readFileSync(join(REPO_ROOT as string, 'extensions', 'taiji', 'msg-id-mapper', 'src', 'index.ts'), 'utf-8')
+      const extSrc = readFileSync(join(REPO_ROOT as string, 'extensions', 'taiji', 'host-internals', 'src', 'msg-id-mapper.ts'), 'utf-8')
       const segmentDef = /const MSG_ID_UUID_SEGMENT = '(.+?)'/.exec(sharedSrc)
       const tagMatchDef = /const TAG_MATCH = \/(.+?)\/([a-z]*)\r?\n/.exec(extSrc)
       expect(segmentDef, 'shared MSG_ID_UUID_SEGMENT 字面量提取失败——复核 packages/shared/src/message.ts').not.toBeNull()
-      expect(tagMatchDef, 'extension TAG_MATCH 字面量提取失败——复核 msg-id-mapper/src/index.ts').not.toBeNull()
+      expect(tagMatchDef, 'extension TAG_MATCH 字面量提取失败——复核 host-internals/src/msg-id-mapper.ts').not.toBeNull()
       // [MF-1-11] uuid 模式段手写体全仓单处：shared message.ts 只允许 MSG_ID_UUID_SEGMENT
       // 一处（出现 2 次 = 三形态外又冒出手写体新问题点）；core/runtime 零残留（残留 =
       // 派生器回退或新问题点）

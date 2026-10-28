@@ -17,6 +17,8 @@ export default {
     // overlay 壳
     overlayTitle: '工作流实况',
     overlayClose: '关闭',
+    // 插件内容浮层 aria-label（§6.8 插件载体——声明 title 待注册表接线后透传，现行通用词）
+    overlayPluginTitle: '插件面板',
     overlayTabRuns: '运行',
     overlayTabScheduler: '定时任务',
     overlayTabCanvas: '画布',

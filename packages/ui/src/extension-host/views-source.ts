@@ -6,7 +6,7 @@
  * 查询 sidebar.tab 视图贡献，见 renderer 侧 T6 接线），单测 global.provide mock。
  *
  * 与 ViewHostSource（getView(sessionId, viewId) 按需取单 view 的 GuiComponent 树）不同，
- * 本接口是 L2 二级 tab 的清单源：一次取全部 plugin view 摘要（标题/可见性/所属 plugin），
+ * 本接口是 L2 二级 tab 的清单源：一次取全部 plugin view 摘要（标题/图标/所属 plugin），
  * 供 PluginViewContainer 渲染 tab 栏 + 路由到 ViewHost。
  */
 import type { InjectionKey } from 'vue'
@@ -17,7 +17,6 @@ export interface PluginViewSummary {
   title: string
   /** 图标名（当前贡献侧无图标源，壳透传 undefined；组件按 viewId 内置字典兜底） */
   icon?: string
-  initialVisibility: 'visible' | 'hidden'
   /** 所属 plugin（builtin 判定依据：'tasks' 为 builtin，不可关闭） */
   pluginId: string
 }

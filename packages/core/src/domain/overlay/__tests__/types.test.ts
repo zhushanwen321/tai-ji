@@ -19,14 +19,17 @@ import type {
 
 // ── 编译期断言（tsc 系执行）──
 
-// kind 四员（browser / workflow / scheduler / canvas）
-const overlayKinds: OverlayKind[] = ['browser', 'workflow', 'scheduler', 'canvas']
+// kind 词表五员（browser / workflow / scheduler / canvas 内置 + plugin 插件内容载体——
+// 容器扩展点统一 §6.8「内置 4 种 + 一种插件载体」开放形态；词表单源 = @taiji/shared
+// OverlayContentKind，browser:overlay-state IPC 契约四方同批）
+const overlayKinds: OverlayKind[] = ['browser', 'workflow', 'scheduler', 'canvas', 'plugin']
 
-// 判别联合：browser 载荷 url+sessionId（发起会话，URL 注入链）/ workflow 载荷 sessionId+runId（与迁移前 overlayCurrent 同构）/ scheduler 载荷 sessionId（定时任务面板 per-session 分区键）/ canvas 载荷 canvasId+sessionId（画布归属会话，D4 隔离）
+// 判别联合：browser 载荷 url+sessionId（发起会话，URL 注入链）/ workflow 载荷 sessionId+runId（与迁移前 overlayCurrent 同构）/ scheduler 载荷 sessionId（定时任务面板 per-session 分区键）/ canvas 载荷 canvasId+sessionId（画布归属会话，D4 隔离）/ plugin 载荷 contentId+sessionId（§6.8 插件载体——sessionId 由宿主注入当前会话，级联判据唯一锚）
 const browserContent: OverlayContent = { kind: 'browser', payload: { url: 'http://127.0.0.1:5173/', sessionId: 'sess-1' } }
 const workflowContent: OverlayContent = { kind: 'workflow', payload: { sessionId: 'sess-1', runId: 'run-1' } }
 const schedulerContent: OverlayContent = { kind: 'scheduler', payload: { sessionId: 'sess-1' } }
 const canvasContent: OverlayContent = { kind: 'canvas', payload: { canvasId: 'cvs-1', sessionId: 'sess-1' } }
+const pluginContent: OverlayContent = { kind: 'plugin', payload: { contentId: 'my-plugin.panel', sessionId: 'sess-1' } }
 
 // 开合态：关 = current 复位 null；开 = 单例 current
 const closedState: OverlayControlState = { isOpen: false, current: null }
@@ -45,8 +48,8 @@ type InvalidShieldsViewRejected = 'always' extends ShieldsViewMode ? false : tru
 const shieldsViewNegativeAnchor: InvalidShieldsViewRejected = true
 
 describe('overlay 开合态类型契约（§7.1 单例 kind/payload 换内容）', () => {
-  it('kind 四员 = browser / workflow / scheduler / canvas（浮层条目锚；canvas 画布 tab，problem-solve-canvas §3.1(3)）', () => {
-    expect(overlayKinds).toEqual(['browser', 'workflow', 'scheduler', 'canvas'])
+  it('kind 词表五员 = browser / workflow / scheduler / canvas + plugin（§6.8 插件内容载体；四方词表同批）', () => {
+    expect(overlayKinds).toEqual(['browser', 'workflow', 'scheduler', 'canvas', 'plugin'])
   })
 
   it('关态 current 复位 null；开态持单例 current（用户可见：关浮层无残留内容、开新内容替换旧内容）', () => {
@@ -56,11 +59,12 @@ describe('overlay 开合态类型契约（§7.1 单例 kind/payload 换内容）
     expect(openState.current).toBe(workflowContent)
   })
 
-  it('payload 形状：browser=URL 注入链（url + 发起会话）/ workflow=与迁移前 overlayCurrent 同构（SSOT 迁移对账锚）/ scheduler=定时任务面板会话键 / canvas=画布 id + 归属会话（D4）', () => {
+  it('payload 形状：browser=URL 注入链（url + 发起会话）/ workflow=与迁移前 overlayCurrent 同构（SSOT 迁移对账锚）/ scheduler=定时任务面板会话键 / canvas=画布 id + 归属会话（D4）/ plugin=声明 id + 宿主注入会话（§6.8，级联判据锚）', () => {
     expect(browserContent).toEqual({ kind: 'browser', payload: { url: 'http://127.0.0.1:5173/', sessionId: 'sess-1' } })
     expect(workflowContent).toEqual({ kind: 'workflow', payload: { sessionId: 'sess-1', runId: 'run-1' } })
     expect(schedulerContent).toEqual({ kind: 'scheduler', payload: { sessionId: 'sess-1' } })
     expect(canvasContent).toEqual({ kind: 'canvas', payload: { canvasId: 'cvs-1', sessionId: 'sess-1' } })
+    expect(pluginContent).toEqual({ kind: 'plugin', payload: { contentId: 'my-plugin.panel', sessionId: 'sess-1' } })
   })
 })
 

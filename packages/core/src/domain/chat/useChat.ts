@@ -1039,7 +1039,7 @@ export function createUseChat(deps: UseChatDeps) {
     // extension input hook 见不到标记即不写映射 custom entry（自然 no-op）。
     // 标记格式严格：`<!--taiji:msg:<uuid>-->`，uuid 是 clientUuid 完整值（u-<uuid>），
     // 与 extension TAG 正则（u-[0-9a-fA-F-]{36}）+ segments.json clientUuid key 严格一致。
-    // [u3b] 本标记只服务 msg-id-mapper 映射回填（D8：与内核出站裸标记双标记共存，已登记）；
+    // [u3b] 本标记只服务 msg-id-mapper 模块映射回填（D8：与内核出站裸标记双标记共存，已登记）；
     // 投递身份的裸标记由内核出站侧统一附加。
     const markedPromptText = needsBackfill ? `${promptText}\n${markerLiteral(clientUuid)}` : promptText
     // 图片走路径模式（对齐 pi TUI）：路径已在 promptText 里（segmentsToText 产出裸路径），

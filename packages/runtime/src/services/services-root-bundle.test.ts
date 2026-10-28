@@ -23,7 +23,7 @@ const DATA_DIR = '/Users/tester/.taiji'
 const OWN_PID = 100
 
 /** spawn 清单值（判据 v2：argv --extension 值与清单精确相等；形态对齐 reap-orphan-pi.test MARKERS）。 */
-const MARKER = '/Applications/TaiJi.app/Contents/Resources/extensions/pi-agent-ext'
+const MARKER = '/Applications/TaiJi.app/Contents/Resources/extensions/pi-host-internals'
 
 
 let dataDir: string
@@ -202,7 +202,7 @@ const OWN_PID_m2 = 100
  * 只是精确相等目标字符串，形态区分用于正向 ×2 的宿主覆盖：打包 / dev）。
  */
 const MARKERS = [
-  '/Applications/TaiJi.app/Contents/Resources/extensions/pi-agent-ext', // ① 打包资源根
+  '/Applications/TaiJi.app/Contents/Resources/extensions/pi-host-internals', // ① 打包资源根
   '/Users/tester/Code/taiji/extensions/universal/todo', // ② dev 仓库源码根（D-11 形态）
 ] as const
 

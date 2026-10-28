@@ -3,7 +3,10 @@
   壳根类名契约（.trace-blk）与 data-testid（block-tool-<id>）留在 Block 壳，本组件根 =
   原 tool 分支根 div（.trace-tool），无新 DOM 层。
   agentgraph 数据结构同 tool（ToolCall），Turn 层 type 语义与渲染分派在本组件内统一：
-  按工具名三分——subagent → SubagentRow / workflow → WorkflowRow / 其余普通 tool 形态。
+  按工具名两分——subagent → SubagentRow / 其余（含 workflow 工具组）普通 tool 形态。
+  [容器扩展点统一 §7.4 workflow 层 2] workflow 专属行组件（WorkflowRow，collapsed-only
+  + phases chips + 点击开 overlay）已删：workflow 工具落通用 tool 形态（展开区消费
+  details.__gui__ 插件树，恢复产树后的通用渲染路径；行内点击 = 展开/收起树）。
   普通 tool：默认 1 行收起（streaming/running 也收起），点击展开详情。failed 终态默认展开
   （streaming 中失败不 remount，只图标染 danger）。展开区：copy 按钮 + bash 凹槽（命令头恒吸顶）
   + meta 条 / GUI 协议输出 / 富渲染 / 文本输出 + ToolResultImages 统一图片出口。
@@ -15,10 +18,8 @@
     <!-- ── subagent 块：委托 SubagentRow（users ICON + SUBAGENT. prefix + 去卡片化）── -->
     <SubagentRow v-if="isSubagent" :tool="tool!" :session-id="sessionId" />
 
-    <!-- ── workflow 块：委托 WorkflowRow（collapsed only 单行，点击开 workflow overlay）── -->
-    <WorkflowRow v-else-if="isWorkflow" :tool="tool" :session-id="sessionId" />
-
-    <!-- ── 普通 tool 块：1 行收起（header 含 toolName+argPath 摘要+状态），点击展开详情。
+    <!-- ── 普通 tool 块（含 workflow 工具组——§7.4 workflow 层 2 删专属行组件）：1 行收起
+         （header 含 toolName+argPath 摘要+状态），点击展开详情。
          group/tool 命名分组承载行尾时刻槽的悬停/键盘聚焦两翼显现（D2）── -->
     <div v-else class="group/tool">
       <div
@@ -195,10 +196,9 @@ import { Check, Copy as CopyIcon } from '@lucide/vue'
 import type { GuiComponent } from '@zhushanwen/extension-protocol'
 import { extractGui } from '@zhushanwen/extension-protocol'
 import type { ToolCall } from '@taiji/shared'
-import { SUBAGENT_TOOL_NAMES, WORKFLOW_TOOL_NAMES } from '@taiji/shared'
+import { SUBAGENT_TOOL_NAMES } from '@taiji/shared'
 import { AnsiText, GuiComponentRenderer } from '../../rendering-protocol'
 import SubagentRow from './SubagentRow.vue'
-import WorkflowRow from './WorkflowRow.vue'
 import BlockScrollBox from './BlockScrollBox.vue'
 import ToolResultImages from './ToolResultImages.vue'
 import RunningBlockIcon from './RunningBlockIcon.vue'
@@ -308,9 +308,8 @@ const filteredMetaItems = computed(() => {
   return metaItems.value.filter((item) => item.kind !== 'lines')
 })
 
-/* ── 块类型路由：subagent / workflow（agentgraph 数据结构同 tool，分派与本组件渲染语义一致）── */
+/* ── 块类型路由：subagent（workflow 工具组落通用 tool 形态，§7.4 workflow 层 2）── */
 const isSubagent = computed(() => SUBAGENT_TOOL_NAMES.has(toolName.value))
-const isWorkflow = computed(() => WORKFLOW_TOOL_NAMES.has(toolName.value))
 
 /** 普通 tool header 的块类型 ICON（running 用 RunningBlockIcon，其余走 BLOCK_ICON_LUCIDE）。
  *  bash running 豁免动效图标（2026-10-17 方案 A 裁决）：status 归一 completed，
@@ -386,7 +385,8 @@ function toggleTool(): void {
  * 从 input 提取可读参数摘要（header 单行展示）。覆盖高频工具：
  * bash→command、read/write/edit→path、grep→pattern、tool_search→query、codemode→code。
  * （file_path/tasks 为死分支已删：pi 1.0.0 内置 edit/write 主参数是 path；tasks 参数
- * 工具 subagents 走 WorkflowRow 不经本链。）未覆盖的工具返回空串（header 只显 toolName，
+ * 工具 subagent_batch 的 name 是脚本路径——落在通用 header 摘要之外，展开区渲插件树。）
+ * 未覆盖的工具返回空串（header 只显 toolName，
  * 或由 details.summary 自报摘要接管）。
  */
 const argPath = computed(() => {

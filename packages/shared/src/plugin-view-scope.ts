@@ -12,7 +12,8 @@
  * 本模块是 scope 串形态的单一事实源：runtime 侧快照存储（PluginUiSnapshotStore）与
  * 渲染侧缓存（core ViewHostStore）用同一函数推导分区键，快照回放与实时推送两路才能
  * 落同一分区（键形态若两包各自手拼必然漂移）。全局域键含插件维度：同一挂载位被多个
- * 插件推树互不可见、互不覆盖（S25）。
+ * 插件推树互不可见、互不覆盖（S25）。挂载位维度的收窄/清理（pluginId 缺省场景）用
+ * pluginViewScopeMountPrefix 前缀原语表达，与精确键同源。
  */
 
 /** 会话域归属：现役全部会话内挂载点（panel.header / sidebar.tab / ...）。 */
@@ -35,11 +36,20 @@ export interface GlobalViewScope { // oe-exempt:20261024:framework:ports/SDK 契
 /** 插件视图归属作用域（互斥联合，恰好其一）。 */
 export type PluginViewScope = SessionViewScope | GlobalViewScope
 
+/**
+ * 全局域挂载位前缀（scope 串前缀形态）：pluginId 缺省的挂载位维度场景（快照存储
+ * clearForMount 的前缀删除）用此前缀比对，精确键必然以它开头（见 pluginViewScopeKey
+ * 的构造——两函数同处本模块，键形态改一处必改另一处，禁止再手拼）。
+ */
+export function pluginViewScopeMountPrefix(mountId: string): string {
+  return `global:${mountId}:`
+}
+
 /** 插件视图的分区键（scope 串）：runtime 快照存储与渲染侧缓存共用的键形态。 */
 export function pluginViewScopeKey(scope: PluginViewScope): string {
   return scope.kind === 'session'
     ? `session:${scope.sessionId}`
-    : `global:${scope.mountId}:${scope.pluginId}`
+    : `${pluginViewScopeMountPrefix(scope.mountId)}${scope.pluginId}`
 }
 
 /**

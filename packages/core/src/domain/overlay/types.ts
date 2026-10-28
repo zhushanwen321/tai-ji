@@ -11,8 +11,9 @@
 import type { OverlayContentKind } from '@taiji/shared'
 
 /** 浮层内容类型（§7.2 浮层条目 + scheduler 整合（2026-10-06 用户裁决）+ canvas 画布
- * tab（problem-solve-canvas §3.1(3)，对齐 scheduler 双入口先例））：
- * browser（网页）/ workflow（工作流图）/ scheduler（定时任务面板）/ canvas（问题解决画布）。
+ * tab（problem-solve-canvas §3.1(3)，对齐 scheduler 双入口先例）+ plugin 插件内容载体
+ *（容器扩展点统一 §6.8））：browser（网页）/ workflow（工作流图）/ scheduler（定时任务面板）
+ * / canvas（问题解决画布）/ plugin（插件声明内容）。
  * 词表单源 = @taiji/shared OverlayContentKind（browser:overlay-state IPC payload
  * 契约四方共用），本域派生别名保持既有导出名与消费方不变。 */
 export type OverlayKind = OverlayContentKind
@@ -51,12 +52,23 @@ export interface CanvasOverlayPayload { // oe-exempt:20261014:framework:类型�
   sessionId: string
 }
 
-/** 浮层当前内容（判别联合，kind/payload 换内容） */
+/** plugin 浮层载荷（容器扩展点统一 §6.8 插件内容载体）：contentId = 插件声明 id
+ *（overlay.content 位声明，ContentSlotRegistry 派生）；sessionId = 会话归属——由宿主在
+ * 执行打开时注入当前会话（插件不传，避免自报不一致），同时是会话删除级联的唯一判据
+ *（级联锚 payload.sessionId，kind 不参与；scope:'global' 的插件内容不参与级联）。 */
+export interface PluginOverlayPayload { // oe-exempt:20261025:framework:容器契约层声明——U7 openOverlayContent 协调函数即为消费方
+  contentId: string
+  sessionId: string
+}
+
+/** 浮层当前内容（判别联合，kind/payload 换内容）：内置 4 种（browser/workflow/scheduler/canvas）
+ * + 插件载体（§6.8「内置 + 插件载体」开放形态；词表单源 = @taiji/shared OverlayContentKind） */
 export type OverlayContent =
   | { kind: 'browser'; payload: BrowserOverlayPayload }
   | { kind: 'workflow'; payload: WorkflowOverlayPayload }
   | { kind: 'scheduler'; payload: SchedulerOverlayPayload }
   | { kind: 'canvas'; payload: CanvasOverlayPayload }
+  | { kind: 'plugin'; payload: PluginOverlayPayload }
 
 /** 浮层开合态（单例）：isOpen=false 时 current 置 null（关浮层复位，§7.4 发起会话删除级联同语义） */
 export interface OverlayControlState { // oe-exempt:20261003:framework:类型契约先行——容器契约层声明，D1 下游单元即为消费方

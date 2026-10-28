@@ -1,17 +1,19 @@
 <!--
-  TrayNativePanel —— composer 任务托盘的 built-in 三件面板（bash / subagent / workflow）。
+  TrayNativePanel —— composer 任务托盘的 built-in 任务域面板（bash）。
+  [容器扩展点统一 §6.6/U9+U10] subagent 与 workflow 两件面板已随件迁移删（插件推
+  widget 树，宿主 widget 区 TrayWidgetPanel 渲染）。
   设计 docs/design/composer-task-tray.md（已删除，git 可追溯）§3.3 D2/D8/D9 + §3.4 + §3.5。
   props / emits / 尺寸契约与形态说明见 <script setup> 顶部块注释（消费方必读，u-tray-shell）。
 -->
-<!-- split-justified: built-in 三件面板同一语义域（分桶 tab + 行渲染 + 行内操作 + 行点击归宿） -->
+<!-- split-justified: built-in 任务域面板同一语义域（分桶 tab + 行渲染 + 行内操作 + 行点击归宿） -->
 <template>
   <div
     class="flex min-h-0 w-full flex-1 flex-col gap-1"
-    data-testid="tray-native-panel" :data-kind="kind" :aria-label="t(titleKey)"
+    data-testid="tray-native-panel" data-kind="bash" :aria-label="t(titleKey)"
   >
     <!-- 损坏错误条（bash，S7 sticky 语义）：自愈拍（tasks 非空）清位后消失 -->
     <div
-      v-if="kind === 'bash' && bashCorrupted"
+      v-if="bashCorrupted"
       data-testid="tray-bash-corrupt-banner"
       class="flex shrink-0 items-center gap-1.5 rounded-sm bg-warn-soft px-2 py-1 text-[length:var(--text-2xs)] text-warn"
     >
@@ -21,7 +23,7 @@
     <!-- 断连提示条（bash，S6）：断连 &&（拉取失败 || 未拉到过）——重连边沿由 useBackgroundTasks
          重连路径自动重新拉取，恢复即消失（计数冻结不虚报，§3.5） -->
     <div
-      v-if="kind === 'bash' && showDisconnectBanner"
+      v-if="showDisconnectBanner"
       data-testid="tray-bash-disconnect-banner"
       class="flex shrink-0 items-center gap-1.5 rounded-sm bg-bg-input px-2 py-1 text-[length:var(--text-2xs)] text-neutral-mid"
     >
@@ -34,24 +36,6 @@
       class="flex flex-col items-center justify-center gap-2 py-8 text-center">
       <Loader2 class="size-[16px] animate-spin text-neutral-dim opacity-60" />
       <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-60">{{ t('panel.tray.loading') }}</p>
-    </div>
-
-    <!-- 错误态（subagent / workflow 首次拉取失败）：可重试（D13 retry 路径） -->
-    <div v-else-if="kindError" data-testid="tray-panel-error"
-      class="flex flex-col items-center justify-center gap-2 py-8 text-center">
-      <AlertCircle class="size-5 text-danger opacity-60" />
-      <p class="min-w-0 px-2 text-[length:var(--text-2xs)] text-neutral-mid">{{ t('panel.tray.loadFailed', { error: kindError }) }}</p>
-      <Button variant="ghost" class="h-6 text-[length:var(--text-2xs)] text-accent"
-        data-testid="tray-panel-retry" @click="onRetry">{{ t('panel.tray.retry') }}</Button>
-    </div>
-
-    <!-- oversize 降级态（[RT-4#8] subagent / workflow：session 文件 >32MB 列表不可用）：
-         与「无记录」的空列表显式分形（不可重试——重试结果恒同，给指引而非按钮） -->
-    <div v-else-if="kindOversize" data-testid="tray-panel-oversize"
-      class="flex flex-col items-center justify-center gap-2 px-4 py-8 text-center">
-      <AlertTriangle class="size-5 text-warn opacity-70" />
-      <p class="text-[length:var(--text-2xs)] text-neutral-mid">{{ t('panel.tray.oversizeTitle') }}</p>
-      <p class="text-[length:var(--text-3xs)] leading-relaxed text-neutral-dim opacity-70">{{ t('panel.tray.oversizeHint') }}</p>
     </div>
 
     <template v-else>
@@ -76,151 +60,45 @@
         </Button>
       </div>
 
-      <!-- 列表（当前桶非空） -->
+      <!-- 列表（当前桶非空）：bash 行 = 状态 icon + 命令 + 耗时 / pid · exit + 两段式终止
+           （仅 running 行、仅 pin 态）——行容器形态 = demo .tray-row（min-h 26 / r-sm /
+           px 6 / 字 --mid、hover 提 --fg） -->
       <ScrollArea v-if="hasRows" class="min-h-0 flex-1">
         <div class="flex flex-col px-1.5">
-          <!-- bash 行：状态 icon + 命令 + 耗时 / pid · exit + 两段式终止（仅 running 行、仅 pin 态）
-               ——行容器形态 = demo .tray-row（min-h 26 / r-sm / px 6 / 字 --mid、hover 提 --fg） -->
-          <template v-if="kind === 'bash'">
-            <div
-              v-for="entry in bashRows" :key="entry.taskId"
-              class="group/item relative flex min-h-[26px] cursor-pointer select-none items-start gap-2 rounded-sm px-1.5 py-1 text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
-              data-testid="tray-bash-row" :aria-label="`${statusText(entry)}: ${entry.command}`"
-              @click="openBashTask(entry)" @mouseleave="killConfirm.clear()"
-            >
-              <div class="mt-[3px] size-[7px] shrink-0" data-testid="tray-bash-icon" :title="statusText(entry)">
-                <span v-if="iconOf(entry).shape === 'spinner'"
-                  class="block size-[7px] animate-spin rounded-full border-[1.5px] border-accent border-t-transparent" />
-                <span v-else class="block size-[7px] rounded-full" :class="DOT_TONE_CLASS[iconOf(entry).tone]" />
-              </div>
-              <div class="min-w-0 flex-1">
-                <!-- 命令行 = demo .bash-cmd（mono 10px）；主行字色继承行容器（--mid → hover --fg） -->
-                <div class="flex min-w-0 items-center gap-1 text-[length:var(--text-xs)] leading-[1.35]">
-                  <span class="min-w-0 flex-1 truncate font-mono text-[length:var(--text-3xs)]">{{ entry.command }}</span>
-                  <span class="shrink-0 font-mono text-[length:var(--text-3xs)] leading-[1.35] text-neutral-dim">{{ elapsedLabel(entry) }}</span>
-                </div>
-                <div data-testid="tray-bash-meta"
-                  class="mt-0.5 flex min-w-0 items-center gap-1 font-mono text-[length:var(--text-3xs)] leading-[1.3] text-neutral-dim">
-                  <span class="min-w-0 flex-1 truncate">
-                    {{ t('panel.tray.pidLabel') }} {{ entry.pid }}<template v-if="isEnded(entry)"> · {{ t('panel.tray.exitLabel') }} {{ entry.exitCode ?? '—' }}</template>
-                  </span>
-                  <TrayConfirmButton
-                    v-if="pinned && entry.state === 'running'"
-                    testid="tray-bash-kill"
-                    :confirming="killConfirm.isConfirming(entry.taskId)"
-                    :title="t('panel.tray.kill')"
-                    :confirm-title="t('panel.tray.killConfirm')"
-                    confirm-opacity
-                    @click.stop="onKillClick(entry)"
-                  />
-                </div>
-              </div>
+          <div
+            v-for="entry in bashRows" :key="entry.taskId"
+            class="group/item relative flex min-h-[26px] cursor-pointer select-none items-start gap-2 rounded-sm px-1.5 py-1 text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
+            data-testid="tray-bash-row" :aria-label="`${statusText(entry)}: ${entry.command}`"
+            @click="openBashTask(entry)" @mouseleave="killConfirm.clear()"
+          >
+            <div class="mt-[3px] size-[7px] shrink-0" data-testid="tray-bash-icon" :title="statusText(entry)">
+              <span v-if="iconOf(entry).shape === 'spinner'"
+                class="block size-[7px] animate-spin rounded-full border-[1.5px] border-accent border-t-transparent" />
+              <span v-else class="block size-[7px] rounded-full" :class="DOT_TONE_CLASS[iconOf(entry).tone]" />
             </div>
-          </template>
-
-          <!-- subagent 行：引擎 icon + 状态点/spinner + agent + slug / turns · tokens · 耗时 / task 摘要
-               （行容器 = demo .tray-row 形态；名称字色继承 --mid → hover --fg） -->
-          <template v-else-if="kind === 'subagent'">
-            <div
-              v-for="record in subagentRows" :key="record.subagentId"
-              class="group relative min-h-[26px] cursor-pointer select-none rounded-sm px-1.5 py-1 text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
-              data-testid="tray-subagent-row"
-              :title="record.slug ? record.agent + ' · ' + record.slug : record.agent"
-              @click="openSubagentRow(record)" @mouseleave="cancelConfirm.clear()"
-            >
-              <div class="flex items-center gap-2">
-                <component :is="resolveEngineIcon(record.engine).icon" :title="resolveEngineIcon(record.engine).label"
-                  class="size-[13px] shrink-0 text-neutral-dim" data-testid="tray-subagent-engine-icon" />
-                <Loader2 v-if="isRunningSubagent(record)" data-testid="tray-subagent-spinner"
-                  class="size-[13px] shrink-0 animate-spin text-accent" />
-                <span v-else class="size-[7px] shrink-0 rounded-full" :class="subagentDotClass(record)" />
-                <span class="min-w-0 flex-1 truncate text-[length:var(--text-xs)] leading-[1.35]">
-                  {{ displayAgentName(record.agent) }}
+            <div class="min-w-0 flex-1">
+              <!-- 命令行 = demo .bash-cmd（mono 10px）；主行字色继承行容器（--mid → hover --fg） -->
+              <div class="flex min-w-0 items-center gap-1 text-[length:var(--text-xs)] leading-[1.35]">
+                <span class="min-w-0 flex-1 truncate font-mono text-[length:var(--text-3xs)]">{{ entry.command }}</span>
+                <span class="shrink-0 font-mono text-[length:var(--text-3xs)] leading-[1.35] text-neutral-dim">{{ elapsedLabel(entry) }}</span>
+              </div>
+              <div data-testid="tray-bash-meta"
+                class="mt-0.5 flex min-w-0 items-center gap-1 font-mono text-[length:var(--text-3xs)] leading-[1.3] text-neutral-dim">
+                <span class="min-w-0 flex-1 truncate">
+                  {{ t('panel.tray.pidLabel') }} {{ entry.pid }}<template v-if="isEnded(entry)"> · {{ t('panel.tray.exitLabel') }} {{ entry.exitCode ?? '—' }}</template>
                 </span>
-                <span v-if="record.slug" data-testid="tray-subagent-slug"
-                  class="shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-dim">{{ record.slug }}</span>
-                <!-- 确认窗口期保留按钮：第一击进入确认态后迟到收尾广播不得把确认钮藏掉（可达性优先） -->
                 <TrayConfirmButton
-                  v-if="pinned && (isRunningSubagent(record) || cancelConfirm.isConfirming(record.subagentId))"
-                  testid="tray-subagent-cancel"
-                  :confirming="cancelConfirm.isConfirming(record.subagentId)"
-                  :title="t('panel.tray.cancel')"
-                  :confirm-title="t('panel.tray.cancelConfirm')"
-                  @click.stop="onCancelClick(record)"
+                  v-if="pinned && entry.state === 'running'"
+                  testid="tray-bash-kill"
+                  :confirming="killConfirm.isConfirming(entry.taskId)"
+                  :title="t('panel.tray.kill')"
+                  :confirm-title="t('panel.tray.killConfirm')"
+                  confirm-opacity
+                  @click.stop="onKillClick(entry)"
                 />
               </div>
-              <div class="mt-1 flex items-center gap-2 pl-[42px] font-mono text-[length:var(--text-3xs)] text-neutral-dim">
-                <span v-if="record.turns !== undefined">{{ record.turns }} {{ t('panel.tray.turnsUnit') }}</span>
-                <span v-if="record.totalTokens !== undefined">· {{ formatTokens(record.totalTokens) }}</span>
-                <span v-if="record.elapsedSeconds !== undefined">· {{ formatSeconds(record.elapsedSeconds) }}</span>
-                <!-- 轮收条失败分类（subagent-observability §3.4 u8）：lastRound.failure 事实——
-                     class.kind 点拼原文，tone 与状态点红点判据同源（user.cancelled 中性，其余 danger）；
-                     lastRound 通道缺省（u3 runtime 产出前恒 undefined）不占位 -->
-                <template v-if="record.lastRound?.failure">
-                  <span aria-hidden="true">·</span>
-                  <span
-                    class="min-w-0 truncate max-w-[140px]"
-                    :class="failureCauseToneClass(record.lastRound.failure)"
-                    :title="failureCauseLabel(record.lastRound.failure)"
-                    data-testid="tray-subagent-failure"
-                  >{{ failureCauseLabel(record.lastRound.failure) }}</span>
-                </template>
-              </div>
-              <div class="mt-0.5 truncate pl-[42px] text-[length:var(--text-2xs)] leading-[1.3] text-neutral-mid">
-                {{ record.task }}
-              </div>
             </div>
-          </template>
-
-          <!-- workflow 行：状态点/spinner + scriptName + slug / 进度条 + N/M + 耗时 + abort（两段式；
-               pause/resume 已随扩展 D-2 移除；行容器 = demo .tray-row 形态，进度轨道 = demo --hover 档） -->
-          <template v-else>
-            <div
-              v-for="record in workflowRows" :key="record.runId"
-              class="group relative min-h-[26px] cursor-pointer select-none rounded-sm px-1.5 py-1 text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
-              data-testid="tray-workflow-row"
-              @click="openWorkflowRow(record)" @mouseleave="clearAbortConfirm"
-            >
-              <div class="flex items-center gap-2">
-                <Loader2 v-if="record.status === 'running'" data-testid="tray-workflow-spinner"
-                  class="size-[13px] shrink-0 animate-spin text-accent" />
-                <span v-else class="size-[7px] shrink-0 rounded-full" :class="workflowToneClass(record)"
-                  :title="workflowStatusLabel(record)" />
-                <span class="min-w-0 flex-1 truncate text-[length:var(--text-xs)] leading-[1.35]">
-                  {{ record.scriptName }}
-                </span>
-                <span v-if="record.slug" data-testid="tray-workflow-slug"
-                  class="shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-dim">{{ record.slug }}</span>
-                <!-- [D2] 中断 run 人读状态文案（可见文本——场景 25 CDP 断言 innerText 承载位）：
-                     「已中断（可续跑）」非「运行中」；状态点色调归 workflowToneClass 中性暗档，
-                     hover title 不承载（workflowStatusLabel 出终态文案，interrupted 非终局） -->
-                <span v-if="record.status === 'interrupted'" data-testid="tray-workflow-interrupted"
-                  class="shrink-0 text-[length:var(--text-3xs)] text-neutral-dim">{{ t('panel.tray.workflowInterrupted') }}</span>
-                <!-- 行内操作（仅 pin 态）：running 态 abort 两段式。workflow 一次性生命周期
-                     （subagent-workflow D-2）：pause/resume 已在扩展侧移除，宿主不再暴露 -->
-                <template v-if="pinned && record.status === 'running'">
-                  <TrayConfirmButton
-                    testid="tray-workflow-abort"
-                    :confirming="isAbortConfirming(record.runId)"
-                    :title="t('panel.tray.abort')"
-                    :confirm-title="t('panel.tray.abortConfirm')"
-                    :rounded="false"
-                    @click.stop="onAbortClick(record.runId)"
-                  >
-                    <template #icon><Square class="size-[12px]" /></template>
-                  </TrayConfirmButton>
-                </template>
-              </div>
-              <div class="mt-1 flex items-center gap-1.5 pl-[21px] font-mono text-[length:var(--text-3xs)] text-neutral-dim">
-                <div class="h-[3px] min-w-[40px] flex-1 overflow-hidden rounded-full bg-surface-hover">
-                  <div class="h-full rounded-full transition-[width,background-color] duration-300 ease-[var(--ease)]"
-                    :class="workflowToneClass(record)" :style="{ width: `${workflowPercent(record)}%` }" />
-                </div>
-                <span class="shrink-0">{{ t('panel.tray.agentsLabel', { done: completedAgentCount(record), total: record.agentCalls.length }) }}</span>
-                <span v-if="record.startedAt" class="shrink-0">· {{ workflowElapsed(record) }}</span>
-              </div>
-            </div>
-          </template>
+          </div>
         </div>
       </ScrollArea>
 
@@ -243,10 +121,12 @@
 
 <script setup lang="ts">
 /**
- * TrayNativePanel —— composer 任务托盘 built-in 三件面板（bash / subagent / workflow）。
+ * TrayNativePanel —— composer 任务托盘 built-in 任务域面板（bash）。
+ * [容器扩展点统一 §6.6/U9+U10] subagent / workflow 件已迁插件推 widget 树，本面板只剩 bash。
  *
  * ── 契约（供 u-tray-shell 消费）──
- * props.kind: 'bash' | 'subagent' | 'workflow' —— 面板类型（built-in 三件之一）
+ * props.kind: 'bash' —— 面板类型（built-in 任务域件词表唯一成员；prop 保留供外壳
+ *   v-for 分派形态与测试锚定，面板内不再按 kind 分支）
  * props.sessionId: string —— 焦点 session id（行点击归宿 / 行内操作 RPC 的会话键；外壳由
  *   Composer 绑定的 sessionId 透传，与外壳 provide 的数据范围同一 session——外壳透传自身
  *   props，两侧天然一致）
@@ -265,12 +145,10 @@
  * - 分桶 tab（凹陷槽范式：外槽 bg-bg-input + active bg-surface-hover 浮起——2026-10-14
  *   全族迁移：旧 active bg-bg-elevated 浮层档退役，选中态改 solid hover tone，同 SessionItem
  *   10-13 裁决_pattern），计数与行集同源
- *   （tab 数字恒等于列表条数）：三件均两视图「进行中 / 已结束」——[两视图裁决 2026-09-16]
- *   subagent 的「已收起」桶自托盘退役（「已收起」机制已全链路删除，已结束桶判据 =
- *   !isRunningProjection）；
- * - 行：bash = 状态 icon + 命令 + 耗时 + pid/exit + 两段式终止；subagent = 引擎 icon + 状态点/
- *   spinner + agent + slug + turns/tokens/耗时 + task 摘要 + 两段式取消；workflow = 状态点/spinner
- *   + scriptName + slug + 进度条 + N/M + 耗时 + abort（两段式；pause/resume 已随扩展 D-2 移除）；
+ *   （tab 数字恒等于列表条数）：两视图「进行中 / 已结束」；
+ * - 行：bash = 状态 icon + 命令 + 耗时 + pid/exit + 两段式终止（workflow 行 = 状态点/
+ *   spinner + scriptName + slug + 进度条 + N/M + 耗时 + abort，已随件迁移删——插件侧
+ *   widget 树的行原语承载）；
  * - 空态（D9 可行动空态）：默认桶「进行中」为空 = 一行提示 + 「查看已结束 (N)」显式切桶按钮
  *   （不自动跳转）；其余桶为空仅提示；
  * - 提示条（bash）：损坏（sticky，自愈拍清位）+ 断连（S6 范式，重连边沿自动重新拉取）。
@@ -279,53 +157,44 @@
  * 形态均以复制件迁入；旧侧栏组件已随退役单元删除，本文件为唯一实现。
  *
  * 脚本分区：props 契约 / 数据范围接线（inject 外壳单例，禁自建）/ 分桶视图状态（ADR-0049
- * per-session 分区）/ 行渲染格式化 / 行内操作（RPC + 两段式确认）/ 行点击归宿矩阵。
+ * per-session 分区）/ 行渲染格式化 / 行内操作（RPC + 两段式确认）/ 行点击归宿。
  */
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AlertCircle, AlertTriangle, Loader2, Square, WifiOff } from '@lucide/vue'
+import { AlertTriangle, Loader2, WifiOff } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import { getState } from '@taiji/core/transport/ws-client'
-import { selectBackgroundTask, openSubagent, openWorkflow } from '@taiji/core/domain/drawer'
-import { subagentVirtualId, useSubagentStore } from '@/stores/subagent'
+import { selectBackgroundTask } from '@taiji/core/domain/drawer'
 import { useToast } from '@/composables/useToast'
 import { useSessionScopedState } from '@/composables/useSessionScopedState'
 import TrayConfirmButton from '@/components/panel/tray/TrayConfirmButton.vue'
 import { useTwoStepConfirm } from '@/composables/useTwoStepConfirm'
-import { useWorkflowAction } from '@/composables/features/workflow/useWorkflowAction'
 import { TRAY_BUCKETS, useTrayCountsContext } from '@/components/panel/tray/useTrayCounts'
-import type { TrayBucketValue } from '@/components/panel/tray/useTrayCounts'
-import { failureCauseLabel, failureCauseToneClass, isRunningProjection, subagentDotClass } from '@/lib/subagent-bucket'
-import { workflowStatusLabel, workflowToneClass } from '@/components/panel/tray/tray-tone'
+import type { TrayBucketValue, TrayTaskKind } from '@/components/panel/tray/useTrayCounts'
 import { backgroundTaskBucket, backgroundTaskStatusIcon } from '@/lib/background-task-bucket'
 import type { BackgroundTaskEntry, BackgroundTaskIconState, BackgroundTaskStatusKey } from '@/lib/background-task-bucket'
-import { formatTokens as formatTokensK } from '@/lib/token-format'
-import { formatClockDuration, formatCompactDuration, MS_PER_SECOND } from '@/lib/duration-format'
-import { resolveEngineIcon } from '@/constants/engine-icons'
-import { displayAgentName } from '@taiji/shared'
+import { formatClockDuration } from '@/lib/duration-format'
 import { toErrorMessage } from '@taiji/core'
 import * as backgroundTaskApi from '@taiji/core/transport/api/domains/background-task'
-import type { SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
 
 const props = withDefaults(defineProps<{
-  /** 面板类型（built-in 三件之一） */
-  kind: 'bash' | 'subagent' | 'workflow'
+  /** 面板类型（built-in 任务域件；词表唯一成员 bash——保留 prop 供外壳分派与测试锚定） */
+  kind?: TrayTaskKind
   /** 焦点 session id（数据分区键；外壳由 Composer 的 sessionId 透传） */
   sessionId: string
   /** pin 态（外壳管理）：行内操作按钮仅 pin 态渲染（D8 防误触） */
   pinned?: boolean
-}>(), { pinned: false })
+}>(), { kind: 'bash', pinned: false })
 
 const { t } = useI18n()
-const { error: toastError, info: toastInfo } = useToast()
-const subagentStore = useSubagentStore()
+const { error: toastError } = useToast()
 
 /**
  * 数据范围（单例注入）：实例由外壳 ComposerTray 创建并 provide（TRAY_COUNTS_KEY），本面板
- * **不自建实例**——面板随 Popover 开合反复挂载/卸载，自建即每次打开重发首次拉取 RPC（loadSubagents
- * + loadWorkflows）。计数/行集/错误态/retry 全部消费外壳实例，本面板零拉取。
+ * **不自建实例**——面板随 Popover 开合反复挂载/卸载，自建即每次打开重发首次拉取 RPC。
+ * 计数/行集/retry 全部消费外壳实例，本面板零拉取。
  */
 const tray = useTrayCountsContext()
 
@@ -341,7 +210,7 @@ const bucketPartition = useSessionScopedState<TrayBucketPartition>(
 )
 /** 当前桶：分区遗留的越界值（跨版本持久化 / 扩枚举残留）按默认「进行中」渲染 */
 const activeBucket = computed<TrayBucketValue>(() =>
-  TRAY_BUCKETS[props.kind].includes(bucketPartition.current.value.bucket)
+  TRAY_BUCKETS.bash.includes(bucketPartition.current.value.bucket)
     ? bucketPartition.current.value.bucket
     : 'running',
 )
@@ -351,45 +220,32 @@ function setBucket(bucket: TrayBucketValue): void {
   })
 }
 
-const buckets = computed(() => TRAY_BUCKETS[props.kind])
-/** 三件标题 i18n key（面板 aria-label；外壳 icon title 复用同键） */
-const titleKey = computed(() => `panel.tray.title.${props.kind}`)
+const buckets = computed(() => TRAY_BUCKETS.bash)
+/** 标题 i18n key（面板 aria-label；外壳 icon title 复用同键） */
+const titleKey = 'panel.tray.title.bash'
 
 /** 分桶标签 key：bash 属进程域，沿用「运行中」（sidebar.ts 已登记的域差异，见 locale 文件头） */
 function bucketLabelKey(bucket: TrayBucketValue): string {
-  if (bucket === 'running') {
-    return props.kind === 'bash' ? 'panel.tray.bucket.runningProcess' : 'panel.tray.bucket.running'
-  }
-  return 'panel.tray.bucket.ended'
+  return bucket === 'running' ? 'panel.tray.bucket.runningProcess' : 'panel.tray.bucket.ended'
 }
-/** 空态提示 key（{name} 插值 = 三件标题） */
-const emptyKey = computed(() => {
-  if (activeBucket.value === 'running') {
-    return props.kind === 'bash' ? 'panel.tray.empty.runningProcess' : 'panel.tray.empty.running'
-  }
-  return 'panel.tray.empty.ended'
-})
+/** 空态提示 key（{name} 插值 = 标题） */
+const emptyKey = computed(() =>
+  activeBucket.value === 'running' ? 'panel.tray.empty.runningProcess' : 'panel.tray.empty.ended',
+)
 /** 桶计数（与行集同源派生） */
 function bucketCount(bucket: TrayBucketValue): number {
-  return tray.counts.value[props.kind][bucket]
+  return tray.counts.value.bash[bucket]
 }
 /** 空态可行动按钮（D9：仅默认桶为空、且其他桶有内容时渲染；点击显式切桶）。
- *  [两视图裁决 2026-09-16] 可跳桶只剩「已结束」，按钮文案固定 viewEnded（原
- *  jumpLabelKey 泛化分派随第三桶退役删除）。 */
+ *  [两视图裁决 2026-09-16] 可跳桶只剩「已结束」，按钮文案固定 viewEnded。 */
 const jumpBuckets = computed<TrayBucketValue[]>(() => {
   if (activeBucket.value !== 'running') return []
   return buckets.value.filter((bucket) => bucket !== 'running' && bucketCount(bucket) > 0)
 })
 
-// ── 当前桶的行集（三件各一；面板按 kind 分支渲染）──
+// ── 当前桶的行集 ──
 const bashRows = computed<BackgroundTaskEntry[]>(() =>
   activeBucket.value === 'ended' ? tray.lists.bash.ended.value : tray.lists.bash.running.value,
-)
-const subagentRows = computed<SubagentRecord[]>(() =>
-  activeBucket.value === 'ended' ? tray.lists.subagent.ended.value : tray.lists.subagent.running.value,
-)
-const workflowRows = computed<WorkflowRunRecord[]>(() =>
-  activeBucket.value === 'ended' ? tray.lists.workflow.ended.value : tray.lists.workflow.running.value,
 )
 const hasRows = computed(() => bucketCount(activeBucket.value) > 0)
 
@@ -399,21 +255,12 @@ const hasRows = computed(() => bucketCount(activeBucket.value) > 0)
  * bash 的 loaded=false 表示「从未成功拉到过一次」（S6 语义），同样只在无数据时占位。
  */
 const isKindLoading = computed(() =>
-  tray.loading[props.kind].value && tray.counts.value[props.kind].total === 0,
-)
-/** 错误态（subagent / workflow 首次拉取失败；bash 的失败信号由提示条承载，见设计 §3.5） */
-const kindError = computed(() =>
-  props.kind === 'bash' ? null : tray.errors[props.kind].value,
-)
-/**
- * [RT-4#8] oversize 降级态（subagent / workflow）：session 文件超 runtime 读取预检阈值
- * （>32MB）时列表不可用——「会话过大，列表不可用」与「无记录」空列表显式分形。bash 无此态。
- */
-const kindOversize = computed(() =>
-  props.kind === 'bash' ? false : tray.oversize[props.kind].value,
+  !backgroundTasksLoaded.value && tray.counts.value.bash.total === 0,
 )
 
 // ── bash 提示条判据（损坏 = 分区 sticky 位；断连 = 非 connected 且（拉取失败 || 未拉到过））──
+// bash 无独立错误态 UI：失败信号走提示条（S6/S7），恢复 = 重连边沿自动重新拉取
+// （useBackgroundTasks 重连路径；原 workflow 件的 loadFailed 错误态 + retry 按钮随件迁移删）。
 const bashCorrupted = computed(() => tray.bashPartition.value.corrupted)
 const wsState = getState()
 const showDisconnectBanner = computed(() => {
@@ -421,10 +268,6 @@ const showDisconnectBanner = computed(() => {
   const partition = tray.bashPartition.value
   return partition.fetchFailed || !partition.loaded
 })
-/** 错误态 retry：按类重新拉取（D13 retry 路径） */
-function onRetry(): void {
-  void tray.retry(props.kind)
-}
 
 // ── 行渲染格式化（bash：格式/色档全部消费 background-task-bucket SSOT，本层禁二次判定）──
 const DOT_TONE_CLASS: Record<BackgroundTaskIconState['tone'], string> = {
@@ -444,7 +287,6 @@ const STATUS_TEXT_KEYS: Record<BackgroundTaskStatusKey, string> = {
   succeeded: 'panel.tray.status.succeeded',
   failed: 'panel.tray.status.failed',
 }
-const PERCENT_BASE = 100
 
 function iconOf(entry: BackgroundTaskEntry): BackgroundTaskIconState {
   return backgroundTaskStatusIcon(entry)
@@ -455,34 +297,19 @@ function statusText(entry: BackgroundTaskEntry): string {
 function isEnded(entry: BackgroundTaskEntry): boolean {
   return backgroundTaskBucket(entry) === 'ended'
 }
-/** 秒 → 可读耗时（≥1h hNm / ≥1m NmNs / Ns；subagent 与 workflow 行共用；换算单点在 lib/duration-format） */
-function formatSeconds(seconds: number): string {
-  return formatCompactDuration(seconds, { hours: true })
-}
-/** token K 格式化单点在 lib/token-format；unit 走 i18n 由本组件注入 */
-function formatTokens(tokens: number): string {
-  return formatTokensK(tokens, t('panel.tray.tokUnit'))
-}
-/** workflow 行耗时：startedAt（ISO）→ completedAt 或当下 */
-function workflowElapsed(record: WorkflowRunRecord): string {
-  const start = new Date(record.startedAt).getTime()
-  const end = record.completedAt ? new Date(record.completedAt).getTime() : Date.now()
-  return formatSeconds(Math.floor((end - start) / MS_PER_SECOND))
-}
+/** useBackgroundTasks 的 loaded 位（加载态判据；经 tray.bashPartition 透传） */
+const backgroundTasksLoaded = computed(() => tray.bashPartition.value.loaded)
 
-// ── running bash 行实时计时（1s tick；仅驱动 elapsedLabel 重算，测试用 fake timers）──
-// tick 仅在有可见 live 行时挂载（bash 面板无 running 行 / 停在已结束桶时同样无）
-// ——面板随 Popover 开合反复挂载且 split mode 下多实例并存，各实例独立 gate：live 行
-// 出现即建、消失即撤，空闲实例零 interval。watch 为 pre flush 先于渲染，回调内先同步
-// now 再建 timer，切桶回来首帧耗时即准确（与常驻 tick 行为一致）。
+/** running bash 行实时计时（1s tick；仅驱动 elapsedLabel 重算，测试用 fake timers）──
+ * tick 仅在有可见 live 行时挂载（面板无 running 行 / 停在已结束桶时同样无）
+ * ——面板随 Popover 开合反复挂载且 split mode 下多实例并存，各实例独立 gate：live 行
+ * 出现即建、消失即撤，空闲实例零 interval。watch 为 pre flush 先于渲染，回调内先同步
+ * now 再建 timer，切桶回来首帧耗时即准确（与常驻 tick 行为一致）。 */
 const NOW_TICK_INTERVAL_MS = 1000
 const now = ref(Date.now())
 let tickTimer: ReturnType<typeof setInterval> | null = null
 /** 当前可见 bash 行中存在非 ended 行（elapsedLabel 的 now 分支才有消费者；killing 态仍 live） */
-const hasLiveBashRow = computed(() =>
-  props.kind === 'bash' && bashRows.value.some((entry) => !isEnded(entry)),
-)
-const hasLiveRow = hasLiveBashRow
+const hasLiveRow = computed(() => bashRows.value.some((entry) => !isEnded(entry)))
 watch(hasLiveRow, (live) => {
   if (tickTimer !== null) {
     clearInterval(tickTimer)
@@ -509,38 +336,16 @@ function elapsedLabel(entry: BackgroundTaskEntry): string {
   return formatClockDuration(ms, { padHours: false })
 }
 
-// ── subagent 行状态点 / workflow 行色档：规则与映射单点在 lib/subagent-bucket
-//    （状态点规则表，[W2 D8] 迁入 + status 全集锁）与 tray-tone（outcome tone 映射 +
-//    中文词表文案，[W2 D8] 全集锁）；本组件只消费，不再自持判定表 ──
-/** 执行态判据 = SSOT 谓词（isRunningProjection），与计数/徽标同源不漂移 */
-const isRunningSubagent = isRunningProjection
-function completedAgentCount(record: WorkflowRunRecord): number {
-  // 已收束计数（进度分母分子）：done/failed/cancelled 都是终态——cancelled（run 终局
-  // 收尾在途成员，§3.3.8）计入，防 run 取消后进度条永久不满格。
-  return record.agentCalls.filter((call) => call.status === 'done' || call.status === 'failed' || call.status === 'cancelled').length
-}
-function workflowPercent(record: WorkflowRunRecord): number {
-  if (record.agentCalls.length === 0) return 0
-  return Math.round((completedAgentCount(record) / record.agentCalls.length) * PERCENT_BASE)
-}
-
-// ── 行点击归宿矩阵（D2：subagent/bash 对齐现状；workflow 行 = 开浮层）──
-function openSubagentRow(record: SubagentRecord): void {
-  openSubagent({ virtualId: subagentVirtualId(props.sessionId, record.subagentId) })
-}
+// ── 行点击归宿（D2：bash 行选中落 bashTask 分区）──
 function openBashTask(entry: BackgroundTaskEntry): void {
   // 选中态落 bashTask 内容域分区（selection/bash-task.ts，§6.6①）+ 切 tab + 开 drawer
   selectBackgroundTask(entry.taskId)
 }
-/** workflow 行传 runId（opener 反查 findRun 先按 runId 精确匹配，后回退 scriptName 归一匹配取最新） */
-function openWorkflowRow(record: WorkflowRunRecord): void {
-  openWorkflow(record.runId)
-}
 
-// ── 行内操作 1：bash 两段式终止（首击确认态，再击发令；仅 running 行、仅 pin 态渲染）──
+// ── 行内操作：bash 两段式终止（首击确认态，再击发令；仅 running 行、仅 pin 态渲染）──
 const killConfirm = useTwoStepConfirm((taskId) => {
   // fire-and-forget：结果经 killing 广播翻转行状态，失败条目停留原状态（下次广播/拉取自愈）；
-  // 但用户点击必须有可见反馈——对齐 cancelSubagent / runWorkflowAction 的 toastError 先例
+  // 但用户点击必须有可见反馈——对齐 runWorkflowAction 的 toastError 先例
   void backgroundTaskApi.kill(props.sessionId, taskId).catch((err: unknown) => {
     console.debug('[tray] background task kill failed', taskId, err)
     toastError(t('panel.tray.killFailed', { msg: toErrorMessage(err) }))
@@ -549,33 +354,4 @@ const killConfirm = useTwoStepConfirm((taskId) => {
 function onKillClick(entry: BackgroundTaskEntry): void {
   killConfirm.toggle(entry.taskId)
 }
-
-// ── 行内操作 2：subagent 两段式取消 + 迟到收尾防误报（复制件，自原侧栏列表动作 composable）──
-const cancelConfirm = useTwoStepConfirm((subagentId) => {
-  void cancelSubagent(subagentId)
-})
-function onCancelClick(record: SubagentRecord): void {
-  cancelConfirm.toggle(record.subagentId)
-}
-/**
- * 第二击时任务可能已收尾（迟到 isStreaming=false 窗口）——此时**不发** cancel RPC
- * （会被 runtime 拒绝并误报「取消失败」），toast「任务已结束」给出确定反馈。
- */
-async function cancelSubagent(subagentId: string): Promise<void> {
-  if (!subagentStore.isStreamingSubagent(props.sessionId, subagentId)) {
-    toastInfo(t('panel.tray.alreadyEnded'))
-    return
-  }
-  try {
-    await subagentStore.cancelSubagent(props.sessionId, subagentId)
-  } catch (e) {
-    toastError(t('panel.tray.cancelFailed', { msg: toErrorMessage(e) }))
-  }
-}
-
-// ── 行内操作 3：workflow abort（两段式；pause/resume 随扩展 D-2 一次性生命周期移除）──
-// 动作单点在 useWorkflowAction（两段式确认 + RPC + 刷新 + toast）
-const { isAbortConfirming, onAbortClick, clearAbortConfirm } = useWorkflowAction(
-  () => props.sessionId,
-)
 </script>

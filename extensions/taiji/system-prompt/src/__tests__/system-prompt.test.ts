@@ -17,7 +17,7 @@
  * 在 config 里显式 "capability":{"enabled":false} 隔离关注点；无法塞字段的用例（畸形 JSON /
  * 文件缺失）期望值如实更新为含 capability 段。capability 自身行为由专项 describe 锚定。
  *
- * mock 策略（参照 msg-id-mapper 测试模式）：pi SDK import type 零运行时解析，
+ * mock 策略（参照 host-internals msg-id-mapper 测试模式）：pi SDK import type 零运行时解析，
  * ExtensionAPI 用结构化桩；node:fs mock 后按路径分流（env 指向假目录，不碰真实文件系统）。
  *
  * 运行：cd extensions/taiji/system-prompt && npx vitest run
@@ -58,7 +58,7 @@ const CAP_HEADER = '# TaiJi capabilities'
 /** 既有用例隔离关注点用的「capability 显式关闭」config 片段 */
 const CAP_OFF = '"capability": {"enabled": false}'
 
-/** hook 注册表桩（参照 msg-id-mapper harness 模式）——handler 第二参 ctx 透传（路径注入测试用） */
+/** hook 注册表桩（参照 host-internals msg-id-mapper harness 模式）——handler 第二参 ctx 透传（路径注入测试用） */
 function createHarness(): { beforeAgentStart: (event: BeforeAgentStartEvent, ctx?: unknown) => unknown } {
   const handlers = new Map<string, (...args: unknown[]) => unknown>()
   const pi = {

@@ -1,7 +1,7 @@
 /**
  * pi extension wiring：把 ExtensionContext 适配进 trace.ts 状态机并订阅三个事件。
  *
- * 事件直接标注 SDK 具名类型（与同组 msg-id-mapper / system-prompt 的既有风格一致）：
+ * 事件直接标注 SDK 具名类型（与同组 host-internals / system-prompt 的既有风格一致）：
  * pi 的 on() 按事件名重载，handler 参数即 SDK 事件类型。SDK reason 枚举演进时
  * mapReasonForFirstWrite 的 switch 在编译期报 non-exhaustive（负防腐），不再有运行时静默归一。
  */

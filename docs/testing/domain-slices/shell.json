@@ -7,6 +7,7 @@
   ],
   "scope": {
     "ui": [
+      "packages/renderer/src/composables/features/drawer/useDrawerContentDispatch.ts",
       "packages/ui/src/features/drawer/**",
       "packages/ui/src/overlays/**",
       "packages/ui/src/primitives/dialog/**",

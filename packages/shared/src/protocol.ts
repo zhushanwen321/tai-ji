@@ -175,7 +175,7 @@ export type ClientMessageType =
   //（活跃走 RPC get_entries + header 首行补读；非活跃走文件直读），reply session.traceEntries。
   | 'session.getTraceEntries'
   // session-trace（design §3.1 失败路径 / D2）：现取当前 system prompt（pi RPC 无
-  // get_system_prompt，通道在 builtin agent-ext 包（不可禁）的 /__taiji_get_system_prompt__
+  // get_system_prompt，通道在 builtin host-internals 包（不可禁）的 /__taiji_get_system_prompt__
   // 命令 → taiji:current-system-prompt custom entry → runtime 轮询拉取）。
   | 'session.fetchCurrentSystemPrompt'
   | 'session.handoff' | 'session.abortHandoff'
@@ -2382,7 +2382,7 @@ export interface SessionSetProjectMutationReply {
 /**
  * `__taiji_nav__` internal command 名（消息撤回设计 D1 信令通道）：runtime 编排经
  * sendSystemCommand 直连 `client.prompt('/__taiji_nav__ <entryId>')` 触发 pi
- * navigateTree；注册方 = extensions/taiji/agent-ext（mandatory infrastructure，不可禁）。
+ * navigateTree；注册方 = extensions/taiji/host-internals（mandatory infrastructure，不可禁）。
  * `__` 前缀经 internal-command-filter 过滤，不出现在用户 slash 浮层；command 不进模型、
  * 无 turn（P2 前提），故不走用户消息链路（不经 hook / 不经内核）。
  */
@@ -2397,7 +2397,7 @@ export type RevokeMessageErrorCode =
   | 'busy'
   // targetId 定位失败（clientUuid 空间双通道均 miss，或 entryId 空间目标不在文件——基线 stale）
   | 'no-mapping'
-  // __taiji_nav__ 命令探测耗尽（agent-ext 为 mandatory infrastructure 不可禁，正常不触达）
+  // __taiji_nav__ 命令探测耗尽（host-internals 为 mandatory infrastructure 不可禁，正常不触达）
   | 'extension-missing'
   // reply 后 get_entries 校验不过（含 navigateTree throw 形态与 get_entries RPC 自身失败）
   | 'nav-failed'

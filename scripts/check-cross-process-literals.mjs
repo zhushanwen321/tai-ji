@@ -6,9 +6,10 @@
  * plugin 各为独立进程/独立构建单元），编译期拦截不可行，多侧手抄仅靠注释纪律
  * 同步，无任何机器信号——本脚本把「多侧同步改」变成可机检的失败：
  *   - 'taiji.client-msg-id'：pi session custom entry，承载 userEntryId → clientUuid
- *     映射（runtime entry-tree-builder / revoke-orchestrator × msg-id-mapper 扩展）
+ *     映射（runtime entry-tree-builder / revoke-orchestrator × host-internals 扩展的
+ *     msg-id-mapper 模块）
  *   - 'taiji:revoked'：LabelEntry 撤回信号，runtime 侧以 custom entry 补记失效，
- *     agent-ext 与 scheduler-manager 插件消费
+ *     host-internals 扩展（host-commands 模块）与 scheduler-manager 插件消费
  *
  * 检查逻辑（TypeScript 编译器 API 语法级 AST 解析，同 check-chat-ops-sync.mjs
  * 惯例）：对每个登记文件提取代码字符串字面量集合（模板串无插值形态同算；注释
@@ -46,14 +47,14 @@ const GROUPS = [
     files: [
       'packages/runtime/src/infra/pi/entry-tree-builder.ts',
       'packages/runtime/src/services/session/revoke-orchestrator.ts',
-      'extensions/taiji/msg-id-mapper/src/index.ts',
+      'extensions/taiji/host-internals/src/msg-id-mapper.ts',
     ],
   },
   {
     literal: 'taiji:revoked',
     files: [
       'packages/runtime/src/services/session/revoke-orchestrator.ts',
-      'extensions/taiji/agent-ext/src/index.ts',
+      'extensions/taiji/host-internals/src/host-commands.ts',
       'resources/plugins/scheduler-manager/index.ts',
     ],
   },

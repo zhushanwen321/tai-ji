@@ -7,13 +7,27 @@
   <!--
     subagent 块（@zhushanwen/pi-subagent-workflow，重写 fork）—— collapsed only（spec §10 / design D2）。
     异步 background 执行：只展示发起参数（input），看不到执行过程（结果由 agent 后续 turn 总结）。
-    单行摘要：subagent prefix + agent · slug + (model · thinking X)。
-    running → 呼吸弧 loader；failed → 图标常驻染 danger（行文字保持层级灰）+ failtag
-    失败文案 chip（tool.error 摘要，demo .failtag 形态）。
+
+    行内呈现两分支（容器扩展点统一 §7.4 层 2 三问答案：判据 = details.__gui__ 存在，
+    与 isGuiCapable 无关——那是生产侧条件，非图形模式无树已结构性保证）：
+    - 有树：内层呈现替换为插件树（GuiComponentRenderer 渲染 extension 经 withGuiAttach
+      挂在 details.__gui__ 的组件树）。点击仍归本行外壳——openSubagent 需要 virtualId，
+      hostAction.params 只允许标量，树内传不出去（三问答案②），故不把点击交给插件树。
+    - 无树：保留现有解析（单行摘要：subagent prefix + agent · slug + (model · thinking X)；
+      running → 呼吸弧 loader；failed → 图标常驻染 danger + failtag 失败文案 chip）。
     点击整行 → openSubagent（drawer 开 subagent tab，主对话流保留）。subagentId 取自 toolResult.output。
   -->
   <div class="trace-subagent" data-testid="subagent-block">
+    <!-- 有树分支容器：块级流（树自管布局），整行点击语义不变 -->
     <div
+      v-if="guiTree"
+      class="min-w-0 cursor-pointer select-none text-neutral-dim transition-opacity hover:opacity-80"
+      @click="openSubagentDrawer"
+    >
+      <GuiComponentRenderer :component="guiTree" />
+    </div>
+    <div
+      v-else
       class="flex min-w-0 cursor-pointer select-none items-baseline gap-2 [font-weight:var(--fw-mid)] text-neutral-dim transition-opacity hover:opacity-80"
       @click="openSubagentDrawer"
     >
@@ -61,9 +75,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import type { GuiComponent } from '@zhushanwen/extension-protocol'
+import { extractGui } from '@zhushanwen/extension-protocol'
 import type { ToolCall } from '@taiji/shared'
 import { subagentVirtualId } from '@taiji/shared'
 import { openSubagent } from '@taiji/core/domain/drawer'
+import { GuiComponentRenderer } from '../../rendering-protocol'
 import { BLOCK_ICON_CLASS, BLOCK_ICON_LUCIDE, BLOCK_LABEL_CLASS } from './block-icon'
 import RunningBlockIcon from './RunningBlockIcon.vue'
 
@@ -77,6 +94,24 @@ const { t } = useI18n()
 
 const isFailed = computed(() => props.tool.status === 'error')
 const isRunning = computed(() => props.tool.status === 'running')
+
+/**
+ * 行内呈现分支判据（§7.4 层 2 三问答案③）：details.__gui__ 存在即渲插件树，与
+ * isGuiCapable 无关（生产侧条件已结构性保证非图形模式无树）。提取语义与 ToolRow
+ * 的 guiComponent 同款——终态 details（复数）优先；streaming 态回退 detail（单数），
+ * tool_call_end 后 detail 残留不作为渲染源（最终态无 __gui__ 不渲染过期组件）。
+ */
+const guiTree = computed<GuiComponent | undefined>(() => {
+  const fromEnd = extractGui(props.tool.details)?.component
+  if (fromEnd) return fromEnd
+  if (isRunning.value) {
+    const streamingDetail = props.tool.detail
+    if (typeof streamingDetail === 'object' && streamingDetail !== null) {
+      return extractGui(streamingDetail)?.component
+    }
+  }
+  return undefined
+})
 
 /** header 图标 class：常态走 BLOCK_ICON_CLASS SSOT；failed 常驻染 danger（demo
  *  .line.subagent.failed .sicon，替代原 hover:text-warn——失败态不应依赖悬停才可辨）。 */

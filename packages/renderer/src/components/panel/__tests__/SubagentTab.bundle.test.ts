@@ -77,7 +77,6 @@ vi.mock('@taiji/core/domain/drawer', async (importOriginal) => {
     ...actual,
     useDrawerControl: () => drawerState,
     useSubagentSelection: () => drawerState,
-    openWorkflowInDrawer: vi.fn(),
     // 真实语义：清 core 选中态（关闭入口的选中同步通道）
     clearSubagentSelection: vi.fn(() => {
       drawerState.selectedSubagentId.value = null

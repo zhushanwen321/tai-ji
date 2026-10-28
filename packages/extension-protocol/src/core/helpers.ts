@@ -30,7 +30,8 @@ export function isGuiCapable(ctx: GuiContext): boolean {
 
 /**
  * 构造 GuiRenderResult。当前主用途是 guiSetWidget 的载荷（composer 任务托盘的协议 widget 区）；
- * details.__gui__（tool result 通道）为遗留兼容路径，todo/goal 已不再使用。
+ * details.__gui__（tool result 通道）为 workflow / subagent_batch 等工具的在产通道（经
+ * subagent-workflow 侧 tool/tool-shared.ts 的 withGuiAttach 单点构造，RPC 模式门控）。
  * stripUndefined 确保序列化不含 undefined（JSON.stringify 会丢弃 undefined 字段）。
  */
 export function guiResult(component: GuiComponent, meta?: WidgetMeta): GuiRenderResult {

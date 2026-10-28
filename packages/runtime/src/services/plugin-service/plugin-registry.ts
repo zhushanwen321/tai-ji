@@ -288,6 +288,10 @@ export class PluginRegistry {
       ...(manifest.namespace !== undefined ? { namespace: manifest.namespace } : {}),
       engines: { 'taiji': engineRange ?? '*' },
       pluginPath: entryPath,
+      // npm 包名透传（ns 推导唯一事实源，providers.* 命名空间边界消费——与 capabilities
+      // 同链：scan 是 descriptor 唯一装配点，重扫即刷新；畸形包缺 name 时为 undefined，
+      // 消费方窄化判定）
+      pkgName: pkg.name,
       source,
       extensionDependencies: manifest.extensionDependencies ?? [],
       ...(compatCompatible ? {} : { compatibilityError: compatibilityReason }),

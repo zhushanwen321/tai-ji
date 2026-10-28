@@ -4,8 +4,6 @@
   "layers": [],
   "scope": {},
   "tests": [
-    "extensions/taiji/agent-ext/src/__tests__/agent-ext.test.ts",
-    "extensions/taiji/msg-id-mapper/src/__tests__/msg-id-mapper.test.ts",
     "extensions/taiji/system-prompt-trace/src/__tests__/baseline.a12.test.ts",
     "extensions/taiji/system-prompt-trace/src/__tests__/diff.test.ts",
     "extensions/taiji/system-prompt-trace/src/__tests__/index-wiring.test.ts",

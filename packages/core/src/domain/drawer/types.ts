@@ -12,14 +12,35 @@
  * 零 DOM 约束：core tsconfig 未配置 DOM lib，本文件为纯类型定义，不引入 DOM/浏览器 API 类型。
  */
 
-/** 右抽屉 tab 枚举（display-containers §7.1 终态 8 员）：git（变更集）/ doc（命令文档）/ detail（文件详情）/ subagent（子代理只读对话流）/ bashTask（后台命令详情）/ plan（计划文档）/ btw（旁路线）/ trace（session-trace 条目详情）。
- * workflow 不入本枚举（[2026-10-19 用户裁决] drawer workflow tab 删除，workflow 唯一入口 =
- * 浮层，见 OVERLAY_REGISTRY）；terminal/browser 同不入（terminal 迁底抽屉、browser 走浮层，
- * §7.6）——本枚举是右抽屉 tab 的唯一类型，'terminal'/'browser'/'workflow' 赋给任何右抽屉
- * tab 位即编译错（注册表终态由类型层强制）。
+/** 右抽屉 tab 位（容器扩展点统一设计 §7.2「容器类型去枚举」）：从编译期联合降为开放字符串。
+ * 去枚举原因：tab 位是 ContentSlotRegistry 的开放容器位（插件声明 drawer.tab 后派生出新成员，
+ * 封闭联合无法表达）；终态成员集合由运行时已知值常量 + 注册表派生视图承接，内置 8 员 =
+ * RIGHT_DRAWER_TAB_IDS（git 变更集 / doc 命令文档 / detail 文件详情 / subagent 子代理只读对话流
+ * / bashTask 后台命令详情 / plan 计划文档 / btw 旁路线 / trace session-trace 条目详情）。
+ * workflow 不入右抽屉（[2026-10-19 用户裁决] drawer workflow tab 删除，workflow 唯一入口 =
+ * 浮层，见 OVERLAY_REGISTRY）；terminal 迁底抽屉、browser 走浮层（§7.6）。
  * 无打开参数（OpenDrawerOptions 零加员）；自动打开经 ADR-0053 per-session pendingOpen
- * 语义（renderer 接线，core 只持 tab 枚举成员）。 */
-export type RightDrawerTab = 'git' | 'doc' | 'detail' | 'subagent' | 'bashTask' | 'plan' | 'btw' | 'trace'
+ * 语义（renderer 接线，core 只持 tab 位标识）。 */
+export type RightDrawerTab = string
+
+/** 右抽屉内置 tab 已知值（§7.2「保留一组已知值常量供校验与内置项使用」；成员序 =
+ * RIGHT_DRAWER_REGISTRY 声明序，插入位 tab 的运行时校验以本表为准）。 */
+export const RIGHT_DRAWER_TAB_IDS = [
+  'git',
+  'doc',
+  'detail',
+  'subagent',
+  'bashTask',
+  'plan',
+  'btw',
+  'trace',
+] as const
+
+/** tab 位是否为右抽屉内置已知值（去枚举后的成员校验入口：terminal/browser/workflow 等
+ * 非内置位返回 false——编译期联合负向锚的运行时承接）。 */
+export function isKnownRightDrawerTab(tab: string): tab is RightDrawerTab {
+  return (RIGHT_DRAWER_TAB_IDS as readonly string[]).includes(tab)
+}
 
 /** drawer open 的可选参数：打开时指定要展示的 slash 命令名（Doc tab）/ 文件路径（Detail tab） */
 export interface OpenDrawerOptions { // oe-exempt:20261003:framework:类型契约先行——容器契约层声明，D1 下游单元即为消费方

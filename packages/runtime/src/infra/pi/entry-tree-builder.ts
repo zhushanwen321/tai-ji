@@ -22,7 +22,7 @@ import { applyEntryEndTimes, computeActivePathEntries, mapSessionEntries } from 
  * 产出 taiji 内部类型（Message）。services 层调本函数，不直接碰 pi entry 类型。
  */
 
-/** msg-id-mapper extension 写入的 client-msg-id custom entry 的 data 结构。 */
+/** host-internals 扩展（msg-id-mapper 模块）写入的 client-msg-id custom entry 的 data 结构。 */
 interface ClientMsgIdData {
   clientUuid: string
   userEntryId: string
@@ -53,9 +53,9 @@ export interface RebuiltHistory {
 }
 
 /**
- * msg-id-mapper extension 写入的 customType 常量。
+ * host-internals 扩展（msg-id-mapper 模块）写入的 customType 常量。
  *
- * 与 extension 实现的 customType 字符串严格一致（步骤 1 的 @zhushanwen/pi-msg-id-mapper extension）。
+ * 与 extension 实现的 customType 字符串严格一致（@zhushanwen/pi-host-internals 的 msg-id-mapper 模块）。
  * 改名需同步 extension 端 + 测试。taiji. 前缀是 taiji namespace 约定，避免与 pi/其他扩展冲突。
  */
 const CLIENT_MSG_ID_TYPE = 'taiji.client-msg-id'
@@ -67,7 +67,7 @@ const CLIENT_MSG_ID_TYPE = 'taiji.client-msg-id'
  * MSG_ID_TAG_BARE_RE 单份常量（uuid 段经 MSG_ID_UUID_SEGMENT 单点构造，捕获组 1 = 裸
  * uuid，buildDeferEntryIdMap match[1] 提取）；与 core apply-entry-convert 的
  * DEFER_FLUSH_MARKER_RE 是同一常量，无双侧派生器与同步纪律。字符集（uuid hex，不含
- * u-）与 msg-id-mapper TAG_MATCH 的 u- 前缀形态结构互斥——u- 标记帧不被本正则捕获、
+ * u-）与 host-internals msg-id-mapper 模块 TAG_MATCH 的 u- 前缀形态结构互斥——u- 标记帧不被本正则捕获、
  * 裸标记不被 TAG_MATCH 捕获（行为锁定：pi-semantics-defer-marker-survival 探针 +
  * entry-tree-builder D2）。
  */

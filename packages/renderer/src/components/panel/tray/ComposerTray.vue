@@ -8,8 +8,8 @@
   隐藏与指标聚合按钮同判据——无 session 无任务面）；随 Composer 实例化（per-Composer 归属），数据按该 Composer 绑定
   的 sessionId 过滤——各件计数走 `useTrayCounts(sessionId)`（**唯一实例在本外壳创建**，见文末
   「数据范围归属」），widget 走 ViewHostStore 的 per-session 分区，切 session 即跟随。
-  条目 = built-in 五件（bash → subagent → workflow → session → canvas，固定序恒在最左）+
-  协议 widget 区（排序后逐个 TrayWidgetButton）。两类条目共用同一套外壳状态机（hover/pin/互斥），
+  条目 = built-in 三件（bash → session → canvas，固定序恒在最左；subagent / workflow 已迁
+  插件 widget 区，容器扩展点统一 §6.6/U9+U10）+ 协议 widget 区（排序后逐个 TrayWidgetButton）。两类条目共用同一套外壳状态机（hover/pin/互斥），
   面板内容按类型分流：
 
     built-in 三件任务域 → TrayNativePanel（kind / sessionId / **显式透传 pinned**——否则行内操作永不渲染）
@@ -163,8 +163,9 @@
     </Popover>
 
     <template v-if="!aggregated">
-    <!-- built-in 五件（固定序 bash → subagent → workflow → session → canvas；三态判定见文件头，
-         canvas 件同三态——D4 隔离后无恒渲染豁免，见 builtinItems 注释） -->
+    <!-- built-in 三件（固定序 bash → session → canvas；三态判定见文件头，
+         canvas 件同三态——D4 隔离后无恒渲染豁免，见 builtinItems 注释；
+         [容器扩展点统一 §6.6/U9+U10] subagent / workflow 两件已迁插件 widget 区） -->
     <Popover
       v-for="item in builtinItems"
       :key="item.kind"
@@ -246,6 +247,7 @@
         <TrayWidgetButton
           :view-id="item.viewId"
           :meta="item.entry.meta"
+          :plugin-id="item.entry.pluginId"
           :pinned="isPinnedOf(widgetKey(item.viewId))"
           :expanded="activeKey === widgetKey(item.viewId)"
           @hover-start="onHoverStart(widgetKey(item.viewId))"
@@ -283,7 +285,7 @@
 import { computed, inject, onBeforeUnmount, provide, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Bot, Layers, Network, SquareTerminal, Waypoints, Workflow } from '@lucide/vue'
+import { Layers, Network, SquareTerminal, Waypoints } from '@lucide/vue'
 import { VIEW_HOST_SOURCE_KEY, ViewHost } from '@taiji/ui/extension-host'
 import { usePluginToolbarContribution } from '@/components/panel/tray/use-plugin-toolbar'
 import type { ViewCacheEntry } from '@taiji/ui/extension-host'
@@ -336,16 +338,18 @@ const HOVER_OPEN_DELAY_MS = 160
 /** 指针离开 icon+面板整体后的收起延时（D8：240ms——覆盖 icon 与面板之间 6px 间隙的移动耗时） */
 const HOVER_CLOSE_DELAY_MS = 240
 
-/** built-in 五件固定序（D1：不参与 widget 动态排序，恒在最左；第 4 件 session 见 u7 / §6.7 D7，
- * 第 5 件 canvas 见 problem-solve-canvas §3.1(3) u-tray-entry） */
-const BUILTIN_ORDER: readonly TrayBuiltinKind[] = ['bash', 'subagent', 'workflow', 'session', 'canvas']
+/** built-in 三件固定序（D1：不参与 widget 动态排序，恒在最左；第 4 件 session 见 u7 / §6.7 D7，
+ * 第 5 件 canvas 见 problem-solve-canvas §3.1(3) u-tray-entry）。
+ * [容器扩展点统一 §6.6/U9+U10] subagent / workflow 件已迁插件推 widget 树（widget 区，
+ * 排 built-in 之后），宿主自建条目删除。 */
+const BUILTIN_ORDER: readonly TrayBuiltinKind[] = ['bash', 'session', 'canvas']
 
-/** built-in 五件 icon（各自语义直取：bash = 终端、subagent = Bot、workflow = 流程、
- * session = 层叠路径、canvas = 问题分解图（节点连线）） */
+/** built-in 三件 icon（各自语义直取：bash = 终端、
+ * session = 层叠路径、canvas = 问题分解图（节点连线）；subagent / workflow icon 已随件
+ * 迁移退役——widget 区由 TrayWidgetButton 按插件 meta.icon 解析（'bot' / 'workflow'
+ * 在其 registry 在册）） */
 const BUILTIN_ICONS: Record<TrayBuiltinKind, Component> = {
   bash: SquareTerminal,
-  subagent: Bot,
-  workflow: Workflow,
   session: Waypoints,
   canvas: Network,
 }

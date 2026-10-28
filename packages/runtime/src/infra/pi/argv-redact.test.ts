@@ -103,7 +103,7 @@ describe('redactArgvLine（字符串形态；reap-orphan-pi argv 摘要 → cras
 
   it('reap 判据 token 不因脱敏丢失（pi 路径 / --mode rpc / --extension 值）', () => {
     const line =
-      '/opt/pi/pi --mode rpc --no-extensions --approve --extension /Applications/TaiJi.app/Contents/Resources/extensions/pi-agent-ext'
+      '/opt/pi/pi --mode rpc --no-extensions --approve --extension /Applications/TaiJi.app/Contents/Resources/extensions/pi-host-internals'
     const out = redactArgvLine(line)
     expect(out).toContain('/opt/pi/pi')
     expect(out).toContain('--mode rpc')

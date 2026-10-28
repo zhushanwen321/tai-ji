@@ -3030,7 +3030,34 @@ describe('PluginUiSnapshotStore', () => {
     vi.restoreAllMocks()
   })
 
-  it('clearForSession 清该会话两族；clearForPlugin 跨域按 pluginId 清并移除空分区', () => {
+  it('键形态对账（SSOT）：setView 写入与 snapshot 过滤 / clearForSession / clearForMount 落同一分区', () => {
+    // 写入两族三域：会话域 s1/s2 + 全局域同挂载位双插件（S25）——键全经
+    // pluginViewScopeKey/pluginViewScopeMountPrefix（shared SSOT），任一路径手拼漂移
+    // 即在此对不上账（写入后过滤不到 / 清不掉）。
+    const store = new PluginUiSnapshotStore()
+    store.setView(viewItem())                                                                                       // session:s1
+    store.setView(viewItem({ sessionId: 's2', viewId: 'v2' }))                                                       // session:s2
+    store.setView(viewItem({ sessionId: undefined, mountId: 'provider.authorize', pluginId: 'pa', viewId: 'va' }))   // global:provider.authorize:pa
+    store.setView(viewItem({ sessionId: undefined, mountId: 'provider.authorize', pluginId: 'pb', viewId: 'vb' }))   // global:provider.authorize:pb
+
+    // snapshot 过滤命中写入分区（会话域精确 / 全局域精确）
+    expect(store.snapshot({ sessionId: 's1' }).views.map((v) => v.viewId)).toEqual(['v1'])
+    expect(store.snapshot({ mountId: 'provider.authorize', pluginId: 'pb' }).views.map((v) => v.viewId)).toEqual(['vb'])
+
+    // 清理路径命中写入分区：clearForSession（会话域）
+    store.clearForSession('s1')
+    expect(store.snapshot().views.map((v) => v.viewId).sort()).toEqual(['v2', 'va', 'vb'])
+    // clearForMount 精确（单插件分区）
+    store.clearForMount('provider.authorize', 'pa')
+    expect(store.snapshot().views.map((v) => v.viewId).sort()).toEqual(['v2', 'vb'])
+    // clearForMount 前缀（pluginId 缺省 = 该挂载位全部插件分区）
+    store.clearForMount('provider.authorize')
+    expect(store.snapshot().views.map((v) => v.viewId)).toEqual(['v2'])
+    store.clearForSession('s2')
+    expect(store.snapshot().views).toEqual([])
+  })
+
+  it('clearForSession 清该会话两族；clearForMount 清全局域分区；clearForPlugin 跨域按 pluginId 清并移除空分区', () => {
     const store = new PluginUiSnapshotStore()
     store.setHeaderAction(headerAction())
     store.setHeaderAction(headerAction({ headerActionId: 'a2', sessionId: 's2', pluginId: 'p2' }))
@@ -3042,7 +3069,11 @@ describe('PluginUiSnapshotStore', () => {
     expect(store.snapshot().headerActions.map((h) => h.sessionId)).toEqual(['s2'])
     expect(store.snapshot().views.map((v) => v.viewId).sort()).toEqual(['flow', 'v2'])
 
-    // clearForPlugin 跨会话/全局域清剩余 p2 条目（插件维度生命周期清理链：crash/disable/uninstall）
+    // 精确分区清理（mountId + pluginId）
+    store.clearForMount('provider.authorize', 'p2')
+    expect(store.snapshot().views.map((v) => v.viewId)).toEqual(['v2'])
+
+    // clearForPlugin 跨会话/全局域清剩余 p2 条目
     store.clearForPlugin('p2')
     expect(store.snapshot()).toEqual({ headerActions: [], views: [] })
   })

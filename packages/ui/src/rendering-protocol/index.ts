@@ -20,6 +20,18 @@ export { default as GuiComponentRenderer } from './GuiComponentRenderer.vue'
 // Actionbar.vue 内部 inject 同一 key——key symbol 必须跨包同一实例，故经 barrel 导出给消费方
 export { ACTION_EXECUTOR_KEY } from './action-executor-key'
 export type { ActionExecutor, ActionArgs } from './action-executor-key'
+// 容器导航执行器注入契约（容器扩展点统一 §6.4）：壳层 provide core 执行器实例（结构同构
+// 零适配），Actionbar/ListTree 内部 inject 同一 key；VIEW_SCOPE_SESSION_KEY 由 ViewHost
+// 按视图 scope provide（会话注入第一档）。symbol 跨包同一实例，经 barrel 导出
+export {
+  CONTAINER_NAVIGATION_KEY,
+  VIEW_SCOPE_SESSION_KEY,
+  dispatchTreeInteraction,
+} from './container-navigation-key'
+export type {
+  ContainerNavigationExecutor,
+  NavigateOptions,
+} from './container-navigation-key'
 // text-input 值回传注入契约（provider-plugin-access D8）：mount 点容器 provide（它同时掌握
 // pluginId + viewId），TextInput.vue inject 同一 key——key symbol 必须跨包同一实例
 export { UI_EVENT_SENDER_KEY } from './primitives/ui-event-sender-key'

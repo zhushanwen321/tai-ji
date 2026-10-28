@@ -29,3 +29,30 @@ export type { OverlayState, OverlayLifecycleDeps } from './overlay-lifecycle'
 export { ViewHostStore } from './view-host-store'
 export type { ViewCacheEntry, ViewHostStoreDeps } from './view-host-store'
 export * from './header-action-store'
+export { ContainerNavigationExecutor, PLACEMENT_BY_KIND, KNOWN_PARAMS_KEYS_BY_PLACEMENT } from './container-navigation'
+export type {
+  ContainerNavigationTarget,
+  ContainerSlotLookup,
+  ContainerNavigationSink,
+  ContainerNavigationDeps,
+  NavigateOptions,
+  ContainerNavigationFailure,
+  ContainerNavigationResult,
+} from './container-navigation'
+export { ContentSlotRegistry, contentSlotRegistry, CONTENT_SLOT_PLACEMENTS, HOST_PLUGIN_ID, BUILTIN_NAMESPACE, HOST_COMPONENT_WHITELIST, compareContentSlotOrder, validateContentSlotId, builtinDrawerSlots, builtinOverlayTypeViews } from './content-slot-registry'
+export { warnFailureOnce, resolveContributionIcon, normalizeIconKey, CONTRIBUTION_ICON_KEYS, FALLBACK_CONTRIBUTION_ICON, FAILURE_JUDGEMENT_TABLE } from './failure-degradation'
+export type {
+  ContentSlotPlacement,
+  ContentSlotRenderer,
+  ContentSlotDeclaration,
+  UnavailableSlotReason,
+  ContentSlotEntry,
+  HostComponentName,
+  DrawerRegistryEntryLike,
+  OverlayRegistryEntryLike,
+  ContentSlotView,
+  OverlayContentTypeView,
+  SettingsSectionGroupView,
+  SettingsContentMaxWidth,
+} from './content-slot-registry'
+export type { SlotFailureKind, WarnDedupKind, FailureJudgement, ContributionIconResolution, ContributionIconInput } from './failure-degradation'

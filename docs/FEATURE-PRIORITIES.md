@@ -121,9 +121,8 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 |----|----|------|------|
 | ask-user | universal | **P0** | 边界判例 #3（2026-09-12 用户裁决升 P0） |
 | subagent-workflow | universal | **P0** | 边界判例 #2（2026-09-12 用户裁决升 P0） |
-| agent-ext | taiji | P1 | taiji 集成基座，挂了集成能力降级但 pi 主链路存活 |
+| host-internals | taiji | P1 | taiji 集成基座，挂了集成能力降级但 pi 主链路存活 |
 | base-tool-enhance | universal | P1 | bash 前台链挂了 agent 失去执行能力（原生回退仅保底） |
-| msg-id-mapper | taiji | P1 | 挂了消息映射错乱 |
 | permission | universal | P1 | 审批闭环（边界判例 #7） |
 | provider-live-sync | universal | **P0** | 挂了 = 运行中会话看不到新增/变更的 provider·模型·凭据，切新模型报 `Model not found` 且只能重开会话；目录投喂（catalog overlay）同挂于此包——投喂的 overlay-only 模型对新会话不可见（模型控制主链路的实时性前提；与 ask-user/subagent-workflow 同族的「能力静默失效」形态，故 tier=infrastructure 不可禁） |
 | system-prompt | taiji | P1 | 挂了 agent 裸人格、所有会话质量崩 |

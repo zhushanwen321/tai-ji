@@ -241,7 +241,7 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 
 **D8：skill 失效降级必须前端可见（选定）**
 - **采用**：runtime 展开器对「name 在权威映射（D7 切源后 = SkillRegistry 扫描，原 get_commands）无映射」或「SKILL.md 读取失败」或「`<taiji-skill/>` 标记被 BeforeSend hook 改写破坏至不可解析」的标记：**原样保留**（对齐 pi 的透传行为），同时经现有 runtime → renderer 广播通道发一条消息级提示（renderer 以 toast + 消息内联提示呈现）。禁止静默——静默降级会让用户以为 skill 生效。
-- **检测域边界（R4 补登）**：D8 的残缺扫描发生在 runtime 注入器发送前，只覆盖 BeforeSend hook 及之前的改写；**pi 侧 `input` hook 在注入器之后运行**（client.prompt 进入 pi 后触发），其改写破坏标记/块时无检测点、无提示，静默进入 LLM 上下文——不新增机制，依赖 hook 自律（仓内现仅 msg-id-mapper 使用 input hook 且只剥 u- 注释不触碰标记；第三方 extension 为真实暴露面，登记为已知边界）。
+- **检测域边界（R4 补登）**：D8 的残缺扫描发生在 runtime 注入器发送前，只覆盖 BeforeSend hook 及之前的改写；**pi 侧 `input` hook 在注入器之后运行**（client.prompt 进入 pi 后触发），其改写破坏标记/块时无检测点、无提示，静默进入 LLM 上下文——不新增机制，依赖 hook 自律（仓内现仅 host-internals msg-id-mapper 模块使用 input hook 且只剥 u- 注释不触碰标记；第三方 extension 为真实暴露面，登记为已知边界）。
 - **不采用**：整条消息拒绝发送——单个 skill 失效不该阻断整条消息的表达。
 - **证据**：pi 对未知 skill 原样透传（`agent-session.js:989-991`）——行为对齐。
 - **效果**：§3.1 场景 3。
@@ -265,7 +265,7 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
   - 失效标记（无映射/读取失败/hook 破坏）不进块：正文原样保留 + notice（D8 行为不变）；映射源整体失败（registry 扫描异常 / 晚绑定未绑定，mapping_unavailable；原 get_commands RPC 失败同 reason）同理：正文留标记、不追加块。
 - **裁决理由**：① 正文可读性——原位展开把 SKILL.md 全文（最坏 50KB）嵌进句子中间，模型与人都难读；占位保留后句子完整，展开集中尾部；② 显示/数据范围干净——反解析从「把 block 从正文中间挖出来」变为「剥尾部一整块 + 正文标记还原 badge」，复制消息（normalizeContent）恒为占位形态，编辑重发草稿不可见全文；③ 降级统一——原降级形态（标记 + 块）与正常形态同构，两 tag 合一后反解析规则从「形态分叉」收敛为「先剥块、再认标记」；④ 多轮上下文中后续 turn 引用「某条消息的 skill」时正文位置稳定。
 - **同 name 去重**：块内每个 name 只展开一次（按标记出现序首个归并，notice 不发）。UI 层 D2 已禁选同 skill，此处兜底手打/编辑重发路径；重复全文纯浪费上下文。**数据源澄清**：块内 `<skill>` 的 location **与降级清单条目的 location 均恒取 SkillRegistry 权威扫描的 `sourcePath`**（D4 修订后权威源；「与 pi 逐字对齐」约束的是展开格式而非数据源；标记自带 location 若过时——skill 移动后——不得作为权威 read 路径进入块/清单，否则模型按过时路径 read）；去重归并判定仅按 `name`（不读标记自带 location）；标记自带 location 仅作反解析自描述，非权威数据源。
-- **落盘末尾性依赖声明**：useChat 在注入前已于文本尾追加 `<!--taiji:msg:u-…-->` 标记，注入块实际拼接在该注释之后；「真末尾」由 pi 侧 msg-id-mapper input hook 剥除注释实现——该 extension 自身降级（hook 错误标记存活）时落盘为「注释 + 块」，反解析剥块按任意位置匹配不受影响。
+- **落盘末尾性依赖声明**：useChat 在注入前已于文本尾追加 `<!--taiji:msg:u-…-->` 标记，注入块实际拼接在该注释之后；「真末尾」由 pi 侧 host-internals msg-id-mapper input hook 剥除注释实现——该 extension 自身降级（hook 错误标记存活）时落盘为「注释 + 块」，反解析剥块按任意位置匹配不受影响。
 - **LLM 关联指引：正常形态不加文本内指引行（选定）**。理由：对齐信号完备——正文标记带 `name`、块内每个 `<skill>` 也带同名 `name`，citation/脚注模式主流 coding 模型可建立映射；块 tag 名语义化。**观察点**：若实测弱模型漏读末尾块（回答未体现 skill 内容），补救路径 = system-prompt extension 经 hook 注入提示词（一处生效全 session，不污染消息文本）；不回退到文本内指引行。降级形态保留指引行（该形态下 read 是唯一获取通道，指引是必要指令非冗余）。
 - **不采用**：① 维持原位展开——裁决理由 ①②③ 全部反向；② 展开块紧跟各标记后方内联——可读性问题与原位展开等价，只是换个包裹；③ 新降级 tag 与新块并存——同构形态双 tag 徒增反解析与文档分叉；④ **复用既有 `<taiji-skills>` 作统一包裹 tag**——基础设施虽现成（`buildSkillsFallbackBlock`/`parseSkillsFallbackBlocks` 已实装），但 tag 名是 LLM 可读协议范围：`taiji-skills`（清单语义）承载全文块语义 stretch，`taiji-skill-data` 对模型的「数据附挂区」语义传达更准；且存量降级块消息与 R4 新形态消息靠 tag 名即可自识别（诊断/测试断言友好），复用则须解析块内子项形态才能区分新旧——概念净增 1 个 tag 换取协议范围语义精度与新旧自识别，判定值得。
 - **效果**：正文可读；resume/复制/编辑重发数据范围干净；降级/正常统一包裹。验收场景 1②/2①/4 形态断言随本决策更新。

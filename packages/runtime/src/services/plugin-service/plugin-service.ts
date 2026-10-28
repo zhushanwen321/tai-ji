@@ -1145,7 +1145,14 @@ export class PluginService implements IPluginService {
         }
       }
       const result = await this.commitAndActivate(pending.prepared)
-      if (!result.success) return result
+      // 失败即失效登记：激活失败路径 rollback 后 staging 已被 commit rename 消费、
+      // 正式目录已删（更新场景旧版恢复），残留 pending 只会让重试 confirm 撞缺失
+      // staging 的原始 ENOENT——清掉后重试拿到「call preparePluginInstall first」
+      // 可操作错误（S18 五处无残留口径在 confirm 通道同样成立）
+      if (!result.success) {
+        this.pendingPrepares.delete(pluginId)
+        return result
+      }
       this.pendingPrepares.delete(pluginId)
       const extensionResult = await this.installPiExtensionMember(pending.preview)
       return extensionResult ?? result
@@ -1256,7 +1263,7 @@ export class PluginService implements IPluginService {
       this.broadcastPluginList()
       return {
         success: false,
-        error: `Plugin '${prepared.dirName}' installed but failed to activate (state=${state ?? 'UNKNOWN'}) — installation rolled back`,
+        error: `Plugin '${prepared.dirName}' installed but failed to activate (state=${state ?? 'UNKNOWN'}) — installation rolled back。请重新发起安装（两段式安装需重新 prepare 后再确认）`,
       }
     }
 

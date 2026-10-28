@@ -67,6 +67,8 @@ import { MAX_RETAINED_DONE_RUNS, noteRebuiltSettlement } from "@zhushanwen/subag
 import type { LauncherDeps, WorkflowRun } from "@zhushanwen/subagent-core";
 import { setSubagentService } from "@zhushanwen/subagent-core";
 import type { InFlightReporter } from "../host/inflight-reporter.ts";
+import type { SubagentTrayWidgetPusher } from "../interface/gui/tray-widget.ts";
+import type { WorkflowTrayWidgetPusher } from "../interface/gui/workflow-tray-widget.ts";
 import type { WorkflowDomainHandle } from "../workflow-events.ts";
 import { runSettledEffects, type RunSettledEffectsEnv } from "../workflow-events.ts";
 import { GLOBAL_SLOT_KEYS } from "@zhushanwen/subagent-core";
@@ -87,6 +89,13 @@ const storeDisposeSpy = vi.fn(async () => {});
 const queueRejectAllSpy = vi.fn();
 const reporterAttachSpy = vi.fn();
 const reporterDetachSpy = vi.fn();
+// [§6.6 U9/U10] 托盘双推送器接线 spy（fake pusher 经 wiring 注入——attach/detach
+// 驱动时点锚定；vi.clearAllMocks 于 beforeEach 统一重置，与 reporter spy 同款）。
+const trayAttachSpy = vi.fn();
+const trayDetachSpy = vi.fn();
+const wfTrayAttachSpy = vi.fn();
+const wfTrayDetachSpy = vi.fn();
+const wfTrayNotifySpy = vi.fn();
 
 /** notifyDone 降级直发的 pi.sendMessage 首参形状（workflow-notify.ts WorkflowNotifyDetails）。 */
 type SentMessage = {
@@ -198,6 +207,18 @@ function makeReporter(): InFlightReporter {
   } as unknown as InFlightReporter;
 }
 
+/** [§6.6 U9] subagent 件托盘推送器 fake（wiring 注入点——漏 attach/detach 接线
+ *  在此可见，无需真实 widget 推送）。 */
+function makeTrayPusher(): SubagentTrayWidgetPusher {
+  return { attach: trayAttachSpy, detach: trayDetachSpy };
+}
+
+/** [§6.6 U10] workflow 件托盘推送器 fake（同 seam 同款；notifyRunsChanged 是接口
+ *  必备成员，journal 出口分发的回归不属本块防线——本块只锁 attach/detach 接线）。 */
+function makeWorkflowTrayPusher(): WorkflowTrayWidgetPusher {
+  return { attach: wfTrayAttachSpy, detach: wfTrayDetachSpy, notifyRunsChanged: wfTrayNotifySpy };
+}
+
 function makePi(): {
   pi: ExtensionAPI;
   handlers: Map<string, (event: unknown, ctx: ExtensionContext) => unknown>;
@@ -221,6 +242,9 @@ let setupWorkflowDomain: typeof import("../workflow-events.ts").setupWorkflowDom
 
 type HandlerMap = Map<string, (event: unknown, ctx: ExtensionContext) => unknown>;
 
+/** setupWorkflowDomain 的 wiring 注入类型（fake reporter / pusher 的注入通道）。 */
+type DomainWiring = NonNullable<Parameters<typeof setupWorkflowDomain>[1]>;
+
 /** 挂载（只装配事件族，不触发 session_start）——围栏 / 提权槽 / 注册顺序用。 */
 function mount(): { handle: WorkflowDomainHandle; handlers: HandlerMap } {
   const { pi, handlers } = makePi();
@@ -228,10 +252,15 @@ function mount(): { handle: WorkflowDomainHandle; handlers: HandlerMap } {
   return { handle, handlers };
 }
 
-/** 挂载 + session_start 装配受控条目（deps 检查要求条目 + storeHealthy）。 */
+/** 挂载 + session_start 装配受控条目（deps 检查要求条目 + storeHealthy）。
+ *  wiring 透传 fake 注入面（缺省只注入 inflightReporter，与既有用例形态一致）。 */
 async function mountWithSession(
   sessionId: string,
-  opts: { mode?: "rpc" | "tui"; runs?: WorkflowRun[] } = {},
+  opts: {
+    mode?: "rpc" | "tui";
+    runs?: WorkflowRun[];
+    wiring?: DomainWiring;
+  } = {},
 ): Promise<{
   pi: ExtensionAPI;
   handle: WorkflowDomainHandle;
@@ -241,9 +270,12 @@ async function mountWithSession(
   runs: Map<string, WorkflowRun>;
 }> {
   const { pi, handlers } = makePi();
-  const { result, ctx, runs } = makeLifecycleResult(sessionId, opts);
+  const { result, ctx, runs } = makeLifecycleResult(sessionId, {
+    mode: opts.mode,
+    runs: opts.runs,
+  });
   mockSetupSessionLifecycle.mockResolvedValue(result);
-  const handle = setupWorkflowDomain(pi, { inflightReporter: makeReporter() });
+  const handle = setupWorkflowDomain(pi, { inflightReporter: makeReporter(), ...opts.wiring });
   await handlers.get("session_start")!({ type: "session_start" }, ctx);
   // deps = lazyDeps 本体（getter 形态）：属性访问触发检查 + makeDeps 现读——
   // D3 volatile 现读语义（pi 切换后旧 deps 解析新 pi）依赖 getter 不被展开求值。
@@ -643,6 +675,72 @@ describe("D1 session_shutdown quit 族：六动作现状全执行", () => {
       expect(queueRejectAllSpy).toHaveBeenCalledTimes(1);
     },
   );
+});
+
+// ── ② [容器扩展点统一 §6.6 U9/U10] 托盘双推送器接线（dmg-r2-7）─────────────────
+//
+// 两个托盘推送器（subagent 件 / workflow 件）与 inflight/journal reporter 同 seam 同款：
+// session_start 注入 ctx 驱动 attach，session_shutdown 的 reload 与终结两分支摘 ctx 驱动
+// detach。漏 detach = 旧 pusher 持 stale ctx 反复推送死 session（reload 后新 factory 覆盖
+// 前的窗口）——本块经 wiring 注入 fake pusher 锁定三个接线点的调用次数与相对时序。
+
+describe("[§6.6 U9/U10] 托盘双推送器接线：session_start attach / reload·终结 detach", () => {
+  it("session_start：装配链完成后两 pusher.attach 各执行一次（实参 = 当前 session ctx）", async () => {
+    const { ctx } = await mountWithSession("sess-tray-attach", {
+      wiring: { trayWidgetPusher: makeTrayPusher(), workflowTrayWidgetPusher: makeWorkflowTrayPusher() },
+    });
+
+    expect(trayAttachSpy).toHaveBeenCalledTimes(1);
+    expect(wfTrayAttachSpy).toHaveBeenCalledTimes(1);
+    expect(trayAttachSpy.mock.calls[0]?.[0]).toBe(ctx);
+    expect(wfTrayAttachSpy.mock.calls[0]?.[0]).toBe(ctx);
+    // 时序：attach 在装配链之后（getSubagentService 单例此时必在——订阅 onChange 的
+    // 前提，生产注释 :539-541 的时序保证在此锁定）。
+    expect(mockSetupSessionLifecycle.mock.invocationCallOrder[0]!).toBeLessThan(
+      trayAttachSpy.mock.invocationCallOrder[0]!,
+    );
+    expect(trayAttachSpy.mock.invocationCallOrder[0]!).toBeLessThan(
+      wfTrayAttachSpy.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("session_shutdown reason=reload：两 pusher.detach 各执行一次（旧 ctx 摘除，防 stale ctx 推送）", async () => {
+    const { handlers, ctx } = await mountWithSession("sess-tray-reload", {
+      wiring: { trayWidgetPusher: makeTrayPusher(), workflowTrayWidgetPusher: makeWorkflowTrayPusher() },
+    });
+    await handlers.get("session_shutdown")!({ type: "session_shutdown", reason: "reload" }, ctx);
+
+    expect(trayDetachSpy).toHaveBeenCalledTimes(1);
+    expect(wfTrayDetachSpy).toHaveBeenCalledTimes(1);
+    // attach 不重复：reload 分支只摘不重臂（重臂点 = reload 后新 session_start）
+    expect(trayAttachSpy).toHaveBeenCalledTimes(1);
+    // 时序：detach 在句柄作废之后（分支首动作 → 摘 ctx），两 pusher detach 顺序锁定
+    expect(serviceInvalidatePiBindingSpy.mock.invocationCallOrder[0]!).toBeLessThan(
+      trayDetachSpy.mock.invocationCallOrder[0]!,
+    );
+    expect(trayDetachSpy.mock.invocationCallOrder[0]!).toBeLessThan(
+      wfTrayDetachSpy.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("session_shutdown reason=quit（终结分支）：两 pusher.detach 各执行一次", async () => {
+    const { handlers, ctx } = await mountWithSession("sess-tray-quit", {
+      runs: [makeRun({ runId: "run-sess-tray-quit", callCount: 1 })],
+      wiring: { trayWidgetPusher: makeTrayPusher(), workflowTrayWidgetPusher: makeWorkflowTrayPusher() },
+    });
+    await handlers.get("session_shutdown")!({ type: "session_shutdown", reason: "quit" }, ctx);
+
+    expect(trayDetachSpy).toHaveBeenCalledTimes(1);
+    expect(wfTrayDetachSpy).toHaveBeenCalledTimes(1);
+    // 时序：detach 在 service dispose 之后、run 终态化之前（session 已死才摘推送通道，
+    // 摘除不阻断终态落盘链）
+    expect(serviceDisposeSpy.mock.invocationCallOrder[0]!).toBeLessThan(
+      trayDetachSpy.mock.invocationCallOrder[0]!,
+    );
+    expect(wfTrayDetachSpy.mock.invocationCallOrder[0]!).toBeLessThan(
+      mockTerminateRunningRuns.mock.invocationCallOrder[0]!,
+    );
+  });
 });
 
 // ── ② D2：WorkflowDomainState 提权槽 ─────────────────────────────────────────

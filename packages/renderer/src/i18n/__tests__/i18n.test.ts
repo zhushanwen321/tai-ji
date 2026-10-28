@@ -554,7 +554,7 @@ describe('U9: locale 消息无裸 @（linked-message 语法冲突检查）', () 
     const errorSpy = vi.spyOn(console, 'error').mockImplementation((...args) => logs.push(`error: ${String(args[0])}`))
     try {
       const i18n = createI18n({ legacy: false, locale: 'zh-CN', messages: { 'zh-CN': zhCN } })
-      expect(i18n.global.t('settings.preset.builtinExtensionHint')).toContain('@zhushanwen/pi-agent-ext')
+      expect(i18n.global.t('settings.preset.builtinExtensionHint')).toContain('@zhushanwen/pi-host-internals')
       expect(logs).toEqual([])
     } finally {
       warnSpy.mockRestore()
@@ -1035,6 +1035,7 @@ const USAGE_WHITELIST: ReadonlyArray<{ literal: string; kind: 'exact' | 'prefix'
   { literal: 'app.model.cycleBackward', kind: 'exact', reason: 'composer 快捷动作 ID（同上）' },
   { literal: 'app.message.copy', kind: 'exact', reason: 'composer 快捷动作 ID（同上）' },
   { literal: 'sidebar.tab', kind: 'exact', reason: '扩展宿主 placement 枚举值（placement === "sidebar.tab"），非 i18n key' },
+  { literal: 'settings.section', kind: 'exact', reason: '扩展宿主 placement 枚举值（容器位注册表四族之一，content-slots.ts 声明表），settings 恰为 i18n 顶层命名空间故形态无法区分' },
   { literal: 'rollingRestart.status', kind: 'exact', reason: 'RPC 命令名（command("rollingRestart.status")），非 i18n key' },
   { literal: 'workspace.detected', kind: 'exact', reason: 'WS 消息类型（ServerMessageMap 索引），非 i18n key' },
 ]

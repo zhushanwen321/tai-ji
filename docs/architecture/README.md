@@ -46,7 +46,7 @@ docs/architecture/
 └── file-lock-unification-and-reaper-sink.md  # 文件锁统一 SSOT + 后台任务收殓下沉 runtime
 ```
 
-> plugin 使用指南（内置插件开发 how-to）在 [`../plugins/built-in-plugin-guide.md`](../plugins/built-in-plugin-guide.md)（「怎么写」不属架构文档）。
+> plugin 体系文档在 [`../plugins/`](../plugins/README.md)：架构总览 [`architecture.md`](../plugins/architecture.md)（四层模型 / 贡献点契约 / 数据流 / 与 pi extension 分工）+ 扩展点全量盘点 [`extension-points.md`](../plugins/extension-points.md)，使用指南（内置插件开发 how-to）是 [`built-in-plugin-guide.md`](../plugins/built-in-plugin-guide.md)（「怎么写」不属架构文档）。
 
 > ADR 统一收录在 [`../adr/decisions.md`](../adr/decisions.md)（单文件 SSOT，沿用 ADR 编号）。**v3 能力设计 spec** 在 [`v3-specs/`](v3-specs/README.md)（v6 无对应物的功能/跨区联动设计 SSOT）；视觉设计权威 = [`../DESIGN.md`](../DESIGN.md)。
 

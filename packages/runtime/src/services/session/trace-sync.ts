@@ -45,7 +45,7 @@ export function nextTracePushId(): string {
 }
 
 /**
- * 现取 system prompt 的 custom entry customType。写入方 = builtin agent-ext 包
+ * 现取 system prompt 的 custom entry customType。写入方 = builtin host-internals 包
  *（infrastructure 不可禁）的 /__taiji_get_system_prompt__ 命令 handler（字面量锤定，不 import
  * 本模块）；读取方 = fetchCurrentSystemPrompt 轮询匹配。与留痕包的 taiji:system-prompt（core
  * SYSTEM_PROMPT_CUSTOM_TYPE）语义不同：这是「当前值现取」，非留痕历史。
@@ -371,7 +371,7 @@ export class TraceSync {
    *
    * 通道：pi RPC 无 get_system_prompt 命令、getSystemPrompt() 只在 extension API，且现取
    * 不能依赖可禁的留痕包（system-prompt-trace 是 feature tier）——链路固定为：
-   *   client.prompt('/__taiji_get_system_prompt__')（builtin agent-ext 包注册，不可禁，
+   *   client.prompt('/__taiji_get_system_prompt__')（builtin host-internals 包注册，不可禁，
    *   /__ 内部命令不经 LLM；RPC prompt 在 preflight 后即返回，不等 handler 完成）
    *   → handler 写 taiji:current-system-prompt custom entry
    *   → 本方法轮询 get_entries(since=基线) 拉到该 entry 后提取返回。

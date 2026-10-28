@@ -99,7 +99,7 @@ describe("command-registry", () => {
         type: 'view',
         placement: 'sidebar.tab',
         available: true,
-        view: { viewType: 'gui', title: 'View', initialVisibility: 'hidden' },
+        view: { viewType: 'gui', title: 'View' },
       })
       registry.registerFromContribution({
         pluginId: 'tasks',
@@ -290,7 +290,7 @@ describe("contribution-registry", () => {
         type: 'view',
         placement: 'sidebar.tab', // 未注册
         available: false,
-        view: { viewType: 'gui', title: 'My View', initialVisibility: 'hidden' },
+        view: { viewType: 'gui', title: 'My View' },
       })
       registry.routeAll(mounts)
       // 事件 emit
@@ -315,7 +315,7 @@ describe("contribution-registry", () => {
         type: 'view',
         placement: 'sidebar.tab', // 已注册
         available: false,
-        view: { viewType: 'gui', title: 'My View', initialVisibility: 'hidden' },
+        view: { viewType: 'gui', title: 'My View' },
       })
       registry.routeAll(mounts)
       expect(registry.getContributions({ pluginId: 'p1' })[0].available).toBe(true)
@@ -427,15 +427,17 @@ describe("contribution-registry", () => {
       registry.loadExternal([d])
       registry.loadExternal([d])
       expect(registry.getContributions({ pluginId: 'ext1' })).toHaveLength(1)
-      // 覆盖语义：新注入替换旧的全部
+      // 覆盖粒度（U4 §6.2 源合并）：同 (type, contributionId) 覆盖为新值；清单未覆盖的
+      // 既有项不清除（旧「整插件清空」语义会清掉 ext1.a——失败模式 D 防线）
       const d2: PluginDescriptorLike = {
         pluginId: 'ext1',
         contributes: { commands: [{ command: 'ext1.b', title: 'B' }] },
       }
       registry.loadExternal([d2])
       const all = registry.getContributions({ pluginId: 'ext1' })
-      expect(all).toHaveLength(1)
-      expect(all[0].contributionId).toBe('ext1.b')
+      expect(all).toHaveLength(2)
+      expect(all.find((c) => c.contributionId === 'ext1.a')?.command?.title).toBe('A')
+      expect(all.find((c) => c.contributionId === 'ext1.b')?.command?.title).toBe('B')
     })
 
     it('TC-5e: 无 contributes → 注册为空不抛错（ERR5 降级）', () => {
@@ -471,8 +473,8 @@ describe("contribution-registry", () => {
         pluginId: 'p1',
         contributes: {
           views: [
-            { id: 'todo', title: '任务', placement: 'sidebar.tab', initialVisibility: 'visible' },
-            { id: 'goal', title: '目标', placement: 'sidebar.tab', initialVisibility: 'visible' },
+            { id: 'todo', title: '任务', placement: 'sidebar.tab' },
+            { id: 'goal', title: '目标', placement: 'sidebar.tab' },
           ],
         },
       }])
@@ -483,13 +485,11 @@ describe("contribution-registry", () => {
         viewId: 'todo',
         title: '任务',
         icon: undefined,
-        initialVisibility: 'visible',
       })
       expect(views[1]).toEqual({
         viewId: 'goal',
         title: '目标',
         icon: undefined,
-        initialVisibility: 'visible',
       })
     })
 
@@ -597,6 +597,90 @@ describe("contribution-registry", () => {
       const rec = registry.getContributions({ pluginId: 'scheduler-manager', type: 'headerAction' })[0]
       expect(rec.contributionId).toBe('scheduler-manager.open')
       expect(rec.headerAction?.activation).toBe('scheduler-overlay')
+    })
+
+    it('AP-1e: 结构化 activation（§6.3 联合三 kind）原样透传到 ContributionRecord（声明驱动分派键）', () => {
+      const { registry } = setup()
+      registry.loadExternal([{
+        pluginId: 'nav',
+        contributes: {
+          headerActions: [
+            { id: 'nav.overlay', title: '浮层', icon: 'panel-right', activation: { kind: 'overlay', tabId: 'nav.panel', params: { p: 1 } } },
+            { id: 'nav.drawer', title: '抽屉', icon: 'list', activation: { kind: 'drawer', tabId: 'ui.doc' } },
+            { id: 'nav.command', title: '命令', icon: 'zap', activation: { kind: 'command' }, commandId: 'nav.go' },
+          ],
+        },
+      }])
+      const byId = new Map(
+        registry.getContributions({ pluginId: 'nav', type: 'headerAction' }).map((c) => [c.contributionId, c]),
+      )
+      // core 不消费 activation 语义，只保证形状无损透传（renderer 按 kind 分派点击）
+      expect(byId.get('nav.overlay')?.headerAction?.activation).toEqual({ kind: 'overlay', tabId: 'nav.panel', params: { p: 1 } })
+      expect(byId.get('nav.drawer')?.headerAction?.activation).toEqual({ kind: 'drawer', tabId: 'ui.doc' })
+      expect(byId.get('nav.command')?.headerAction?.activation).toEqual({ kind: 'command' })
+    })
+  })
+
+  describe('ContributionRegistry.loadExternal 覆盖粒度（U4 §6.2 源合并）', () => {
+    // scheduler-manager 的贡献只在 builtin 静态表（其清单无 contributes 段，运行时扫描填
+    // `contributes: {}`）——失败模式 D 的反向断言：接通声明通路后每次广播（含空声明）
+    // 不得清掉静态声明（S7 验收场景的单测承载，§11.1-3）
+    it('U4-1: 同 pluginId 清单缺 contributes / contributes 为 {} → 静态项不被清（失败模式 D）', () => {
+      const { registry } = setup()
+      registry.registerBuiltin()
+      const before = registry.getContributions({ pluginId: 'scheduler-manager' })
+      expect(before.length).toBeGreaterThan(0)
+      registry.loadExternal([{ pluginId: 'scheduler-manager' }])
+      registry.loadExternal([{ pluginId: 'scheduler-manager', contributes: {} }])
+      expect(registry.getContributions({ pluginId: 'scheduler-manager' })).toEqual(before)
+    })
+
+    it('U4-2: 清单覆盖同 (type, contributionId) 项为新值，未覆盖的静态项保留', () => {
+      const { registry } = setup()
+      registry.registerBuiltin()
+      // 静态表：scheduler-manager.open headerAction + toggle/run/delete 三 command；
+      // 清单只声明 toggle → headerAction 与 run/delete 静态项保留，toggle 被覆盖为新 title
+      registry.loadExternal([{
+        pluginId: 'scheduler-manager',
+        contributes: { commands: [{ command: 'scheduler-manager.toggle', title: 'Toggle(v2)' }] },
+      }])
+      const all = registry.getContributions({ pluginId: 'scheduler-manager' })
+      expect(all.find((c) => c.type === 'headerAction')).toBeDefined()
+      expect(all.filter((c) => c.type === 'command')).toHaveLength(3)
+      expect(all.find((c) => c.contributionId === 'scheduler-manager.toggle')?.command?.title).toBe('Toggle(v2)')
+      expect(all.find((c) => c.contributionId === 'scheduler-manager.run')?.command?.title).toBe('立即执行定时任务')
+    })
+
+    it('U4-3: 同 pluginId 连续两次 loadExternal 幂等（不翻倍、静态项仍在）——§11.1-3', () => {
+      const { registry } = setup()
+      registry.registerBuiltin()
+      const d: PluginDescriptorLike = {
+        pluginId: 'scheduler-manager',
+        contributes: { commands: [{ command: 'scheduler-manager.toggle', title: 'T' }] },
+      }
+      registry.loadExternal([d])
+      const once = registry.getContributions()
+      registry.loadExternal([d])
+      expect(registry.getContributions()).toHaveLength(once.length)
+      expect(
+        registry.getContributions({ pluginId: 'scheduler-manager' }).find((c) => c.type === 'headerAction'),
+      ).toBeDefined()
+    })
+
+    it('U4-4: 一个插件多条视图声明不互相覆盖，重复注入不翻倍（§11.1-3 / PB-3）', () => {
+      const { registry } = setup()
+      const d: PluginDescriptorLike = {
+        pluginId: 'multi',
+        contributes: {
+          views: [
+            { id: 'multi.a', title: 'A', placement: 'sidebar.tab' },
+            { id: 'multi.b', title: 'B', placement: 'sidebar.tab' },
+          ],
+        },
+      }
+      registry.loadExternal([d])
+      registry.loadExternal([d])
+      expect(registry.getViewsByPlacement('sidebar.tab')).toHaveLength(2)
     })
   })
 

@@ -494,7 +494,7 @@ describe('createChatStore factory', () => {
 
     it('clientUuid 形态契约：返回 id 匹配 extension TAG 正则 u-[0-9a-fA-F-]{36}', () => {
       const id = sut.store.appendUser('s-w2-uuid', textToSegments('x'))
-      // @zhushanwen/pi-msg-id-mapper TAG_MATCH 锚定该形态——重开 badge 回填链的硬约束
+      // @zhushanwen/pi-host-internals（msg-id-mapper 模块）TAG_MATCH 锚定该形态——重开 badge 回填链的硬约束
       expect(id).toMatch(/^u-[0-9a-fA-F-]{36}$/)
     })
 

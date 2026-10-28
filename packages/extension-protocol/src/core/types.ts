@@ -112,6 +112,12 @@ export interface GuiComponentProps {
       commandId?: string
       /** 只许标量：args 原样传给插件 handler，禁嵌套对象防无 schema 结构化旁路（设计 AP-3 校验） */
       args?: Record<string, string | number | boolean>
+      /**
+       * 宿主容器导航（容器扩展点统一 §6.4 导航原语）：声明后点击请求宿主打开
+       * 对应容器（浮层/抽屉）的 tabId 标签页，不经命令链；与 commandId 互为两条
+       * 执行路径（commandId 优先走既有命令链，宿主执行器裁决）。
+       */
+      hostAction?: HostContainerAction
     }[]
   }
 
@@ -202,8 +208,36 @@ export interface TreeItem {
   status?: 'running' | 'done' | 'failed'
   depth?: number
   children?: TreeItem[]
+  /**
+   * 行点击动作（容器扩展点统一 §6.4 导航原语；此前 TreeItem 完全不可点）。
+   * commandId 走既有命令链，hostAction 走宿主容器导航执行器——两条路径汇入
+   * 同一个执行器，缺省 = 纯展示行（维持旧行为）。
+   */
+  action?: {
+    /** 命令链命令 id（无参形态执行；带参命令用 hostAction.params 语义或后续按需扩展） */
+    commandId?: string
+    /** 宿主容器导航（打开浮层/抽屉的某个标签页） */
+    hostAction?: HostContainerAction
+  }
 }
 export type TreeItemIcon = 'arrow' | 'check' | 'cross' | 'circle' | 'dot' | 'pause' | 'branch'
+
+/**
+ * 宿主容器导航声明（§6.4 导航原语的公共形状）：请求宿主打开某个容器的某个标签页。
+ * 插件不接触宿主内部状态，只表达「打开哪个容器的哪个 tab、带什么参数」。
+ */
+export interface HostContainerAction {
+  /** 容器位置族：overlay = workflow-viz 浮层，drawer = 右抽屉 */
+  kind: 'overlay' | 'drawer'
+  /** 目标标签页 id（全局 id 空间解析，须带插件命名空间前缀）；目标不存在时点击无动作 + 一行 warning */
+  tabId: string
+  /**
+   * 透传给目标容器选项字段的参数：键 = 目标容器选项的字段名（显式登记为对外契约），
+   * 值只许标量——禁嵌套对象防无 schema 结构化旁路（与 action-bar args 同一校验口径）；
+   * 未知键被忽略 + 一行 warning，不阻断动作。会话上下文由宿主注入（插件不传）。
+   */
+  params?: Record<string, string | number | boolean>
+}
 
 // ── plan 审阅协议（submit-review select 通道；marker 常量见 core/markers.ts）──
 //

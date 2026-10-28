@@ -1408,7 +1408,7 @@
   },
   {
     "id": "PS-63",
-    "claim": "extension slash 命令的 args 切分 = 首个空格原样切：_tryExecuteExtensionCommand 以 text.indexOf(\" \") 定位首个空格，commandName = 首空格前（剥 / 前缀），args = 首个空格后的原样余串（text.slice(spaceIndex + 1)——无 trim、无多空格折叠、无引号解析；无空格时 args=''）。单空格形态 '/<cmd> <id>' 下 handler 收到的 args 精确等于 id 本体。承重（message-revoke D1）：runtime revoke 信令 sendSystemCommand(`/${TAIJI_NAV_COMMAND} ${entryId}`) 单空格拼接（revoke-orchestrator.ts）→ agent-ext __taiji_nav__ handler 的 entryId 直用（navigateTree 回退目标）；pi 改切分规则（trim/引号解析/多空格容忍）则 id 失真 → nav mismatch，失败形态 = navigateTree 找不到目标报 nav-failed 可重试（安全降级，非破坏）",
+    "claim": "extension slash 命令的 args 切分 = 首个空格原样切：_tryExecuteExtensionCommand 以 text.indexOf(\" \") 定位首个空格，commandName = 首空格前（剥 / 前缀），args = 首个空格后的原样余串（text.slice(spaceIndex + 1)——无 trim、无多空格折叠、无引号解析；无空格时 args=''）。单空格形态 '/<cmd> <id>' 下 handler 收到的 args 精确等于 id 本体。承重（message-revoke D1）：runtime revoke 信令 sendSystemCommand(`/${TAIJI_NAV_COMMAND} ${entryId}`) 单空格拼接（revoke-orchestrator.ts）→ host-internals __taiji_nav__ handler 的 entryId 直用（navigateTree 回退目标）；pi 改切分规则（trim/引号解析/多空格容忍）则 id 失真 → nav mismatch，失败形态 = navigateTree 找不到目标报 nav-failed 可重试（安全降级，非破坏）",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",

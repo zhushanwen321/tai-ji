@@ -17,7 +17,7 @@ export type ToolMode = 'all' | 'allowlist' | 'denylist' | 'none'
  * 排除用户指定的 deniedExtensions 后，作为 allowlist 注入（见设计文档 §2.4）。
  *
  * builtin infrastructure 级扩展（mandatory-extensions.json SSOT，如
- * @zhushanwen/pi-system-prompt / pi-msg-id-mapper）不受 extensionMode 影响（任何
+ * @zhushanwen/pi-system-prompt / pi-host-internals）不受 extensionMode 影响（任何
  * 模式下都注入，extension-filter.ts applyPresetMode 的 presetOverridable=false）；
  * feature 级 builtin 与用户扩展同受 preset 筛选，见设计文档 §2.3（builtin→npm
  * 迁移后形态）。

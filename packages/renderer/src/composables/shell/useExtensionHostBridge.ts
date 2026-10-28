@@ -40,11 +40,13 @@ import {
   MessageBusBridge,
   MountPointRegistry,
   setExtensionRegistries,
+  setPluginListSource,
   NotificationHostController,
   ViewHostStore,
   OverlayLifecycle,
   ActivationManager,
   CommandRegistry,
+  ContainerNavigationExecutor,
   type ActivationTrigger,
   type CommandExecutor,
   type ContributionRecord,
@@ -53,6 +55,10 @@ import {
   type SessionScopedMap,
   type ViewCacheEntry,
 } from '@taiji/core'
+import { openDrawerTab, getBoundSessionId, ensureBuiltinsAssembled } from '@taiji/core/domain/drawer'
+import type { ContentSlotDeclaration, PluginDescriptorLike } from '@taiji/core'
+import { contentSlotRegistry, HOST_PLUGIN_ID } from '@taiji/core'
+import { openOverlayContent } from '@taiji/core/domain/overlay'
 import { getState as getWsState, send } from '@taiji/core/transport/ws-client'
 import {
   createCompanionDialogAdapters,
@@ -65,10 +71,10 @@ import {
   OVERLAY_LIFECYCLE_KEY,
   type ContributionInfo,
 } from '@taiji/ui/extension-host'
-import { ACTION_EXECUTOR_KEY } from '@taiji/ui/rendering-protocol'
+import { ACTION_EXECUTOR_KEY, CONTAINER_NAVIGATION_KEY } from '@taiji/ui/rendering-protocol'
 import { SLASH_COMMAND_SOURCE_KEY } from '@/components/panel/command-popover-source'
 import { onPlugins, getPluginUiSnapshot } from '@taiji/core/transport/api/domains/plugin'
-import type { PluginUiSnapshotPayload, PluginViewScope } from '@taiji/shared'
+import type { PluginContributesView, PluginInfo, PluginUiSnapshotPayload, PluginViewScope } from '@taiji/shared'
 import { createNotifyToastHandler } from './notify-toast'
 import { notifyUiResponseNotDelivered } from './ui-response-feedback'
 import { useChatStore } from '@/stores/chat'
@@ -86,6 +92,24 @@ export function getExtensionBus(): InternalEventBus {
   if (!sharedBus) sharedBus = new InternalEventBus()
   return sharedBus
 }
+
+/**
+ * unregistered-mount-point 告警去重集合（容器扩展点统一 §6.14 失败降级三件套）。
+ *
+ * 模块级 = 进程级持存：跨容器实例与跨会话生效，插件重新启用后不清空——routeAll 每次
+ * loadExternal 后重跑，同一无效声明会在每次 config.plugins 广播时重复 emit（7 处触发点），
+ * 无去重则告警刷屏。键 = pluginId::contributionId::失败种类（§6.14 统一口径）。
+ * 登记处 = docs/architecture/data-source-registry.md #84（与 failure-degradation.ts warnedKeys
+ * 同条两载体，本条为 renderer 桥侧载体②）。
+ */
+const unregisteredMountPointWarned = new Set<string>() // @data-owner #84
+
+/**
+ * 差集收敛清理（订阅职责④）的去抖窗：矛盾帧（active 事件重放后尾随的 enabled=false
+ * 过期列表帧）是相邻 WS 消息、毫秒级间隔，300ms 合并窗足够取到末帧权威；重连收敛
+ * 延迟同量级，对容器位列表不可感知。
+ */
+const RECONCILE_EXTERNAL_SLOTS_DEBOUNCE_MS = 300
 
 /**
  * 壳层响应式 SessionScopedMap（MF-2 R2 修复，ADR-0049 范式的响应式版）。
@@ -212,6 +236,50 @@ export function toContributionInfos(
   }))
 }
 
+/**
+ * 插件 view 声明 → 容器位声明（容器扩展点统一 §6.1，清理与重放接线 U12/W-C-9）。
+ *
+ * 字段映射：label ← title（声明结构必填，插件文案自带原文 §6.16④）；renderer 恒为
+ * kind:'view'（插件声明走推树通道，ViewHost 按 (sessionId, viewId) 消费；kind:'host' 的
+ * 白名单命中形态只由宿主内置项使用，插件 view 声明没有 host 组件字段，无从命中）。
+ * placement 是开放字符串（挂载点注册制）：不在此过滤位置族——注册表 loadExternal 内做
+ * placement 词表校验（未知族判 unavailable + warnOnce，§5.4 判定表），桥内重复判定是第二份
+ * 检查无增益。校验（§6.12 id / §6.9 上限 / §6.1 白名单 / placement 词表）统一在注册表做——
+ * 桥内零校验逻辑，双注册表同一权威。
+ */
+function toContentSlotDeclaration(pluginId: string, v: PluginContributesView): ContentSlotDeclaration {
+  return {
+    id: v.id,
+    placement: v.placement,
+    label: v.title,
+    ...(v.icon !== undefined ? { icon: v.icon } : {}),
+    ...(v.order !== undefined ? { order: v.order } : {}),
+    ...(v.emptyState !== undefined ? { emptyState: v.emptyState } : {}),
+    scope: v.scope ?? 'session',
+    pluginId,
+    renderer: { kind: 'view', viewId: v.view ?? v.id },
+  }
+}
+
+/**
+ * 插件容器位声明的注册表操作（灌入/清理/重放共用同一入口）。
+ *
+ * 单一写路径：四个容器的派生视图同源于 core 模块级单例 contentSlotRegistry（§6.1 一份
+ * 注册表；侧栏/设置页经 lib/content-slots 的 getContentSlotRegistry 访问同一实例，抽屉经
+ * domain/drawer/content-slots 消费同一实例）——灌入与清理各只有这一个写点，无双权威、
+ * 无成对写。
+ */
+function loadExternalContentSlots(descriptor: PluginDescriptorLike): void {
+  const declarations = (descriptor.contributes?.views ?? []).map((v) =>
+    toContentSlotDeclaration(descriptor.pluginId, v),
+  )
+  contentSlotRegistry.loadExternal(descriptor.pluginId, declarations)
+}
+
+function clearContentSlots(pluginId: string): void {
+  contentSlotRegistry.clearForPlugin(pluginId)
+}
+
 // ── u4b（plugin-header-action-modal-points AP-1）渲染宿主的数据源契约 ──
 //
 // key 定义在本模块（对齐 SLASH_COMMAND_SOURCE_KEY 的「壳内定义、壳 provide、组件 inject」
@@ -242,15 +310,22 @@ export type VisibleHeaderActionRecord = ContributionRecord & {
 }
 
 /**
- * headerAction 可见性谓词（单点）：声明缺省 / 插件未推送过运行时状态 / 运行时 hidden=true /
- * （非 overlay 直开且）无 commandId 四者皆不可见；E13/E3 簿记只影响 disabled/tooltip 不影响可见性。
+ * headerAction 可见性谓词（单点）：声明缺省 / 运行时 hidden=true /
+ * （依赖运行时推送的入口）未推送 且（无 activation 且）无 commandId 者不可见；
+ * E13/E3 簿记只影响 disabled/tooltip 不影响可见性。
+ *
+ * 「未推送 = 不可见」fail-safe 的适用边界（容器扩展点统一 §6.3 连带明确）：该反转只约束
+ * 依赖运行时推送的入口（scheduler-overlay 兼容值是徽标入口，任务计数经运行时推送）；
+ * 结构化 activation（HeaderActionActivation 联合）是声明即存在的静态入口，自带可见性
+ * 依据——要求它先推一次 updateHeaderAction 才可见是无意义仪式。两类的 hidden=true
+ * 运行时开关一视同仁（显式推送过 hidden 即隐藏）。
  *
  * 缺省语义反转（ADR-0097 拉为主改造，2026-10-21 用户裁决）：runtimeState === undefined
  * （插件从未对该会话推送）= 不可见——「无任务不显示」契约的 fail-safe 形态。旧语义
  * 「未推送 = 显示」把未知态乐观渲染成有入口，是「无任务会话按钮常驻 + 空面板」缺陷的
- * 根因之一；反转后按钮只在插件明确声明存在（有推送记录且非 hidden）时渲染。数据到达
- * 由 connected 边沿的 plugin.ui.snapshot 快照拉取保证（ensurePluginUiSnapshot），推送
- * 丢失不再导致该反转产生「有任务也漏显示」的常态。
+ * 根因之一；反转后按钮只在插件明确声明存在（静态声明或有推送记录且非 hidden）时渲染。
+ * 数据到达由 connected 边沿的 plugin.ui.snapshot 快照拉取保证（ensurePluginUiSnapshot），
+ * 推送丢失不再导致该反转产生「有任务也漏显示」的常态。
  *
  * 消费点：HeaderActionsHost 的按钮渲染过滤（toHeaderActionButton 返回 null 的唯一判定源，
  * 用户直接可见的正确性权威侧）与 hasVisibleHeaderActions（托盘聚合面板段「有可见按钮才
@@ -262,10 +337,14 @@ export function isVisibleHeaderAction(
 ): decl is VisibleHeaderActionRecord {
   const ha = decl.headerAction
   if (!ha) return false
-  // 插件从未推送过运行时状态 = 该入口未被插件声明存在（fail-safe：未知态不渲染）
+  // 运行时 hidden 开关对两类入口一视同仁：显式推送过 hidden 即隐藏
+  if (runtimeState?.hidden === true) return false
+  // 结构化 activation = 声明即存在的静态入口（命令链或容器导航），不依赖运行时推送
+  if (ha.activation !== undefined && ha.activation !== 'scheduler-overlay') return true
+  // 徽标入口（scheduler-overlay 兼容值）与纯命令链入口依赖运行时状态推送：
+  // 插件从未推送 = 该入口未被插件声明存在（fail-safe：未知态不渲染）
   if (runtimeState === undefined) return false
-  if (runtimeState.hidden === true) return false
-  return ha.activation === 'scheduler-overlay' || !!ha.commandId
+  return !!ha.activation || !!ha.commandId
 }
 
 /**
@@ -316,8 +395,9 @@ export function resolveHeaderActionAvailability(
  * - lastInitHandles：最近一次 initExtensionHostBridge 装配的测试所需句柄快照——init 返回
  *   void 后（生产调用方 main.ts 恒丢弃返回值），测试 afterEach dispose 与注册注入用例
  *   （contributions）取内部实例的唯一通道。dispose 回收本次装配（重复 init 前置调用 /
- *   测试 afterEach，幂等）：stop 两个 connected 重放器 watcher + dispose bridge（防 bus
- *   事件翻倍，项目规则#2；bus 上其余 controller 订阅随 app 生命周期存活，不在回收逻辑）。
+ *   测试 afterEach，幂等）：取消职责④在途去抖 timer + stop 各 connected 重放器 watcher +
+ *   dispose bridge（防 bus 事件翻倍，项目规则#2；bus 上其余 controller 订阅随 app 生命
+ *   周期存活，不在回收逻辑）。
  */
 export const __testing = {
   lastInitHandles: null as null | {
@@ -358,6 +438,55 @@ export function initExtensionHostBridge(app: App): void {
   const mountPoints = new MountPointRegistry()
   const contributions = new ContributionRegistry(bus)
   setExtensionRegistries({ mountPoints, contributions })
+  // 声明通路订阅源（容器扩展点统一 §6.2）：config.plugins 订阅原语注入 bootstrap
+  //（scanContributions 内建订阅——每次广播重跑 loadExternal + routeAll）。core bootstrap
+  // 对 transport api 域保持 import 零依赖，订阅原语由壳装配注入（与 setExtensionRegistries
+  // 同范式）；onPlugins 即 core transport api 的 config.plugins global 通道订阅。
+  // 桥内包装单帧四职责（W-C-9 清理与重放接线，单订阅零双挂）：
+  // ① 快照维护：最近一帧全量列表存 lastPluginListSnapshot——handlePluginBack 的 external
+  //    重放数据源（重放信任 active 事件、不看快照 enabled 位：statusChange(active) 先于
+  //    下一帧 config.plugins 到达，此刻快照可能仍是禁用帧，enabled 位过期不采信）；
+  // ② 容器位灌入：启用插件的 view 声明转 ContentSlotDeclaration 注入注册表（幂等）——
+  //    插件容器位的出现通路（handlePluginGone 清理 / handlePluginBack 重放与它成对）；
+  // ③ 启用位过滤后喂 bootstrap：togglePlugin 成功/失败都广播全量列表（plugin-service
+  //    broadcastPluginList，禁用插件的 contributes 被无条件透传），不过滤则「禁用 → E2 触发链
+  //    清理 → toggle 广播帧 loadExternal 复活」先后必然发生（statusChange 先于列表帧），
+  //    handlePluginGone 的清理被同一次用户操作撤回（E2 语义失效）。过滤在喂入侧单点生效，
+  //    禁用插件的声明复活在 ContributionRegistry 与容器位注册表两条通路同时被堵；
+  // ④ 差集收敛清理：② 只灌不清，清理唯一依赖 E2 触发链的 statusChange 广播
+  //    （handlePluginGone）——WS 断连窗口内 runtime 侧完成插件禁用/卸载时该广播丢失，
+  //    重连 initial-state 全量帧只重灌 enabled 项，禁用/缺席插件的旧声明残留容器位注册表
+  //    （点击导航失败 warn 或打开过期视图）。每帧去抖计算注册表 external 分区 pluginId
+  //    集合与末帧 enabled 集合的差集，对差集调 clearForPlugin——重连全量帧天然成为收敛点。
+  //    去抖容忍 ① 所述乱序（active 事件重放后可能尾随 enabled=false 的过期列表帧）：
+  //    末帧权威，相邻矛盾帧不在中间态上执行清理，避免误清刚启用插件。
+  let lastPluginListSnapshot: PluginInfo[] = []
+  // ④ 的去抖 timer 句柄：随 dispose 取消（teardown 后迟发清理会误清下一次装配灌入的声明）
+  let reconcileExternalSlotsTimer: ReturnType<typeof setTimeout> | undefined
+  setPluginListSource((handler) => onPlugins((plugins) => {
+    lastPluginListSnapshot = plugins
+    for (const p of plugins) {
+      if (p.enabled === false) continue
+      loadExternalContentSlots(p)
+    }
+    handler(plugins.filter((p) => p.enabled !== false))
+    // ④ 差集收敛清理（每帧重调度，闭包捕获本帧 enabled 集 → 末帧权威）
+    if (reconcileExternalSlotsTimer !== undefined) clearTimeout(reconcileExternalSlotsTimer)
+    reconcileExternalSlotsTimer = setTimeout(() => {
+      reconcileExternalSlotsTimer = undefined
+      const enabledIds = new Set(
+        plugins.filter((p) => p.enabled !== false).map((p) => p.pluginId),
+      )
+      const registeredIds = new Set(
+        contentSlotRegistry.listEntries()
+          .map((entry) => entry.declaration.pluginId)
+          .filter((pluginId) => pluginId !== HOST_PLUGIN_ID),
+      )
+      for (const pluginId of registeredIds) {
+        if (!enabledIds.has(pluginId)) clearContentSlots(pluginId)
+      }
+    }, RECONCILE_EXTERNAL_SLOTS_DEBOUNCE_MS)
+  }))
   // 仅注入注册表：注册触发收敛为 bootstrap 第 4/5 步（App.vue onMounted 编排，u6 去重）——
   // 本装配点不再自行 registerMountPoints/scanContributions。
 
@@ -400,6 +529,18 @@ export function initExtensionHostBridge(app: App): void {
   // 插件 UI 快照 connected 重放器（ADR-0097）：headerAction/视图状态在首屏/重载/重连后
   // 由全量拉取恢复；实时推送仍承担运行中的即时性（失效提示）。
   const stopPluginUiSnapshotSync = ensurePluginUiSnapshot(bus)
+
+  // unregistered-mount-point 订阅（容器扩展点统一 §7.2/§5.5——此前该事件零订阅）：
+  // routeAll 对未注册挂载点的 emit 在此出声（失败路径第一行告警的现成 sink），按 §6.14
+  // 去重键 warn 一次；插件管理页的逐贡献置灰由 toContributionInfos 承载（M16 既有）。
+  const stopUnregisteredMountPointWarn = bus.on('unregistered-mount-point', (e) => {
+    const key = `${e.pluginId}::${e.contributionId}::unregistered-mount-point`
+    if (unregisteredMountPointWarned.has(key)) return
+    unregisteredMountPointWarned.add(key)
+    console.warn(
+      `[extension-host] 贡献 ${e.pluginId}/${e.contributionId} 引用未注册挂载点 '${e.expectedMountPoint}'，已置灰——插件作者修正清单 placement 为已注册位置后恢复`,
+    )
+  })
 
   // ui 组件数据源（ViewHost 经 inject 取，壳 provide 真实实现；形状对齐 IF10 + U2）。
   // 会话域三法 = 托盘 widget 区既有消费面（sessionId 形态，壳内适配为 session scope）；
@@ -445,7 +586,6 @@ export function initExtensionHostBridge(app: App): void {
           viewId: c.contributionId,
           title: c.view?.title ?? c.contributionId,
           icon: undefined,
-          initialVisibility: c.view?.initialVisibility ?? 'hidden',
           pluginId: c.pluginId,
         }))
       return staticViews
@@ -529,8 +669,9 @@ export function initExtensionHostBridge(app: App): void {
   }, { immediate: true })
 
   // E2 触发链：runtime plugin:statusChange / plugin:crashed 广播 → bus 事件 → 清理容器 +
-  // 注销该插件命令（ContributionRegistry 无按插件枚举，先查后清）；disabled→active 重启用走
-  // 静态表重放（registerBuiltin + 命令声明重放；external 声明表壳侧无镜像，重放归 s3 透传）。
+  // 注销该插件命令（ContributionRegistry 无按插件枚举，先查后清）；disabled→active 重启用
+  // 走静态表重放 + external 声明快照重放（W-C-9：重放数据源 = 桥内 config.plugins 订阅处
+  // 维护的最近一帧快照——不再依赖下一次广播自然重放，禁用→启用即刻恢复）。
   const handlePluginGone = (pluginId: string): void => {
     const commandIds = contributions
       .getContributions({ pluginId })
@@ -539,10 +680,25 @@ export function initExtensionHostBridge(app: App): void {
     contributions.clearForPlugin(pluginId)
     for (const id of commandIds) commandRegistry.unregisterCommand(id)
     headerActionStore.clearForPlugin(pluginId)
+    // 容器位注册表同链清理（W-C-9）：不清则禁用后派生视图仍含该插件容器位（抽屉/侧栏/
+    // 设置页四处；浮层插件内容不进标签条，构造性不受影响）。注册表内建 host 保护
+    //（taiji-host 内置项不受影响），幂等；四容器同源单实例，本清理即全容器生效。
+    clearContentSlots(pluginId)
     refreshHeaderActionDeclarations()
   }
   const handlePluginBack = (pluginId: string): void => {
     contributions.registerBuiltin()
+    // external 声明快照重放（W-C-9）：从最近一帧 config.plugins 快照取该插件 descriptor
+    // 重放（loadExternal 覆盖粒度幂等；ContributionRegistry 与容器位注册表同源重放）。
+    // 快照缺失（安装后首帧未达即崩溃恢复等时序窗口）→ 跳过重放，等下一次 config.plugins
+    // 广播自然重放（debug 出声不 warn——广播必然到达，非失败路径）。
+    const descriptor = lastPluginListSnapshot.find((p) => p.pluginId === pluginId)
+    if (descriptor !== undefined) {
+      contributions.loadExternal([descriptor])
+      loadExternalContentSlots(descriptor)
+    } else {
+      console.debug(`[extension-host] ${pluginId}: 快照无该插件 descriptor，external 声明待下一次 config.plugins 广播重放`)
+    }
     for (const c of contributions.getContributions({ pluginId })) {
       if (c.type === 'command' || c.type === 'slashCommand') commandRegistry.registerFromContribution(c)
     }
@@ -563,6 +719,45 @@ export function initExtensionHostBridge(app: App): void {
       void commandRegistry.execute(id, args as Record<string, unknown> | undefined)
     },
   })
+  // 容器导航执行器（容器扩展点统一 §6.4）：core 执行器装配后直接 provide（与 ui
+  // CONTAINER_NAVIGATION_KEY 接口结构同构，零适配）。校验逻辑（全局 id 解析/族匹配/
+  // 可打开性/params 标量/会话优先级）全在 core 执行器（container-navigation.test.ts 承载）；
+  // 壳层装配两个端口的真实实现：
+  // - lookup：容器位注册表（core 单例 contentSlotRegistry）的真实查询——resolveTargets 投影
+  //   注册表 findById（全局 id 空间解析，§6.12）；查询前确保抽屉内置声明在册（内置装配
+  //   既有触发点在抽屉首渲，导航点击可能先于首渲）。hasData 的按族数据事实查询（view 类
+  //   = ViewHostStore 分区读）待声明面出现 openableWithoutData=false 成员时随端口扩形落地：
+  //   现声明面无 false 成员（内置项恒 true、插件清单声明无该字段缺省 true），本端口仅
+  //   false 声明可达——保守判无数据，不打开空容器（§5.4 行 7，warn 出声可诊断），不谎报。
+  // - sink.openDrawerTab：接 core drawer coordination openDrawerTab（瞬时参数 + 开合态一次
+  //   写入）。RightDrawerTab 已去枚举（开放 string，types.ts），目标存在性/族匹配已由执行器
+  //   对注册表校验先行（§6.4 先校验后动作），tabId 直接透传。sessionId 形参为浮层级联
+  //   （§6.8）保留统一签名：drawer 选中态分区键走 bindDrawerSessionId 绑定的焦点会话
+  //   （ADR-0053 单例抽屉语义），本分支不消费。
+  // - sink.openOverlayContent：接 core overlay 协调函数 openOverlayContent（内置 scheduler
+  //   走既有组装，其余按声明 id 走 §6.8 plugin 载体；core 形参序 (contentId, sessionId)）。
+  const containerNavigationExecutor = new ContainerNavigationExecutor({
+    lookup: {
+      resolveTargets: (tabId) => {
+        ensureBuiltinsAssembled()
+        return contentSlotRegistry.findById(tabId).map((d) => ({
+          id: d.id,
+          placement: d.placement,
+          pluginId: d.pluginId,
+          scope: d.scope,
+          openableWithoutData: d.openableWithoutData ?? true,
+        }))
+      },
+      hasData: () => false,
+    },
+    sink: {
+      openDrawerTab: (_sessionId, tabId, params) => openDrawerTab(tabId, params),
+      openOverlayContent: (sessionId, contentId) => openOverlayContent(contentId, sessionId),
+    },
+    // 焦点会话复用 drawer 域绑定（useSideDrawer 模块加载时绑到 panel store 的 focusedSessionId）
+    getBoundSessionId,
+  })
+  app.provide(CONTAINER_NAVIGATION_KEY, containerNavigationExecutor)
   // HeaderActionsHost 数据源（声明镜像 + 运行时镜像 + E13/E3 面）
   const commandStore = useCommandStore()
   app.provide(HEADER_ACTIONS_SOURCE_KEY, {
@@ -583,10 +778,16 @@ export function initExtensionHostBridge(app: App): void {
     contributions,
     // 回收本次装配（init 开头前置调用 / 测试 afterEach；watch stop 与 bridge.dispose 均幂等）
     dispose: () => {
+      // 职责④在途去抖 timer 取消（teardown 后迟发清理会误清下一次装配灌入的声明）
+      if (reconcileExternalSlotsTimer !== undefined) {
+        clearTimeout(reconcileExternalSlotsTimer)
+        reconcileExternalSlotsTimer = undefined
+      }
       stopMountPointsSync()
       stopCommandDeclarationsSync()
       stopHeaderActionsSync()
       stopPluginUiSnapshotSync()
+      stopUnregisteredMountPointWarn()
       bridge.dispose()
     },
   }

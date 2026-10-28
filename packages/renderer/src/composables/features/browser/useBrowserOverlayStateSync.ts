@@ -31,9 +31,11 @@ export function useBrowserOverlayStateSync(): void {
         ? {
           open: true,
           content: cur.kind,
-          // canvas 内容不驱动 browser view 显示谓词 → 谓词 sessionId 恒 null（u-canvas 后
-          // payload 已持归属会话，此处 null 是显示谓词面的刻意常量，非「画布无归属」）
-          sessionId: cur.kind === 'canvas' ? null : cur.payload.sessionId,
+          // 通用判据（容器扩展点统一 §7.2 词表四方同批）：唯一消费方是 browser 显示谓词，
+          // 非 browser 内容一律 sessionId: null（browser 持发起会话）。原 canvas 特判并入
+          // 判据（画布归属会话仍在 core 载荷层，谓词面 null 语义不变；workflow/scheduler
+          // 上报从带会话改为 null——与 main parse 通用判据成对，漏改任一侧会被 .catch 吞错）
+          sessionId: cur.kind === 'browser' ? cur.payload.sessionId : null,
         }
         : { open: false, content: null, sessionId: null },
     ).catch((e: unknown) => {

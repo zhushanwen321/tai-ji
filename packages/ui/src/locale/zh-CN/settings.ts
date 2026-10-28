@@ -11,6 +11,8 @@ export default {
     groupResources: '模型与资源',
     groupInputAppearance: '输入与外观',
     groupEnvSystem: '环境与系统',
+    // 插件声明分区未带 group 时的归组头（U8：无组归「其他」）
+    groupOther: '其他',
     provider: '供应商',
     providerDesc: '配置模型供应商与 API Key',
     skill: '技能',
@@ -936,7 +938,7 @@ export default {
     defaultOn: '默认启用',
     defaultOff: '默认禁用',
     noExtensions: '暂无扩展',
-    builtinExtensionHint: "提示：3 个内置扩展（{'@'}zhushanwen/pi-agent-ext / {'@'}zhushanwen/pi-system-prompt / {'@'}zhushanwen/pi-msg-id-mapper）始终加载，不受扩展策略影响。",
+    builtinExtensionHint: "提示：2 个内置扩展（{'@'}zhushanwen/pi-host-internals / {'@'}zhushanwen/pi-system-prompt）始终加载，不受扩展策略影响。",
     summaryAll: '全部可用',
     summaryNone: '全部禁用',
     summaryAllowlist: '白名单 {count} 项',
