@@ -402,8 +402,8 @@ describe("buildWorkflowGui", () => {
       expect(props.items).toHaveLength(1);
       expect(props.items[0].status).toBe("running");
       expect(props.items[0].icon).toBe("circle");
-      // label = name + slug + runId 前 8 字符
-      expect(props.items[0].label).toBe("build ci abcdefgh");
+      // label = name · slug · runId 前 8 字符（中点连接，与托盘侧 rowLabelOf 同形态）
+      expect(props.items[0].label).toBe("build · ci · abcdefgh");
     });
 
     it("not_found → stats-line danger（错误状态不渲染为成功）", () => {
@@ -424,7 +424,7 @@ describe("buildWorkflowGui", () => {
       expect(props.items[0].severity).toBe("danger");
     });
 
-    it("无 slug 时 label 不含双空格（filter(Boolean).join 生效）", () => {
+    it("无 slug 时 label 不含悬空分隔符（filter(Boolean) 过滤生效）", () => {
       const details: WorkflowToolDetails = {
         action: "run",
         runId: "1234567890",
@@ -433,8 +433,8 @@ describe("buildWorkflowGui", () => {
       };
       const comp = buildWorkflowGui(details);
       const props = comp.props as { items: Array<{ label: string }> };
-      // slug 缺失 → filter(Boolean) 过滤掉空段 → "deploy 12345678"（单空格）
-      expect(props.items[0].label).toBe("deploy 12345678");
+      // slug 缺失 → filter(Boolean) 过滤掉空段 → "deploy · 12345678"（无悬空中点）
+      expect(props.items[0].label).toBe("deploy · 12345678");
     });
   });
 

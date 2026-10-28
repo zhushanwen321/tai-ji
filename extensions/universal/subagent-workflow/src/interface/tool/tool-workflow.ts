@@ -323,9 +323,10 @@ function runTreePresentation(
   }
 }
 
-/** run 行 label：`name · slug · runId 前 8 字符`（缺段 filter(Boolean) 过滤，防双空格）。 */
+/** run 行 label：`name · slug · runId 前 8 字符`（缺段 filter(Boolean) 过滤，防悬空中点；
+ *  连接符与托盘侧 rowLabelOf 同一中点形态——同一 run 行信息两树呈现一致）。 */
 function runRowLabel(parts: readonly (string | undefined)[]): string {
-  return parts.filter(Boolean).join(" ");
+  return parts.filter(Boolean).join(" · ");
 }
 
 /**
