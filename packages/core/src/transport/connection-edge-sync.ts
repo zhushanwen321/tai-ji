@@ -12,7 +12,9 @@
  *   语义（fire-and-forget，不参与落定与代次）。
  *
  * 机制约束（§6.4）：
- * - **并发合流**：同一数据域同一时刻最多一个在途加载，进行中再次触发不重复发。
+ * - **并发合流**：同一数据域同一时刻最多一个在途加载，进行中再次触发不重复发——
+ *   在途登记收编于 createInflightDedup 共享原语（C-data-18 禁手写 Map+settle 清理
+ *   同构实现；每域固定 key 的单键退化形态，meta 携带发起时刻连接代供回执判旧）。
  * - **仅最新代提交**：每次尝试携带连接代（实装为 connected 边沿的全局单调计数，与
  *   「实例标识+尝试序」在判旧语义上等价——实例变更与重连必经断连→connected 边沿，
  *   generation 随边沿递增，故「不同实例」必然「不同代」；回执仅携带 generation 数字），
@@ -41,6 +43,7 @@
  * 域 sync 函数由壳层登记时闭包提供）。
  */
 import { watch } from 'vue'
+import { createInflightDedup, type InflightDedup } from '../foundation/create-inflight-dedup'
 import { getState } from './ws-client'
 
 // ── 登记接口 ────────────────────────────────────────────────────────
@@ -103,16 +106,24 @@ export interface AuxiliaryRefreshDescriptor { // oe-exempt:20261027:framework:�
 
 // ── 模块级状态 ──────────────────────────────────────────────────────
 
-interface DomainRuntime { // oe-exempt:20261027:framework:域登记运行时条目（descriptor+在途代），与登记契约同族机制形态
+interface DomainRuntime { // oe-exempt:20261027:framework:域登记运行时条目（descriptor+在途去重表），与登记契约同族机制形态
   descriptor: DataDomainDescriptor
-  /** 在途尝试的连接代；null = 无在途（并发合流判据） */
-  inFlightGeneration: number | null
+  /** 域级 in-flight 去重表（单键退化形态；并发合流判据 = 有无在途条目） */
+  readonly inflight: InflightDedup<unknown, SyncInflightMeta>
   /** 首轮尝试是否已发起（首次落定 promise 只绑定首轮） */
   firstAttemptStarted: boolean
   /** 首次落定 promise（成功与失败均落定；后续边沿的同步不改变它） */
   readonly firstSettle: Promise<void>
   readonly firstSettleResolve: () => void
 }
+
+/** 在途条目元数据：发起时刻的连接代（回执判旧的比对基线；发起后连接代推进 = 旧代回执）。 */
+interface SyncInflightMeta {
+  generation: number
+}
+
+/** 每域固定单键（全局唯一 in-flight 变量的退化形态）：同域至多一个在途槽。 */
+const SYNC_INFLIGHT_KEY = 'sync'
 
 // taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，已登记）：域同步器登记表——
 // 数据域描述符 + 首次落定簿记（运行时装配状态，壳层 useSidebar 装配段单写点，非任何 GUI
@@ -142,7 +153,7 @@ export function registerDataDomain<T>(descriptor: DataDomainDescriptor<T>): void
   })
   domains.set(descriptor.id, {
     descriptor: descriptor as DataDomainDescriptor,
-    inFlightGeneration: null,
+    inflight: createInflightDedup<unknown, SyncInflightMeta>(),
     firstAttemptStarted: false,
     firstSettle,
     firstSettleResolve,
@@ -159,19 +170,25 @@ export function registerAuxiliaryRefresh(descriptor: AuxiliaryRefreshDescriptor)
 /**
  * 发起一轮同步尝试（并发合流：同域在途不重复发——新边沿/补发在在途期触达同域时跳过，
  * 在途回执按代次/revision 判旧后于丢弃点补发，收敛且任一时刻至多一个在途）。
+ *
+ * 在途登记收编于 createInflightDedup（C-data-18）：has→run 仅在无在途时登记消费侧
+ * then（在途期的触达为纯跳过——不重复挂接消费回调，避免同回执多次 apply/补发/失败
+ * 留痕）；factory 的 settle 清理先于本 then 执行（时序契约），故 then 内的补发 run
+ * 必发起新一轮。meta 携带发起时刻连接代（收编前闭包变量形态，语义等价）。
  */
 function attemptSync(domain: DomainRuntime, generation: number): void {
-  if (domain.inFlightGeneration !== null) return
-  domain.inFlightGeneration = generation
+  if (domain.inflight.has(SYNC_INFLIGHT_KEY)) return
   const isFirstAttempt = !domain.firstAttemptStarted
   domain.firstAttemptStarted = true
-  domain.descriptor.sync().then(
+  const entry = domain.inflight.run(SYNC_INFLIGHT_KEY, () => domain.descriptor.sync(), {
+    generation,
+  })
+  entry.promise.then(
     (receipt) => {
-      domain.inFlightGeneration = null
       if (isFirstAttempt) domain.firstSettleResolve()
       // 仅最新代提交：旧连接代回执丢弃（generation 单调，实例变更/重连边沿推进后
       // 旧代回执不再具备提交资格）。isFirstAttempt 场景首轮即最新代，恒不命中。
-      const staleByGeneration = generation < connectionGeneration
+      const staleByGeneration = entry.meta.generation < connectionGeneration
       // 命令×同步交错（§6.4）：回执 revision 早于 store 已提交的最新 revision = 期间
       // 有命令回执提交，按过时内容丢弃——否则旧快照提交回滚命令结果。
       const staleByRevision = domain.descriptor.isStaleReceipt?.(receipt) ?? false
@@ -188,7 +205,6 @@ function attemptSync(domain: DomainRuntime, generation: number): void {
       domain.descriptor.apply?.(receipt)
     },
     (error: unknown) => {
-      domain.inFlightGeneration = null
       if (isFirstAttempt) domain.firstSettleResolve()
       // 失败不补发：重试通道 = 下一连接边沿（whenToSync 判定）或 store 的手动重试，
       // 不在本模块内建自动重试（事实驱动原则：失败显式上报，不时间推测兜底）。
