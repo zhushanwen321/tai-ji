@@ -25,7 +25,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { computed, nextTick } from 'vue'
-import { InternalEventBus, MessageBusBridge, providePlatform, registerMountPoints, scanContributions, type ContributionRegistry, ActivationManager, CommandRegistry, type ContributionRecord, type HeaderActionEntry } from '@taiji/core'
+import { InternalEventBus, MessageBusBridge, contentSlotRegistry, providePlatform, registerMountPoints, scanContributions, type ContributionRegistry, ActivationManager, CommandRegistry, type ContributionRecord, type HeaderActionEntry } from '@taiji/core'
 import { dispatchCrossSession, dispatchGlobal } from '@taiji/core/transport/api'
 import {
   getExtensionBus,
@@ -807,5 +807,87 @@ describe('U4 声明通路（config.plugins 订阅 + routeAll 接线 + unregister
     ]))
     expect(warnsOf('[failure-degradation]')).toHaveLength(1)
     expect(warnsOf('[extension-host]')).toHaveLength(1)
+  })
+})
+
+// ── dmg-r1-7 断连窗口声明残留收敛（config.plugins 差集清理，去抖末帧权威）──
+
+describe('dmg-r1-7 差集收敛清理（断连残留收敛 + 去抖容忍乱序 + dispose 取消）', () => {
+  /** 与其他 describe 隔离的 pluginId（contentSlotRegistry 为 core 模块级单例，跨用例持存） */
+  const STALE_PLUGIN_ID = 'dmg-r1-7-stale'
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    disposeLastInit()
+    contentSlotRegistry.clearForPlugin(STALE_PLUGIN_ID)
+    vi.useRealTimers()
+  })
+
+  function initBridge(): void {
+    const app: { provide: () => unknown } = { provide: () => app }
+    initExtensionHostBridge(app as never)
+    if (!__testing.lastInitHandles) throw new Error('initExtensionHostBridge 未写入 __testing.lastInitHandles')
+    void simulateBootstrapRegistration()
+  }
+
+  /** 带 drawer.tab view 声明的 PluginInfo（enabled 驱动差集方向） */
+  const pluginInfoOf = (pluginId: string, enabled: boolean): PluginInfo => ({
+    pluginId,
+    version: '1.0.0',
+    displayName: pluginId,
+    description: '',
+    status: enabled ? 'active' : 'inactive',
+    trustLevel: 'trusted',
+    enabled,
+    contributes: { views: [{ id: `${pluginId}.panel`, title: '残留面板', placement: 'drawer.tab' }] },
+  })
+
+  const pluginsFrame = (plugins: PluginInfo[]) => ({
+    type: 'config.plugins' as const,
+    id: `plugins-dmg-r1-7-${plugins.map((p) => `${p.pluginId}-${p.enabled}`).join('_')}`,
+    payload: { plugins },
+  })
+
+  const slotPresent = (): boolean =>
+    contentSlotRegistry.listEntries().some((e) => e.declaration.pluginId === STALE_PLUGIN_ID)
+
+  it('断连残留收敛：重连全量帧 enabled 集不含该插件 → 去抖到期后容器位声明被清', () => {
+    initBridge()
+    // 断连前：插件启用并灌入容器位注册表
+    dispatchGlobal(pluginsFrame([pluginInfoOf(STALE_PLUGIN_ID, true)]))
+    expect(slotPresent()).toBe(true)
+
+    // 断连窗口内 runtime 侧完成禁用（statusChange 广播丢失——不 emit），重连
+    // initial-state 全量帧只重灌 enabled 项（禁用插件的 contributes 被无条件透传）
+    dispatchGlobal(pluginsFrame([pluginInfoOf(STALE_PLUGIN_ID, false)]))
+
+    // 去抖窗口内不执行（乱序容忍，不在中间态清理）
+    expect(slotPresent()).toBe(true)
+    vi.advanceTimersByTime(1000) // 超过去抖窗（常量 300ms）即触发收敛
+    expect(slotPresent()).toBe(false)
+  })
+
+  it('乱序容忍：enabled=false 过期帧尾随 enabled=true 末帧 → 末帧权威，不误清刚启用插件', () => {
+    initBridge()
+    dispatchGlobal(pluginsFrame([pluginInfoOf(STALE_PLUGIN_ID, true)]))
+    // 交错竞态窗口（职责①所述时序）：active 事件重放后尾随一帧 enabled=false 的过期
+    // 列表帧，紧接真实的 enabled=true 帧——末帧权威，去抖合并后不清理
+    dispatchGlobal(pluginsFrame([pluginInfoOf(STALE_PLUGIN_ID, false)]))
+    dispatchGlobal(pluginsFrame([pluginInfoOf(STALE_PLUGIN_ID, true)]))
+    vi.advanceTimersByTime(1000)
+    expect(slotPresent()).toBe(true)
+  })
+
+  it('dispose 取消在途去抖 timer（teardown 后不触发迟发清理）', () => {
+    initBridge()
+    dispatchGlobal(pluginsFrame([pluginInfoOf(STALE_PLUGIN_ID, true)]))
+    dispatchGlobal(pluginsFrame([pluginInfoOf(STALE_PLUGIN_ID, false)]))
+    disposeLastInit()
+    vi.advanceTimersByTime(1000)
+    // timer 已随 dispose 取消：不触发清理（迟发清理会误清下一次装配灌入的声明）
+    expect(slotPresent()).toBe(true)
   })
 })

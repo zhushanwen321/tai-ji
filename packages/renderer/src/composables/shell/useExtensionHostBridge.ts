@@ -57,7 +57,7 @@ import {
 } from '@taiji/core'
 import { openDrawerTab, getBoundSessionId, ensureBuiltinsAssembled } from '@taiji/core/domain/drawer'
 import type { ContentSlotDeclaration, PluginDescriptorLike } from '@taiji/core'
-import { contentSlotRegistry } from '@taiji/core'
+import { contentSlotRegistry, HOST_PLUGIN_ID } from '@taiji/core'
 import { openOverlayContent } from '@taiji/core/domain/overlay'
 import { getState as getWsState, send } from '@taiji/core/transport/ws-client'
 import {
@@ -103,6 +103,13 @@ export function getExtensionBus(): InternalEventBus {
  * 同条两载体，本条为 renderer 桥侧载体②）。
  */
 const unregisteredMountPointWarned = new Set<string>() // @data-owner #80
+
+/**
+ * 差集收敛清理（订阅职责④）的去抖窗：矛盾帧（active 事件重放后尾随的 enabled=false
+ * 过期列表帧）是相邻 WS 消息、毫秒级间隔，300ms 合并窗足够取到末帧权威；重连收敛
+ * 延迟同量级，对容器位列表不可感知。
+ */
+const RECONCILE_EXTERNAL_SLOTS_DEBOUNCE_MS = 300
 
 /**
  * 壳层响应式 SessionScopedMap（MF-2 R2 修复，ADR-0049 范式的响应式版）。
@@ -388,8 +395,9 @@ export function resolveHeaderActionAvailability(
  * - lastInitHandles：最近一次 initExtensionHostBridge 装配的测试所需句柄快照——init 返回
  *   void 后（生产调用方 main.ts 恒丢弃返回值），测试 afterEach dispose 与注册注入用例
  *   （contributions）取内部实例的唯一通道。dispose 回收本次装配（重复 init 前置调用 /
- *   测试 afterEach，幂等）：stop 两个 connected 重放器 watcher + dispose bridge（防 bus
- *   事件翻倍，项目规则#2；bus 上其余 controller 订阅随 app 生命周期存活，不在回收逻辑）。
+ *   测试 afterEach，幂等）：取消职责④在途去抖 timer + stop 各 connected 重放器 watcher +
+ *   dispose bridge（防 bus 事件翻倍，项目规则#2；bus 上其余 controller 订阅随 app 生命
+ *   周期存活，不在回收逻辑）。
  */
 export const __testing = {
   lastInitHandles: null as null | {
@@ -434,7 +442,7 @@ export function initExtensionHostBridge(app: App): void {
   //（scanContributions 内建订阅——每次广播重跑 loadExternal + routeAll）。core bootstrap
   // 对 transport api 域保持 import 零依赖，订阅原语由壳装配注入（与 setExtensionRegistries
   // 同范式）；onPlugins 即 core transport api 的 config.plugins global 通道订阅。
-  // 桥内包装单帧三职责（W-C-9 清理与重放接线，单订阅零双挂）：
+  // 桥内包装单帧四职责（W-C-9 清理与重放接线，单订阅零双挂）：
   // ① 快照维护：最近一帧全量列表存 lastPluginListSnapshot——handlePluginBack 的 external
   //    重放数据源（重放信任 active 事件、不看快照 enabled 位：statusChange(active) 先于
   //    下一帧 config.plugins 到达，此刻快照可能仍是禁用帧，enabled 位过期不采信）；
@@ -444,8 +452,17 @@ export function initExtensionHostBridge(app: App): void {
   //    broadcastPluginList，禁用插件的 contributes 被无条件透传），不过滤则「禁用 → E2 触发链
   //    清理 → toggle 广播帧 loadExternal 复活」先后必然发生（statusChange 先于列表帧），
   //    handlePluginGone 的清理被同一次用户操作撤回（E2 语义失效）。过滤在喂入侧单点生效，
-  //    禁用插件的声明复活在 ContributionRegistry 与容器位注册表两条通路同时被堵。
+  //    禁用插件的声明复活在 ContributionRegistry 与容器位注册表两条通路同时被堵；
+  // ④ 差集收敛清理：② 只灌不清，清理唯一依赖 E2 触发链的 statusChange 广播
+  //    （handlePluginGone）——WS 断连窗口内 runtime 侧完成插件禁用/卸载时该广播丢失，
+  //    重连 initial-state 全量帧只重灌 enabled 项，禁用/缺席插件的旧声明残留容器位注册表
+  //    （点击导航失败 warn 或打开过期视图）。每帧去抖计算注册表 external 分区 pluginId
+  //    集合与末帧 enabled 集合的差集，对差集调 clearForPlugin——重连全量帧天然成为收敛点。
+  //    去抖容忍 ① 所述乱序（active 事件重放后可能尾随 enabled=false 的过期列表帧）：
+  //    末帧权威，相邻矛盾帧不在中间态上执行清理，避免误清刚启用插件。
   let lastPluginListSnapshot: PluginInfo[] = []
+  // ④ 的去抖 timer 句柄：随 dispose 取消（teardown 后迟发清理会误清下一次装配灌入的声明）
+  let reconcileExternalSlotsTimer: ReturnType<typeof setTimeout> | undefined
   setPluginListSource((handler) => onPlugins((plugins) => {
     lastPluginListSnapshot = plugins
     for (const p of plugins) {
@@ -453,6 +470,22 @@ export function initExtensionHostBridge(app: App): void {
       loadExternalContentSlots(p)
     }
     handler(plugins.filter((p) => p.enabled !== false))
+    // ④ 差集收敛清理（每帧重调度，闭包捕获本帧 enabled 集 → 末帧权威）
+    if (reconcileExternalSlotsTimer !== undefined) clearTimeout(reconcileExternalSlotsTimer)
+    reconcileExternalSlotsTimer = setTimeout(() => {
+      reconcileExternalSlotsTimer = undefined
+      const enabledIds = new Set(
+        plugins.filter((p) => p.enabled !== false).map((p) => p.pluginId),
+      )
+      const registeredIds = new Set(
+        contentSlotRegistry.listEntries()
+          .map((entry) => entry.declaration.pluginId)
+          .filter((pluginId) => pluginId !== HOST_PLUGIN_ID),
+      )
+      for (const pluginId of registeredIds) {
+        if (!enabledIds.has(pluginId)) clearContentSlots(pluginId)
+      }
+    }, RECONCILE_EXTERNAL_SLOTS_DEBOUNCE_MS)
   }))
   // 仅注入注册表：注册触发收敛为 bootstrap 第 4/5 步（App.vue onMounted 编排，u6 去重）——
   // 本装配点不再自行 registerMountPoints/scanContributions。
@@ -745,6 +778,11 @@ export function initExtensionHostBridge(app: App): void {
     contributions,
     // 回收本次装配（init 开头前置调用 / 测试 afterEach；watch stop 与 bridge.dispose 均幂等）
     dispose: () => {
+      // 职责④在途去抖 timer 取消（teardown 后迟发清理会误清下一次装配灌入的声明）
+      if (reconcileExternalSlotsTimer !== undefined) {
+        clearTimeout(reconcileExternalSlotsTimer)
+        reconcileExternalSlotsTimer = undefined
+      }
       stopMountPointsSync()
       stopCommandDeclarationsSync()
       stopHeaderActionsSync()
