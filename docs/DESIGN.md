@@ -455,6 +455,35 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 
 **名义出彩（2026-10-22 裁决）**：四套 preset 主题的 accent 按主题名义色相取值（黛蓝=蓝 / 暖墨=暖沙 / 青墨=花青 / 朱印=朱砂），修正 2026-10-10「align six-theme tokens」把六主题 accent 全家对齐青玉造成的名不副实（朱印承诺朱砂却渲染青玉绿）；两族默认（玄名义即青玉 / 皓名义为宣纸墨黑）继续承担产品主行动色青玉，名义与实现一致，保持不变。暗族 accent 取同色相提亮档配深字 `-fg`，亮族取压暗档配白字；`--chart-ink` 掺 accent 的 preset（青墨/朱印）随基色自动跟随，图表墨自此真正「掺花青 / 掺朱砂」。
 
+### 4.9 移动尺度层（`--m-*`，移动壳专属）
+
+移动端在桌面尺度之上叠加一层移动专属尺度 token（设计 remote-use-mobile-v2 §6.8）：手机阅读距离 30cm / 单手 / 动态光线，正文基准从桌面 14px 提到 16px，触控目标最小 44px。**只新增尺度不新增颜色**——任何颜色必须先在桌面色板（§4.1-4.7）存在，移动层派生色（如 `--m-scrim`）全部 `color-mix` 自桌面 token，随 `data-theme` 自动跟随；桌面同源层（颜色/圆角/阴影/动效）维持「style.css ↔ mobile-renderer tokens.css 手工镜像」现状。
+
+- **载体与消费**：`packages/ui/src/styles/mobile-tokens.css`（`@taiji/ui` 包出口 `./mobile-tokens.css`），移动壳入口 import 一次；`@taiji/ui` 移动原语中 Sheet/StatusPill/EmptyState/SegmentedControl/InlineNotice 五件（Button 经 button-variants 同源）直接消费 `--m-*` 变量，StatusDot/Skeleton 仅消费桌面语义色 token 与消费方传入 class（StatusDot 8px/6px 是规格固定尺寸、Skeleton 尺寸契约归消费方——两者无需 `--m-*` 尺度）；ChatView `density=mobile` 档直接消费变量。桌面壳不 import，渲染零感知（ChatView 缺省 desktop 档产出类名与现状逐字一致）。
+- **字号缩放槽位**：`--m-font-scale` 跟随根节点 `data-font-size` 三档（small 0.94 / medium 1 / large 1.08），与桌面 root font-size 档位语义对齐；六档字号（display 22 / title 17 / body 16 / callout 15 / sub 13 / cap 12）全部 `calc(px * var(--m-font-scale))`。
+- **值表**（真值源 = 该 css 文件，此处登记用途）：
+
+| 组 | token | 值 | 用途 |
+|---|---|---|---|
+| 文字 | `--m-text-display` | 22px | 屏级大标题 |
+| | `--m-text-title` | 17px | 页头 / Sheet 标题 |
+| | `--m-text-body` | 16px | 消息正文 / 列表主标题 / 表单选项 |
+| | `--m-text-callout` | 15px | 按钮文案 / 说明段 / Sheet 正文 |
+| | `--m-text-sub` | 13px | 副标题 / 工具行密度档 |
+| | `--m-text-cap` | 12px | 状态 pill / 时间戳 / 徽标 |
+| 行高 | `--m-leading-tight / -body / -ui` | 1.32 / 1.62 / 1.4 | 标题 / 正文 / 控件 |
+| 布局 | `--m-gutter` | 16px | 左右页边距（固定） |
+| | `--m-tap` | 44px | 触控最小热区 |
+| | `--m-row-h` | 64px | 列表主行最小高 |
+| | `--m-nav-h` | 56px | 底部导航内容高（安全区另计） |
+| 浮层 | `--m-radius-sheet` | 16px | 底部 Sheet 顶圆角（移动专属档） |
+| | `--m-sheet-max` | 90% | Sheet 面板最大高度 |
+| | `--m-scrim` | `color-mix(--scrim 66%)` | Sheet 遮罩（比桌面 modal 遮罩淡） |
+| | `--z-sheet` | 1000 | Sheet 层级（与桌面 --z-modal 同档，两形态互斥不同屏） |
+| 内滚 | `--m-scroll-expand` | 220px | ChatView density=mobile 展开块限高（桌面 = `--block-scroll-max-height` 240px） |
+| 动效 | `--m-motion-enter / -exit / -sheet` | 220 / 160 / 300ms | 一般入场 / 退场 / Sheet 升起 |
+| | `--m-ease-enter / -exit` | `cubic-bezier(0.16,1,0.3,1)` / `cubic-bezier(0.4,0,1,1)` | 入场软缓出 / 退场 |
+
 ---
 
 ## §5 Design System（组件范式）

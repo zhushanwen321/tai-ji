@@ -1,26 +1,28 @@
 <script setup lang="ts">
-// MobileMessageStream —— 移动壳消息流容器（remote-use D10「ChatViewDeps provide 义务」转移落点：
-// 桌面由 MessageStream.vue provide，该组件不复用 → 义务转移到本组件）。
+// MobileMessageStream v2 —— 移动壳消息流容器（remote-use-mobile-v2 §6.2 消费半；v1 文件
+// 原地升级，remote-use D10「ChatViewDeps provide 义务」转移落点不变：桌面由 MessageStream.vue
+// provide，该组件不复用 → 义务在本组件）。
 //
-// 构成：ui ChatView 展示子树（复用）+ 轻量滚动容器（overflow-y + 贴底跟随）
-// + TruncatedHistoryBar 加载更早（A2：core loadMoreHistory 游标翻页消费，见 handleLoadMore）。
-// 不含 virtua/@wheel/TurnRail/fork-notice——桌面壳层编排语义不进移动壳（D10 不采用①）。
+// v2 相对 v1 的三处变化：
+// ① density:'mobile' provide（§6.2 移动 variant 注入——正文 16px/1.62、思考块收起一行、
+//    工具行 13px 密度；additive 维度经 ChatViewDeps 单一 provide 树，桌面缺省不受影响）。
+// ② 「回到最新」浮钮（§5.1：上滑看历史右下浮出，≥44px 触控档；nearBottom 单谓词驱动显隐，
+//    点击回底并恢复贴底跟随）。
+// ③ 流尾内嵌 QueueStrip 摘除——输入区固定顺序（§7.1：运行带→队列条→待回答条→待授权条→
+//    出错条→Composer）收拢 ChatScreen，消息流回归纯消息。
 //
-// ChatViewDeps 四类分派（D10 全表逐字段）：
-// ① 真实现（core store/useChat + ui 渲染链下沉模块）：isActive/isHandingOff/
-//    getChangeSetStatus/isPendingSend/isExpanded/toggleExpand/collapse/abortBash/
-//    onRevokeMessage + renderMarkdown（renderMarkdownSegments + copyLabel 经 i18n 注入）/
-//    renderMarkdownIncremental/streamingFenceSilenceMs（finalize 判定已并入 ui 组件内派生：
-//    message complete ∨ token 静默 ≥ 阈值，谓词注入字段已随审计候选 18 收单删除）
-// ② 惰性（D10 移动壳无接管态——turn 展开分区只留展开集合，接管读写恒 false/no-op，
-//    与 ui 组件侧原兜底行为等价）：isTakeover/setTakeover
-// ③ no-op（hover 入口触屏不可见，remote-use-mobile D7（移动壳 v1 功能集裁定）hover actions 行）：onForkAsk/onHandoffAsk/editAndResend
-// ④ no-op + remote-use-mobile D7 登记（diff 详情/文件树面板族 Phase 2 行）：openDrawer/onFileClick +
-//    loadFileCandidates（空数组——路径链接化降级普通文本，env 白名单同步空集）
-// ⑤ 占位降级：renderMermaid 返回占位 svg（MarkdownRenderer 期望 {svg} 结构，纯 no-op 破图；
-//    mermaid 库不进移动壳 bundle，remote-use-mobile D7 mermaid 图表行）
+// 其余承接 v1（逐项核对不丢失）：
+// - 贴底自动跟流 + 上滑不抢滚动（nearBottom 阈值 + MutationObserver 覆盖流式 delta 增高）
+// - 加载更早前插保位（TruncatedHistoryBar + core loadMoreHistory 游标翻页；前插后非贴底态
+//   scrollTop += 增量补偿，贴底态两路写入以 nearBottom 单谓词互斥）
+// - 按需加载（游标扩窗，渲染不虚拟化 §7.1——ChatView 全量渲染窗口内消息）
+// - M-7 撤回常显：deps.onRevokeMessage 接线（UserBubble msg-revoke-button 常显，
+//   core useChat.revokeMessage 单点路由）——v1 :70-72 原样保留
+// - M-8 运行中 bash 停止：deps.abortBash 接线（ToolRow 停止入口）——v1 :65-67 原样保留
+// - hover 族 no-op（M-9）/ mermaid 占位降级 / 图片粘贴降级（M-13）/ markdown 渲染桥接
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { ArrowDown } from '@lucide/vue'
 import { ChatView, ChatViewDepsKey, TruncatedHistoryBar } from '@taiji/ui'
 import type { ChatViewDeps } from '@taiji/ui'
 import { renderMarkdownSegments } from '@taiji/ui/features/chat/markdown'
@@ -32,7 +34,6 @@ import {
 import type { Message } from '@taiji/shared'
 import { chatStore, createTurnExpansion, useChatInstance } from '../shell/app-runtime'
 import { renderMermaidPlaceholder } from '../shell/mermaid-placeholder'
-import QueueStrip from './QueueStrip.vue'
 
 const props = defineProps<{ sessionId: string }>()
 
@@ -54,7 +55,7 @@ const deps: ChatViewDeps = {
   isExpanded: (turnKey) => expansion.isExpanded(turnKey),
   // 惰性接管态（D10：移动壳 turn 展开分区无接管态，恒 false——与 ui 组件侧原兜底等价）
   isTakeover: () => false,
-  // pendingSend 派生视图（core chat store 派生，UserBubble submitEdit 双发锁消费）
+  // pendingSend 派生视图（core chat store 派生视图，UserBubble submitEdit 双发锁消费）
   isPendingSend: (sid) => chatStore.isPendingSend(sid),
 
   // 操作回调
@@ -62,15 +63,16 @@ const deps: ChatViewDeps = {
   // [chat-flow-consistency C3] ChatViewDeps.collapse 已随 Turn.vue onComplete 接线退役删除
   // 惰性接管写入（同 isTakeover：移动壳无接管态，no-op）
   setTakeover: () => {},
+  // [M-8] 运行中 bash 停止入口（ToolRow 停止按钮消费）——v1 :65-67 接线原样保留
   abortBash: (sid) => {
     void useChatInstance.abortBash(sid)
   },
-  // 撤回统一单入口（core useChat.revokeMessage：在途 cancel / 已送达树内回退的路由判定
-  // 在 core 单点，壳透传 targetId）
+  // [M-7] 撤回统一单入口（UserBubble msg-revoke-button 常显消费；core useChat.revokeMessage：
+  // 在途 cancel / 已送达树内回退的路由判定在 core 单点，壳透传 targetId）——v1 :70-72 原样保留
   onRevokeMessage: (sid, targetId) => {
     void useChatInstance.revokeMessage(sid, targetId)
   },
-  // hover 全族 no-op（remote-use-mobile D7：触屏不可见；恢复路径 = 桌面操作）
+  // hover 全族 no-op（M-9：触屏不可见；恢复路径 = 桌面操作。F13 重试走独立失败条入口）
   editAndResend: () => {},
   onForkAsk: () => {},
   onHandoffAsk: () => {},
@@ -92,11 +94,15 @@ const deps: ChatViewDeps = {
     return { ...result, cache: c }
   },
   streamingFenceSilenceMs: STREAMING_FENCE_SILENCE_MS,
-  // ④ 占位降级（remote-use-mobile D7 mermaid 行：图表在桌面查看；文案经 i18n，不养文案副本）
+  // ④ 占位降级（M-13 mermaid 行：图表在桌面查看；文案经 i18n，不养文案副本）
   renderMermaid: (source, _theme) => {
     void source
     return renderMermaidPlaceholder(t('mobile.mermaid.placeholder'))
   },
+
+  // [§6.2] 移动 variant：density=mobile（正文 16px/1.62、用户气泡 82%、思考块收起一行、
+  // 工具行 13px——u-foundation 交付的 additive 维度，单一 provide 树注入）
+  density: 'mobile',
 }
 
 provide(ChatViewDepsKey, deps)
@@ -122,6 +128,12 @@ let observer: MutationObserver | null = null
 function scrollToBottom(): void {
   const el = scrollEl.value
   if (el) el.scrollTop = el.scrollHeight
+}
+
+/** 「回到最新」（§5.1 ≥44px 触控档）：回底 + 恢复贴底跟随（单谓词复位，无时序窗）。 */
+function onBackToLatest(): void {
+  nearBottom.value = true
+  scrollToBottom()
 }
 
 onMounted(() => {
@@ -188,28 +200,40 @@ async function handleLoadMore(): Promise<void> {
 </script>
 
 <template>
-  <div
-    ref="scrollEl"
-    class="min-h-0 flex-1 overflow-y-auto"
-    data-testid="mobile-message-stream"
-    @scroll.passive="onScroll"
-  >
-    <div ref="contentEl" class="flex flex-col gap-2 p-2">
-      <!-- [A2] 历史截断顶部条：显隐 = store 截断窗口状态 truncated（窗口记录缺失按无截断）；
-           分区为空时无翻页游标不渲染（对齐桌面 renderItems.length 条件）。
-           N = loadedTurns，文案由 ui 组件经壳 i18n（ui locale 单源）；「加载更早」走
-           handleLoadMore（core loadMoreHistory 游标翻页 + 前插保位补偿）。 -->
-      <TruncatedHistoryBar
-        v-if="showLoadMore && messages.length > 0"
-        :loaded-turns="loadedTurns"
-        :loading="loadingMore"
-        @load="handleLoadMore"
-      />
-      <ChatView :messages="messages" :session-id="sessionId" :is-session-active="isSessionActive" />
-      <!-- [D7/U10] 流尾队列条：busy 期被 morph 移出对话流的排队消息可见可取消（与对话流
-           同视野——D7 不采用②「抽屉/独立页签」）；数据源/取消/回填编排内聚组件内，此处纯挂载，
-           空队列结构性不渲染 -->
-      <QueueStrip :session-id="sessionId" />
+  <div class="relative min-h-0 flex-1">
+    <div
+      ref="scrollEl"
+      class="h-full overflow-y-auto"
+      data-testid="mobile-message-stream"
+      @scroll.passive="onScroll"
+    >
+      <div ref="contentEl" class="flex flex-col gap-2 p-2">
+        <!-- [A2] 历史截断顶部条：显隐 = store 截断窗口状态 truncated（窗口记录缺失按无截断）；
+             分区为空时无翻页游标不渲染（对齐桌面 renderItems.length 条件）。
+             N = loadedTurns，文案由 ui 组件经壳 i18n（ui locale 单源）；「加载更早」走
+             handleLoadMore（core loadMoreHistory 游标翻页 + 前插保位补偿）。 -->
+        <TruncatedHistoryBar
+          v-if="showLoadMore && messages.length > 0"
+          :loaded-turns="loadedTurns"
+          :loading="loadingMore"
+          @load="handleLoadMore"
+        />
+        <ChatView :messages="messages" :session-id="sessionId" :is-session-active="isSessionActive" />
+      </div>
+    </div>
+    <!-- [§5.1] 回到最新浮钮：上滑阅读（!nearBottom）时浮出，≥44px 触控目标（--m-tap 档）；
+         点击回底 + 恢复贴底跟随。流式跟流期间贴底态结构性不渲染（不抢滚动） -->
+    <div
+      v-if="!nearBottom"
+      role="button"
+      tabindex="0"
+      class="absolute bottom-3 right-3 flex size-11 cursor-pointer items-center justify-center rounded-full border border-[var(--border)] bg-bg text-neutral-mid shadow-md outline-none active:bg-bg-input focus-visible:ring-2 focus-visible:ring-accent"
+      data-testid="mobile-back-to-latest"
+      :aria-label="t('mobile.messageStream.backToLatest')"
+      @click="onBackToLatest"
+      @keydown.enter="onBackToLatest"
+    >
+      <ArrowDown class="size-5" aria-hidden="true" />
     </div>
   </div>
 </template>

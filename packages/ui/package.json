@@ -18,6 +18,7 @@
       "types": "./src/extension-host/index.ts",
       "import": "./src/extension-host/index.ts"
     },
+    "./mobile-tokens.css": "./src/styles/mobile-tokens.css",
     "./form-protocol": {
       "types": "./src/form-protocol.ts",
       "import": "./src/form-protocol.ts"

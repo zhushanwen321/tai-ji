@@ -83,6 +83,13 @@ export interface SessionDeliveryDeps {
   /** MessageBus 当前值（skillNotice 广播 + 投递失败 message.error 用） */
   getMessageBus(): IMessageBus | null
   /**
+   * 整表会话列表广播（remote-use-mobile-v2 §6.3 fallback）：prompt 受理（deliverOne 尾部
+   * markSessionActive 后）补发既有 config.sessions 帧——未读信号的「新投递」触发源
+   * （客户端 lastActiveAt diff 消费）。缺席（未注入）= no-op，既有测试装配零变化。
+   * 生产 = 组合根传 server.broadcastSessionList。
+   */
+  broadcastSessionList?(): void
+  /**
    * 磁盘 outbox store 装配（§3.8 波 4，每 session 一个实例）：返回 undefined = 无持久化存储的一侧
    * （v2 行为，既有测试装配缺省零变化）。生产 = 组合根传 createDiskDeliveryStoreForSession；
    * 测试可注入内存替身或 undefined。
@@ -1021,6 +1028,16 @@ export function createSessionDeliveryRegistry(
     // [occupancy 置位退役] 记账-only（dispatching 置位归 prompt 发起前的 markDispatchingIfIdle，
     // 竞态根因见 markSessionActive 注释——handled 终局回落语义由上方 settleDispatching 承担）
     markSessionActive(sessionId)
+    // [remote-use-mobile-v2 §6.3 fallback] prompt 受理即整表广播（既有 config.sessions
+    // 通道补发，不加新事件类型）：未读信号的「新投递」触发源——客户端以 lastActiveAt
+    // 推进 diff 点亮非活跃会话未读。频度契约 = 每次投递受理恰好一帧（事件边界去重，
+    // 禁定时器合帧；护栏单测 broadcast-session-list-fanout.test.ts 钉住）。广播失败不
+    // 影响投递受理回执（推补充通道 best-effort，ADR-0097——丢失由重连快照/整表拉取收敛）。
+    try {
+      deps.broadcastSessionList?.()
+    } catch (e) {
+      warn('broadcastSessionList failed (non-blocking), sid=', sessionId, e)
+    }
   }
 
   /**
@@ -1745,6 +1762,109 @@ export function createSessionDeliveryRegistry(
     return rt.segmentsByEntry.get(id)
   }
 
+  /**
+   * [resync 拆分] 崩溃断连后的 manual retry 恢复支线（§6.22 failed 重试语义 / A5 缺陷修复）：
+   * pi 意外死亡的销毁收敛链（onSessionExit → removeSessionEntry → delivery.dispose）把
+   * failed 留守条目连同运行时态一并丢弃，UI 仍持 failed 行快照可点重试——原样返回空 =
+   * 静默 no-op，「发送未确认」无限滞留。条目的持久形态 = 磁盘 outbox 未终局记录（受理前
+   * persist 的耐久承诺，§3.8）：命中 = 未送达事实在案。用户重试是显式投递意图
+   * （pi-respawn「recovery waits for user action (manual retry / lazy restore)」的 manual
+   * retry 支线）——与 readTranscriptUserTexts 的「resync 不拉起 pi」裁决不冲突：该裁决针对
+   * idle 回收场景的只读判重，本函数只在磁盘记录证实确有未送达条目待处置时才恢复。恢复
+   * 通道 = deps.ensureActive（respawn.ensureRestored 单源 join）→ ensureRuntime 重建 →
+   * 'pi-restored' 对账尾部 replayUndelivered 以原 id 重投（transcript 判重防双发，已送达只
+   * 补记账）。恢复失败保持现状（条目留 renderer 侧 failed 行，可再试或经发消息惰性恢复）。
+   * 返回 undefined = 无待恢复条目或恢复失败（resync 直接返回空）；成功 = 重建后的运行时。
+   */
+  async function restoreRuntimeForRetry(
+    sessionId: string,
+    clientUuids: readonly string[],
+  ): Promise<SessionRuntime | undefined> {
+    const store = deps.createDeliveryStore?.(sessionId)
+    const undelivered = store ? store.loadUndelivered() : []
+    const pendingRetry = clientUuids.filter((id) => undelivered.some((r) => r.id === id))
+    if (pendingRetry.length === 0) return undefined
+    warn(`resync: ${pendingRetry.length} undelivered entry(ies) survive on disk outbox after teardown — lazy-restoring for manual retry, sid=`, sessionId, pendingRetry)
+    try {
+      await deps.ensureActive(sessionId)
+    } catch (e) {
+      warn('resync: lazy restore failed (kept on renderer), sid=', sessionId, e)
+      return undefined
+    }
+    const rt = ensureRuntime(sessionId)
+    // 同步等重放对账落地再回落既有判定：'pi-restored' 常规触发点（watchClient changed
+    // 边沿）是 fire-and-forget，直调同一触发点让回执语义对齐「重投后的条目状态」。
+    // reconcile 内部自兜异常（失败只 warn），此 await 不上抛。
+    await reconcile(sessionId, 'pi-restored')
+    return rt
+  }
+
+  /**
+   * [resync 拆分] failed 条目重试前 transcript 预检（第 11 条穷举 1）：受理失败的歧义性——
+   * 首败时文本可能已进 transcript 未及回执。预检命中 = 确定性送达事实（getEntries 回执，
+   * 非时间逻辑）：confirmDelivered 记账（failed → delivered，事实终结失败猜测）+ 计入
+   * deduped 应答（renderer 据此隐去该行）而非重投——顺带覆盖断连 failed 重试的同类残余
+   * 双发风险。读取失败（texts null）保守判未送达 = 全部重投（必达优先于去重，与 rebuild
+   * 同口径）。未命中条目经内核 requeue 重投入队首并 flush 出站（on-accept 受理即出站；
+   * compaction 持有由 waitDeliverable 拦截）。返回 preConfirmed（已确认送达的 id）。
+   */
+  async function precheckFailedBeforeRequeue(
+    sessionId: string,
+    rt: SessionRuntime,
+    retryIds: string[],
+  ): Promise<string[]> {
+    const texts = await readTranscriptUserTexts(sessionId, rt)
+    const preConfirmed: string[] = []
+    const toRequeue: string[] = []
+    for (const id of retryIds) {
+      const needle = markerLiteral(bareMarkerId(id))
+      if (texts !== null && texts.some((t) => t.includes(needle))) {
+        rt.handle.confirmDelivered(id)
+        rt.submitted.delete(bareMarkerId(id))
+        preConfirmed.push(id)
+      } else {
+        toRequeue.push(id)
+      }
+    }
+    const requeued = toRequeue.length > 0 ? rt.handle.requeue(toRequeue) : 0
+    if (requeued > 0) {
+      rt.handle.flush()
+      warn(`resync: retry ${requeued} failed entry(ies) as user-requested, sid=`, sessionId, toRequeue)
+    }
+    if (preConfirmed.length > 0) {
+      warn(`resync: ${preConfirmed.length} failed entry(ies) already in transcript — delivered, not requeued, sid=`, sessionId, preConfirmed)
+    }
+    return preConfirmed
+  }
+
+  /**
+   * [resync 拆分] 判重表已清空（runtime 重启 reattach）+ 未知条目的判重锚回落：transcript
+   * 标记扫描（D5②），全量读取一次供全部重报 id 复用。终局 id 与已确认送达 id 计入
+   * deduped 应答；未知且 transcript 无标记的条目出声留 renderer 侧（不静默吞）。
+   */
+  async function dedupeUnknownViaTranscript(
+    sessionId: string,
+    rt: SessionRuntime,
+    clientUuids: readonly string[],
+    finalIds: Set<string>,
+    activeStateById: Map<string, string>,
+    preConfirmed: string[],
+  ): Promise<string[]> {
+    const texts = await readTranscriptUserTexts(sessionId, rt)
+    const deduped: string[] = [...preConfirmed]
+    for (const id of clientUuids) {
+      if (finalIds.has(id)) {
+        deduped.push(id)
+        continue
+      }
+      if (activeStateById.has(id)) continue
+      const needle = markerLiteral(bareMarkerId(id))
+      if (texts !== null && texts.some((t) => t.includes(needle))) deduped.push(id)
+      else warn('resync: unknown uuid not in kernel nor transcript (kept on renderer), sid=', sessionId, id)
+    }
+    return [...new Set(deduped)]
+  }
+
   const registry: SessionDeliveryRegistry = {
     getOrCreateDelivery(sessionId) {
       return ensureRuntime(sessionId).handle
@@ -1885,64 +2005,31 @@ export function createSessionDeliveryRegistry(
       return withSegments
     },
     async resync(sessionId, clientUuids) {
-      const rt = runtimes.get(sessionId)
-      if (!rt) return []
+      let rt = runtimes.get(sessionId)
+      if (!rt) {
+        // teardown 后的 manual retry 恢复支线（全语义见 restoreRuntimeForRetry 头注释）
+        const restored = await restoreRuntimeForRetry(sessionId, clientUuids)
+        if (!restored) return []
+        rt = restored
+      }
       const full = rt.handle.entriesFull()
       const finalIds = new Set(full.tombstones.map((t) => t.id))
       const activeStateById = new Map(full.active.map((e) => [e.id, e.state] as const))
       // 用户重试（§3.4 错误规格表：队列区 failed 行的重试钮 = delivery.resync 单条重报）：
-      // failed → queued 的唯一入口是内核 requeue（types.ts 状态机迁移表）——重投入队首并
-      // 立即 flush 出站（on-accept 受理即出站；compaction 持有由 waitDeliverable 拦截）。
-      // 其余活跃条目（queued/in-flight）行为不变（它们在队列里，重报不改变状态）。
-      // 重试前 transcript 预检（第 11 条穷举 1）：受理失败的歧义性——首败时文本可能已进
-      // transcript 未及回执。预检命中 = 确定性送达事实（getEntries 回执，非时间逻辑）：
-      // confirmDelivered 记账（failed → delivered，事实终结失败猜测）+ 计入 deduped 应答
-      // （renderer 据此隐去该行）而非重投——顺带覆盖断连 failed 重试的同类残余双发风险。
-      // 读取失败（texts null）保守判未送达 = 全部重投（必达优先于去重，与 rebuild 同口径）。
+      // failed → queued 的唯一入口是内核 requeue（types.ts 状态机迁移表）。其余活跃条目
+      // （queued/in-flight）行为不变（它们在队列里，重报不改变状态）。重试前 transcript
+      // 预检与重投（全语义见 precheckFailedBeforeRequeue 头注释）。
       const retryIds = clientUuids.filter((id) => activeStateById.get(id) === 'failed')
-      const preConfirmed: string[] = []
-      if (retryIds.length > 0) {
-        const texts = await readTranscriptUserTexts(sessionId, rt)
-        const toRequeue: string[] = []
-        for (const id of retryIds) {
-          const needle = markerLiteral(bareMarkerId(id))
-          if (texts !== null && texts.some((t) => t.includes(needle))) {
-            rt.handle.confirmDelivered(id)
-            rt.submitted.delete(bareMarkerId(id))
-            preConfirmed.push(id)
-          } else {
-            toRequeue.push(id)
-          }
-        }
-        const requeued = toRequeue.length > 0 ? rt.handle.requeue(toRequeue) : 0
-        if (requeued > 0) {
-          rt.handle.flush()
-          warn(`resync: retry ${requeued} failed entry(ies) as user-requested, sid=`, sessionId, toRequeue)
-        }
-        if (preConfirmed.length > 0) {
-          warn(`resync: ${preConfirmed.length} failed entry(ies) already in transcript — delivered, not requeued, sid=`, sessionId, preConfirmed)
-        }
-      }
+      const preConfirmed = retryIds.length > 0
+        ? await precheckFailedBeforeRequeue(sessionId, rt, retryIds)
+        : []
       const unknown = clientUuids.filter((id) => !finalIds.has(id) && !activeStateById.has(id))
       if (unknown.length === 0) {
         const deduped = clientUuids.filter((id) => finalIds.has(id))
         return [...new Set([...deduped, ...preConfirmed])]
       }
-      // 判重表已清空（runtime 重启 reattach）+ 未知条目：判重锚回落 transcript 标记扫描
-      // （D5②），全量读取一次供全部重报 id 复用
-      const texts = await readTranscriptUserTexts(sessionId, rt)
-      const deduped: string[] = [...preConfirmed]
-      for (const id of clientUuids) {
-        if (finalIds.has(id)) {
-          deduped.push(id)
-          continue
-        }
-        if (activeStateById.has(id)) continue
-        const needle = markerLiteral(bareMarkerId(id))
-        if (texts !== null && texts.some((t) => t.includes(needle))) deduped.push(id)
-        else warn('resync: unknown uuid not in kernel nor transcript (kept on renderer), sid=', sessionId, id)
-      }
-      return [...new Set(deduped)]
+      // 未知条目判重锚回落 transcript 标记扫描（全语义见 dedupeUnknownViaTranscript 头注释）
+      return dedupeUnknownViaTranscript(sessionId, rt, clientUuids, finalIds, activeStateById, preConfirmed)
     },
     entries(sessionId) {
       return runtimes.get(sessionId)?.handle.entriesFull()

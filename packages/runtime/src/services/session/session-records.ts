@@ -58,6 +58,9 @@ import { SUBAGENTS_ENGINES_FILENAME, PLAN_STATE_CUSTOM_TYPE } from '@zhushanwen/
 // paths.ts 是 Node-only 模块，刻意不从 shared barrel 导出（见 shared/src/index.ts L32 注释），
 // Node 端从子路径 import
 import { getDataDir } from '@taiji/shared/paths'
+// session 存储树根公式（subagent 会话 jsonl 路径穿越守卫锚；零 env 纯公式模块，
+// dataDir 由本进程 getDataDir() 提供）
+import { getSessionStoreDir } from '@taiji/shared/session-store-paths'
 // zcode 同步副本段常量单源（SDK zcode-db-paths.ts）——与引擎读侧（zcode-subagent-cli
 // preparer 解析链）同源 import；SDK 是跨包契约根，不违 C-ext-13 的「runtime 不 import
 // 引擎包」红线（control-server.ts 同款先例）
@@ -1213,10 +1216,14 @@ export class SessionRecords {
 
     if (!record.sessionFile) return { messages: [], truncated: false }
 
-    // 路径穿越校验：sessionFile 必须严格落在 piAgentDir 下（<dataDir>/agent/）。
-    // record.sessionFile 由 subagent-extractor 从 JSONL 文本提取，不可信——攻击者构造的
-    // session JSONL 可塞入任意路径（如 /etc/passwd），不校验直接读会泄露任意文件内容。
-    if (!isStrictlyUnder(getPiAgentDir(), record.sessionFile)) return { messages: [], truncated: false }
+    // 路径穿越校验：sessionFile 必须严格落在 session 存储树（<dataDir>/ext-sessions/，
+    // session-store-paths 单源公式）下。record.sessionFile 由 subagent-extractor 从 JSONL
+    // 文本提取，不可信——攻击者构造的 session JSONL 可塞入任意路径（如 /etc/passwd），
+    // 不校验直接读会泄露任意文件内容。守卫锚随 [session-store-layout-inversion] 布局反转
+    // 迁移：子代理会话 jsonl 现行落点 = <ext-sessions>/<rootSid>/subagents/sessions/*.jsonl，
+    // 旧 <dataDir>/agent/ 锚对新布局恒拒（执行记录结构性恒空缺陷根因）；锚 ext-sessions
+    // 树根对树内全部分区形态放行，树外路径照拒（穿越防线语义不变）。
+    if (!isStrictlyUnder(getSessionStoreDir(getDataDir()), record.sessionFile)) return { messages: [], truncated: false }
 
     // 直读 subagent JSONL，复用 getHistoryFromFilePath 转换链路（parseJsonl + filter + convertHistory）。
     // subagent JSONL 格式与主 session 一致（pi SessionManager._persist 写入）。
@@ -1514,7 +1521,10 @@ export class SessionRecords {
     const { records: subagents } = await this.getSubagents(sessionId)
     const record = subagents.find((s) => s.subagentId === agentCallSessionId)
     if (!record?.sessionFile) return ''
-    if (!isStrictlyUnder(getPiAgentDir(), record.sessionFile)) return ''
+    // 路径穿越校验（与 getSubagentHistory 同型同锚）：sessionFile 必须严格落在 session
+    // 存储树（<dataDir>/ext-sessions/）下——守卫锚随布局反转从旧 <dataDir>/agent/ 迁移，
+    // 旧锚对新布局恒拒（agent call 路径解析结构性落空），树外路径照拒。
+    if (!isStrictlyUnder(getSessionStoreDir(getDataDir()), record.sessionFile)) return ''
     return record.sessionFile
   }
 

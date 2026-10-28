@@ -1,9 +1,5 @@
-import { i18n } from '../i18n';
 import type { ConnectionCredentialController } from '../platform/connection-profile';
-import NewTaskSheet from '../views/NewTaskSheet.vue';
 import type { ConnectionState, UseChatDeps } from '@taiji/core';
-import type { SessionSummary } from '@taiji/shared';
-import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { nextTick, ref } from 'vue';
 // 机械合并产物（同目录合并，vi.mock 相对路径不变）；源文件见各节横幅。重名顶层标识符已加 _mN 后缀。
@@ -200,15 +196,6 @@ describe('submitRemoteToken 提交编排（TokenInputView 提交路径，含 cat
 
 // ======================================================================
 // ← mobile-new-task.spec.ts
-// ======================================================================
-
-const createdSession: SessionSummary = {
-  id: 'sid-new',
-  label: 'demo task',
-  cwd: '/repo/demo',
-  status: 'idle',
-  lastActiveAt: Date.now(),
-}
 
 // vi.hoisted：mock 工厂被 hoist 到 import 前，工厂内引用的变量须经 vi.hoisted 创建
 const { mockCreateSessionFlow, mockSend } = vi.hoisted(() => ({
@@ -221,111 +208,4 @@ const { mockCreateSessionFlow, mockSend } = vi.hoisted(() => ({
 // 仅发送出口可观测（编排落在 app-runtime 生产代码，mock 组件层会变成断言 mock 自身）
 // @taiji/core 并集 mock 见簇首（connection-view 节顶部）：本节覆盖项已并入同一工厂。
 
-function mountSheet(open = true) {
-  return mount(NewTaskSheet, {
-    props: { open },
-    global: { plugins: [i18n] },
-  })
-}
 
-describe('NewTaskSheet 提交调 createSessionFlow（remote-use-mobile D7（移动壳 v1 功能集裁定）新建任务行）', () => {
-  beforeEach(() => {
-    mockCreateSessionFlow.mockReset()
-  })
-
-  it('两字段填写后提交：createSessionFlow 以 (cwd, segments) 入参被调，emit created + close', async () => {
-    mockCreateSessionFlow.mockResolvedValue({ session: createdSession, migratedSegments: [{ type: 'text', text: 'demo task' }] })
-    const wrapper = mountSheet()
-    await wrapper.get('[data-testid="new-task-cwd"]').setValue('/repo/demo')
-    await wrapper.get('[data-testid="new-task-message"]').setValue('demo task')
-    await wrapper.get('[data-testid="new-task-submit"]').trigger('click')
-    await flushPromises()
-
-    expect(mockCreateSessionFlow).toHaveBeenCalledTimes(1)
-    const [ctx, input] = mockCreateSessionFlow.mock.calls[0] as [
-      { defaultCwd: string; onCwdFallback?: unknown },
-      { cwd: string; segments: Array<{ type: string; text?: string }> },
-    ]
-    expect(ctx.defaultCwd).toBe('')
-    expect(input.cwd).toBe('/repo/demo')
-    expect(input.segments).toEqual([{ type: 'text', text: 'demo task' }])
-    expect(wrapper.emitted('created')).toEqual([[createdSession]])
-    expect(wrapper.emitted('close')).toBeTruthy()
-    wrapper.unmount()
-  })
-
-  it('空字段提交被组件层拦截：提交键 disabled（required 检查），不触编排', async () => {
-    const wrapper = mountSheet()
-    await wrapper.get('[data-testid="new-task-message"]').setValue('only message')
-    // cwd 缺失 → 提交键 disabled（组件层拦截），click 不触达 onSubmit
-    const submit = wrapper.get('[data-testid="new-task-submit"]')
-    expect((submit.element as HTMLButtonElement).disabled).toBe(true)
-    await submit.trigger('click')
-    await flushPromises()
-
-    expect(mockCreateSessionFlow).not.toHaveBeenCalled()
-    wrapper.unmount()
-  })
-})
-
-describe('创建成功后首条消息自动发送编排（createMobileTask：创建 → 激活 → useChat.send）', () => {
-  beforeEach(() => {
-    mockCreateSessionFlow.mockReset()
-    mockSend.mockReset()
-  })
-
-  it('创建成功：send 以新 session id + migratedSegments 自动被调，emit created + close，无错误提示', async () => {
-    mockCreateSessionFlow.mockResolvedValue({ session: createdSession, migratedSegments: [{ type: 'text', text: 'demo task' }] })
-    mockSend.mockResolvedValue(undefined)
-    const wrapper = mountSheet()
-    await wrapper.get('[data-testid="new-task-cwd"]').setValue('/repo/demo')
-    await wrapper.get('[data-testid="new-task-message"]').setValue('demo task')
-    await wrapper.get('[data-testid="new-task-submit"]').trigger('click')
-    await flushPromises()
-
-    expect(mockSend).toHaveBeenCalledTimes(1)
-    expect(mockSend).toHaveBeenCalledWith('sid-new', [{ type: 'text', text: 'demo task' }])
-    expect(wrapper.emitted('created')).toEqual([[createdSession]])
-    expect(wrapper.emitted('close')).toBeTruthy()
-    // 用户可见部分：编排成功后表单不出现错误提示
-    expect(wrapper.find('[data-testid="new-task-error"]').exists()).toBe(false)
-    wrapper.unmount()
-  })
-
-  it('send 失败不回滚创建：created + close 照常上抛，表单不误报创建失败（仅 console 留痕）', async () => {
-    mockCreateSessionFlow.mockResolvedValue({ session: createdSession, migratedSegments: [{ type: 'text', text: 'demo task' }] })
-    mockSend.mockRejectedValue(new Error('ws down'))
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const wrapper = mountSheet()
-    await wrapper.get('[data-testid="new-task-cwd"]').setValue('/repo/demo')
-    await wrapper.get('[data-testid="new-task-message"]').setValue('demo task')
-    await wrapper.get('[data-testid="new-task-submit"]').trigger('click')
-    await flushPromises()
-
-    expect(mockSend).toHaveBeenCalledTimes(1)
-    expect(wrapper.emitted('created')).toEqual([[createdSession]])
-    expect(wrapper.emitted('close')).toBeTruthy()
-    // 发送失败只 console 留痕，不进表单错误提示（session 已存在，失败情形仅首条消息投递）
-    expect(errSpy).toHaveBeenCalledWith('[mobile-task] first message send failed:', expect.any(Error))
-    expect(wrapper.find('[data-testid="new-task-error"]').exists()).toBe(false)
-    errSpy.mockRestore()
-    wrapper.unmount()
-  })
-})
-
-describe('NewTaskSheet backdrop 遮罩（点击关闭）', () => {
-  it('open=true：backdrop 渲染，点击 emit close', async () => {
-    const wrapper = mountSheet(true)
-    const backdrop = wrapper.get('[data-testid="new-task-backdrop"]')
-    expect(backdrop.element).toBeTruthy()
-    await backdrop.trigger('click')
-    expect(wrapper.emitted('close')).toBeTruthy()
-    wrapper.unmount()
-  })
-
-  it('open=false：backdrop 不渲染（v-if 整树关闭）', () => {
-    const wrapper = mountSheet(false)
-    expect(wrapper.find('[data-testid="new-task-backdrop"]').exists()).toBe(false)
-    wrapper.unmount()
-  })
-})

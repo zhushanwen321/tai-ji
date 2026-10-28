@@ -884,6 +884,21 @@ describe("useChat", () => {
       f.dispose()
     })
 
+    it('send options.clientUuid 透传：调用方注入幂等键贯穿到 submitDelivery + 气泡 id（remote-use-mobile-v2 §7.1 幂等口径一）', async () => {
+      // 「未送达重发」契约：弱网失败重试复用原 clientUuid，runtime 按 clientUuid 幂等防
+      // 已受理回执丢失双投——透传断裂（内部重新生成）会让该防线静默失效，此处锁定全链。
+      const f = makeFixture()
+      const injected = 'u-00000000-0000-4000-8000-000000000001'
+      await expect(f.useChat.send('s1', textToSegments('retry'), { clientUuid: injected })).resolves.toBe(true)
+      expect(f.chatApi.submitDelivery).toHaveBeenCalledTimes(1)
+      const calledUuid = (f.chatApi.submitDelivery.mock.calls[0] as unknown as [string, string, string])[2]
+      expect(calledUuid).toBe(injected)
+      // 气泡 id = 注入键（appendUser 显式 id 入参契约——内核条目 id 与乐观气泡同源）
+      const userMsg = f.chatStore.getMessages('s1').find((m) => m.role === 'user')!
+      expect(userMsg.id).toBe(injected)
+      f.dispose()
+    })
+
     it('send 在非 secure context（crypto.randomUUID undefined）下照常提交（移动壳 LAN http 场景）', async () => {
       // 场景：移动壳经 LAN http（http://<lan-ip>:<port>）访问，isSecureContext=false →
       // crypto.randomUUID 为 undefined（Web API 仅 secure context 暴露）。submitNewMessage

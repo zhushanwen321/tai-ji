@@ -91,11 +91,22 @@ SPLIT_JUSTIFIED_SCAN_LINES = 30
 # [2026-10 trace 块壳化 W2] ToolRow.vue：承接 Block.vue tool 分支的 .text-sweep 扫光（运行中
 # 尾行视口/摘要）与 .tool-file-chip hover 滚动（.fchip-roll keyframes + 后代选择器，MF-1-24），
 # 与 ThinkingRow 同族论证；block-expand 展开过渡走 Vue Transition 类 escape hatch 不占名额。
+# [2026-10 remote-use-mobile-v2 U1] Sheet.vue：底部浮层原语。scoped 仅两类规则：①z 层级
+# 声明（--z-sheet / +1）——刻意不落模板 z-[var(--z-sheet)] class 形：桌面 z 基线扫描器
+# （z-scan-helper）口径为 .css 声明形 + 模板 class/inline 形，Sheet 是双壳共享原语、消费
+# 壳未接线前桌面 modal registry 无登记位，z 落 scoped 声明形避免对账面出现未消费表面
+# （移动壳接线时随消费壳的表面登记机制处置）；②[data-state] 属性选择器动画 + keyframes
+# （Tailwind 无法表达，CollapsibleContent.vue 同律 escape hatch）。结构布局全部 Tailwind。
+# [2026-10 remote-use-mobile-v2 U1] StatusDot.vue / Skeleton.vue：移动原语纯动效组件——
+# scoped CSS 全部为动画本体（accent 状态点脉冲 / skeleton 扫光：keyframes + animation 声明 +
+# prefers-reduced-motion 停帧降级），论证同 RunningBlockIcon.vue 同族。不进壳层 tailwind
+# config 的原因：原语被双壳 content 扫描消费，animation 简写类只在使用方 config 定义了
+# keyframes 时才生成规则，scoped 自包含使任何宿主完整生效（含 reduced-motion 降级）。
 # [2026-10 trace 块壳化 W3] RunGroupBlock.vue：承接 run-group 分支的 .rg-badge 徽标入场
 # （keyframes + 后代选择器，demo workbench.css rg-badge-pop 同参）与 block-expand 展开过渡
 # （Vue Transition 类 escape hatch 不占名额），论证同 ToolRow 同族。Block.vue 同批移出本表——
 # 五类型全转发后壳内无任何 scoped 样式（豁免跟随消费点）。
-STYLE_SCOPED_WHITELIST: list[str] = ['shell/MainPanel.vue', 'sidebar/UpdateButton.vue', 'settings/SettingsModal.vue', 'collapsible/CollapsibleContent.vue', 'sidebar/Sidebar.vue', 'features/chat/RunningBlockIcon.vue', 'features/chat/ThinkingRow.vue', 'features/chat/ToolRow.vue', 'features/chat/RunGroupBlock.vue']
+STYLE_SCOPED_WHITELIST: list[str] = ['shell/MainPanel.vue', 'sidebar/UpdateButton.vue', 'settings/SettingsModal.vue', 'collapsible/CollapsibleContent.vue', 'sidebar/Sidebar.vue', 'features/chat/RunningBlockIcon.vue', 'primitives/sheet/Sheet.vue', 'primitives/status-dot/StatusDot.vue', 'primitives/skeleton/Skeleton.vue', 'features/chat/ThinkingRow.vue', 'features/chat/ToolRow.vue', 'features/chat/RunGroupBlock.vue']
 
 # CSS 选择器检测正则
 RE_STYLE_SELECTOR = re.compile(r'^[.\w\-]+[\s,]*\{')

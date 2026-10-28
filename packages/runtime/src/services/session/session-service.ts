@@ -499,6 +499,10 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       fetchContext: (sessionId) => this.fetchContext(sessionId),
       persistSessionOutcome: (sessionId, outcome, reason) => this.persistSessionOutcome(sessionId, outcome, reason),
       tryPersistProjectBinding: (session) => this.tryPersistProjectBinding(session),
+      // [remote-use-mobile-v2 §6.3 fallback] 回合终态写点补发整表广播：形态与进程退出链
+      // onSessionExit 的广播同构（broker.broadcast + listPersistedSessions；archiveCount
+      // 缺省走协议 optional 语义，同 :746 进程退出链行为）。
+      broadcastSessionList: () => this.broker.broadcast({ type: 'config.sessions', payload: { groups: this.listPersistedSessions() } }),
     })
     // subagent/workflow 记录域（S6 迁出至 session-records.ts）：deps 窄注入——session 存在性
     // 经 lifecycle（Map 所有者）只读侧，messageBus 经 getter 每次调用动态读（setter 晚期注入

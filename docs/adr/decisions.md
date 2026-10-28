@@ -1155,6 +1155,38 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 ### ADR-0173 连接目标快照与域同步收敛：supervisor 签发实例标识 + 目标快照单一权威 + 连接边沿统一域同步 + project 写通道命令化（2026-10-27 设计裁决，connection-datasync-ssot）
 
+### ADR-0174 移动壳视图层全量重写：三目的域信息架构 + 装配层保留 + v1 能力映射对账（2026-10-25 设计落地，remote-use-mobile-v2 §6.1）
+
+**决策**：`packages/mobile-renderer` 视图层按 spec 全量重写为三目的域信息架构（会话/进行中/设置 + 聊天详情页，五态路由状态机 + popstate 系统返回接管，不引 vue-router）；装配层（bootstrap 连接编排 / app-runtime core factory 接线 / companion-bridge 三通道 / platform 连接档案）保留并按 v2 扩展，core/ui 通道零断链。v1 视图组件直接删除（git 历史即回退通道，不保留 private 旧版）；删除以 v1→v2 老能力映射表（M-1~M-18）逐条对账为前置判据——每条迁移类能力确认 v2 承接锚点在场才删（对账档案 = `packages/mobile-renderer/MIGRATION-RECONCILIATION.md`），无锚点即阻塞。绑定 v1 视图的单测随组件同删，装配层/通道单测保留适配，视图测试按 v2 重建（三视角）。
+
+**否决记录**：渐进修补不采用（六问题全部锚定视图层结构，修补 = 在错误信息架构上打补丁）；保留 v1 作 private 回退不采用（死代码 + 两套「当前会话」定义并存，UI 回退用 git revert 更干净）。
+
+**效果**：audit 全部 P0/P1/P2 随重写消除（首屏白屏 / 触控 44px / 对比度达标 / 浮层焦点管理 / 删除二次确认）；v1 两 tab 空壳态、三套手写浮层、ErrorBar/断线条/Band 三层堆叠退役，概念净减；v1 视图 8 文件 + SlashBarStub + BottomTabBar + pinia 空挂载清退完成（views/ 保留 2 个 v2 现役组件，清单见 `MIGRATION-RECONCILIATION.md` 清退清单节；对账 M-1~M-18 全绿）。
+
+### ADR-0175 ChatView 移动 variant = density 注入，桌面渲染路径字节不变（2026-10-25 设计落地，remote-use-mobile-v2 §6.2）
+
+**决策**：`@taiji/ui` chat 组件族新增 `density` 维度（`'desktop' | 'mobile'`），经 ChatViewDeps provide 树注入；Turn/Block/ThinkingRow/ToolRow/UserBubble 等组件读 density 切换类名组合（移动档：正文 16px/1.62、气泡最大宽 82%、思考块默认收起、工具行 13px 密度）。桌面默认值 `'desktop'`、不传走原类名——桌面渲染路径字节不变（u-foundation 以桌面快照断言 + E2E-VISUAL-01 像素基线双防线证明）。移动壳 `MobileMessageStream` provide `density:'mobile'` 消费。撤回按钮（UserBubble 常显）与运行中 bash 停止在移动档保持可达（老能力映射 M-7/M-8）。
+
+**否决记录**：移动壳自建轻量消息流不采用（真实消息类型远多于 demo 五类，自建丢桌面能力且双壳渲染漂移）；CSS 全局覆盖不采用（覆盖范围失控、无法约束到组件内部结构）。
+
+**效果**：双壳共享同一套 chat 渲染单源；桌面零回归由 additive-only 约束 + 像素基线门禁结构性保证；逃生通道（个别组件无法 additive 时降级移动壳局部 CSS 覆盖并登记）未触发。
+
+### ADR-0176 spec F16 表单超时条款收窄：失效事件消费，不设墙钟（2026-10-25 设计落地，remote-use-mobile-v2 §6.4 + §6.23 断连不清表单请求、时间平抑类逻辑退役）
+
+**决策**：移动端表单/权限请求的「超时」表现全部消费既有失效信号，不新增任何墙钟——extension 域（ask-user/planReview）无超时（runtime 2026-07-16 既有裁决 + 超时默认原则：任务级正常路径禁止自带墙钟超时，「等用户回答」不是时间问题），消费 `extension:requestsInvalidated`（撤销即失效）；plugin 域消费既有真超时事件 `plugin:uiRequestExpired` / `plugin:permissionRequestExpired`（30min，env 可调）。断连不清表单分区（v1 定时清空形态退役）：分区保留作对账基线，重连后 getPendingRequests reconcile 收敛；runtime 重启分支恢复前禁提交（封「旧 runtime 静默忽略已终结 requestId」的假成功窗口），恢复恒经对账完成事件、无定时器。「表单取消回传 null」用既有 `extension.ui_response result:null`。
+
+**否决记录**：为满足 spec F16 字面在移动壳或 runtime 加表单墙钟不采用（违反 runtime 既有裁决 + 超时默认原则——失效本来就是事件，加墙钟是把事件问题换成时间问题）；改 runtime 恢复 extension 超时不采用（改变桌面行为，超出设计范围）。
+
+**效果**：spec F16 首句修订为「请求失效（撤销/过期）」、§19「请求超时」按「extension 域 = 失效通知、plugin 域 = 真超时事件」分流落地（修订建议见 docs/spec-revision-proposals.md，随设计包呈报用户确认后回写 Open Design 存档）；时间平抑类逻辑（断连定时清空）退役，失效链单一出口事实化。
+
+### ADR-0177 移动端三通道呈现统一 Sheet 化：回传通道零变化（2026-10-25 设计落地，remote-use-mobile-v2 §6.5）
+
+**决策**：移动壳三个「等用户处理」通道全部迁入 Sheet 体系：① form/planReview → FormSheet（表单逻辑复用 ui 包 form-protocol 纯函数与 createFormRequestChannel，题型渲染单列化）；② 简单 dialog 四型全集（confirm/select/input/editor，含 editor 多行预填等宽——v1 实装能力不回归）并入「待回答」数据源由 FormSheet 泛化承接，放行词表单一来源 = 自 shared `ExtensionInteractMethod` 类型派生 + 反向穷举编译锁（shared 扩型时编译红，禁手写字面量副本）；③ 权限 → PermissionSheet（编排状态机复用 createPermissionRequestController，仅呈现层换 Sheet 原语；桌面继续用 Dialog，ui 包组件不动）。三入口统一「聊天底部条 + 进行中页聚合 + 底部导航计数」（聚合口径见 ADR 语义：回合主体只看活跃会话、待办与计数聚合全部会话，权限请求归属为可选字段、无归属是一等分支）。壳侧浮层唯一出口 = Sheet 原语（sheet-manager 单例互斥，八名封闭词表），禁止手写浮层（L0 grep 机器检查）。
+
+**否决记录**：CompanionBand/PermissionRequestDialog 与 Sheet 双形态并存不采用（两套浮层语言 = v1 三套手写浮层问题的复刻）；PermissionSheet 在 ui 包新做不采用（权限编排 factory 已共享，呈现层是壳的职责）；dialog 只映射三型丢 editor 不采用（editor 型被丢弃则请求方无限等待，多行预填语义丢失）。
+
+**效果**：spec「答」主线成立——请求从「只活在当前会话聊天页」变为全壳可达；回传通道零变化（extension.ui_response / plugin.uiResponse / plugin.approvePermissions / plugin.denyPermissions 原样）；v1 收起/展开（minimize/restore）随单槽互斥形态退役（拖拽关闭取代）。
+
 **背景**：冷启动侧栏项目分组丢失的架构级修复。旧形态四层缺陷叠加——① runtime 端口经「裸端口推送 + 前端备用端口猜连公式」双通道分发，dev 延迟启动期前端拿过期端口猜连至他人实例；② 端口推送无实例标识，runtime 重启后前端持有死端口/死 token 重连；③ 连接重连的域刷新由 initApp 一次性编排 + 重连分支逐域手写两套并存；④ project 表由前端 localStorage 回写 + runtime save 端点双写，无 revision 水位，双窗口并发编辑互相整表覆盖。设计过程产物 connection-datasync-ssot（tech-design 归档），本条即该形态决策的现行登记处。
 
 **决策**：九条。
@@ -1174,3 +1206,5 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **依据**：ADR-0122 事实驱动原则体系（本机故障模型 = 进程生死二态，状态判定来源严格递减：同步查询 > 确定性事件 > 禁止时间推测；失败显式上报、首败即停；UI 跟随事实）的具体化；ADR-0097 拉为主推补充（拉是真理通道、推是性能提示，可靠性由通道保证，功能域代码禁出现推送补偿逻辑）在连接与项目域落地；域同步器是 ADR-0097「丢失后的收敛由域同步协议统一提供」的实现载体。
 
 **登记**：实装——协议地基 `packages/shared/src/{protocol,ipc-channels,constants}.ts`（快照类型 / project 命令域 / IPC 通道常量 / `RUNTIME_ID_ENV`）；主进程 `apps/electron/main/supervisor/{runtime-supervisor,process-control}.ts`（快照持有与签发、4 广播点载荷升级）+ `gateway/bridge-handlers.ts`（快照 IPC 读口）+ `preload/preload.ts`；runtime `packages/runtime/src/transport/connection-manager.ts`（auth 应答回传）+ `transport/project-message-handler.ts` + `services/project/project-store.ts`（四命令 + 串行队列 + revision + 归一化）；core `packages/core/src/transport/use-connection.ts`（连接控制器裁决表）+ `connection-edge-sync.ts`（域同步器）+ `transport/api/domains/project.ts`（命令封装）；renderer `stores/project.ts`（4 值状态机 + 命令化编辑）+ `composables/features/sidebar/{useSidebar,useProjectGroups}.ts` + `components/sidebar/{SessionList,ProjectGroup,ProjectLoadStatus}.vue`。出站 env deny 登记（C-proc-09 spawn-env-contract）随 `TAIJI_RUNTIME_ID` 注入更新。无新约束族；排障条目见 [TROUBLESHOOTING.md](../TROUBLESHOOTING.md) 连接状态词与快照排查节。真机验收（设计 §8 七场景 + P-3/P-4/P-5 探针）由 verify-taiji 场景剧本族承载（`a1-cold-start-groups` / `a2-first-port-occupied` / `a3-runtime-restart-recovery` / `a4-failure-presentation-recovery` / `a5-failure-window-edit-disabled` / `a6-dual-window-revision` / `a7-disk-invariant`）。
+
+

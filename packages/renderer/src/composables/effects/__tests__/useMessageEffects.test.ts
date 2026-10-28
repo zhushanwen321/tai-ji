@@ -42,6 +42,7 @@ const storeMocks = vi.hoisted(() => ({
   activePanelId: 'root-panel',
   toastError: vi.fn(),
   handleCompletion: vi.fn(),
+  ensureStreamSubscription: vi.fn(),
 }))
 
 vi.mock('@/stores/chat', () => ({
@@ -75,6 +76,13 @@ vi.mock('@/composables/useToast', () => ({
 }))
 vi.mock('@/composables/effects/useCompletionNotify', () => ({
   handleCompletion: storeMocks.handleCompletion,
+}))
+// [A5 修复接线] ensureStream（lifecycle factory 恢复窗口全套重建原语）的壳侧绑定 mock：
+// 真实实现内部 rendererSubDeps() 走 pinia store（本文件 node 环境无 active pinia）；本层
+// 只验证「openRestoreWindow 经 deps.ensureStream 走壳绑定」的接线事实，绑定体行为
+// （events handler 重挂 + subscribe RPC）归 session-exited.test.ts 全链路覆盖。
+vi.mock('@/composables/features/chat/useChat', () => ({
+  ensureStreamSubscription: (...args: unknown[]) => storeMocks.ensureStreamSubscription(...args),
 }))
 
 import { createInboundEffects, handleRuntimeUnavailable } from '../useMessageEffects'
@@ -126,11 +134,13 @@ describe('createInboundEffects（§11.4 InboundEffects 接线）', () => {
     expect(msg).not.toContain('ext load failed')
   })
 
-  it('[D5 接线] 意外退出 → 经 factory 建立恢复窗口订阅（subscribe RPC 发出，壳不直调 subscribeSession）', async () => {
+  it('[D5 接线] 意外退出 → 经 factory 建立恢复窗口订阅（ensureStream 壳绑定被调，壳不直调 subscribeSession）', async () => {
     effects.onSessionExited!('s1', { code: 1, reason: 'crashed' })
 
-    expect(subscribeRpc).toHaveBeenCalledTimes(1)
-    expect(subscribeRpc).toHaveBeenCalledWith('s1', undefined)
+    // [A5 修复接线] 恢复窗口走 deps.ensureStream（events handler 重挂 + bus 订阅全套），
+    // 绑定体真实行为（含内部 subscribe RPC）归 session-exited.test.ts 全链路覆盖。
+    expect(storeMocks.ensureStreamSubscription).toHaveBeenCalledTimes(1)
+    expect(storeMocks.ensureStreamSubscription.mock.calls[0]?.[0]).toBe('s1')
     await flushSubscribes()
   })
 
@@ -140,7 +150,7 @@ describe('createInboundEffects（§11.4 InboundEffects 接线）', () => {
     effects.onSessionExited!('s1', { code: 1, reason: 'force quit' })
 
     expect(storeMocks.markRespawnPending).not.toHaveBeenCalled()
-    expect(subscribeRpc).not.toHaveBeenCalled()
+    expect(storeMocks.ensureStreamSubscription).not.toHaveBeenCalled()
     // 终态防御路径：清掉可能残留的过渡态
     expect(storeMocks.clearRespawnPending).toHaveBeenCalledWith('s1')
     // markSessionDead 序列与壳扩展①② 照常（core 序列在分流之前）

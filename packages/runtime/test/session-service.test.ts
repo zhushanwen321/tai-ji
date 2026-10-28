@@ -312,6 +312,7 @@ function createSetup(): Setup {
     unsubscribe: vi.fn(),
     unsubscribeAll: vi.fn(),
     clearSession: vi.fn(),
+    forgetSession: vi.fn(),
   } as unknown as IMessageBus
 
   const extensionService: IExtensionService = {

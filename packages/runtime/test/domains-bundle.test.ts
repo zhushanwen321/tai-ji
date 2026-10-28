@@ -6388,7 +6388,7 @@ describe('migrateSettingsSkillsToDiscovery', () => {
     migrateSettingsSkillsToDiscovery()
     // no-op 语义不变：迁移不写 discovery.json；文件缺失时读端回落 DEFAULT_DISCOVERY_CONFIG
     // （feat: discovery scan dirs default-enabled），skill preset 默认勾选 → 非空。
-    expect(getSkillPaths()).toEqual(['.agents/skills', '~/.pi/agent/skills', '~/.agents/skills'])
+    expect(getSkillPaths()).toEqual(['.agents/skills', '~/.agents/skills'])
   })
 
   it('旧路径父目录不是容器（无 SKILL.md 子目录）→ 过滤掉', () => {
@@ -6402,7 +6402,7 @@ describe('migrateSettingsSkillsToDiscovery', () => {
 
     // 非容器被正确过滤（未写入 discovery）；迁移无有效产物提前 return 不写盘，
     // 读端回落 DEFAULT_DISCOVERY_CONFIG 默认勾选（feat: default-enabled）→ 非空。
-    expect(getSkillPaths()).toEqual(['.agents/skills', '~/.pi/agent/skills', '~/.agents/skills'])
+    expect(getSkillPaths()).toEqual(['.agents/skills', '~/.agents/skills'])
   })
 
   it('迁移后 discovery 为 v2 结构（容器进 globalPaths）', () => {
@@ -7661,8 +7661,8 @@ describe('SessionService.getSubagentHistory', () => {
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), 'subagent-hist-'))
-    // 隔离数据目录到 tempDir，使 getPiAgentDir() 返回 tempDir/agent —— 测试文件写入真实
-    // piAgentDir 下（getSubagentHistory W-R1 路径穿越校验），又不污染真实 ~/.taiji。
+    // 隔离数据目录到 tempDir，使守卫锚 getSessionStoreDir(getDataDir()) 落在 tempDir 内
+    //（getSubagentHistory 路径穿越校验），又不污染真实 ~/.taiji。
     prevDataDir = process.env.TAIJI_AGENT_DATA_DIR
     process.env.TAIJI_AGENT_DATA_DIR = tempDir
   })
@@ -7675,9 +7675,10 @@ describe('SessionService.getSubagentHistory', () => {
 
   it('reads subagent JSONL and converts to Message[]', async () => {
     const mainSessionFile = join(tempDir, 'main.jsonl')
-    // subagent JSONL 必须落在 piAgentDir 下（getSubagentHistory W-R1 路径穿越校验）。
-    // 真实 subagent 文件由 pi-subagent-workflow 写入 getSubagentSessionDir(mainCwd)，位于 piAgentDir 内。
-    const subagentDir = join(getPiAgentDir(), 'subagents', 'mock-subagent-hist')
+    // subagent JSONL 必须落在 session 存储树（<dataDir>/ext-sessions/）下（getSubagentHistory
+    // 路径穿越校验锚，[session-store-layout-inversion] 后合法根 = 会话存储树）。
+    // 真实 subagent 文件由 pi 写入 <ext-sessions>/<rootSid>/subagents/sessions/。
+    const subagentDir = join(tempDir, 'ext-sessions', MAIN_SESSION_ID, 'subagents', 'sessions', 'mock-subagent-hist')
     mkdirSync(subagentDir, { recursive: true })
     const subagentFile = join(subagentDir, 'subagent.jsonl')
 

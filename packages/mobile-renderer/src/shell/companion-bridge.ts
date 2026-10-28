@@ -1,47 +1,65 @@
-// companion-bridge —— 移动壳 companion 区（CompanionBand）的数据源与回传装配
-// （remote-use-mobile D7（移动壳 v1 功能集裁定）「ask-user 提问答复 ✅」行的壳侧拉通）+
-// 权限审批通道（同表「权限审批 ✅ 手机可批」行的壳侧拉通）+ form/planReview 类请求通道
-// （同表 form 行恢复任务：统一表单与 plan 审批的移动壳消费方，消除「请求方无限等待」）。
+// companion-bridge —— 移动壳 companion 区（待回答/待授权体系）的数据源与回传装配
+// （remote-use-mobile D7「ask-user 提问答复 ✅」行的壳侧拉通）+ 权限审批通道（同表
+// 「权限审批 ✅ 手机可批」行）+ form/planReview/dialog 三类请求通道（v2 §6.5 三通道
+// Sheet 化：呈现统一走 FormSheet/PermissionSheet，本模块是数据源与回传的单一装配点）。
 //
 // 对话桥翻译层（WS source 适配 + dialog source/transport 工厂 + requestId 反查表）已下沉
 // @taiji/ui/extension-host shell-adapters（双壳逐字节共享，含 [G1] 反查表泄漏语义文档）；
 // 权限审批编排状态机（bus 订阅 + 畸形事件检查 + expired 撤窗 + transport 回传 +
 // BM3/D3 语义）已下沉同包 createPermissionRequestController（双壳共享，单测在同包
 // __tests__/）。本模块只做移动壳裁决：
-// - 简单 dialog 走 CompanionBand（C4 门固定排除面之内）；form/planReview 类请求被同一 C4
-//   门排除出 CompanionBand，由本模块 form 通道承接（MobileFormCard 渲染 + 作答回传），
-//   通道算法（C4 放行面 form ∨ planReview + requestId dedup + per-session Map 分区 +
+// - dialog 通道宿主居本模块（v2 呈现出口改造：v1 queue 宿主 = CompanionBand setup，
+//   MF-5 句柄回传机制随该呈现退役——模块级 effectScope 包裹创建，订阅永驻与 form 通道
+//   同款，切 session 按分区隔离读口；App.vue 不再 provide DIALOG_QUEUE_HANDLE_KEY）；
+// - form/planReview 类请求由 form 通道承接（C4 门排除出 dialog 通道），通道算法
+//   （C4 放行面 form ∨ planReview + requestId dedup + per-session Map 分区 +
 //   requests-invalidated 失效摘除 + getPendingRequests 快照对账）在
 //   @taiji/ui/extension-host createFormRequestChannel 单点（桌面 useExtensionUI 同 factory）；
 // - bus 模块级私有单例（桌面走 getExtensionBus 惰性单例，来源选择是壳裁决）；
 // - 壳层能力回调按移动壳形态注入（remote-use A11/U14）：onPiResponseSettled 不注入
 //   （空操作，对齐「移动壳无 pendingSend 链」）；notifyNotDelivered 注入错误条提示
-//   （移动壳无分级 toast 组件，错误条即 toast 契约呈现通道——见 ./error-bar；form 通道
-//   另有 respond 返回 false → App 置 MobileFormCard 内联错误行的同源反馈）；
+//   （移动壳无分级 toast 组件，错误条即 toast 契约呈现通道——见 ./error-bar）；form 通道
+//   另有 respond 返回 false → FormSheet 内联错误行的同源反馈；
 //   onSessionError/onGlobalError 错误回调居本模块（bootstrap effects
 //   注入消费，见下方「全局错误条」段），错误条状态单例居 ./error-bar（与 app-runtime
 //   core toast 通道共用同一出口）；
 // - 权限/对话/form 三通道均模块级装配（bus 单例私居本模块；ESM 单次求值，listener 不会
-//   翻倍），App.vue provide + 挂 CompanionBand / PermissionRequestDialog / MobileFormCard。
+//   翻倍），App.vue 按 sheet-manager activeSheet 槽位挂 FormSheet/PermissionSheet（§6.5）；
+// - 断连语义 §6.23（A 级，时间平抑类清空形态退役）：onRuntimeUnavailable 按 reason 分流
+//   ——disconnect 不清分区（重连后 reconcile 对账收敛）；restart 保留分区 + 提交挂起
+//   （suspendFormSubmissions，重连对账完成经 onSnapshotReconciled 恢复），封住「旧
+//   runtime 对已终结 requestId 静默忽略、UI 记为已提交」的假成功窗口。恢复链去合取化：
+//   对账触发不依赖 activeSessionId 置位（reconcileNow 全分区对账）、RPC 失败重试一轮
+//   + 耗尽经 onReconcileFailed 置错误条可见反馈、dialog 节禁答与 form 通道恢复事件
+//   解耦（FormSheet）——任一条件不满足不再永久锁死待办；
+// - 请求失效呈现联动（§6.4/§7.1）：requests-invalidated / plugin:uiRequestExpired 命中
+//   当前呈现请求 → 关闭活动 Sheet + 原因提示（不把已失效请求提交成成功）；
+//   plugin:permissionRequestExpired 命中当前审批请求 → 仅原因提示（Sheet 收层由 App
+//   pending watch 权威处理，收层与提示解耦——A7 缺陷修复，见下方过期订阅段）。
 //
 // 回传走 core 既有通路（不新造协议）：pi 源 extension.ui_response（sendExtensionUIResponse）、
 // plugin 源 plugin.uiResponse（ws send）、审批源 plugin.approvePermissions/denyPermissions。
-import { computed, reactive, watch, type ComputedRef, type Ref } from 'vue'
+import { computed, effectScope, reactive, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { InternalEventBus, MessageBusBridge } from '@taiji/core/extension-host'
+import { onGlobal } from '@taiji/core/transport/api'
 import type { ExtensionInteractMethod } from '@taiji/shared'
 import {
   bindSessionFormActions,
   createCompanionDialogAdapters,
+  createDialogRequestQueue,
   createFormRequestChannel,
   createPermissionRequestController,
   createWsPluginMessageSource,
   type FormChannelPartitions,
 } from '@taiji/ui/extension-host'
-import type { DialogRequestQueue, PermissionTransport, PermissionRequestState } from '@taiji/ui/extension-host'
+import type { DialogRequest, DialogRequestQueue, PermissionTransport, PermissionRequestState } from '@taiji/ui/extension-host'
 import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 import { registerSessionCleanup } from '@taiji/core/foundation/use-session-scoped-state'
-import { chatStore } from './app-runtime'
+import { activeSessionId, chatStore, sessionList } from './app-runtime'
+import { activeSheet, closeSheet } from './sheet-manager'
+import { registerOverlayPendingReader } from './sessions-runtime'
 import { showErrorBar, __testing as errorBarTesting } from './error-bar'
+import { summarizePendingTodos, type PendingTodoSummary } from '../features/pending-todos'
 import { i18n } from '../i18n'
 
 // vue-i18n 的 t 复杂重载收窄为 (key, params?) => string（对齐 app-runtime 同款收窄）
@@ -68,9 +86,14 @@ export const __testing = {
   resetErrorBarForTest(): void {
     errorBarTesting.resetErrorBarForTest()
   },
-  /** exited 重置通路跨用例隔离：清空 dialog queue 句柄（模块级 let，防句柄残留跨用例串扰） */
-  resetDialogQueueHandleForTest(): void {
-    dialogQueueHandle = null
+  /** §6.23 提交挂起态跨用例隔离：复位挂起标志（模块级单例 ref） */
+  resetFormSubmitSuspensionForTest(): void {
+    formSubmitSuspended.value = false
+  },
+  /** dialog queue 句柄（测试跨用例隔离：调用方对自用 sid 调 mobileDialogQueue.resetFor；
+   * getter 惰性求值——__testing 对象字面量先于 queue 声明初始化，直引字段会 TDZ） */
+  get mobileDialogQueue() {
+    return mobileDialogQueue
   },
 }
 
@@ -116,7 +139,7 @@ export const errorBarEffects = {
   onGlobalError: handleGlobalError,
 }
 
-// companion 数据源/回传对（App.vue provide 消费；G1 反查表泄漏语义两壳同持，见 shell-adapters）
+// companion 数据源/回传对（G1 反查表泄漏语义两壳同持，见 shell-adapters）
 const companionDialog = createCompanionDialogAdapters(bus, {
   notifyNotDelivered: notifyDialogResponseNotDelivered,
 })
@@ -124,6 +147,24 @@ export const mobileDialogRequestSource = companionDialog.source
 export const mobileUiResponseTransport = companionDialog.transport
 // errorBarMessage/dismissErrorBar 消费点（ErrorBar.vue）改从 ./error-bar 直接 import——
 // 状态单例归属该模块，本模块不再中转 re-export
+
+// ── dialog 通道 queue（v2 呈现出口改造：宿主自 CompanionBand setup 迁本模块）────────
+//
+// v1 形态：queue 在 CompanionBand setup 顶层创建（MF-5：onScopeDispose 依赖 active effect
+// scope），经 DIALOG_QUEUE_HANDLE_KEY provide/inject 回传句柄供 exited 编排调 resetFor。
+// v2 §6.5 三通道 Sheet 化后 CompanionBand 呈现退役，FormSheet 承接 dialog 四型渲染——
+// queue 宿主随数据源归本模块：模块级 effectScope 包裹创建（scope 永不 stop = 订阅永驻，
+// 与 form 通道「订阅不随视图挂载/卸载」同一形态；effectScope 同时让 queue 内部的
+// onScopeDispose 有合法落点，不产生无 scope 警告）。切 session 读口隔离由 queue 内部的
+// per-session Map 分区承接（sessionIdRef = app-runtime activeSessionId）。
+// registerDialogQueueHandle 机制退役：句柄模块级直持，exited 编排直接调（App.vue 不再
+// provide 注入键）。
+
+/** dialog 通道 queue 单例（effectScope 包裹：queue 内部 useSessionScopedState/onScopeDispose 的合法 scope） */
+const dialogChannelScope = effectScope()
+export const mobileDialogQueue: DialogRequestQueue = dialogChannelScope.run(() =>
+  createDialogRequestQueue(mobileUiResponseTransport, activeSessionId, mobileDialogRequestSource),
+)!
 
 // ── permissionRequest 审批通道（remote-use-mobile D7（移动壳 v1 功能集裁定）「权限审批 ✅ 手机可批」行，App 挂 PermissionRequestDialog）──
 //
@@ -137,10 +178,57 @@ const permissionController = createPermissionRequestController(bus)
 /** 审批回传通道（permission-transport 契约的 factory 产出，App.vue provide 消费） */
 export const mobilePermissionTransport: PermissionTransport = permissionController.transport
 
-/** 取审批弹窗状态（App.vue setup 消费，template 绑定 Dialog props；同一 reactive 单例） */
+/** 取审批弹窗状态（App.vue setup 消费，PermissionSheet props 绑定；同一 reactive 单例） */
 export function useMobilePermissionRequest(): PermissionRequestState {
   return permissionController.state
 }
+
+// ── 请求失效呈现联动（§6.4/§7.1）：plugin 域两过期事件的 Sheet 关闭挂点 ────────────
+// 状态机权威在 controller / dialog queue（各自出队/撤窗）；本订阅只做呈现联动——过期
+// 命中「正在呈现」的请求时关闭活动 Sheet + 原因提示（不把过期请求提交成成功）。
+// requestIds/requestId 匹配判定与 controller 同构（requestId 精确 → 缺失回退 pluginId）。
+
+/** 当前呈现中的 dialog 请求（form 槽打开时 FormSheet 的 dialog 分支渲染面） */
+function presentedDialogRequestId(): string | undefined {
+  if (activeSheet.value !== 'form') return undefined
+  return mobileDialogQueue.currentRequest.value?.requestId
+}
+
+// plugin:uiRequestExpired（plugin 源 dialog 30min 撤窗）：呈现中请求命中 → 关 Sheet + 提示。
+// queue 出队由 source.onUiRequestExpired 独立消费（反查表路由），此处只管呈现。
+void onGlobal((msg) => {
+  if (msg.type !== 'plugin:uiRequestExpired') return
+  const payload = msg.payload as { requestId?: unknown }
+  const expiredId = typeof payload.requestId === 'string' ? payload.requestId : undefined
+  if (expiredId === undefined) return
+  if (presentedDialogRequestId() === expiredId) {
+    closeSheet()
+    showErrorBar(t('mobile.sheet.requestExpired'))
+  }
+})
+
+// plugin:permissionRequestExpired（plugin 权限审批撤窗）：命中当前审批请求 → 原因提示。
+// 呈现时序契约（A7 缺陷修复）：controller 的 expired 订阅注册在先，同一同步 emit 链内
+// pending 已翻 false（requestId/pluginId 保留不清），故匹配判定**不得**以 pending 或
+// activeSheet 为前置——两者都依赖「事件到达时弹窗还开着」的时序，而收层（App pending
+// watch）与提示（本订阅）分属同步链与微任务两个时机，前置守卫会把提示恒吞掉。分式：
+// - Sheet 收层 = App.vue watch(permission.pending) 权威处理（自带 activeSheet==='permission'
+//   guard，用户正在其他 Sheet 操作时不误关）；
+// - 本订阅只做原因提示（错误条单槽，route 态无关常驻）。
+// 回退分支（payload 缺 requestId 的旧版广播）以 requestId 非空为「壳确曾观测到审批请求」
+// 判据——state 零值（壳重启后陈旧广播）不误报。
+void onGlobal((msg) => {
+  if (msg.type !== 'plugin:permissionRequestExpired') return
+  const payload = msg.payload as { pluginId?: unknown; requestId?: unknown }
+  const s = permissionController.state
+  const expiredRequestId = typeof payload.requestId === 'string' ? payload.requestId : ''
+  const matches = expiredRequestId !== ''
+    ? s.requestId === expiredRequestId
+    : s.requestId !== '' && typeof payload.pluginId === 'string' && s.pluginId === payload.pluginId
+  if (matches) {
+    showErrorBar(t('mobile.sheet.requestExpired'))
+  }
+})
 
 // ── form/planReview 类请求通道（remote-use-mobile D7（移动壳 v1 功能集裁定）form 行恢复：统一表单 + plan 审批的移动壳消费方）──
 //
@@ -163,7 +251,7 @@ export function useMobilePermissionRequest(): PermissionRequestState {
  * 登记表主表 #53（声明处 @data-owner #53）——runtime 双源（bus ui-request 实时帧 +
  * getPendingRequests 快照）的消费副本，写口经 formPartitions 适配器封闭于本模块，
  * 清理点 = registerSessionCleanup（删除）+ resetCompanionChannelsForExitedSession
- * （exited 分通道重置）+ clearAllFormRequests（runtime-unavailable 断连收口）。
+ * （exited 分通道重置）。
  */
 // @data-owner #53 —— 主表 #53 mobile 壳 form/planReview 挂起请求分区（消费副本）
 const formRequestsBySid = reactive(new Map<string, ExtensionUIRequest[]>())
@@ -239,6 +327,33 @@ const formChannel = createFormRequestChannel({
     // 未送达：分区条目保留（factory 语义），连接恢复后同 requestId 重发幂等（M1/RD-3#1）
     console.warn('[companion-bridge] form response not delivered (WS closed), kept for retry:', requestId)
   },
+  onSnapshotReconciled: () => {
+    // §6.23 restart 恢复挂点：快照对账完成 = 壳分区已与 runtime 挂起表对齐——提交挂起
+    // 解除（仍在的条目恢复可提交、已不存在的已被剔除）。挂起的置位在 suspendFormSubmissions
+    // （bootstrap restart 分支），恢复恒经本回调（事件驱动，无定时器——时间平抑红线）。
+    // 对账触发点：连接恢复边沿（reconcileNow，含无活跃会话的全分区对账）+ sid 置位
+    // watch + factory 内 RPC 失败重试——恢复链任一支完成即达本回调（去合取化）。
+    formSubmitSuspended.value = false
+  },
+  onReconcileFailed: () => {
+    // §6.23 恢复链去合取化（窗口②）：RPC 失败（factory 内已立即重试一轮）耗尽后的可见
+    // 失败反馈，不静默——挂起期间用户可感知「待办状态未同步」；重连边沿 / sid 变化会
+    // 再次触发 reconcile（事件驱动重试，无定时器）。
+    showErrorBar(t('mobile.errorBar.reconcileFailed'))
+  },
+  onInvalidated: (sid, _requestIds, removed) => {
+    // 请求失效呈现联动（§6.4/§7.1）：当前会话的 form/planReview 请求被撤销 → 关 Sheet +
+    // 原因提示。factory 回调时分区条目已摘除（remove 先于回调），「呈现中 requestId 命中
+    // 失效集」不可查——按 sid 命中判定（activeSessionId 匹配 ∧ form 槽打开）：呈现面渲染
+    // 即当前会话挂起请求，失效即呈现面变化；多请求挂起时非队首失效也收层（用户重开即见
+    // 剩余请求，提示语义仍真——过宽面登记于此）。正常作答路径不走本回调（respond 送达
+    // 摘除 ≠ invalidate），「提交成功误报失效」不可能。
+    if (activeSheet.value !== 'form') return
+    if (removed.length > 0 && sid === activeSessionId.value) {
+      closeSheet()
+      showErrorBar(t('mobile.sheet.requestInvalidated'))
+    }
+  },
 })
 
 // 永驻订阅（模块级单次注册）：C4 门在 factory ingest 内（form ∨ planReview 放行）
@@ -251,6 +366,38 @@ void bus.on('requests-invalidated', (e) => {
   formChannel.invalidate(e.sessionId, e.requestIds)
 })
 
+// ── §6.23 断连不清表单请求（A 级）：reason 分流 + 提交挂起（v2 改造段）────────────
+//
+// v1 行为（退役）：onRuntimeUnavailable 两 reason 一律 clearAllFormRequests（定时宽限式
+// 整表清空——时间平抑类形态，§6.23 裁决退役）。
+// v2 分流（bootstrap handleRuntimeUnavailable 消费）：
+// - disconnect（网络断连，runtime 同一实例、挂起表还在）：分区保留，重连成功后 reconcile
+//   对账收敛（仍在的补回、已撤销的摘除）——本模块无需动作；
+// - restart（runtime 重启，新实例挂起表已清零）：分区保留（Sheet 视图不闪删）+
+//   suspendFormSubmissions() 置提交挂起——重连成功后 reconcile 完成前 FormSheet 提交/取消
+//   禁用，封住假成功窗口（旧 runtime 对已终结 requestId 静默忽略、UI 记为已提交、请求方
+//   空等）；恢复恒经 formChannel onSnapshotReconciled（对账完成 = 事实源对齐）。
+// dialog 通道 queue 两 reason 均不清（与 form 分区同语义；plugin 源 dialog 另有
+// uiRequestExpired 撤窗，pi 源 dialog 无超时机制——shell-adapters [G1] 段）。
+
+// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态）：§6.23 restart 提交挂起标志
+const formSubmitSuspended = ref(false)
+
+/** restart 分支提交挂起置位（bootstrap handleRuntimeUnavailable 消费；幂等） */
+export function suspendFormSubmissions(): void {
+  formSubmitSuspended.value = true
+}
+
+/** 提交挂起读口（FormSheet 提交/取消按钮禁用判定；App 编排同步判定同源） */
+export function useFormSubmitSuspended(): Ref<boolean> {
+  return formSubmitSuspended
+}
+
+/** 提交挂起同步读口（非组件上下文判定用） */
+export function isFormSubmitSuspended(): boolean {
+  return formSubmitSuspended.value
+}
+
 // ── session.exited 分通道重置编排（remote-use U6 / D5 exited 分区清理段 + 「exited 清理与
 //    拦截解绑」段）──
 //
@@ -261,36 +408,13 @@ void bus.on('requests-invalidated', (e) => {
 // 丢弃（发起方无限等待，G3 失效）——exited ≠ 删除，清理与拦截必须解绑。删除路径
 // （U12）才走销毁语义注册表。
 //
-// dialog 通道载体 = CompanionBand setup 内创建的组件私有 queue 实例（MF-5：queue 须在
-// 组件 setup 顶层创建），bootstrap 的 effects 回调无现成通道拿实例——经
-// DIALOG_QUEUE_HANDLE_KEY provide/inject 登记回调回传（App.vue provide，ui 定义 key），
-// 本模块持句柄、exited 编排经下方出口调 resetFor。
-
-/** dialog 通道 queue 句柄（CompanionBand mount 后经登记回调写入） */
-let dialogQueueHandle: DialogRequestQueue | null = null
-
-/** queue 句柄登记入口（App.vue provide DIALOG_QUEUE_HANDLE_KEY 消费；重复登记覆盖——
- * CompanionBand 移动壳单实例挂载，正常时序仅一次） */
-export function registerDialogQueueHandle(queue: DialogRequestQueue): void {
-  dialogQueueHandle = queue
-}
+// dialog 通道 queue 自 v2 起宿主居本模块（见上方 dialog queue 段），exited 编排直调
+// mobileDialogQueue.resetFor——v1 的 DIALOG_QUEUE_HANDLE_KEY 句柄回传机制随 CompanionBand
+// 呈现退役。
 
 /** form 通道具名清理（直调 Map.delete，幂等；不触注册表广播） */
 function clearFormRequestsForSession(sid: string): void {
   formRequestsBySid.delete(sid)
-}
-
-/**
- * form/planReview 分区全局清空（bootstrap onRuntimeUnavailable 断连收口消费）：对齐桌面
- * useMessageEffects.handleRuntimeUnavailable 的 extensionUI clearAllPending——runtime 崩溃
- * / 重启用尽后 runtime pending 内存表已清零，移动壳分区若保留条目，屏上僵尸 form 卡在
- * WS 重连窗口内提交即假成功（旧 runtime 对已终结 requestId 静默忽略，请求方空等）。
- * reactive Map 整表替换，派生视图（currentFormRequest 等）自动清空。dialog 通道 queue
- * 两壳一致不清（dialog 另有确认条重试形态，对齐桌面 clearAllPending 只清 extensionUI
- * 分区的范围），本出口不扩范围。
- */
-export function clearAllFormRequests(): void {
-  formRequestsBySid.clear()
 }
 
 // [remote-use U12] form 分区删除路径注册（销毁语义）：session 永久删除时经删除编排
@@ -303,11 +427,10 @@ registerSessionCleanup(clearFormRequestsForSession)
 
 /**
  * exited 分通道重置出口（bootstrap onSessionExited 壳扩展段消费）：dialog resetFor +
- * form 具名清理。句柄未登记（exited 早于 CompanionBand 挂载）跳过 dialog 通道——exited
- * 只达已订阅连接、订阅建立必晚于挂载，实际不达（设计 U6 resetFor 句柄通路段）。
+ * form 具名清理。
  */
 export function resetCompanionChannelsForExitedSession(sid: string): void {
-  dialogQueueHandle?.resetFor(sid)
+  mobileDialogQueue.resetFor(sid)
   clearFormRequestsForSession(sid)
 }
 
@@ -320,15 +443,17 @@ export type MobileFormRequests = {
    * 作答回传（factory respond 核心流）：result 经 sendExtensionUIResponse（method 透传），
    * 未送达（WS 非 OPEN）保留请求可重试（M1/RD-3#1），送达即出分区。请求已终结
    * （失效/已应答）→ 迟到应答丢弃 + console 留痕（诊断留痕，不占错误条单槽）。返回值 =
-   * 是否送达，App 编排消费（false → MobileFormCard 内联错误行，回传失败不静默）。
+   * 是否送达，App 编排消费（false → FormSheet 内联错误行，回传失败不静默）。
    */
   respond(requestId: string, result: boolean | string | null): boolean
   /** 取消（等价 respond(requestId, null)） */
   cancel(requestId: string): void
   /**
-   * 快照对账立即执行（App.vue watch(isConnected) connected 边沿消费）：静默重连保持
-   * 视图挂载、sessionId 不变，断连期间到达的 form/planReview 请求经此补挂、已终结的
-   * 经此剔除；sid 为空跳过（无会话分区可对账）。
+   * 快照对账立即执行（App.vue watch(isConnected) connected 边沿消费）。§6.23 恢复链
+   * 去合取化——挂起解除不依赖 activeSessionId 置位：活跃 sid 照常对账（sid 首次置位的
+   * 补跑由本 hook 内 watch 承接），另对在场分区逐个对账（用户停留列表页、无活跃会话时，
+   * 任一分区对账完成即触发 onSnapshotReconciled 解除提交挂起）。无 sid 且分区为空时
+   * no-op。
    */
   reconcileNow(): void
 }
@@ -337,6 +462,33 @@ export type MobileFormRequests = {
 export type PlanReviewFrameForView = {
   requestId: string
   selfReview?: string
+}
+
+/** dialog 通道的呈现读口（FormSheet dialog 分支渲染 + App 自动打开 watch 消费） */
+export type MobileDialogRequests = {
+  /** 当前活跃会话的队首 dialog 请求（queue 内部按 activeSessionId 分区派生；undefined = 无；
+   * Readonly<Ref> = queue 接口声明的读口形状） */
+  currentDialogRequest: Readonly<Ref<DialogRequest | undefined>>
+  /** 作答回传（queue.respond：pi 源 sendPiResponse 带 method 透传 / plugin 源 sendPluginResponse；返回 = 是否送达） */
+  respond(requestId: string, result: boolean | string | null): boolean
+  /** 取消（等价 respond(requestId, null)） */
+  cancel(requestId: string): void
+}
+
+/**
+ * dialog 通道呈现读口（queue 单例薄包装；分区隔离在 queue 内部，切 session 自动换分区）。
+ */
+export function useMobileDialogRequests(): MobileDialogRequests {
+  return {
+    currentDialogRequest: mobileDialogQueue.currentRequest,
+    respond: (requestId, result) => {
+      mobileDialogQueue.respond(requestId, result)
+      // queue.respond 返回 void（送达与否体现在请求是否出队）；送达判定经呈现面收敛——
+      // 已出队 = 送达（未送达保留语义在 queue 内部）。
+      return !mobileDialogQueue.hasRequest((r) => r.requestId === requestId)
+    },
+    cancel: (requestId) => mobileDialogQueue.cancel(requestId),
+  }
 }
 
 /**
@@ -365,12 +517,80 @@ export function useMobileFormRequests(sessionId: Ref<string | null>): MobileForm
     if (sid) formChannel.reconcile(sid)
   }, { immediate: true })
 
-  // 回传/取消/对账的 sid 守卫包装收敛 bindSessionFormActions（双壳同构装配段单点，见 ui
+  // 回传/取消的 sid 守卫包装收敛 bindSessionFormActions（双壳同构装配段单点，见 ui
   // form-request-channel）：回传核心流（定位 / 未送达保留 / 送达摘除）与呈现钩子（已终结
   // 留痕 / 未送达留痕）在 factory + 上方 formChannel 装配段。respond 返回值 = 是否送达，
-  // App 编排消费（false → MobileFormCard 内联错误行，回传失败不静默）；reconcileNow =
-  // 连接恢复边沿的对账入口（App.vue watch(isConnected) 消费，sid 为空跳过）。
+  // App 编排消费（false → FormSheet 内联错误行，回传失败不静默）。
   const actions = bindSessionFormActions(formChannel, () => sessionId.value)
 
-  return { currentFormRequest, currentPlanReviewRequest, respond: actions.respond, cancel: actions.cancel, reconcileNow: actions.reconcile }
+  // §6.23 恢复链去合取化（窗口①）：连接恢复边沿的对账入口不依赖 sid 置位——活跃 sid
+  // 照常对账（分区为空也拉快照，挂起解除主路径），另对在场分区逐个对账（restart 置挂起
+  // 时用户可能停留在会话列表、activeSessionId 为 null，若只对账活跃 sid 则
+  // onSnapshotReconciled 永不触发、提交挂起永久锁死待办）。bindSessionFormActions 的
+  // sid 守卫 reconcile 不复用（其「sid 空整体跳过」语义正是本窗口缺口）。
+  function reconcileNow(): void {
+    const sid = sessionId.value
+    if (sid) formChannel.reconcile(sid)
+    for (const other of formRequestsBySid.keys()) {
+      if (other === sid) continue
+      formChannel.reconcile(other)
+    }
+  }
+
+  return { currentFormRequest, currentPlanReviewRequest, respond: actions.respond, cancel: actions.cancel, reconcileNow }
 }
+
+// ── §6.18 待办聚合读口段（「需要你处理」区 + BottomNav 计数角标的共同数据源）────────
+//
+// 聚合范围（§6.18 收窄口径）：全部会话的可归属待办（form/planReview/dialog，按分区键归属）
+// + 全局（无归属）待办（permission——V-6 两问不成立 → protocol sessionId 恒不填，审批请求
+// 恒无归属 = 一等分支）。三源读口就地聚合，ActivityScreen 与 BottomNav 消费同一 computed
+//（单数据源，「导航计数与聚合区计数一致」构造性成立，不留第二套计数逻辑）。
+// 分类谓词与呈现读口同源：form === true / planReview === true（isPlanReviewFrame 同式），
+// legacy 帧不进计数——与 v2 FormSheet 呈现口径一致（无可达作答面的条目不进待办）。
+
+/** form/planReview 分区全表计数快照（reactive Map 迭代建立响应式依赖；分区清空时键摘除） */
+export const mobileFormPendingCounts = computed<ReadonlyMap<string, { form: number; planReview: number }>>(() => {
+  const out = new Map<string, { form: number; planReview: number }>()
+  for (const [sid, requests] of formRequestsBySid) {
+    let form = 0
+    let planReview = 0
+    for (const r of requests) {
+      if (r.planReview === true) planReview++
+      else if (r.form === true) form++
+    }
+    if (form > 0 || planReview > 0) out.set(sid, { form, planReview })
+  }
+  return out
+})
+
+/** dialog 跨分区计数（ui queue pendingCountBySession 读口透传——currentRequest/pendingCount
+ *  只读活跃分区，本读口是聚合对 dialog 的唯一跨分区通路） */
+export const mobileDialogPendingCounts: Readonly<Ref<ReadonlyMap<string, number>>> =
+  mobileDialogQueue.pendingCountBySession
+
+/**
+ * 待办聚合快照（§6.18 聚合半唯一实现点，分组/排序/计数在 features/pending-todos 纯函数）：
+ * ActivityScreen「需要你处理」区渲染与 BottomNav 计数角标的共同入口。
+ */
+export function usePendingTodoSummary(): ComputedRef<PendingTodoSummary> {
+  return computed(() =>
+    summarizePendingTodos({
+      formCounts: mobileFormPendingCounts.value,
+      dialogCounts: mobileDialogQueue.pendingCountBySession.value,
+      permissionPending: permissionController.state.pending,
+      sessionOrder: sessionList.value.map((s) => s.id),
+    }),
+  )
+}
+
+// hasBlockingOverlay 输入接线（§6.19；u-sessions 立的注册口，本模块是分区数据宿主）——
+// 「该会话待回答请求非空（form/planReview/dialog）」喂入 deriveSessionStatus，waiting 态在
+// 移动侧达完整（D9② 消除的最后一行接线）。响应式成立前提：消费方（SessionsScreen 分组
+// computed）求值期间调用 reader，reactive Map get 与计数 ref 读各自建立依赖。
+// u-chat 移交项同批消账：本接线是 u-sessions runlog 决策 2 点名的待接线行。
+registerOverlayPendingReader((sid) => {
+  const requests = formRequestsBySid.get(sid) ?? []
+  if (requests.some((r) => r.form === true || r.planReview === true)) return true
+  return (mobileDialogQueue.pendingCountBySession.value.get(sid) ?? 0) > 0
+})

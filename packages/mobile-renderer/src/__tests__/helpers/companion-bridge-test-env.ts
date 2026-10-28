@@ -15,7 +15,7 @@
  * import 本模块会经「factory → 本模块 → 项目模块 → extension domain → factory」链形成
  * ESM 循环求值。项目模块一律在函数体内动态 import（用例期所有 mock 注册已完成）。
  */
-import { mount, type VueWrapper } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { vi } from 'vitest'
 import type { InternalEventBus } from '@taiji/core'
 import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
@@ -40,16 +40,30 @@ export async function mountCompanionApp(): Promise<VueWrapper> {
   return mount(App, { global: { plugins: [i18n] } })
 }
 
-/** 进入聊天视图（connected + hasConnectedOnce + 激活 session + 切 chat tab），三 spec 同款。
- *  挂载后清 getPendingRequests 调用记录（初始订阅对账的 RPC 噪音不进用例断言）。 */
+/** 进入聊天页（v2 五态路由形态：connected 边沿驱动 sessions → 编程转移 chat），三 spec 同款。
+ *  挂载后清 getPendingRequests 调用记录（初始订阅对账的 RPC 噪音不进用例断言）。
+ *  v2 起聊天是详情页（remote-use-mobile-v2 §6.7）：无 chat tab 可点，经 navigateRoute 进
+ *  （resetRouteForTesting 清单例路由态 + connected 边沿 → sessions → chat，与生产时序同形）。 */
 export async function mountChatView(sessionId: string): Promise<VueWrapper> {
-  const { hasConnectedOnce, shellConnectionState } = await import('../../shell/connection-view')
-  const { sessionStore } = await import('../../shell/app-runtime')
+  const [{ hasConnectedOnce, shellConnectionState }, { sessionStore }, { navigateRoute, resetRouteForTesting }] =
+    await Promise.all([
+      import('../../shell/connection-view'),
+      import('../../shell/app-runtime'),
+      import('../../shell/route'),
+    ])
+  const { nextTick } = await import('vue')
   hasConnectedOnce.value = true
   shellConnectionState.value = 'connected'
   sessionStore.setActiveId(sessionId)
+  resetRouteForTesting()
   const wrapper = await mountCompanionApp()
-  await wrapper.get('[data-testid="mobile-tab-chat"]').trigger('click')
+  await nextTick()
+  navigateRoute('chat')
+  await nextTick()
+  // 挂载期 flush 全部微任务：mount 触发的初始 reconcile（useMobileFormRequests immediate +
+  // connected 边沿 immediate）的空快照 promise 链在此消化完——用例体 emit 的请求不再被
+  // 挂载期对账的迟到回调差集剔除（否则 emit 后空快照清分区 = 用例间脆弱时序）。
+  await flushPromises()
   extensionDomainMocks.getPendingRequests.mockClear()
   return wrapper
 }
@@ -80,24 +94,31 @@ export function singleChoiceRequest(overrides: Record<string, unknown> = {}): Re
 }
 
 /** 每用例前置重置（三 spec 同款全集）：RPC mock 复位 + form/errorBar/dialogQueue 三模块级
- *  单例清空 + 连接态回 connecting + 无活跃 session。对不消费某单例的 spec 幂等无害。 */
+ *  单例清空 + Sheet 槽位归零 + 连接态回 connecting + 无活跃 session。对不消费某单例的
+ *  spec 幂等无害。Sheet 槽位必须复位：sheet-manager activeSheet 是模块级单例，前序用例
+ *  开槽未关（如 dialog 节用例无作答收尾）会污染后续用例的「请求到达自动开槽」时序。 */
 export async function resetCompanionTestState(): Promise<void> {
   extensionDomainMocks.sendExtensionUIResponse.mockReset().mockReturnValue(true)
   extensionDomainMocks.getPendingRequests.mockReset().mockResolvedValue([])
   const { __testing } = await import('../../shell/companion-bridge')
   const { hasConnectedOnce, shellConnectionState } = await import('../../shell/connection-view')
   const { sessionStore } = await import('../../shell/app-runtime')
+  const { resetSheetManagerForTesting } = await import('../../shell/sheet-manager')
   __testing.resetFormRequestsForTest()
   __testing.resetErrorBarForTest()
-  __testing.resetDialogQueueHandleForTest()
+  __testing.resetFormSubmitSuspensionForTest()
+  resetSheetManagerForTesting()
   shellConnectionState.value = 'connecting'
   hasConnectedOnce.value = false
   sessionStore.setActiveId(null)
 }
 
-/** 每用例收尾：unmount + 全量重置 + mock 恢复（幂等）。 */
+/** 每用例收尾：unmount + 在途微任务消化 + 全量重置 + mock 恢复（幂等）。
+ *  flushPromises 在 mockReset 之前：用例内在途 promise 链（reconcile 补挂等）先消化——
+ *  未消费的 mockResolvedValueOnce 队列值 / 迟到 then 链跨用例泄漏的窗口在此收口。 */
 export async function cleanupCompanionTestState(wrapper: VueWrapper | null): Promise<void> {
   wrapper?.unmount()
+  await flushPromises()
   await resetCompanionTestState()
   vi.restoreAllMocks()
 }

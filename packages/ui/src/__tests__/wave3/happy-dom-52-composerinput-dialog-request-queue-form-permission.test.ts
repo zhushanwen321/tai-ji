@@ -6,6 +6,7 @@ import ComposerInput from '../../features/composer/ComposerInput.vue';
 import { ComposerInputDepsKey, type ComposerInputDeps } from '../../features/composer/composer-input-deps';
 import { rebuildSegmentsWithEditedText } from '../../lib/segment-rebuild';
 import { type DialogRequest as DialogRequest_m2, type InternalEvent, InternalEventBus } from '@taiji/core';
+import { triggerSessionCleanups } from '@taiji/core/foundation/use-session-scoped-state';
 import { dispatchGlobal } from '@taiji/core/transport/api';
 import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension';
 import type { HandleImagePasteResult } from '@taiji/dom-core/composer/input';
@@ -387,6 +388,96 @@ describe('DialogRequestQueue', () => {
       q.resetFor('A')
       expect(q.pendingCount.value).toBe(0)
       expect(initCounter.count).toBe(0) // 已有分区的清空不触发 init
+    } finally {
+      scope.stop()
+    }
+  })
+
+  // ── pendingCountBySession 跨分区计数（remote-use-mobile-v2 §6.18 待办聚合半）────
+  // currentRequest/pendingCount 只读当前活跃分区；「需要你处理」聚合要全部会话的 dialog
+  // 待答数——本组锁定计数登记与分区写点的同步（入队/出队/dedup/resetFor 四路径）。
+
+  it('TC-15 跨分区聚合：非活跃分区的请求计入 pendingCountBySession（活跃分区读口不可见的面）', () => {
+    const sid = ref<string | null>('A')
+    const { source, scope, getQueue } = createHarness(sid)
+    try {
+      const q = getQueue()
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r1' })
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r2' })
+      source.triggerUiRequest({ sessionId: 'B', requestId: 'b1' }) // 非活跃分区
+      expect(q.pendingCountBySession.value.get('A')).toBe(2)
+      expect(q.pendingCountBySession.value.get('B')).toBe(1)
+    } finally {
+      scope.stop()
+    }
+  })
+
+  it('TC-16 出队递减与键消失：逐条 respond 后计数递减，最后一条出队后键从 Map 摘除', () => {
+    const sid = ref<string | null>('A')
+    const { source, scope, getQueue } = createHarness(sid)
+    try {
+      const q = getQueue()
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r1' })
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r2' })
+      expect(q.pendingCountBySession.value.get('A')).toBe(2)
+      q.respond('r1', true)
+      expect(q.pendingCountBySession.value.get('A')).toBe(1)
+      q.respond('r2', true)
+      expect(q.pendingCountBySession.value.has('A')).toBe(false)
+      expect(q.pendingCountBySession.value.size).toBe(0)
+    } finally {
+      scope.stop()
+    }
+  })
+
+  it('TC-17 dedup 不加计：同 requestId 双源重复入队计数仍为 1（与 TC-3 分区行为对齐）', () => {
+    const sid = ref<string | null>('A')
+    const { source, scope, getQueue } = createHarness(sid)
+    try {
+      const q = getQueue()
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r1' })
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r1' })
+      expect(q.pendingCountBySession.value.get('A')).toBe(1)
+    } finally {
+      scope.stop()
+    }
+  })
+
+  it('TC-18 resetFor 计数归零 + 不存在分区 resetFor 不误登记：与分区写点同语义', () => {
+    const sid = ref<string | null>('A')
+    const { source, scope, getQueue } = createHarness(sid)
+    try {
+      const q = getQueue()
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r1' })
+      source.triggerUiRequest({ sessionId: 'B', requestId: 'b1' })
+      q.resetFor('A')
+      expect(q.pendingCountBySession.value.has('A')).toBe(false)
+      expect(q.pendingCountBySession.value.get('B')).toBe(1) // 他分区不受影响
+      q.resetFor('never-existed') // no-op 不误建登记（与 TC-14 分区侧同语义）
+      expect(q.pendingCountBySession.value.size).toBe(1)
+    } finally {
+      scope.stop()
+    }
+  })
+
+  it('TC-19 session 删除清理计数：triggerSessionCleanups 后 pendingCountBySession 不再含该 sid（他分区不受影响）', () => {
+    const sid = ref<string | null>('A')
+    const { source, scope, getQueue } = createHarness(sid)
+    try {
+      const q = getQueue()
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r1' })
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r2' })
+      source.triggerUiRequest({ sessionId: 'B', requestId: 'b1' })
+      expect(q.pendingCountBySession.value.get('A')).toBe(2)
+      // 会话删除路径（triggerSessionCleanups）：分区由工厂自动注册的 cleanup 删除，
+      // 计数登记表须同口径清条目——否则删除后三点全部不可达（resetFor 被 hasPartition
+      // 早退、dequeueByRequestId 被 deletedSids 拦截），残留计数永久无法清除
+      triggerSessionCleanups('A')
+      expect(q.pendingCountBySession.value.has('A')).toBe(false)
+      expect(q.pendingCountBySession.value.get('B')).toBe(1) // 他分区不受影响
+      // 删除后迟到入队不复活计数（updateFor 对已删 sid no-op，计数写点在 updater 内不触）
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r3' })
+      expect(q.pendingCountBySession.value.has('A')).toBe(false)
     } finally {
       scope.stop()
     }

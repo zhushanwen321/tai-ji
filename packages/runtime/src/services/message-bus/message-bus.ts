@@ -34,6 +34,7 @@
  * - ES1：clearSession 对不存在 session no-op（幂等）。
  * - ES2：unsubscribe / unsubscribeAll 对未订阅 ws no-op（幂等）。
  * - ES4：publish 广播时单个 ws.send 抛错——try/catch 兜底，单 ws 失败不影响其它 ws 与 publish 主流程。
+ * - ES5：forgetSession 对无高水位登记的 sid no-op（幂等，Map.delete 语义）。
  */
 import type { ServerMessage } from '@taiji/shared'
 import type { BusClient, SessionBusState, StreamRingBuffer } from './types.js'
@@ -401,6 +402,12 @@ export interface IMessageBus {
   unsubscribeAll(ws: BusClient): void
   /** 清除整个 session 状态（session 销毁时调用，幂等）。 */
   clearSession(sessionId: string): void
+  /**
+   * 永久删除回收（幂等）：丢弃该 session 的 seq 高水位登记——session id 不再复用
+   * （真删除）时调用；同 id 会重建的销毁（pi 崩溃 / forceQuit / restore 清场 / 归档）
+   * 必须走 clearSession 保留高水位（两种销毁语义的区分见实现注释）。
+   */
+  forgetSession(sessionId: string): void
 }
 
 /**
@@ -415,6 +422,24 @@ export interface IMessageBus {
 export class MessageBus implements IMessageBus {
   /** sessionId → SessionBusState。 */
   private readonly sessions = new Map<string, SessionBusState>()
+  /**
+   * 已清除 entry 的 seq 高水位（sessionId → 该 session 历史最高 seqCounter）。
+   *
+   * [为什么存在] seq 协议不变量 = 同一 session 的事件流在订阅方视角全序单调（routeInbound
+   * 以 lastSeenSeq 做去重/gap 判定）。pi 崩溃的销毁链 clearSession 删 entry，renderer 收
+   * session.exited 后立即重订阅（openRestoreWindow）→ 新 entry seq 从 0 重计 → 恢复后的帧
+   * seq < renderer 旧基线 → 被 seq 去重全部静默丢弃（A5 缺陷第二层：恢复重投的 in-flight
+   * 帧到不了投影）。高水位延续让重建设备继承计数，seq 空间跨 entry 重建单调；renderer
+   * 基线（reply.lastSeq=高水位）与新帧自然衔接，零消费方改动。runtime 重启场景不受影响
+   * （进程内存整体消亡，renderer 经 resubscribeAll 前重置基线——subscription-state 既有语义）。
+   *
+   * [回收]（dmg-r1-6）两种销毁语义分流：同 id 会重建的销毁（pi 崩溃 / forceQuit /
+   * restore 清场 / 归档退场）由 clearSession / pruneEmptySession 登记、getOrCreateSession
+   * 重建时消费（delete），条目生命周期挂 session 复活链；session **永久删除**（id 不再
+   * 复用——lifecycle.delete 真删除与 btw 线终结合一挂点）经 forgetSession 显式 delete，
+   * 防长驻 runtime 随会话建删循环无界增长。
+   */
+  private readonly seqHighWater = new Map<string, number>()
   /** ws → Set<sessionId>（反查表，双向不变量维护 + unsubscribeAll 用）。 */
   private readonly wsSubscriptions = new Map<BusClient, Set<string>>()
   /** ring 容量（构造时固定）。 */
@@ -666,7 +691,8 @@ export class MessageBus implements IMessageBus {
   /**
    * 清除整个 session 状态（session 销毁时调用，幂等，ES1）。
    *
-   * 取 entry → 遍历其 subscribers 的每个 ws，从 wsSubscriptions[ws] 删除 sid
+   * 取 entry → seq 高水位登记（seqHighWater 注释：同 id 重建后 seq 空间延续，订阅方基线
+   * 协议不破）→ 遍历其 subscribers 的每个 ws，从 wsSubscriptions[ws] 删除 sid
    * （集合空则 delete ws entry，维持反查表不累积空 Set）→ sessions.delete(sid)。
    *
    * @param sessionId 目标 session
@@ -674,6 +700,7 @@ export class MessageBus implements IMessageBus {
   clearSession(sessionId: string): void {
     const state = this.sessions.get(sessionId)
     if (!state) return
+    this.seqHighWater.set(sessionId, Math.max(this.seqHighWater.get(sessionId) ?? 0, state.seqCounter))
     for (const ws of state.subscribers) {
       const subs = this.wsSubscriptions.get(ws)
       if (subs) {
@@ -691,6 +718,20 @@ export class MessageBus implements IMessageBus {
   }
 
   /**
+   * 永久删除回收（dmg-r1-6，幂等 ES5）：丢弃该 session 的 seq 高水位登记。
+   *
+   * [与 clearSession 的销毁语义区分] clearSession 是「同 id 会重建」的销毁（pi 崩溃
+   * respawn / forceQuit restore 重开 / restore 清场 / 归档退场恢复同 id），高水位必须
+   * 保留供 getOrCreateSession 继承（TC6c 锁定）——故回收不可挂在 clearSession 内。
+   * 本方法只服务「id 永不复用」的真删除（lifecycle.delete 主会话两分支 + btw 线终结
+   * 合一挂点 onLineTerminated），调用点均在 removeSessionEntry（内部 clearSession 登记
+   * 高水位）之后，delete 抹掉登记即完成回收。对未知 sid no-op（Map.delete 幂等）。
+   */
+  forgetSession(sessionId: string): void {
+    this.seqHighWater.delete(sessionId)
+  }
+
+  /**
    * M4（b21）：回收「三空」entry（subscribers 空 + ring 空 + 快照空）——subscribe 对
    * 未知 sid（renderer 重连竞态等）也会 lazy 建 entry，该 sid 无销毁路径可触发
    * clearSession 时 entry 进程生命周期泄漏。数据全空的 entry 无任何可回放内容，回收
@@ -702,6 +743,8 @@ export class MessageBus implements IMessageBus {
     const state = this.sessions.get(sessionId)
     if (!state) return
     if (state.subscribers.size === 0 && state.streamRing.size === 0 && state.stateSnapshot.size === 0) {
+      // 三空回收同受 seq 空间延续约束（entry 内 seqCounter 可能非零——state 帧曾流过）。
+      this.seqHighWater.set(sessionId, Math.max(this.seqHighWater.get(sessionId) ?? 0, state.seqCounter))
       this.sessions.delete(sessionId)
     }
   }
@@ -869,13 +912,17 @@ export class MessageBus implements IMessageBus {
 
   /**
    * lazy 创建 session 状态（首次 publish/subscribe 时建 entry）。
-   * seqCounter 从 0 起（首次 publish 后变 1）；ring 是 ringCapacity 定长空缓冲。
+   * seqCounter 继承该 session 的历史高水位（seqHighWater；无历史 = 0 起，首个 publish 后 +1）；
+   * ring 是 ringCapacity 定长空缓冲。
    */
   private getOrCreateSession(sessionId: string): SessionBusState {
     let state = this.sessions.get(sessionId)
     if (!state) {
+      // seq 空间延续（seqHighWater 注释）：重建 entry 继承历史高水位，保订阅方基线协议。
+      const inheritedSeq = this.seqHighWater.get(sessionId) ?? 0
+      this.seqHighWater.delete(sessionId)
       state = {
-        seqCounter: 0,
+        seqCounter: inheritedSeq,
         streamRing: {
           buf: new Array(this.ringCapacity),
           head: 0,

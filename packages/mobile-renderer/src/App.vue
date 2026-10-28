@@ -1,94 +1,71 @@
 <script setup lang="ts">
-// App.vue —— mobile 壳多视图布局（remote-use D10：单屏四 zone → 列表/聊天/token 输入多视图态）。
+// App.vue —— mobile 壳 v2 布局（remote-use-mobile-v2 §7.1 组件树：三目的域 + 聊天详情页 +
+// 验身页，五态路由消费；§6.6 bootstrap 先挂载后连接的壳侧承接）。
 //
-// 三视图态（消费 bootstrap 的 shellConnectionState + hasConnectedOnce，U1.3 装配）：
-// - token-input：TokenInputView（D8 恢复入口，submit 走 submitRemoteToken 重试编排）
-// - failed：重连预算用尽终态，全屏接管给可行动指引
-// - 连接成功过（hasConnectedOnce）：两 tab 视图——
-//     列表视图 = MobileSessionList + BottomTabBar（D10 三视图 zone 布局行）
-//     聊天视图 = message-stream + slash（隐藏保留）+ 输入条 + BottomTabBar
-//   瞬时断连（掉回 connecting）不换视图：connected 布局保持挂载（composer 卸载会丢
-//   输入草稿，BM5），仅壳顶部插轻量断线条
-// - 首连尚未 connected：轻量「连接中」呈现（无重 UI；D8 裁决③：不复用桌面 runtime 不可用状态条）
+// 视图分支由路由状态机（shell/route.ts 五态）驱动，连接态（connection-view 四态）经本组件
+// watch 段驱动路由转移（connect 域与连接装配域的正交边界在此收口）：
+// - token-input / failed → navigateRoute('connect')（验身页：ConnectScreen 三态分流呈现）
+// - connected 且当前在 connect → navigateRoute('sessions')（首连进初始目的域）
+// 瞬时断连（connected → connecting）不换视图：路由保持挂载，仅顶部插轻量断线条（BM5 语义
+// 保留——composer 卸载会丢输入草稿；草稿/视图保持语义已由 ChatScreen 落位：草稿分区在
+// sessions-runtime（draftOf/setDraft，跨挂载存活），返回列表即丢弃 §7.1）。
 //
-// companion 区挂 ui CompanionBand（简单 dialog 渲染）——D3 根级常驻：不随页签/视图分支
-// 卸载（订阅随组件卸载退订，页签分支内挂载会静默丢请求），任意页签直接可见可作答；
-// form/planReview 类请求（C4 门排除情形）由 MobileFormCard 承接（D7 form 行恢复）；
-// source/transport/OverlayLifecycle 经 App provide（回传走 core 既有通路，D7 ask-user 行）。
-// 权限审批弹窗（D7「手机可批」行）全局挂根：bus 'plugin-permission-request' →
-// companion-bridge 弹窗状态 → PermissionRequestDialog；回传经 provide 的
-// PermissionTransport（plugin.approvePermissions/denyPermissions 既有通路）。
-// zone 容器 data-testid（zone-*//bottom-tab-bar）延续 AC5 结构断言锚点。
-import { computed, provide, ref, watch } from 'vue'
+// chat 态 BottomNav 整体隐藏（聊天是详情页不占目的域，§7.1；返回经 popstate 回 chatFrom）。
+// 路由内容区分段：
+// - sessions → SessionsScreen（搜索/分组/未读/长按动作 Sheet；会话行切入导航内聚屏内，
+//   新建入口上抛 new-task 走 openSheet('newTask') 通道）
+// - activity → ActivityScreen（回合面板 + 「需要你处理」聚合 + 子代理行直落 SubagentSheet）
+// - chat     → ChatScreen（页头/计时/模型 chip/更多 + 消息流 density=mobile +
+//   输入区固定顺序；待回答/待授权状态经 props 传入，App 单点订阅 companion-bridge hooks）
+//
+// companion 区（§6.5 三通道 Sheet 化，本单元呈现出口改造落位）：v1 呈现三件
+// （CompanionBand 顶部条 / PermissionRequestDialog / MobileFormCard 聊天内卡片）挂载摘除，
+// 统一走 sheet-manager activeSheet 驱动的 Sheet 族（FormSheet 三源三节 / PermissionSheet）；
+// 数据源与回传通路零变化（§6.5 回传通道不变——dialog queue 宿主已迁 companion-bridge
+// 模块级，无需 provide 注入键）。请求到达自动开 Sheet = 与 u-chat 待回答条并存的常驻
+// 呈现出口（ChatScreen 已交付待回答条 :ask-pending，条点击 openSheet 幂等，单槽覆盖
+// 语义天然互斥）；条↔Sheet 联动断言归 D3 验收（A6）。
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { createSessionScopedMap, InternalEventBus, OverlayLifecycle, type OverlayState } from '@taiji/core'
 import { Button } from '@taiji/ui'
 import {
-  CompanionBand,
-  DIALOG_QUEUE_HANDLE_KEY,
-  DIALOG_REQUEST_SOURCE_KEY,
-  OVERLAY_LIFECYCLE_KEY,
-  PermissionRequestDialog,
-  PERMISSION_TRANSPORT_KEY,
-  UI_RESPONSE_TRANSPORT_KEY,
-} from '@taiji/ui/extension-host'
-import {
-  mobileDialogRequestSource,
   mobilePermissionTransport,
-  mobileUiResponseTransport,
-  registerDialogQueueHandle,
+  useMobileDialogRequests,
+  useFormSubmitSuspended,
   useMobileFormRequests,
   useMobilePermissionRequest,
 } from './shell/companion-bridge'
-import { activeSessionId, loadSessions, refreshHistory } from './shell/app-runtime'
-import { connectionBannerI18nKey, hasConnectedOnce, shellConnectionState, submitRemoteToken, tokenSubmit } from './shell/connection-view'
-import BottomTabBar, { type MobileTab } from './shell/BottomTabBar.vue'
-import SlashBarStub from './shell/stubs/SlashBarStub.vue'
-import TokenInputView from './shell/TokenInputView.vue'
-import MobileChatHeader from './views/MobileChatHeader.vue'
-import MobileComposer from './views/MobileComposer.vue'
-import MobileFormCard from './views/MobileFormCard.vue'
-import MobileMessageStream from './views/MobileMessageStream.vue'
-import MobileSessionList from './views/MobileSessionList.vue'
-import NewTaskSheet from './views/NewTaskSheet.vue'
-import SubagentStatusLine from './views/SubagentStatusLine.vue'
+import {
+  activeSessionId,
+  appendActionNotice,
+  loadSessions,
+  markConnectedNow,
+  refreshHistory,
+} from './shell/app-runtime'
+import { connectionBannerI18nKey, hasConnectedOnce, shellConnectionState } from './shell/connection-view'
+import { navigateRoute, shellRoute, type ChatSourceDomain } from './shell/route'
+import { activeSheet, closeSheet, openSheet } from './shell/sheet-manager'
+import { useVisualViewport } from './shell/use-visual-viewport'
+import BottomNav from './components/BottomNav.vue'
+import ActivityScreen from './screens/ActivityScreen.vue'
+import ChatScreen from './screens/ChatScreen.vue'
+import CommandSheet from './features/CommandSheet.vue'
+import ConnectScreen from './screens/ConnectScreen.vue'
+import FormSheet from './features/FormSheet.vue'
+import ModelSheet from './features/ModelSheet.vue'
+import NewTaskSheet from './features/NewTaskSheet.vue'
+import PermissionSheet from './features/PermissionSheet.vue'
+import SessionsScreen from './screens/SessionsScreen.vue'
+import SettingsScreen from './screens/SettingsScreen.vue'
+import SubagentSheet from './features/SubagentSheet.vue'
 import ErrorBar from './views/ErrorBar.vue'
 
-// companion 数据源/回传通道（App 级 provide，CompanionBand 经 inject 消费）
-provide(DIALOG_REQUEST_SOURCE_KEY, mobileDialogRequestSource)
-provide(UI_RESPONSE_TRANSPORT_KEY, mobileUiResponseTransport)
-// 审批回传通道（D7 权限审批行）：PermissionRequestDialog 经 inject 调 transport RPC
-provide(PERMISSION_TRANSPORT_KEY, mobilePermissionTransport)
-
-// exited 分通道重置的句柄登记回调（U6 / D5 exited 分区清理段）：CompanionBand 创建 queue
-// 后经此把实例句柄回传 companion-bridge（bootstrap 的 session.exited 编排经其调 resetFor）。
-// 桌面壳不 provide 该 key（桌面 exited 清理走壳侧 store 单点）→ CompanionBand inject 缺失
-// 静默跳过——登记通道必须 provide/inject 形态（ui 不得依赖壳）。
-provide(DIALOG_QUEUE_HANDLE_KEY, registerDialogQueueHandle)
-
-// OverlayLifecycle（D3 假按钮处置：provide 真实状态机）——CompanionBand 的收起/展开按钮
-// 在 inject 缺失时仍在场但点击 no-op（假行为）；provide 后 minimize/restore 经
-// transition→getState 闭环真实生效（expanded→minimized→restored，对齐桌面
-// useExtensionHostBridge 同类 provide）。bus 为独立实例：移动壳共享 bus 私居
-// companion-bridge（无导出清单），本实例不 subscribe——状态迁移不依赖订阅（transition/getState
-// 直读分区 Map），订阅无事件源的 bus 属无效监听；桌面订阅才有的 ui-request 自动建 expanded
-// 分区（z-index 派生）与 session-destroyed cleanup 在移动壳消费方之外（移动壳未定义
-// --z-dialog，bandStyle 的 expanded 分支本就无有效派生视图）。
-provide(
-  OVERLAY_LIFECYCLE_KEY,
-  new OverlayLifecycle({
-    bus: new InternalEventBus(),
-    sessionScoped: createSessionScopedMap(() => new Map<string, OverlayState>()),
-  }),
-)
-
-// 权限审批弹窗状态（companion-bridge bus 订阅驱动，全局单例 session 无关）
+// 权限审批状态（companion-bridge bus 订阅驱动；§6.18 降级分支 = 恒全局呈现，无归属一等分支）
 const permission = useMobilePermissionRequest()
 
-// form/planReview 类请求（C4 门排除出 CompanionBand 的富交互入口，D7 form 行恢复）：
-// 队首请求派生 + 快照对账（companion-bridge form 通道）；作答经 respond 回传
-// extension.ui_response 既有通路。form 请求呈现时替换 composer（桌面 FormOverlay 与
-// composer 互斥同构——输入禁止）；planReview 卡与 composer 并存（桌面 PlanReviewBar 同式）。
+// form/planReview/dialog 三源请求（§6.5 统一「待回答」数据源）：队首请求派生 + 快照对账
+// （companion-bridge form 通道 + dialog queue 单例）；作答经 respond 回传既有通路
+// （form/planReview → extension.ui_response；dialog → queue 双源路由）。
 const {
   currentFormRequest: pendingFormRequest,
   currentPlanReviewRequest: pendingPlanReview,
@@ -96,47 +73,150 @@ const {
   reconcileNow: reconcileFormRequests,
 } = useMobileFormRequests(activeSessionId)
 
-// 作答回传失败（WS 未送达）的可见反馈：记录失败 requestId，经 prop 传入 MobileFormCard
+const { currentDialogRequest: pendingDialogRequest, respond: respondDialogRequest } = useMobileDialogRequests()
+
+// §6.23 restart 提交挂起（对账完成前 FormSheet 全节禁答；companion-bridge 单例状态）
+const submitSuspended = useFormSubmitSuspended()
+
+// 作答回传失败（WS 未送达）的可见反馈：记录失败 requestId，经 prop 传入 FormSheet
 // 渲染内联错误行（不静默）；错误行按 requestId 匹配渲染——同请求重试成功或请求被摘除后
 // 不再显示，后续新请求不继承旧错误态
 const formRespondFailedId = ref<string | null>(null)
 
-function onFormSubmit(payload: { requestId: string; result: string }): void {
-  formRespondFailedId.value = respondFormRequest(payload.requestId, payload.result) ? null : payload.requestId
+/** FormSheet 作答回传（按 requestId 归属路由通道；送达即关 Sheet，未送达留层显错误行） */
+function onSheetSubmit(payload: { requestId: string; result: string | boolean }): void {
+  const isDialog = pendingDialogRequest.value?.requestId === payload.requestId
+  const delivered = isDialog
+    ? respondDialogRequest(payload.requestId, payload.result)
+    : respondFormRequest(payload.requestId, payload.result)
+  formRespondFailedId.value = delivered ? null : payload.requestId
+  if (delivered) {
+    closeSheet()
+    // §6.20「已提交回答」流内通知（回执成功点插入；三源请求分区键 = 活跃会话）
+    const sid = activeSessionId.value
+    if (sid) appendActionNotice(sid, t('mobile.notices.answerSubmitted'))
+  }
 }
 
-function onFormCancel(payload: { requestId: string }): void {
-  formRespondFailedId.value = respondFormRequest(payload.requestId, null) ? null : payload.requestId
+/** FormSheet 取消（回传 result:null——送达即请求终结收层；未送达保留可重试 + 错误行） */
+function onSheetCancel(payload: { requestId: string; source: 'form' | 'dialog' }): void {
+  const delivered = payload.source === 'dialog'
+    ? respondDialogRequest(payload.requestId, null)
+    : respondFormRequest(payload.requestId, null)
+  formRespondFailedId.value = delivered ? null : payload.requestId
+  if (delivered) closeSheet()
+}
+
+// §6.20「已允许/已拒绝」流内通知的本端动作标记：transport approve/deny 返回 void，
+// 回执成功点 = controller pending 翻 false（RPC 失败保持 true，BM3）。标记区分
+// pending 翻 false 的其余来源（expired 超时 / 他端 resolved 撤回——无本端动作不发通知）。
+let pendingPermissionAction: 'approve' | 'deny' | null = null
+
+/** PermissionSheet 审批回传（controller transport 既有通路；成败呈现由 controller state 收敛） */
+function onPermissionApprove(payload: { pluginId: string; permissions: string[] }): void {
+  pendingPermissionAction = 'approve'
+  mobilePermissionTransport.approve(payload.pluginId, payload.permissions)
+}
+
+function onPermissionDeny(payload: { pluginId: string }): void {
+  pendingPermissionAction = 'deny'
+  mobilePermissionTransport.deny(payload.pluginId)
 }
 
 const { t } = useI18n()
 
-const activeTab = ref<MobileTab>('sessions')
-const newTaskOpen = ref(false)
+// ── 请求呈现联动（§6.5/§7.1 Sheet 生命周期）──────────────────────────────
+// 请求到达自动开对应 Sheet（与 u-chat 待回答条并存的常驻呈现出口；不抢已打开的 Sheet——
+// activeSheet 为 null 才开，用户正在操作的浮层不被新请求顶掉，关掉后条仍可再开）；
+// form 槽三源全空时收槽（最后一个请求作答/摘除后 Sheet 不留空壳）。
+watch([pendingFormRequest, pendingPlanReview], ([f, p]) => {
+  if ((f !== undefined || p !== undefined) && activeSheet.value === null) openSheet('form')
+})
+watch(pendingDialogRequest, (r) => {
+  if (r !== undefined && activeSheet.value === null) openSheet('form')
+})
+watch(() => permission.pending, (p) => {
+  if (p && activeSheet.value === null) openSheet('permission')
+})
+watch([pendingFormRequest, pendingPlanReview, pendingDialogRequest], ([f, p, d]) => {
+  if (activeSheet.value === 'form' && f === undefined && p === undefined && d === undefined) closeSheet()
+})
+// 审批收尾（approve/deny RPC 成功 → controller pending 翻 false；失败 BM3 保持 true 留层重试）
+watch(() => permission.pending, (pending) => {
+  if (pending) {
+    // 新请求覆盖旧弹窗：清旧动作标记（本次弹窗终局若非本端动作不发通知）
+    pendingPermissionAction = null
+    return
+  }
+  if (activeSheet.value === 'permission') closeSheet()
+  // §6.20「已允许/已拒绝」流内通知（本端动作回执成功点）：审批请求经 §6.18 V-6 探针
+  // 恒无会话归属，通知插当前活跃会话分区（动作发生的壳上下文；内存态事实记录）。
+  if (pendingPermissionAction !== null) {
+    const sid = activeSessionId.value
+    const key = pendingPermissionAction === 'approve' ? 'mobile.notices.permissionApproved' : 'mobile.notices.permissionDenied'
+    pendingPermissionAction = null
+    if (sid) appendActionNotice(sid, t(key))
+  }
+})
+// RPC 失败（error 显形）清动作标记：失败后请求终局（超时/他端撤回）不误发成功通知
+watch(() => permission.error, (e) => {
+  if (e) pendingPermissionAction = null
+})
 
-const isTokenInput = computed(() => shellConnectionState.value === 'token-input')
-const isConnected = computed(() => shellConnectionState.value === 'connected')
-
-function onOpenChat(sessionId: string): void {
-  if (sessionId) activeTab.value = 'chat'
-}
-
+// 新建任务入口统一走 openSheet('newTask')（SessionsScreen 上抛 + 聊天空态入口共用）；
+// 创建完成关槽 + 切入聊天（u-shell-skeleton 立契的迁移落位）。
 function onTaskCreated(): void {
-  activeTab.value = 'chat'
+  closeSheet()
+  navigateRoute('chat')
 }
 
-function onTokenSubmit(token: string): void {
-  void submitRemoteToken(token)
+// 子代理行直落详情（u-activity 进行中屏上抛）：记直落目标 + 打开 subagentList 槽——
+// SubagentSheet 清单拉取后按 initialSubagentId 推进详情态（直落意图单次消费）。
+// target 生命周期 = subagentList 槽位打开期间（单槽覆盖关闭不经 @close——watch 槽位
+// 统一清，防残留 target 让下次普通打开误直落旧子代理）。
+const subagentDetailTarget = ref<string | undefined>(undefined)
+
+watch(activeSheet, (slot) => {
+  if (slot !== 'subagentList' && subagentDetailTarget.value !== undefined) {
+    subagentDetailTarget.value = undefined
+  }
+})
+
+function onOpenSubagentDetail(subagentId: string): void {
+  subagentDetailTarget.value = subagentId
+  openSheet('subagentList')
 }
 
-// 连接成功即拉取会话列表（首屏数据；后续 config.sessions 广播经 SessionApiPort 自动更新）；
-// connected 边沿同时补充拉取 form/planReview 快照对账（静默重连保持视图挂载、sessionId 不变，
-// 断连期间到达的请求重连后补挂——dialog/permission 通道不在此列：dialog 另立任务、
-// permission 有超时撤窗有界）；并对当前活跃会话触发重连对账（U9/A6——断连期间完成的
-// turn + D1 链外残留窗口经 core 统一编排入口收敛；无活跃会话跳过，未 hydrate 由 core
-// 方法内 no-op）。对账执行的真机层无独立可观测锚点，接线防线 = connected-reconcile 单测。
-watch(isConnected, (connected) => {
+// ── 连接态 → 路由转移（connect 域与连接装配域的正交收口，见文件头）────────────
+// immediate：挂载时同步路由与连接态（bootstrap 重排后挂载先于连接编排，正常时序挂载点
+// 恒 connecting——immediate 分支防挂载时已是终态的重装配形态，对齐 v1 isConnected watch
+// immediate 语义）。
+watch(shellConnectionState, (s) => {
+  if (s === 'token-input' || s === 'failed') {
+    navigateRoute('connect')
+    return
+  }
+  if (s === 'connected' && shellRoute.value === 'connect') {
+    navigateRoute('sessions')
+  }
+}, { immediate: true })
+
+// ── 路由消费桥接 ────────────────────────────────────────────────────────
+// chat 态 BottomNav 不挂载（get 的兜底分支仅为类型闭合，不渲染）
+const navRoute = computed<ChatSourceDomain>({
+  get: () => (shellRoute.value === 'chat' || shellRoute.value === 'connect' ? 'sessions' : shellRoute.value),
+  set: (to) => navigateRoute(to),
+})
+
+// 壳级键盘处理（§6.16）：visualViewport 高度 → --shell-viewport-h，输入条贴可视区下沿
+useVisualViewport()
+
+// ── connected 边沿三件套（v1 接线保留：connected-reconcile 契约）──────────────
+// 连接成功即拉取会话列表 + form/planReview 快照对账 + 当前活跃会话历史对账；同时记录
+// 连接建立时刻（§6.11 设置页「已连接时长」派生源，每次重连重算）。
+watch(() => shellConnectionState.value === 'connected', (connected) => {
   if (connected) {
+    markConnectedNow()
     void loadSessions()
     reconcileFormRequests()
     if (activeSessionId.value) void refreshHistory(activeSessionId.value)
@@ -145,128 +225,128 @@ watch(isConnected, (connected) => {
 </script>
 
 <template>
-  <!-- 壳根吃顶部 + 横向 safe-area（A16 顶栏/横向职责）：顶部元素随视图态变化
-       （ErrorBar/token/failed/connecting/chat header），壳根一处覆盖所有视图态；
-       底部 inset 分治给贴底 chrome BottomTabBar（此处不挂 pb，防双倍扣除） -->
+  <!-- 壳根吃顶部 + 横向 safe-area（remote-use A16 顶栏/横向职责）；高度走 --shell-viewport-h
+       （visualViewport 接管，§6.16——静态满屏高在 iOS 不可靠，audit P2 修复）；
+       底部 inset 分治给贴底 chrome BottomNav（此处不挂 pb，防双倍扣除） -->
   <div
-    class="mobile-shell flex h-screen flex-col bg-bg pt-[var(--safe-area-top)] pr-[var(--safe-area-right)] pl-[var(--safe-area-left)]"
+    class="mobile-shell flex flex-col bg-bg pt-[var(--safe-area-top)] pr-[var(--safe-area-right)] pl-[var(--safe-area-left)]"
     data-testid="mobile-shell"
+    :style="{ height: 'var(--shell-viewport-h, 100dvh)' }"
   >
-    <!-- 全局错误条（A7/U14）：三条驱动链（onSessionError/onGlobalError/notifyNotDelivered）
-         经 bootstrap effects + companion-bridge 单例状态驱动，壳顶部细行呈现（对齐断线条
-         的轻量内联形态），视图态无关常驻根级；单槽覆盖 + 手动关闭（无自动消失 timer）。 -->
+    <!-- 全局错误条（A7/U14）：三条驱动链经 bootstrap effects + companion-bridge 单例状态
+         驱动，壳顶部细行呈现，路由态无关常驻根级 -->
     <ErrorBar />
 
-    <!-- companion（B 伴随）：ui CompanionBand（简单 dialog 渲染）——D3 根级常驻（对齐桌面
-         Workspace 常驻形态；根级挂载先例 = 尾部 PermissionRequestDialog）。不随页签/视图
-         分支卸载：DialogRequestQueue 的消息订阅随组件卸载退订，页签条件分支内挂载会让
-         停留列表页签期间到达的请求静默丢失（S3）——请求到达即当前页签直接可见可作答
-         （前提 = 请求所属会话为当前活跃会话）。组件无请求时 v-if 自隐藏（不占位）；
-         DOM 居首使 band 绘制序低于 BottomTabBar / PermissionRequestDialog 等后继定位层
-         （fixed 弹窗不遮挡壳 chrome，页签切换保持可用）。容器保留 testid 锚点（AC5）。 -->
-    <section class="mobile-shell__companion shrink-0" data-testid="zone-companion">
-      <CompanionBand :session-id="activeSessionId" />
-    </section>
-
-    <!-- token 输入视图（D8：凭据缺失/验身失败的恢复入口；submitting/error 反馈见 TokenInputView） -->
-    <TokenInputView
-      v-if="isTokenInput"
-      :submitting="tokenSubmit.submitting"
-      :error="tokenSubmit.error"
-      @submit="onTokenSubmit"
-    />
-
-    <!-- failed：重连预算用尽终态，全屏接管必须给可行动指引
-         （禁无限期「连接中」假态——重试入口 = 刷新页面重走 bootstrap 验身链）。
-         容器独立 testid（shell-failed-screen），不复用首连分支的 shell-connecting：
-         「failed 态无 connecting 视图」类断言依赖二者不撞名；可行动指引元素是 shell-failed -->
+    <!-- 瞬时断连条：已连接过且当前断连、且不在验身页（token-input/failed 已由路由进
+         connect，全屏指引优先，不叠断线条） -->
     <div
-      v-else-if="shellConnectionState === 'failed'"
-      class="flex h-screen flex-col items-center justify-center gap-2 bg-bg"
-      data-testid="shell-failed-screen"
+      v-if="hasConnectedOnce && shellRoute !== 'connect' && shellConnectionState !== 'connected'"
+      role="status"
+      data-testid="shell-reconnecting-banner"
+      class="shrink-0 px-3 py-1.5 text-xs text-neutral-mid text-center"
     >
-      <p class="text-sm text-neutral-fg" role="alert" data-testid="shell-failed">
-        {{ t('mobile.connectionFailed') }}
-      </p>
-      <p class="text-xs text-neutral-mid">{{ t('mobile.connectionFailedHint') }}</p>
+      {{ t(connectionBannerI18nKey) }}
     </div>
 
-    <!-- 连接成功过：列表 / 聊天 两 tab 视图。瞬时断连不换视图（composer 卸载丢草稿，BM5），
-         仅壳顶部插轻量断线条 -->
-    <template v-else-if="hasConnectedOnce">
-      <div
-        v-if="!isConnected"
-        role="status"
-        data-testid="shell-reconnecting-banner"
-        class="shrink-0 px-3 py-1.5 text-xs text-neutral-mid text-center"
+    <!-- 验身页（connect 路由态）：骨架/连接中/验身入口/失败指引三态分流在屏内 -->
+    <ConnectScreen v-if="shellRoute === 'connect'" />
+
+    <!-- 三目的域 + 聊天详情页（路由态内容区） -->
+    <template v-else>
+      <!-- sessions：u-sessions SessionsScreen（W3 交付接线；搜索/分组/未读/长按动作 Sheet） -->
+      <section
+        v-if="shellRoute === 'sessions'"
+        class="flex min-h-0 flex-1 flex-col"
+        data-testid="screen-sessions"
       >
-        {{ t(connectionBannerI18nKey) }}
+        <SessionsScreen @new-task="openSheet('newTask')" />
+      </section>
+
+      <!-- activity：u-activity ActivityScreen（W4）：回合面板（activeSession 计时/步数/子代理数）
+           + 「需要你处理」（全表可归属待办 + 无归属全局区，§6.18 聚合半）+ 子代理行直落
+           （open-subagent-detail 上抛 → SubagentSheet initialSubagentId）+ 排队消息 + 四空态 -->
+      <ActivityScreen
+        v-else-if="shellRoute === 'activity'"
+        @open-subagent-detail="onOpenSubagentDetail"
+      />
+
+      <!-- settings：本单元交付 -->
+      <SettingsScreen v-else-if="shellRoute === 'settings'" />
+
+      <!-- chat：u-chat ChatScreen（W3 整段替换落位）：页头（返回/标题/已观察计时/模型
+           chip/更多）+ RunBand + 消息流 density=mobile + 输入区固定顺序（§7.1）。待回答/
+           待授权状态经 props 传入（companion-bridge hooks 含 reconcile watch，App 单点
+           订阅不重复触发对账）；返回语义 = popstate 单点回 chatFrom（ChatScreen 内聚） -->
+      <ChatScreen
+        v-else-if="shellRoute === 'chat' && activeSessionId"
+        :session-id="activeSessionId"
+        :ask-pending="pendingFormRequest !== undefined || pendingPlanReview !== undefined || pendingDialogRequest !== undefined"
+        :form-pending="pendingFormRequest !== undefined"
+        :permission-pending="permission.pending"
+      />
+
+      <!-- 聊天视图空态：无激活 session 时给新建入口（G1 新建链路） -->
+      <div
+        v-else-if="shellRoute === 'chat'"
+        class="flex min-h-0 flex-1 flex-col items-center justify-center gap-3"
+        data-testid="screen-chat"
+      >
+        <p class="text-sm text-neutral-mid">{{ t('mobile.chat.empty') }}</p>
+        <Button variant="default" data-testid="mobile-chat-empty-new" @click="openSheet('newTask')">
+          {{ t('mobile.chat.start') }}
+        </Button>
       </div>
 
-      <MobileSessionList v-if="activeTab === 'sessions'" @new-task="newTaskOpen = true" @open-chat="onOpenChat" />
-
-      <template v-else>
-        <!-- 聊天视图空态：无激活 session 时给新建入口（G1 新建链路） -->
-        <div
-          v-if="!activeSessionId"
-          class="flex min-h-0 flex-1 flex-col items-center justify-center gap-3"
-          data-testid="mobile-chat-empty"
-        >
-          <p class="text-sm text-neutral-mid">{{ t('mobile.chat.empty') }}</p>
-          <Button variant="default" data-testid="mobile-chat-empty-new" @click="newTaskOpen = true">
-            {{ t('mobile.chat.start') }}
-          </Button>
-        </div>
-        <template v-else>
-          <!-- 主内容区：聊天头部（u13/A5 当前会话模型/思考档只读标签）+ subagent 运行状态行
-               （A9/U15：onSubagents 分区驱动的 running 汇总，无运行不占位）+ message-stream
-               （B 对话流），flex-1 占主体 -->
-          <main class="mobile-shell__main flex min-h-0 flex-1 flex-col" data-testid="zone-message-stream">
-            <MobileChatHeader :session-id="activeSessionId" />
-            <SubagentStatusLine :session-id="activeSessionId" />
-            <MobileMessageStream :session-id="activeSessionId" />
-          </main>
-
-          <!-- form/planReview 类请求卡（D7 form 行恢复）：C4 门排除的富交互入口；
-               form 请求在场时 composer 隐藏（桌面 overlay 与 composer 互斥同构） -->
-          <MobileFormCard
-            :request="pendingFormRequest"
-            :plan-review="pendingPlanReview"
-            :respond-failed-id="formRespondFailedId"
-            @submit="onFormSubmit"
-            @cancel="onFormCancel"
-          />
-
-          <!-- slash（D 命令，composer 命令栏）：隐藏保留占位（D10 stub 处置行） -->
-          <div class="mobile-shell__slash shrink-0" data-testid="zone-slash">
-            <SlashBarStub />
-          </div>
-
-          <!-- 输入条（发送/中断键在拇指区，D7 中断行）；form 请求呈现时隐藏（互斥） -->
-          <MobileComposer v-if="!pendingFormRequest" :session-id="activeSessionId" />
-        </template>
-      </template>
-
-      <!-- 底部 tab 导航（壳 chrome，非挂载点） -->
-      <BottomTabBar v-model="activeTab" />
-      <NewTaskSheet :open="newTaskOpen" @close="newTaskOpen = false" @created="onTaskCreated" />
+      <!-- 底部导航（壳 chrome；chat 态隐藏——详情页全屏） -->
+      <BottomNav v-if="shellRoute !== 'chat'" v-model="navRoute" />
     </template>
 
-    <!-- 首连尚未 connected：轻量「连接中」呈现（无重 UI；D8 裁决③：不复用桌面 runtime 不可用状态条） -->
-    <div
-      v-else
-      class="flex h-screen flex-col items-center justify-center gap-2 bg-bg"
-      data-testid="shell-connecting"
-    >
-      <p class="text-sm text-neutral-mid">{{ t('mobile.connecting') }}</p>
-    </div>
-
-    <!-- 权限审批弹窗（D7「手机可批」）：全局单例挂根，视图态无关；pending 驱动开合 -->
-    <PermissionRequestDialog
+    <!-- ── Sheet 族挂载段（§6.5/§6.13：activeSheet 单槽驱动，路由态无关常驻根级）────── -->
+    <!-- 待回答（form/planReview/dialog 三源三节；§6.23 提交挂起直通） -->
+    <FormSheet
+      :open="activeSheet === 'form'"
+      :request="pendingFormRequest"
+      :plan-review="pendingPlanReview"
+      :dialog="pendingDialogRequest"
+      :submit-failed-id="formRespondFailedId"
+      :submit-suspended="submitSuspended"
+      @submit="onSheetSubmit"
+      @cancel="onSheetCancel"
+      @close="closeSheet()"
+    />
+    <!-- 权限审批（无归属一等分支：恒全局呈现，§6.18 降级分支） -->
+    <PermissionSheet
+      :open="activeSheet === 'permission'"
       :plugin-id="permission.pluginId"
       :permissions="permission.permissions"
       :pending="permission.pending"
       :error="permission.error"
+      @approve="onPermissionApprove"
+      @deny="onPermissionDeny"
+      @close="closeSheet()"
+    />
+    <!-- 新建任务（§6.12 项目 chip 主路径 + 手输兜底） -->
+    <NewTaskSheet :open="activeSheet === 'newTask'" @close="closeSheet()" @created="onTaskCreated" />
+    <!-- 模型与思考档切换（§7.2 七值四段映射） -->
+    <ModelSheet
+      v-if="activeSessionId"
+      :open="activeSheet === 'model'"
+      :session-id="activeSessionId"
+      @close="closeSheet()"
+    />
+    <!-- 命令面板（§6.13 插入输入框语义，不直接执行） -->
+    <CommandSheet
+      :open="activeSheet === 'command'"
+      :session-id="activeSessionId"
+      @close="closeSheet()"
+    />
+    <!-- 子代理两级（列表态/详情态同 key 内部推进，§6.13；直落目标经 ActivityScreen 上抛） -->
+    <SubagentSheet
+      v-if="activeSessionId"
+      :open="activeSheet === 'subagentList'"
+      :session-id="activeSessionId"
+      :initial-subagent-id="subagentDetailTarget"
+      @close="closeSheet()"
     />
   </div>
 </template>

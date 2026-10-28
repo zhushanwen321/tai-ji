@@ -17,9 +17,12 @@
  * session 销毁经 triggerSessionCleanups 清理分区。事件 handler 用 updateFor(事件 sid) 写入
  * 「消息所属 sid」的分区（M1 竞态修复：切 sid 后旧 sid 迟到消息不污染新分区）。
  */
-import { computed, onScopeDispose, reactive } from 'vue'
+import { computed, onScopeDispose, reactive, ref } from 'vue'
 import type { Ref } from 'vue'
-import { useSessionScopedState } from '@taiji/core/foundation/use-session-scoped-state'
+import {
+  registerSessionCleanup,
+  useSessionScopedState,
+} from '@taiji/core/foundation/use-session-scoped-state'
 
 // ── IF1: DialogRequest（统一内部协议，bridge → queue 的契约，ui 包本地定义） ──
 
@@ -95,6 +98,20 @@ export interface DialogRequestQueue {
   readonly currentRequest: Readonly<Ref<DialogRequest | undefined>>
   /** 当前 session 的 pending 请求数（只读） */
   readonly pendingCount: Readonly<Ref<number>>
+  /**
+   * 跨分区 pending 计数（remote-use-mobile-v2 §6.18 待办聚合半：「需要你处理」区与导航
+   * 计数要聚合全部会话的 dialog 待答，而 currentRequest/pendingCount 只读当前活跃分区）。
+   * 键 = 有非空 pending 队列的会话 id，值 = 该分区 pending 条数；不可变替换触发响应式。
+   * 计数登记与分区写点同函数同步维护（enqueue/dequeueByRequestId/resetFor/session 销毁
+   * 清理四点封闭），请求内容权威仍在分区——本读口只承载计数，不做内容镜像（禁双轨副本）。
+   *
+   * 模式取舍（对照 form 通道 mobileFormPendingCounts 的 computed 派生）：本队列分区由
+   * useSessionScopedState 工厂承载，工厂分区表是 plain Map 且不提供分区遍历入口，跨分区
+   * computed 建立不了依赖，计数只能由登记表手工维护；form 通道载体是模块级 reactive Map
+   * （companion-bridge formRequestsBySid），computed 迭代即可派生。两轨差异源于分区载体
+   * 的响应性，不是可归并的重复实现。
+   */
+  readonly pendingCountBySession: Readonly<Ref<ReadonlyMap<string, number>>>
   /** 当前 session 是否有匹配的 pending 请求（filter 可选；非响应式查询） */
   hasRequest(filter?: (r: DialogRequest) => boolean): boolean
   /** 用户回复指定请求（按 requestId 精确定位，不假设队首；找不到静默忽略 ERR1） */
@@ -137,13 +154,38 @@ export function createDialogRequestQueue(
   /** 当前 session 分区（null sid 返回临时默认实例，不写 Map） */
   const current = state.current
 
+  // 跨分区 pending 计数登记（pendingCountBySession 的承载；与分区写点同函数同步维护，
+  // 漂移面封闭于本文件四个写点——见接口成员注释）。不可变替换触发响应式。
+  const pendingCountBySid = ref(new Map<string, number>())
+
+  function shiftPendingCount(sid: string, delta: number): void {
+    const next = new Map(pendingCountBySid.value)
+    const count = (next.get(sid) ?? 0) + delta
+    if (count <= 0) next.delete(sid)
+    else next.set(sid, count)
+    pendingCountBySid.value = next
+  }
+
+  // 第四写点（session 删除路径）：分区由 useSessionScopedState 自动注册的 cleanup 删除
+  // （triggerSessionCleanups 驱动），计数登记表是分区外辅助表，须同口径挂清理——否则
+  // 删除后 resetFor 被 hasPartition 早退、dequeueByRequestId 被 deletedSids 拦截，残留计数
+  // 永久无法清除（「需要你处理」区与导航计数聚合到已删会话的僵尸待办）。模块级单例无
+  // scope 时条目保留（与 useSessionScopedState 自身注册同语义）。
+  const unregisterCountCleanup = registerSessionCleanup((sid) => {
+    const count = pendingCountBySid.value.get(sid)
+    if (count) shiftPendingCount(sid, -count)
+  })
+
   // ── 出队工具：按 requestId 精确移除（不假设队首）+ 刷新队首 ──
   function dequeueByRequestId(sid: string, requestId: string): void {
     state.updateFor(sid, (s) => {
       const next = s.pending.filter((r) => r.requestId !== requestId)
       if (next.length === s.pending.length) return // 无目标：静默忽略（ERR1），不触发响应性
+      const removed = s.pending.length - next.length
       s.pending = next
       s.responding = next[0]
+      // 计数登记与分区同步递减（实际移除才调——ERR1 早退分支不触）
+      shiftPendingCount(sid, -removed)
     })
   }
 
@@ -158,6 +200,8 @@ export function createDialogRequestQueue(
       }
       s.pending.push(req)
       s.responding = s.pending[0]
+      // 计数登记与分区同步递增（dedup 早退分支不触——重复投递不加计）
+      shiftPendingCount(req.sessionId, 1)
     })
   }
 
@@ -168,14 +212,19 @@ export function createDialogRequestQueue(
   // 无匹配 pending 时 dequeueByRequestId 内建静默忽略（ERR1，miss noop 幂等）。
   const unsubUiRequestExpired = source.onUiRequestExpired((e) => dequeueByRequestId(e.sessionId, e.requestId))
 
-  // scope dispose 退订（防 listener 翻倍，项目规则 #2）
+  // scope dispose 退订（防 listener 翻倍，项目规则 #2）；计数清理注册同点反注册
+  // （无 scope 上下文时 onScopeDispose 落空、条目保留，与 useSessionScopedState 同语义）
   onScopeDispose(() => {
     unsubUiRequest()
     unsubUiRequestExpired()
+    unregisterCountCleanup()
   })
 
   /** 当前待响应的请求（队首；null sid 时为 undefined） */
   const currentRequest = computed<DialogRequest | undefined>(() => current.value.responding)
+
+  /** 跨分区 pending 计数读口（登记 ref 的只读视图；登记是不可变替换，直返无需复制） */
+  const pendingCountBySession = computed(() => pendingCountBySid.value)
 
   /** 当前 session 的 pending 请求数 */
   const pendingCount = computed<number>(() => current.value.pending.length)
@@ -220,6 +269,8 @@ export function createDialogRequestQueue(
   function resetFor(sessionId: string): void {
     if (!state.hasPartition(sessionId)) return
     state.updateFor(sessionId, (s) => {
+      // 计数登记随重置归零（分区写点同函数同步；清空后才写，用旧长度计 delta）
+      if (s.pending.length > 0) shiftPendingCount(sessionId, -s.pending.length)
       s.pending = []
       s.responding = undefined
     })
@@ -228,6 +279,7 @@ export function createDialogRequestQueue(
   return {
     currentRequest,
     pendingCount,
+    pendingCountBySession,
     hasRequest,
     respond,
     cancel,

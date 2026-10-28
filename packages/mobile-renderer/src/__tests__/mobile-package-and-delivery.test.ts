@@ -54,7 +54,7 @@ describe('AC1: mobile-renderer 包拓扑依赖边', () => {
 const pkgRoot_m2 = process.cwd()
 
 /** 注释提及 __testing 但无消费的生产文件（相对 src 路径）——新条目须随改动同 commit 裁决 */
-const DOC_MENTION_ALLOWLIST = ['views/SubagentStatusLine.vue'] as const
+const DOC_MENTION_ALLOWLIST = [] as const
 
 /** 生产文件 = src 下 .ts/.vue，排除测试目录与测试文件命名 */
 function isProductionFile(relPath: string): boolean {

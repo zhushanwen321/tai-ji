@@ -1,0 +1,68 @@
+/* ============================================================
+   taiji mobile v2 · 移动尺度层（--m-* tokens）
+   ────────────────────────────────────────────────────────────
+   本文件是 @taiji/ui 的移动端尺度 token 层（设计 remote-use-mobile-v2 §6.8）：
+   手机阅读基准字号（16px）、拇指触控尺寸（44px）、行高 / 导航 / Sheet 圆角 /
+   动效曲线。只新增尺度，不新增颜色——任何颜色值必须先在桌面色板存在
+   （真值源 = packages/renderer/src/style.css，SSOT: docs/DESIGN.md §4），
+   本层的 --m-scrim 派生色 color-mix 自桌面既有 token，随主题（data-theme）自动跟随。
+
+   消费方式（壳层入口 import 一次）：
+     import '@taiji/ui/mobile-tokens.css'
+
+   值权威 = Open Design mobile-ui-next demo src/styles/tokens.css（与桌面色板
+   同源已校对）；登记 = docs/DESIGN.md §4.9「移动尺度层」。
+   ============================================================ */
+
+:root {
+  /* ── 字号缩放（壳层 data-font-size 三档驱动；与桌面 root font-size 档位语义对齐）── */
+  --m-font-scale: 1;
+
+  /* ── 移动文字六档 ── */
+  --m-text-display: calc(22px * var(--m-font-scale)); /* 屏级大标题 */
+  --m-text-title: calc(17px * var(--m-font-scale));   /* 页头 / Sheet 标题 */
+  --m-text-body: calc(16px * var(--m-font-scale));    /* 消息正文 / 列表主标题 / 表单选项 */
+  --m-text-callout: calc(15px * var(--m-font-scale)); /* 按钮文案 / 说明段 / Sheet 正文 */
+  --m-text-sub: calc(13px * var(--m-font-scale));     /* 副标题 / 工具行密度档 */
+  --m-text-cap: calc(12px * var(--m-font-scale));     /* 状态 pill / 时间戳 / 徽标 */
+
+  /* ── 行高三档 ── */
+  --m-leading-tight: 1.32; /* 标题 / 挤压布局 */
+  --m-leading-body: 1.62;  /* 消息正文 */
+  --m-leading-ui: 1.4;     /* 控件 / 列表副行 */
+
+  /* ── 布局尺度 ── */
+  --m-gutter: 16px;       /* 左右页边距（固定） */
+  --m-tap: 44px;          /* 触控最小热区 */
+  --m-row-h: 64px;        /* 列表主行最小高 */
+  --m-nav-h: 56px;        /* 底部导航内容高（安全区另计） */
+
+  /* ── Sheet / 浮层 ── */
+  --m-radius-sheet: 16px; /* 底部 Sheet 顶圆角（移动专属档） */
+  --m-sheet-max: 90%;     /* Sheet 面板最大高度（视口百分比） */
+  --m-scrim: color-mix(in oklch, var(--scrim) 66%, transparent); /* Sheet 遮罩（比桌面 modal 遮罩淡，身后内容可辨） */
+  --z-sheet: 1000;        /* Sheet 层级（与桌面 --z-modal 同档：两形态互斥不同屏） */
+
+  /* ── 展开块内滚限高（ChatView density=mobile 的 BlockScrollBox 档；
+        桌面值 = --block-scroll-max-height 240px，移动按 §6.2 收窄到 220px）── */
+  --m-scroll-expand: 220px;
+
+  /* ── 动效 ── */
+  --m-motion-enter: 220ms; /* 一般入场（遮罩淡入） */
+  --m-motion-exit: 160ms;  /* 退场（Sheet 下落 / 遮罩淡出） */
+  --m-motion-sheet: 300ms; /* Sheet 升起 */
+  --m-ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --m-ease-exit: cubic-bezier(0.4, 0, 1, 1);
+}
+
+:root[data-font-size='small'] {
+  --m-font-scale: 0.94;
+}
+
+:root[data-font-size='medium'] {
+  --m-font-scale: 1;
+}
+
+:root[data-font-size='large'] {
+  --m-font-scale: 1.08;
+}

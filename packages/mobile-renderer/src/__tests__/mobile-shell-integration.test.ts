@@ -2,7 +2,6 @@ import App from '../App.vue';
 import { bootstrap } from '../bootstrap';
 import { i18n } from '../i18n';
 import { createMobilePlatformAdapter } from '../platform/mobile-platform-adapter';
-import BottomTabBar from '../shell/BottomTabBar.vue';
 import TokenInputView from '../shell/TokenInputView.vue';
 import { chatStore, sessionStore } from '../shell/app-runtime';
 import { __testing } from '../shell/companion-bridge';
@@ -15,7 +14,15 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { nextTick } from 'vue';
+
+const SID = 'sid-ui-test'
+
+function mountStream(sessionId: string) {
+  return mount(MobileMessageStream, {
+    props: { sessionId },
+    global: { plugins: [i18n] },
+  })
+}
 // 机械合并产物（同目录合并，vi.mock 相对路径不变）；源文件见各节横幅。重名顶层标识符已加 _mN 后缀。
 
 // ======================================================================
@@ -72,102 +79,6 @@ class StubWebSocket {
   send(): void {}
   close(): void {}
 }
-
-function mountApp() {
-  return mount(App, { global: { plugins: [i18n] } })
-}
-
-describe('TC-1: AC5 多视图态结构断言（U1.4c 多视图重排）', () => {
-  let wrapper: ReturnType<typeof mountApp> | null = null
-
-  beforeEach(() => {
-    shellConnectionState.value = 'connecting'
-    hasConnectedOnce.value = false
-    sessionStore.setActiveId(null)
-  })
-
-  afterEach(() => {
-    wrapper?.unmount()
-    wrapper = null
-    shellConnectionState.value = 'connecting'
-    hasConnectedOnce.value = false
-    sessionStore.setActiveId(null)
-  })
-
-  it('connecting 态渲染轻量连接中视图（无 tab bar / 无列表）', () => {
-    wrapper = mountApp()
-    expect(wrapper.find('[data-testid="shell-connecting"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="bottom-tab-bar"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="mobile-session-list"]').exists()).toBe(false)
-  })
-
-  it('token-input 态渲染 token 表单（token-input-view testid）', () => {
-    shellConnectionState.value = 'token-input'
-    wrapper = mountApp()
-    expect(wrapper.find('[data-testid="token-input-view"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="token-input"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="token-submit"]').exists()).toBe(true)
-  })
-
-  it('connected 列表视图渲染列表容器 + bottom-tab-bar', () => {
-    // 直接置态复现 connection-view watch 的置位序（connected 蕴含 hasConnectedOnce，BM5 分支锚点）
-    hasConnectedOnce.value = true
-    shellConnectionState.value = 'connected'
-    wrapper = mountApp()
-    expect(wrapper.find('[data-testid="mobile-session-list"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="bottom-tab-bar"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="mobile-tab-sessions"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="mobile-tab-chat"]').exists()).toBe(true)
-  })
-
-  it('connected 聊天视图渲染 message-stream + companion + slash 隐藏保留 + 输入条 + bottom-tab-bar', async () => {
-    hasConnectedOnce.value = true
-    shellConnectionState.value = 'connected'
-    sessionStore.setActiveId('sid-tc1')
-    wrapper = mountApp()
-    await wrapper.get('[data-testid="mobile-tab-chat"]').trigger('click')
-    expect(wrapper.find('[data-testid="zone-message-stream"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="mobile-message-stream"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="zone-companion"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="zone-slash"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="stub-slash"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="mobile-composer"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="mobile-composer-send"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="bottom-tab-bar"]').exists()).toBe(true)
-  })
-})
-
-describe('TC-2: AC5 SlashBarStub 隐藏保留（DOM 层断言）', () => {
-  let wrapper: ReturnType<typeof mountApp> | null = null
-
-  beforeEach(() => {
-    shellConnectionState.value = 'connecting'
-    hasConnectedOnce.value = false
-    sessionStore.setActiveId(null)
-  })
-
-  afterEach(() => {
-    wrapper?.unmount()
-    wrapper = null
-    shellConnectionState.value = 'connecting'
-    hasConnectedOnce.value = false
-    sessionStore.setActiveId(null)
-  })
-
-  it('聊天视图内 zone-slash 容器 + stub-slash testid 在场且隐藏（不裸渲染占位文案）', async () => {
-    hasConnectedOnce.value = true
-    shellConnectionState.value = 'connected'
-    sessionStore.setActiveId('sid-tc2')
-    wrapper = mountApp()
-    await wrapper.get('[data-testid="mobile-tab-chat"]').trigger('click')
-    expect(wrapper.find('[data-testid="zone-slash"]').exists()).toBe(true)
-    const stub = wrapper.get('[data-testid="stub-slash"]')
-    // 不可见断言走 DOM 属性（class）而非源码文本：项目 SSOT `.hidden { display: none }`；
-    // happy-dom 的 getComputedStyle 不解析样式表，computed display 断言不可用
-    expect(stub.classes()).toContain('hidden')
-    expect(stub.text()).toBe('')
-  })
-})
 
 describe('TC-4: AC5 createMobilePlatformAdapter 满足 core PlatformPort 契约', () => {
   it('kind === "mobile" 且两端口字段存在（storage/webSocket；ipc 已从契约删除）', () => {
@@ -235,71 +146,6 @@ describe('TC-5: AC5 providePlatform/getPlatform 注入链路通（经 bootstrap�
 // BM5 瞬时断连不换视图：connected 后掉回 connecting 时 connected 布局保持挂载
 //（composer/message-stream 不卸载 = 输入草稿保留），仅壳顶部插轻量断线条；
 // failed 仍全屏接管；首连（从未 connected）仍是全屏「连接中」。
-describe('BM5: 断线重连中保持 connected 布局 + 壳顶部断线条', () => {
-  let wrapper: ReturnType<typeof mountApp> | null = null
-
-  beforeEach(() => {
-    shellConnectionState.value = 'connecting'
-    hasConnectedOnce.value = false
-    sessionStore.setActiveId(null)
-  })
-
-  afterEach(() => {
-    wrapper?.unmount()
-    wrapper = null
-    shellConnectionState.value = 'connecting'
-    hasConnectedOnce.value = false
-    sessionStore.setActiveId(null)
-  })
-
-  it('连接成功后掉回 connecting：聊天视图元素仍在场 + shell-reconnecting-banner 在场（无全屏连接中）', async () => {
-    shellConnectionState.value = 'connected'
-    hasConnectedOnce.value = true
-    sessionStore.setActiveId('sid-bm5')
-    wrapper = mountApp()
-    await wrapper.get('[data-testid="mobile-tab-chat"]').trigger('click')
-
-    // 瞬时断连：connected → connecting（connection-view watch 同款状态流转）
-    shellConnectionState.value = 'connecting'
-    await nextTick()
-
-    expect(wrapper.find('[data-testid="shell-reconnecting-banner"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="zone-message-stream"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="mobile-composer"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="bottom-tab-bar"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="shell-connecting"]').exists()).toBe(false)
-  })
-
-  it('failed 重连预算用尽：仍全屏接管（shell-failed 在场，无断线条/无聊天视图/tab bar）', () => {
-    shellConnectionState.value = 'failed'
-    hasConnectedOnce.value = true
-    sessionStore.setActiveId('sid-bm5-failed')
-    wrapper = mountApp()
-
-    expect(wrapper.find('[data-testid="shell-failed"]').exists()).toBe(true)
-    // failed 全屏容器独立 testid（不复用首连分支的 shell-connecting）：负向断言防「failed 态
-    // 误渲染连接中视图」回归——曾因 failed 分支复用 shell-connecting 使该断言假绿
-    expect(wrapper.find('[data-testid="shell-failed-screen"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="shell-connecting"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="shell-reconnecting-banner"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="zone-message-stream"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="bottom-tab-bar"]').exists()).toBe(false)
-  })
-
-  it('首连未 connected：全屏连接中，无断线条', () => {
-    shellConnectionState.value = 'connecting'
-    hasConnectedOnce.value = false
-    wrapper = mountApp()
-
-    expect(wrapper.find('[data-testid="shell-connecting"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="shell-reconnecting-banner"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="mobile-session-list"]').exists()).toBe(false)
-  })
-})
-
-// U1.6 P0 缺陷防回归：src/ 无 @tailwind 指令落点 → tailwindcss postcss 插件零生成工具类，
-// 产物 CSS 裸奔（happy-dom 组件测试不验视觉，拦不住该缺陷）。此处机械锚定样式入口与
-// content 扫描范围两条前提，缺任一即红。
 describe('TC-8: AC5 Tailwind 样式入口（U1.6 P0 防回归）', () => {
   it('样式入口 tokens.css 含 @tailwind 三指令（base/components/utilities）', () => {
     const css = readFileSync(resolve(pkgRoot, 'src/styles/tokens.css'), 'utf-8')
@@ -382,132 +228,14 @@ describe('A16: safe-area 布局类挂载（DOM 断言，TC-1 形态）', () => {
     expect(shell.classes()).not.toContain('pb-[var(--safe-area-bottom)]')
   })
 
-  it('connected 态 BottomTabBar 挂底部 safe-area 类（底导航职责）', () => {
-    hasConnectedOnce.value = true
-    shellConnectionState.value = 'connected'
-    wrapper = mountApp()
-    const bar = wrapper.get('[data-testid="bottom-tab-bar"]')
-    expect(bar.classes()).toContain('pb-[var(--safe-area-bottom)]')
-  })
 
-  it('BottomTabBar 独立挂载同样挂底部 safe-area 类（组件自身契约，不依赖 App 接线）', () => {
-    const bar = mount(BottomTabBar, {
-      global: { plugins: [i18n] },
-      props: { modelValue: 'sessions' as const },
-    })
-    expect(bar.get('[data-testid="bottom-tab-bar"]').classes()).toContain('pb-[var(--safe-area-bottom)]')
-    bar.unmount()
-  })
 })
 
 // ======================================================================
 // ← mobile-companion-band.spec.ts
 // ======================================================================
 
-function mountApp_m2() {
-  return mount(App, { global: { plugins: [i18n] } })
-}
 
-/** 发一条 bridge 归一后的 dialog 类 ui-request（confirm 形态；method 带 method 键同 bridge 产物形状） */
-function emitDialogRequest(sessionId: string, requestId: string): void {
-  __testing.mobileExtensionBus.emit({
-    kind: 'ui-request',
-    sessionId,
-    request: {
-      requestId,
-      pluginId: 'tasks',
-      kind: 'confirm',
-      method: 'confirm',
-      title: '确认执行？',
-      message: '该操作将应用变更',
-    },
-  })
-}
-
-describe('移动壳 CompanionBand 根级常驻（D3）', () => {
-  let wrapper: ReturnType<typeof mountApp_m2> | null = null
-
-  beforeEach(() => {
-    // 反查表 requestIdSessions 为模块级（companion-bridge 未导出其 reset 出口）：
-    // 用例间以唯一 requestId 隔离（残留条目不参与任何断言）
-    shellConnectionState.value = 'connecting'
-    hasConnectedOnce.value = false
-    sessionStore.setActiveId(null)
-  })
-
-  afterEach(() => {
-    wrapper?.unmount()
-    wrapper = null
-    shellConnectionState.value = 'connecting'
-    hasConnectedOnce.value = false
-    sessionStore.setActiveId(null)
-  })
-
-  it('装配断言：列表页签（非聊天分支）下 zone-companion 容器在场（根级常驻，不随页签分支卸载）', () => {
-    hasConnectedOnce.value = true
-    shellConnectionState.value = 'connected'
-    sessionStore.setActiveId('sid-d3')
-    wrapper = mountApp_m2()
-    // 默认页签 = sessions；根级常驻后容器在场（改动前仅聊天页签分支挂载，此处为红）
-    expect(wrapper.find('[data-testid="zone-companion"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="mobile-session-list"]').exists()).toBe(true)
-  })
-
-  it('呈现：列表页签停留期间到达的 dialog 请求直接可见可作答（不切页签）', async () => {
-    hasConnectedOnce.value = true
-    shellConnectionState.value = 'connected'
-    sessionStore.setActiveId('sid-d3')
-    wrapper = mountApp_m2()
-    emitDialogRequest('sid-d3', 'req-d3-visible')
-    await nextTick()
-    expect(wrapper.find('[data-testid="companion-band"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="companion-band-title"]').text()).toBe('确认执行？')
-    // 可作答：confirm/取消按钮在场
-    expect(wrapper.find('[data-testid="companion-confirm-ok"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="companion-confirm-cancel"]').exists()).toBe(true)
-  })
-
-  it('假按钮处置：minimize 点击真实收起（restore 出现、body 隐藏），restore 点击真实展开', async () => {
-    hasConnectedOnce.value = true
-    shellConnectionState.value = 'connected'
-    sessionStore.setActiveId('sid-d3')
-    wrapper = mountApp_m2()
-    emitDialogRequest('sid-d3', 'req-d3-min')
-    await nextTick()
-
-    // 改动前（OVERLAY_LIFECYCLE 缺失）：按钮在场但点击 no-op，本断言为红
-    await wrapper.get('[data-testid="companion-minimize"]').trigger('click')
-    expect(wrapper.find('[data-testid="companion-minimize"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="companion-restore"]').exists()).toBe(true)
-    // 收起态 body 隐藏（仅 header + restore 按钮在场）
-    expect(wrapper.find('[data-testid="companion-band-message"]').exists()).toBe(false)
-
-    await wrapper.get('[data-testid="companion-restore"]').trigger('click')
-    expect(wrapper.find('[data-testid="companion-restore"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="companion-minimize"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="companion-band-message"]').exists()).toBe(true)
-  })
-
-  it('连接前/无请求态：容器常驻但 band 自隐藏（无活跃 session 安全渲染，P5）', () => {
-    wrapper = mountApp_m2()
-    // connecting 态（未连接）：容器在根级渲染树，band 无请求自隐藏
-    expect(wrapper.find('[data-testid="zone-companion"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="companion-band"]').exists()).toBe(false)
-  })
-})
-
-// ======================================================================
-// ← mobile-ui.spec.ts
-// ======================================================================
-
-const SID = 'sid-ui-test'
-
-function mountStream(sessionId: string) {
-  return mount(MobileMessageStream, {
-    props: { sessionId },
-    global: { plugins: [i18n] },
-  })
-}
 
 describe('ChatViewDeps provide 完整性（全部必需字段由 MobileMessageStream provide）', () => {
   beforeEach(() => {

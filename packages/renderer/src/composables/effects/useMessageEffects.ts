@@ -32,6 +32,7 @@ import { configureChatNoticeText, createLifecycleEffects } from '@taiji/core'
 import type { LifecycleEffects, InboundEffects } from '@taiji/core'
 import { subagentVirtualId } from '@taiji/shared'
 import type { PiEntry, PiToolCallEntryForm, ServerMessageMap, SubagentRecord } from '@taiji/shared'
+import { ensureStreamSubscription } from '@/composables/features/chat/useChat'
 
 const t = i18n.global.t
 
@@ -79,7 +80,15 @@ function clearRespawnTimeout(sessionId: string): void {
  */
 function buildLifecycleEffects(): LifecycleEffects {
   return createLifecycleEffects(
-    { chat: useChatStore(), session: useSessionStore() },
+    {
+      chat: useChatStore(),
+      session: useSessionStore(),
+      // 恢复窗口全套重建（A5 缺陷修复，与移动壳 bootstrap 同款注入）：events handler
+      // 重挂 + bus 订阅一步完成——只发 bus 层 subscribe 时恢复后的帧到不了已退订的
+      // events handler（core deps.ensureStream 注释）。绑定形态 = useSidebar sessionEntry
+      // 同款（renderer 薄包装 3 参收窄为 1 参）。
+      ensureStream: (sid) => ensureStreamSubscription(sid, useChatStore(), useSessionStore()),
+    },
     {
       restored: t('panel.message.respawnRestored'),
       restoreFailed: t('panel.message.respawnFailed'),

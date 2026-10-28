@@ -60,9 +60,12 @@
              状态机 translateY(-50%) 滑入（-50% 基于自身 2 行高度，与行高数值解耦）；
              h-[1lh] 视口高度 = 1 行行高。leading-normal（无单位）必需：normal 行高下
              行盒高度随内容 fallback 字体变（实测 system-ui 16px / PingFang 18px /
-             emoji 21px，CJK 行被裁 2-5px）；无单位系数使行盒恒 = 系数×字号，字体无关。 -->
+             emoji 21px，CJK 行被裁 2-5px）；无单位系数使行盒恒 = 系数×字号，字体无关。
+             [remote-use-mobile-v2 §6.2] mobile 档不进尾行视口（思考块默认收起一行——
+             状态词「思考 · 时长」+ 60 字符预览，§5.1「思考块收起为一行」）；desktop
+             判定多一个恒真因子，行为逐字不变。 -->
         <span
-          v-if="working && thinkingTailLines.length > 0"
+          v-if="working && density !== 'mobile' && thinkingTailLines.length > 0"
           class="flex h-[1lh] min-w-0 flex-1 self-center justify-end overflow-hidden leading-normal text-neutral-dim transition-opacity duration-[var(--duration-fast)] group-hover/think:opacity-80"
           :class="thinkingExpanded ? 'invisible' : ''"
         >
@@ -115,9 +118,12 @@ import { formatClock, formatDuration } from './format-utils'
 import { Button } from '../../primitives/button'
 import { useCopy } from './composables/useCopy'
 import { useThinkingCollapse } from './composables/useThinkingCollapse'
+import { useChatDensity } from './chat-view-deps'
 
 const { t } = useI18n()
 const { copied, copy } = useCopy()
+/** 密度档（§6.2）：mobile 思考块恒收起一行（不进尾行视口），desktop 维持既有形态 */
+const density = useChatDensity()
 
 const props = defineProps<{
   /** thinking 内容 */

@@ -1184,6 +1184,14 @@ export class SessionLifecycle implements ISessionRegistry {
     // 画布绑定解绑（problem-solve-canvas U2）：active / scanned 两分支共用的真删除点——
     // 与 B5 同款挂点形态（模块级分发 + delete 主链段）。纯同步 Map 摘除，无失败形态。
     unbindCanvasOnSessionDeleted(sessionId)
+    // seq 高水位回收（dmg-r1-6）：真删除 = 该 session id 永不复用，MessageBus 的
+    // seqHighWater 登记（removeSessionEntry 内 clearSession 写入 / 早期崩溃退出残留）随之
+    // 回收——防长驻 runtime 随会话建删循环无界增长。与三条存活销毁路径（pi 崩溃 / forceQuit /
+    // restore 清场，respawn·restore 同 id 复活需高水位延续，TC6c）及归档（簿记保留同 id、
+    // 恢复即复活）刻意区分，故不挂 removeSessionEntry 汇聚点。btw 直删分支不经本点——
+    // 线侧高水位在 onLineTerminated 终结合一挂点回收（组合根接线）。挂点在 cascade 之后：
+    // 整树 trash 失败上抛时 session 仍在盘（可恢复形态），id 存续则高水位保留语义不变。
+    this.registerDeps.getMessageBus()?.forgetSession(sessionId)
     // wave:perf-w26（D9-1 delete 失效点）：session 文件已 trash，目录 TTL 快照 1s 内仍含
     // 已删条目——显式失效，删除后立即从侧栏列表消失（05 文档 V5 验收）。
     this.sessionStore.invalidateScanCache()

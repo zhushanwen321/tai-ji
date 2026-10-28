@@ -20,17 +20,28 @@ export const buttonVariants = cva(
         secondary:
           'bg-transparent border border-border text-neutral-fg hover:bg-surface-hover',
         ghost: 'hover:bg-surface-hover',
+        quiet:
+          // 移动原语 quiet（remote-use-mobile-v2 §6.9 / spec §6.1）：透明底 + mid 字——
+          // 静默图标钮档（ghost 的 hover 才有软底，quiet 常态即降权文字色）
+          'text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg',
         danger: 'text-danger hover:bg-danger-soft',
         // 危险实底钮（demo pages.css .btn.danger-solid：--danger 底 + --danger-fg 字 + hover
         // brightness 1.1）；消费方 = ConfirmDialog 危险确认分支等需要重钮权重的危险动作
         'danger-solid':
           'bg-danger text-[color:var(--danger-fg)] hover:brightness-110',
+        destructive:
+          // 移动原语 destructive（spec §6.1）：--danger-soft 底 + --danger-text 字——
+          // 删除/停止/断开等破坏动作的中权重档（danger-solid 之上、ghost danger 之下；
+          // spec 配「必须配确认」纪律归消费方）
+          'bg-danger-soft text-[color:var(--danger-text)] hover:brightness-110',
       },
       size: {
         default: 'h-9 px-4 py-2',
         dense: 'h-8 px-3',
         sm: 'h-9 rounded-md px-3',
         icon: 'h-10 w-10',
+        // 移动触控档（spec §6.1「icon 44×44」）：--m-tap 热区，桌面存量尺寸档零变化
+        'icon-44': 'h-[var(--m-tap)] w-[var(--m-tap)]',
       },
     },
     defaultVariants: {

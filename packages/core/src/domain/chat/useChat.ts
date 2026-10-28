@@ -1071,14 +1071,18 @@ export function createUseChat(deps: UseChatDeps) {
    *
    * 返回 clientUuid（= 乐观气泡 id = 内核条目 id），供调用方断言/对账。
    */
-  async function submitNewMessage(sid: string, segments: Segment[], promptText: string): Promise<string> {
+  async function submitNewMessage(sid: string, segments: Segment[], promptText: string, clientUuidOverride?: string): Promise<string> {
     // clientUuid 前移生成（u-<uuid>）：作为 submitSegments 的条目 id（session.delivery 帧 /
     // 送达回执标记 / morph 的身份锚 + clientUuid ↔ pi userEntryId 映射），受理确认后同一 id
     // 上屏气泡（appendUser 显式 id 入参，气泡 id = 内核条目 id 契约不变）。
     // randomUuid（secure-context 安全包装）：移动壳经 LAN http 访问时 isSecureContext=false，
     // 直调 crypto.randomUUID 为 undefined 抛 TypeError → send 恒 false（移动端「未送达」）。
     // crypto.randomUUID 是 secure-context-only API，一切非 https 环境的调用点必须走本包装。
-    const clientUuid = `u-${randomUuid()}`
+    // [remote-use-mobile-v2 §7.1 发送幂等口径一] clientUuidOverride：调用方可注入幂等键
+    // （「未送达重发」复用失败尝试的 uuid，runtime 按 clientUuid 幂等防已受理回执丢失双发）；
+    // 缺省 undefined = 既有生成路径逐字节不变（桌面消费方零改动）。注入值须为 `u-<uuid>`
+    // 形态（与标记正则 u-[0-9a-fA-F-]{36} 兼容），由调用方（壳层 Composer）以 randomUuid 构造。
+    const clientUuid = clientUuidOverride ?? `u-${randomUuid()}`
     ensureStreamSubscription(sid, chat, session, subDeps)
     // S4：复用调用方算过的 promptText，避免 submitSegments 内部再调一次 segmentsToPrompt。
     const reply = await submitSegments(sid, segments, clientUuid, promptText)
@@ -1132,8 +1136,12 @@ export function createUseChat(deps: UseChatDeps) {
    *
    * 显式接收 sessionId：双 panel 下 Composer 各自有独立 sessionId（panel leaf 绑定），
    * send 目标由调用方传入，不读全局 session.activeId（否则 standby panel 发消息会串到 active panel）。
+   *
+   * [remote-use-mobile-v2 §7.1] options.clientUuid（可选）：调用方注入幂等键——「未送达重发」
+   * 复用失败尝试的 uuid（runtime 按 clientUuid 幂等，防已受理回执丢失导致双投）；缺省 undefined
+   * = 内部生成（既有路径，桌面消费方零改动）。注入值须 `u-<uuid>` 形态（调用方以 randomUuid 构造）。
    */
-  async function send(sessionId: string, segments: Segment[]): Promise<boolean> {
+  async function send(sessionId: string, segments: Segment[], options?: { clientUuid?: string }): Promise<boolean> {
     const sid = sessionId
     if (segments.length === 0) return true
     // `@` 定向分流（composer-symbol-system §3.3.4/§3.3.7）：含 subagent 段的消息改走
@@ -1160,7 +1168,7 @@ export function createUseChat(deps: UseChatDeps) {
     // 错误气泡（乐观回滚已由 submitNewMessage catch 完成）——再弹 toast 属同一失败
     // 双提示，抑制；transport 级（断连/超时/未知码）保守 toast 兜底。
     try {
-      await submitNewMessage(sid, segments, promptText)
+      await submitNewMessage(sid, segments, promptText, options?.clientUuid)
       return true
     } catch (e) {
       if (isTransportLevelFailure(e, [BLOCKED_CLASSIFIED_CODE])) {

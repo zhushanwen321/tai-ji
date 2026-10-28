@@ -2717,6 +2717,15 @@ export interface ServerMessageMapBase {
   // 定位撤窗）。广播无条件发出（含排队中从未展示的请求——前端对未展示/已关闭弹窗的撤窗
   // miss 须 noop 幂等，P-11：旧版前端未消费此帧时无异常回退）。
   'plugin:uiRequestExpired': { requestId: string; pluginId: string; sessionId?: string } & Record<string, unknown>
+  // plugin:permissionRequest：插件激活权限审批请求下行（runtime PluginActivator
+  // gateOnPermissionApproval 生产，broadcastOrBroker 全连接广播）。pluginId /
+  // permissions / requestId 必带，requestId 与 expired/resolved 广播同源（前端按它
+  // 精确撤窗）。sessionId 可选（remote-use-mobile-v2 §6.18）：归属语义 =「触发上下文
+  // 可归属时的来源会话；缺失 = 进程级请求，不归属」。V-6 gate 结论：runtime 激活
+  // 触发链不携带会话上下文（全部激活触发点恒 onStartupFinished 形态），现行恒缺省，
+  // 消费方按无归属一等分支（全局呈现）处理；未来激活链携带会话上下文时组装点填值，
+  // 类型零改动。
+  'plugin:permissionRequest': { pluginId: string; permissions: string[]; requestId: string; sessionId?: string } & Record<string, unknown>
   // plugin:permissionRequestExpired：权限审批到期取消下行（timeout-plugin-service D3，
   // runtime PluginActivator 审批等待超时生产）。pluginId 必带；requestId 必带且与
   // 本次审批 plugin:permissionRequest 广播同源（每次审批新生成）——前端按 requestId

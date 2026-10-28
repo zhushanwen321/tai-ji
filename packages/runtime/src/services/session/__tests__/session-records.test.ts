@@ -47,6 +47,16 @@ vi.mock('../../../infra/pi/pi-paths.js', async (importOriginal) => {
   }
 })
 
+// 数据根同 ref 重定向：subagent 会话 jsonl 路径穿越守卫锚 = getSessionStoreDir(getDataDir())
+//（<dataDir>/ext-sessions/）——用例经 piAgentDirRef 控制守卫锚与 fixture 树根一致
+vi.mock('@taiji/shared/paths', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@taiji/shared/paths')>()
+  return {
+    ...actual,
+    getDataDir: () => piAgentDirRef.dir,
+  }
+})
+
 // [W1 / D6] 全文读路径 call-through spy（验收③「getWorkflows/getSubagents 不再调全文
 // 读路径」的代码断言载体）：行为保持真实实现（既有测试零影响），仅计数调用——
 // 正常体量会话走 事件派生视图不触达；oversize 分流（旧格式兼容路径）触达。
@@ -860,6 +870,71 @@ describe('getSubagentHistory / getAgentCallFilePath：负路径检查', () => {
   it('getAgentCallHistory：agent call 即 subagent，委托 getSubagentHistory 路径', async () => {
     const { records } = makeRecords()
     expect(await records.getAgentCallHistory('s1', 'sa-none')).toEqual({ messages: [], truncated: false })
+  })
+})
+
+describe('getSubagentHistory / getAgentCallFilePath：新布局守卫（A9 修复）', () => {
+  beforeEach(() => { piAgentDirRef.dir = mkdtempSync(join(tmpdir(), 'session-records-exttree-')) })
+  afterEach(() => {
+    rmSync(piAgentDirRef.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    piAgentDirRef.dir = ''
+  })
+
+  /** 主 session fixture（终态条目承载 sessionFile，与既有逃逸用例同形态）。 */
+  function recordsWithSessionFile(sessionFile: string) {
+    const dir = mkdtempSync(join(tmpdir(), 'session-records-test-'))
+    const filePath = join(dir, 'session.jsonl')
+    writeFileSync(filePath, jsonlLines(subagentRecordEntry('sa-1', 'done', 'e1', { sessionFile })))
+    return {
+      records: makeRecords({
+        // convertHistory 透传 stub：getHistoryFromFilePath 转换链尾段 port（TC2 契约，
+        // session-history.test.ts 同款 stub 形态）
+        sessionStore: {
+          scanSessions: vi.fn(() => [{ id: 's1', filePath }]),
+          convertHistory: (messages: unknown[]) => messages,
+        } as unknown as ISessionStore,
+      }).records,
+      cleanup: () => rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }),
+    }
+  }
+
+  it('新布局路径过守卫：ext-sessions 会话树内的 subagent JSONL 返回真实历史', async () => {
+    // [session-store-layout-inversion] 新布局：subagent 会话 jsonl =
+    // <dataDir>/ext-sessions/<rootSid>/subagents/sessions/*.jsonl——修复前守卫锚旧
+    // <dataDir>/agent/ 布局恒拒（执行记录结构性恒空），修复后放行并真实读取。
+    const subFile = join(piAgentDirRef.dir, 'ext-sessions', 's1', 'subagents', 'sessions', 'sa-1.jsonl')
+    mkdirSync(dirname(subFile), { recursive: true })
+    writeFileSync(subFile, [
+      JSON.stringify({ type: 'message', id: 'm0', message: { role: 'user', content: '子代理任务输入' } }),
+      JSON.stringify({ type: 'message', id: 'm1', message: { role: 'assistant', content: [{ type: 'text', text: '子代理执行输出' }] } }),
+    ].join('\n') + '\n')
+    const { records, cleanup } = recordsWithSessionFile(subFile)
+    try {
+      // 前置断言：sessionFile 确实进了 record（防「未派生视图 → 空值假绿」）
+      expect((await records.getSubagents('s1')).records[0]!.sessionFile).toBe(subFile)
+      const history = await records.getSubagentHistory('s1', 'sa-1')
+      expect(history.messages.length).toBeGreaterThan(0)
+      expect(history.truncated).toBe(false)
+      expect(await records.getAgentCallFilePath('s1', 'sa-1')).toBe(subFile)
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('树外路径仍被拒：dataDir 内但 ext-sessions 树外不读（穿越防线不随锚迁移放松）', async () => {
+    // dataDir 内、session 存储树外（旧布局落点 <dataDir>/agent/ 形态）：守卫锚迁到
+    // ext-sessions 树根后仍必须拒——防锚迁移放大读面（数据根下任意文件不可借道读出）
+    const outside = join(piAgentDirRef.dir, 'agent', 'sessions', 'evil.jsonl')
+    mkdirSync(dirname(outside), { recursive: true })
+    writeFileSync(outside, JSON.stringify({ type: 'message', id: 'm0', message: { role: 'user', content: 'secret' } }) + '\n')
+    const { records, cleanup } = recordsWithSessionFile(outside)
+    try {
+      expect((await records.getSubagents('s1')).records[0]!.sessionFile).toBe(outside)
+      expect(await records.getSubagentHistory('s1', 'sa-1')).toEqual({ messages: [], truncated: false })
+      expect(await records.getAgentCallFilePath('s1', 'sa-1')).toBe('')
+    } finally {
+      cleanup()
+    }
   })
 })
 
