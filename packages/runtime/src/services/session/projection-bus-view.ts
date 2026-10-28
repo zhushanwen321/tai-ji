@@ -30,5 +30,6 @@ export function createProjectionBusView(
     unsubscribe: (sid, ws) => bus.unsubscribe(sid, ws),
     unsubscribeAll: (ws) => bus.unsubscribeAll(ws),
     clearSession: (sid) => bus.clearSession(sid),
+    forgetSession: (sid) => bus.forgetSession(sid),
   }
 }

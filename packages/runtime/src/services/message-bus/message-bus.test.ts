@@ -11,6 +11,8 @@
  * - TC4：unsubscribe 取消单 session 订阅 + 反查表清理。
  * - TC5：unsubscribeAll 清理 ws 的全部 session 订阅。
  * - TC6：clearSession 删除整个 SessionBusState + 反查表清理。
+ * - TC6d：forgetSession 永久删除回收——高水位丢弃重建从 0 起（clearSession 的 TC6c
+ *   继承语义不受影响）+ 未知 sid 幂等（ES5，dmg-r1-6）。
  * - TC7：ring 覆盖写——满时淘汰最旧（O(1)），不阻塞 publish。
  * - TC8：双向不变量——sessions[sid].subscribers ↔ wsSubscriptions[ws] 一致。
  * - TC9：publish 到非 OPEN（readyState!==1）ws 不发。
@@ -309,6 +311,39 @@ describe('MessageBus', () => {
     expect(ws.sent).toHaveLength(1)
     const frame = JSON.parse(ws.sent[0]!) as { seq?: number }
     expect(frame.seq).toBe(4)
+  })
+
+  // ── TC6d：forgetSession 永久删除回收（dmg-r1-6），与 clearSession 销毁语义区分 ──────────
+  // clearSession 保留高水位（TC6c：同 id 重建场景的崩溃销毁语义）；forgetSession 是真删除
+  //（id 永不复用）的显式回收入口——重建后 seq 从 0 重计，长驻进程 seqHighWater 不随会话
+  // 建删循环无界增长。
+  it('TC6d: forgetSession drops high-water — rebuilt entry starts seq from 0; clearSession alone keeps inheritance', () => {
+    const bus = new MessageBus()
+    const sid = 's1'
+    bus.publish(sid, createMockMessage('message.message_start', { n: 1 }))
+    bus.publish(sid, createMockMessage('message.complete', { n: 2 }))
+
+    // 对照腿：仅 clearSession（崩溃销毁语义）——高水位保留，重建继承（TC6c 锁定语义）
+    bus.clearSession(sid)
+    expect(bus.subscribe(sid, createMockClient()).lastSeq).toBe(2)
+
+    // 回收腿：真删除链现场（clearSession 先登记高水位 → forgetSession 回收）——重建从 0 起
+    bus.clearSession(sid)
+    bus.forgetSession(sid)
+    expect(bus.subscribe(sid, createMockClient()).lastSeq).toBe(0)
+    const ws = createMockClient()
+    bus.subscribe(sid, ws)
+    bus.publish(sid, createMockMessage('message.complete', { n: 3 }))
+    expect(ws.sent).toHaveLength(1)
+    const frame = JSON.parse(ws.sent[0]!) as { seq?: number }
+    expect(frame.seq).toBe(1)
+  })
+
+  it('TC6d: forgetSession is idempotent — unknown sid no-op, repeated calls safe (ES5)', () => {
+    const bus = new MessageBus()
+    expect(() => bus.forgetSession('never-existed')).not.toThrow()
+    bus.forgetSession('never-existed')
+    expect(bus.subscribe('never-existed', createMockClient()).lastSeq).toBe(0)
   })
 
   // ── TC7：ring 覆盖写满时淘汰最旧（D5-3 O(1)）──────────────────────

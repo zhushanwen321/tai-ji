@@ -34,6 +34,7 @@
  * - ES1：clearSession 对不存在 session no-op（幂等）。
  * - ES2：unsubscribe / unsubscribeAll 对未订阅 ws no-op（幂等）。
  * - ES4：publish 广播时单个 ws.send 抛错——try/catch 兜底，单 ws 失败不影响其它 ws 与 publish 主流程。
+ * - ES5：forgetSession 对无高水位登记的 sid no-op（幂等，Map.delete 语义）。
  */
 import type { ServerMessage } from '@taiji/shared'
 import type { BusClient, SessionBusState, StreamRingBuffer } from './types.js'
@@ -401,6 +402,12 @@ export interface IMessageBus {
   unsubscribeAll(ws: BusClient): void
   /** 清除整个 session 状态（session 销毁时调用，幂等）。 */
   clearSession(sessionId: string): void
+  /**
+   * 永久删除回收（幂等）：丢弃该 session 的 seq 高水位登记——session id 不再复用
+   * （真删除）时调用；同 id 会重建的销毁（pi 崩溃 / forceQuit / restore 清场 / 归档）
+   * 必须走 clearSession 保留高水位（两种销毁语义的区分见实现注释）。
+   */
+  forgetSession(sessionId: string): void
 }
 
 /**
@@ -425,6 +432,12 @@ export class MessageBus implements IMessageBus {
    * 帧到不了投影）。高水位延续让重建设备继承计数，seq 空间跨 entry 重建单调；renderer
    * 基线（reply.lastSeq=高水位）与新帧自然衔接，零消费方改动。runtime 重启场景不受影响
    * （进程内存整体消亡，renderer 经 resubscribeAll 前重置基线——subscription-state 既有语义）。
+   *
+   * [回收]（dmg-r1-6）两种销毁语义分流：同 id 会重建的销毁（pi 崩溃 / forceQuit /
+   * restore 清场 / 归档退场）由 clearSession / pruneEmptySession 登记、getOrCreateSession
+   * 重建时消费（delete），条目生命周期挂 session 复活链；session **永久删除**（id 不再
+   * 复用——lifecycle.delete 真删除与 btw 线终结合一挂点）经 forgetSession 显式 delete，
+   * 防长驻 runtime 随会话建删循环无界增长。
    */
   private readonly seqHighWater = new Map<string, number>()
   /** ws → Set<sessionId>（反查表，双向不变量维护 + unsubscribeAll 用）。 */
@@ -702,6 +715,20 @@ export class MessageBus implements IMessageBus {
     observeClearSession(sessionId, state.subscribers.size)
     clearBusObserveState(sessionId)
     snapshotOverBudgetWarned.delete(sessionId)
+  }
+
+  /**
+   * 永久删除回收（dmg-r1-6，幂等 ES5）：丢弃该 session 的 seq 高水位登记。
+   *
+   * [与 clearSession 的销毁语义区分] clearSession 是「同 id 会重建」的销毁（pi 崩溃
+   * respawn / forceQuit restore 重开 / restore 清场 / 归档退场恢复同 id），高水位必须
+   * 保留供 getOrCreateSession 继承（TC6c 锁定）——故回收不可挂在 clearSession 内。
+   * 本方法只服务「id 永不复用」的真删除（lifecycle.delete 主会话两分支 + btw 线终结
+   * 合一挂点 onLineTerminated），调用点均在 removeSessionEntry（内部 clearSession 登记
+   * 高水位）之后，delete 抹掉登记即完成回收。对未知 sid no-op（Map.delete 幂等）。
+   */
+  forgetSession(sessionId: string): void {
+    this.seqHighWater.delete(sessionId)
   }
 
   /**

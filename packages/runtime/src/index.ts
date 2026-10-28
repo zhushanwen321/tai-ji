@@ -1456,13 +1456,17 @@ async function main(): Promise<void> {
     trashDirectory,
     // [M4-a / D9④ 单入口终结扇出] 线终结（级联 / 批内直删 / btw.remove 三路同经 closeLine）的
     // lifecycle 收尾：planned kill 抑制 exit 回调，Map 条目/总线分区/插件数据不自清——
-    // 在此镜像主会话 delete 的收尾序（detach → removeSessionEntry → 插件 sessionData 真删）。
-    // 冷线（从未注册）getSession 空 → 三步全幂等零动作；失效路径（闲置回收）不经过本回调。
+    // 在此镜像主会话 delete 的收尾序（detach → removeSessionEntry → 插件 sessionData 真删
+    // → seq 高水位回收）。冷线（从未注册）getSession 空 → 各步全幂等零动作；失效路径
+    // （闲置回收）不经过本回调。
     onLineTerminated: (sessionId) => {
       if (!sessionService.getSession(sessionId)) return
       sessionService.detachSession(sessionId)
       sessionService.removeSessionEntry(sessionId)
       clearRemovedSessionData(sessionId)
+      // seq 高水位回收（dmg-r1-6，镜像主会话 delete 收尾点）：线终结即该线 session id
+      // 永久退场，removeSessionEntry 内 clearSession 登记的高水位随之回收（幂等）。
+      messageBus.forgetSession(sessionId)
     },
     // [BU2] 交互中转 pending 快照（respond/expired/失效三终态共同落点，server 薄委托）。
     hasPendingUiRequests: (sessionId) => server.getPendingUiRequests(sessionId).length > 0,
