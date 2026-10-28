@@ -369,6 +369,7 @@ taste/no-silent-catch 处理：纯 console.warn 仍报（要求传播/重抛）�
 （旧基线 2026-06 S3-W1：thresholds 72/70/59/67，基线实测 Lines74.05/Stmts~74/Branch60.87/Funcs68.42——PR #185 重构扩大分母后作废）
 
 - **方法论 [from S3-W1]**：**先测量后设阈**——thresholds 取基线 -2~3%（非卡死基线值），留 flake 缓冲同时保整体不退化底线。卡死基线 CI 偶发红，-2~3% 是平衡点。未来若 Statements/Lines 余量持续收窄（当前最紧），补测试提升覆盖率或评估调整 thresholds（保持基线-2~3% 原则并记录原因）
+- **测量域 = 全量档**：阈值基线按全量档实测校准，`--coverage` 运行不套挂载渲染重型排除（vitest.config 按 `--coverage` CLI 标记整体退出 domain-map 排除表，排除清单仍单源 domain-map，不另抄清单）；日常档（`pnpm test`）与域触发档不跑插桩、不受影响。挂载排除文件若从 coverage 测量域缺席，实测会系统性低于全量基线、阈值必红——测量域与校准基线必须同域
 - **CI 收集**：`.github/workflows/coverage.yml`（nightly + workflow_dispatch）跑 `--coverage` 并 upload `coverage-report` artifact（`if:always()` 失败也上传便于排查 gate 红，path `packages/renderer/coverage/`）。[HISTORICAL] 原设计把 `--coverage` 挂在 ci.yml renderer test 步骤，但 pnpm@10 `--` 透传使该 flag 自落地起从未生效（gate 实际从未执行过，阈值形同虚设）；2026-09-14 修复 flag 透传时迁至独立 nightly workflow——PR CI 不跑插桩（~2x 会把 renderer 推到 ~5min 关键路径），阈值防侵蚀由每日快照兜底
 - **产物**：`packages/renderer/coverage/`（index.html + lcov.info + lcov-report/），已被 `.gitignore` 覆盖
 - 通用原则：增量核心逻辑应 100%；全文件覆盖率含大量 pre-existing 代码偏低，**以增量覆盖率为准**（PR 期增量口径 SSOT = `.agents/skills/pr-cr-fix/SKILL.md` 阶段 1.6 coverage-gate：包级 ≥80% + 文件级门槛 ≥60%——单文件盲区不被包百分比稀释）

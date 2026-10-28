@@ -61,8 +61,6 @@ vi.mock('@/composables/useToast', () => ({
 }))
 
 vi.mock('@taiji/ui/features/chat/markdown', () => markdownStubModule())
-// 源: useAppUpdate.check-timeout.test.ts 遗留的旧渲染链路径 mock（该路径已无消费者，原样保留）
-vi.mock('@/composables/logic/markdown', () => markdownStubModule())
 
 setupAppUpdateLifecycle({ primeIpc: true, stubAppVersion: true, markdownHtml: '<h2>新特性</h2>' })
 

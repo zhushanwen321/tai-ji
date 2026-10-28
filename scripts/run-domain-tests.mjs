@@ -179,33 +179,28 @@ function availableDomains(slices, mountDomains) {
   return [...names].sort()
 }
 
-function main() {
-  const args = process.argv.slice(2)
-  const { slices } = readRegistry(SLICES_DIR)
-  const mountDomains = loadMountMap()
-  const expand = strictExpander(ROOT)
-
-  if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
-    console.error('用法: node scripts/run-domain-tests.mjs <domain> [<domain>...] [--list]')
-    console.error('      node scripts/run-domain-tests.mjs --domains')
-    console.error('')
-    console.error('可用域（docs/testing/domain-slices/ 切片 ∪ docs/testing/domain-map.json 挂载）：')
-    for (const name of availableDomains(slices, mountDomains)) {
-      const slice = slices.find((s) => s.name === name)
-      const src = slice && mountDomains[name] ? 'slice+mount' : slice ? 'slice' : 'mount'
-      console.error(`  ${name.padEnd(20)} ${src.padEnd(11)} ${slice?.summary ?? mountDomains[name]?.summary ?? ''}`)
-    }
-    process.exit(args.length === 0 ? 1 : 0)
+/** --help 用法与可用域清单（stderr）。 */
+function printUsage(slices, mountDomains) {
+  console.error('用法: node scripts/run-domain-tests.mjs <domain> [<domain>...] [--list]')
+  console.error('      node scripts/run-domain-tests.mjs --domains')
+  console.error('')
+  console.error('可用域（docs/testing/domain-slices/ 切片 ∪ docs/testing/domain-map.json 挂载）：')
+  for (const name of availableDomains(slices, mountDomains)) {
+    const slice = slices.find((s) => s.name === name)
+    const src = slice && mountDomains[name] ? 'slice+mount' : slice ? 'slice' : 'mount'
+    console.error(`  ${name.padEnd(20)} ${src.padEnd(11)} ${slice?.summary ?? mountDomains[name]?.summary ?? ''}`)
   }
-  if (args.includes('--domains')) {
-    for (const name of availableDomains(slices, mountDomains)) {
-      console.log(`${name}\t${collectDomainFiles(slices, mountDomains, [name], expand).get(name)?.files.length ?? 0}`)
-    }
-    return
-  }
+}
 
-  const listOnly = args.includes('--list')
-  const names = args.filter((a) => !a.startsWith('--'))
+/** --domains 域名清单（stdout，制表分隔）。 */
+function printDomainInventory(slices, mountDomains, expand) {
+  for (const name of availableDomains(slices, mountDomains)) {
+    console.log(`${name}\t${collectDomainFiles(slices, mountDomains, [name], expand).get(name)?.files.length ?? 0}`)
+  }
+}
+
+/** 域名合法性 fail-fast：未指定域 / 未知域直接退出。 */
+function assertDomainsKnown(names, slices, mountDomains) {
   if (names.length === 0) {
     console.error('[run-domain-tests] 未指定域——用法见 node scripts/run-domain-tests.mjs --help')
     process.exit(1)
@@ -216,9 +211,45 @@ function main() {
     console.error(`[run-domain-tests] 未知域 "${unknown.join('", "')}"——可用域见 node scripts/run-domain-tests.mjs --domains`)
     process.exit(1)
   }
+}
+
+/** 多域执行清单并集（排序去重）。 */
+function unionDomainFiles(collected, names) {
+  return [...new Set(names.flatMap((n) => collected.get(n)?.files ?? []))].sort()
+}
+
+/** 逐包执行并汇总退出码（全绿打 OK 行）。 */
+function executeDomains(names, byPkg) {
+  const domainLabel = names.join(',')
+  const run = runPackages(byPkg, domainLabel)
+  if (run.failed > 0) {
+    console.error(`\n[run-domain-tests] 域 "${domainLabel}" 完成：${run.failed}/${run.total} 包失败`)
+    process.exit(1)
+  }
+  console.log(`\n[run-domain-tests] 域 "${domainLabel}" 全绿（${run.total} 包，${run.files} 文件）`)
+}
+
+function main() {
+  const args = process.argv.slice(2)
+  const { slices } = readRegistry(SLICES_DIR)
+  const mountDomains = loadMountMap()
+  const expand = strictExpander(ROOT)
+
+  if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
+    printUsage(slices, mountDomains)
+    process.exit(args.length === 0 ? 1 : 0)
+  }
+  if (args.includes('--domains')) {
+    printDomainInventory(slices, mountDomains, expand)
+    return
+  }
+
+  const listOnly = args.includes('--list')
+  const names = args.filter((a) => !a.startsWith('--'))
+  assertDomainsKnown(names, slices, mountDomains)
 
   const collected = collectDomainFiles(slices, mountDomains, names, expand)
-  const files = [...new Set(names.flatMap((n) => collected.get(n)?.files ?? []))].sort()
+  const files = unionDomainFiles(collected, names)
   if (files.length === 0) {
     console.error(`[run-domain-tests] 域 "${names.join('", "')}" 双源文件清单均为空（登记异常，先跑 node scripts/check-domain-slices.mjs）`)
     process.exit(1)
@@ -236,14 +267,7 @@ function main() {
     return
   }
 
-  const domainLabel = names.join(',')
-  const run = runPackages(byPkg, domainLabel)
-
-  if (run.failed > 0) {
-    console.error(`\n[run-domain-tests] 域 "${domainLabel}" 完成：${run.failed}/${run.total} 包失败`)
-    process.exit(1)
-  }
-  console.log(`\n[run-domain-tests] 域 "${domainLabel}" 全绿（${run.total} 包，${run.files} 文件）`)
+  executeDomains(names, byPkg)
 }
 
 const isMain =

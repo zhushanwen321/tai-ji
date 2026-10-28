@@ -182,162 +182,192 @@ export function pkgOf(file) {
   return m ? m[1] : file.split('/').slice(0, 2).join('/')
 }
 
-// ---------- main（校验管线） ----------
+// ---------- main（校验管线：main 只做编排，9 段检查各自成函数） ----------
 
-function main() {
-  const args = process.argv.slice(2)
-  function argValue(name) {
+function parseCheckArgs(args) {
+  const argValue = (name) => {
     const i = args.indexOf(name)
     return i !== -1 ? args[i + 1] : undefined
   }
-  const root = path.resolve(argValue('--root') ?? REPO_ROOT)
-  const wantStats = args.includes('--stats')
-  const wantUncovered = args.includes('--uncovered')
-
-  const failures = []
-  const registryDir = path.join(root, 'docs', 'testing', 'domain-slices')
-  const { slices, byName, meta, errors } = readRegistry(registryDir)
-  if (errors.length > 0) {
-    console.error(`[domain-slices] 环境错误：\n  ${errors.join('\n  ')}`)
-    console.error('  恢复动作：确认 docs/testing/domain-slices/ 存在且各 JSON 合法')
-    process.exit(2)
+  return {
+    root: path.resolve(argValue('--root') ?? REPO_ROOT),
+    wantStats: args.includes('--stats'),
+    wantUncovered: args.includes('--uncovered'),
   }
-  if (slices.length === 0) {
-    console.error('[domain-slices] 环境错误：注册表为空（docs/testing/domain-slices/ 无任何域 JSON）')
-    process.exit(2)
-  }
+}
 
-  // ── 1. 结构 + 2. 存在性/展开 ──
+/** 段1a：域字段形态校验（name/summary/tests/layers），违规经 struct() 登记。 */
+function validateSliceFields(slice, struct) {
+  struct(typeof slice.name !== 'string' || !slice.name, '缺 name（字符串）')
+  struct(typeof slice.summary !== 'string' || slice.summary.length === 0, '缺 summary（一句话域覆盖说明）')
+  struct(!Array.isArray(slice.tests), 'tests 必须是数组（骨架可为空数组）')
+  struct(slice.tests?.some((t) => typeof t !== 'string'), 'tests 含非字符串条目')
+  if (slice.layers !== undefined) {
+    struct(!Array.isArray(slice.layers) || slice.layers.some((l) => typeof l !== 'string' || !l), 'layers 必须是字符串数组（advisory，无词表强校验）')
+  }
+}
+
+/** 段1b：域引用字段形态校验（scope/sharedBy/e2eRules）。 */
+function validateSliceRefFields(slice, struct) {
+  if (slice.scope !== undefined) {
+    struct(slice.scope === null || typeof slice.scope !== 'object' || Array.isArray(slice.scope), 'scope 必须是「层名 → glob 数组」对象')
+    for (const [layer, globs] of Object.entries(slice.scope ?? {})) {
+      struct(!Array.isArray(globs) || globs.some((g) => typeof g !== 'string'), `scope.${layer} 必须是字符串数组`)
+    }
+  }
+  if (slice.sharedBy !== undefined) {
+    struct(slice.sharedBy === null || typeof slice.sharedBy !== 'object' || Array.isArray(slice.sharedBy), 'sharedBy 必须是「文件 → 域数组」对象')
+    for (const [file, domains] of Object.entries(slice.sharedBy ?? {})) {
+      struct(!Array.isArray(domains) || domains.some((d) => typeof d !== 'string'), `sharedBy["${file}"] 必须是字符串数组`)
+    }
+  }
+  if (slice.e2eRules !== undefined) {
+    struct(!Array.isArray(slice.e2eRules) || slice.e2eRules.some((r) => typeof r !== 'string'), 'e2eRules 必须是字符串数组')
+  }
+}
+
+/** 段1c：contracts 条目形态校验。 */
+function validateSliceContractFields(slice, struct) {
+  for (const [i, c] of (slice.contracts ?? []).entries()) {
+    struct(!c || typeof c !== 'object', `contracts[${i}] 必须是对象`)
+    struct(typeof c?.carrier !== 'string' || !c.carrier, `contracts[${i}].carrier 缺失（契约载体路径/glob）`)
+    struct(!Array.isArray(c?.on) || c.on.length === 0 || c.on.some((d) => typeof d !== 'string'), `contracts[${i}].on 必须是非空字符串数组（对侧域）`)
+  }
+}
+
+/** 段2a：name 与文件名一致（readRegistry 已保证来自独立文件，此处用域文件反查）+ scope 路径存在性。 */
+function validateSlicePaths(slice, root, registryDir, failures) {
+  const stem = slice.name ?? '(缺 name)'
+  const stemFile = `${slice.name}.json`
+  if (!existsSync(path.join(registryDir, stemFile))) {
+    failures.push(`域 "${stem}"：name 与文件名不一致（应存于 ${stemFile}）`)
+  }
+  for (const [layer, globs] of Object.entries(slice.scope ?? {})) {
+    for (const g of globs ?? []) {
+      const target = g.endsWith('/**') ? g.slice(0, -3) : g
+      if (!existsSync(path.join(root, target))) {
+        failures.push(`域 "${stem}"：scope.${layer} 条目 "${g}" 指向的路径不在盘上`)
+      }
+    }
+  }
+}
+
+/** 段1+2：逐域结构/路径校验与 tests 展开；返回 域名 → 展开文件数组。 */
+function expandSlices(slices, root, registryDir, failures) {
   const expansion = new Map() // 域名 → 展开文件数组
   for (const slice of slices) {
     const stem = slice.name ?? '(缺 name)'
     const struct = (cond, msg) => {
       if (cond) failures.push(`域 "${stem}"：${msg}`)
     }
-    struct(typeof slice.name !== 'string' || !slice.name, '缺 name（字符串）')
-    struct(typeof slice.summary !== 'string' || slice.summary.length === 0, '缺 summary（一句话域覆盖说明）')
-    struct(!Array.isArray(slice.tests), 'tests 必须是数组（骨架可为空数组）')
-    struct(slice.tests?.some((t) => typeof t !== 'string'), 'tests 含非字符串条目')
-    if (slice.layers !== undefined) {
-      struct(!Array.isArray(slice.layers) || slice.layers.some((l) => typeof l !== 'string' || !l), 'layers 必须是字符串数组（advisory，无词表强校验）')
-    }
-    if (slice.scope !== undefined) {
-      struct(slice.scope === null || typeof slice.scope !== 'object' || Array.isArray(slice.scope), 'scope 必须是「层名 → glob 数组」对象')
-      for (const [layer, globs] of Object.entries(slice.scope ?? {})) {
-        struct(!Array.isArray(globs) || globs.some((g) => typeof g !== 'string'), `scope.${layer} 必须是字符串数组`)
-      }
-    }
-    if (slice.sharedBy !== undefined) {
-      struct(slice.sharedBy === null || typeof slice.sharedBy !== 'object' || Array.isArray(slice.sharedBy), 'sharedBy 必须是「文件 → 域数组」对象')
-      for (const [file, domains] of Object.entries(slice.sharedBy ?? {})) {
-        struct(!Array.isArray(domains) || domains.some((d) => typeof d !== 'string'), `sharedBy["${file}"] 必须是字符串数组`)
-      }
-    }
-    for (const [i, c] of (slice.contracts ?? []).entries()) {
-      struct(!c || typeof c !== 'object', `contracts[${i}] 必须是对象`)
-      struct(typeof c?.carrier !== 'string' || !c.carrier, `contracts[${i}].carrier 缺失（契约载体路径/glob）`)
-      struct(!Array.isArray(c?.on) || c.on.length === 0 || c.on.some((d) => typeof d !== 'string'), `contracts[${i}].on 必须是非空字符串数组（对侧域）`)
-    }
-    if (slice.e2eRules !== undefined) {
-      struct(!Array.isArray(slice.e2eRules) || slice.e2eRules.some((r) => typeof r !== 'string'), 'e2eRules 必须是字符串数组')
-    }
-    // name 与文件名一致（读不到文件名时跳过——readRegistry 已保证来自独立文件，此处用域文件反查）
-    const stemFile = `${slice.name}.json`
-    if (!existsSync(path.join(registryDir, stemFile))) {
-      failures.push(`域 "${stem}"：name 与文件名不一致（应存于 ${stemFile}）`)
-    }
-
-    // scope 路径存在性（前缀目录或精确文件在盘）
-    for (const [layer, globs] of Object.entries(slice.scope ?? {})) {
-      for (const g of globs ?? []) {
-        const target = g.endsWith('/**') ? g.slice(0, -3) : g
-        if (!existsSync(path.join(root, target))) {
-          failures.push(`域 "${stem}"：scope.${layer} 条目 "${g}" 指向的路径不在盘上`)
-        }
-      }
-    }
-    // tests 展开
+    validateSliceFields(slice, struct)
+    validateSliceRefFields(slice, struct)
+    validateSliceContractFields(slice, struct)
+    validateSlicePaths(slice, root, registryDir, failures)
     const { files, problems } = expandTestGlobs(root, slice.tests ?? [])
     for (const p of problems) failures.push(`域 "${stem}"：${p}`)
     expansion.set(slice.name, files)
   }
+  return expansion
+}
 
-  // 域名重复（不同文件同 name）
+/** 域名重复（不同文件同 name）。 */
+function checkNameUniqueness(slices, failures) {
   const nameCount = new Map()
   for (const s of slices) nameCount.set(s.name, (nameCount.get(s.name) ?? 0) + 1)
   for (const [name, n] of nameCount) if (n > 1) failures.push(`域名 "${name}" 重复登记（${n} 个文件）`)
+}
 
-  // ── 3. 唯一归属 ──
+/** 段3：唯一归属；返回 文件 → owner 域（覆盖完备性的全集对照用）。 */
+function checkUniqueOwnership(slices, expansion, failures) {
   const ownerOf = new Map()
-  const overlaps = []
   for (const slice of slices) {
     for (const f of expansion.get(slice.name) ?? []) {
       const prev = ownerOf.get(f)
       if (prev !== undefined && prev !== slice.name) {
-        overlaps.push(`文件 "${f}" 双归属：域 "${prev}" 与 "${slice.name}"（每测试文件必须唯一归属）`)
+        failures.push(`文件 "${f}" 双归属：域 "${prev}" 与 "${slice.name}"（每测试文件必须唯一归属）`)
       } else {
         ownerOf.set(f, slice.name)
       }
     }
   }
-  failures.push(...overlaps)
+  return ownerOf
+}
 
-  // ── 4. W2-B 交叉核对（domain-map.json 冻结表 ⊆ 同名切片域展开） ──
+/** 段4a：读取 domain-map.json；不存在/解析失败登记后返回 null（核对跳过）。 */
+function loadDomainMap(root, failures) {
   const domainMapPath = path.join(root, DOMAIN_MAP_REL)
-  const w2bNames = new Set()
-  if (existsSync(domainMapPath)) {
-    let domainMap
-    try {
-      domainMap = JSON.parse(readFileSync(domainMapPath, 'utf-8'))
-    } catch (err) {
-      failures.push(`${DOMAIN_MAP_REL} 解析失败（${err.message}）——交叉核对无法进行`)
-      domainMap = null
-    }
-    for (const [name, entry] of Object.entries(domainMap?.domains ?? {})) {
-      w2bNames.add(name)
-      const slice = byName.get(name)
-      if (!slice) {
-        failures.push(`W2-B 域 "${name}" 在切片注册表无同名文件（骨架必须先立）`)
-        continue
-      }
-      const compat = slice.w2bMountCompat
-      if (!compat || typeof compat !== 'object') {
-        failures.push(`域 "${name}"：缺 w2bMountCompat 声明（W2-B 14 域必须携带前向兼容声明，见 _meta.json.fields）`)
-        continue
-      }
-      const status = compat.status
-      if (status !== 'pending' && status !== 'enforced') {
-        failures.push(`域 "${name}"：w2bMountCompat.status 非法 "${status}"（合法值 pending | enforced）`)
-        continue
-      }
-      const filled = (slice.tests ?? []).length > 0
-      if (filled && status === 'pending') {
-        failures.push(`域 "${name}"：tests 已填但 w2bMountCompat.status 仍为 pending（改 enforced 后交叉核对生效）`)
-      }
-      if (!filled && status === 'enforced') {
-        failures.push(`域 "${name}"：w2bMountCompat.status=enforced 但 tests 为空（先填切片清单）`)
-      }
-      if (filled) {
-        const expanded = new Set(expansion.get(name) ?? [])
-        for (const f of entry.files ?? []) {
-          if (!expanded.has(f)) {
-            failures.push(
-              `域 "${name}"：domain-map.json 挂载文件 "${f}" 未被本切片域 tests 展开收录（W2-B 归属冻结，切片必须收录同名域全部 files）`,
-            )
-          }
-        }
-      }
-    }
-  } else {
+  if (!existsSync(domainMapPath)) {
     failures.push(`${DOMAIN_MAP_REL} 不存在——W2-B 交叉核对无法进行`)
+    return null
+  }
+  try {
+    return JSON.parse(readFileSync(domainMapPath, 'utf-8'))
+  } catch (err) {
+    failures.push(`${DOMAIN_MAP_REL} 解析失败（${err.message}）——交叉核对无法进行`)
+    return null
+  }
+}
+
+/** 段4b-i：compat 声明形态与 status 词表校验；返回 status 或 null（违规已登记）。 */
+function checkW2bCompat(slice, name, failures) {
+  const compat = slice.w2bMountCompat
+  if (!compat || typeof compat !== 'object') {
+    failures.push(`域 "${name}"：缺 w2bMountCompat 声明（W2-B 14 域必须携带前向兼容声明，见 _meta.json.fields）`)
+    return null
+  }
+  const status = compat.status
+  if (status !== 'pending' && status !== 'enforced') {
+    failures.push(`域 "${name}"：w2bMountCompat.status 非法 "${status}"（合法值 pending | enforced）`)
+    return null
+  }
+  return status
+}
+
+/** 段4b：单个 W2-B 域的声明与收录核对（compat 声明 / status 词表 / 空非空一致 / files ⊆ 展开）。 */
+function checkW2bEntry(name, entry, slice, expansion, failures) {
+  if (!slice) {
+    failures.push(`W2-B 域 "${name}" 在切片注册表无同名文件（骨架必须先立）`)
+    return
+  }
+  const status = checkW2bCompat(slice, name, failures)
+  if (status === null) return
+  const filled = (slice.tests ?? []).length > 0
+  if (filled && status === 'pending') {
+    failures.push(`域 "${name}"：tests 已填但 w2bMountCompat.status 仍为 pending（改 enforced 后交叉核对生效）`)
+  }
+  if (!filled && status === 'enforced') {
+    failures.push(`域 "${name}"：w2bMountCompat.status=enforced 但 tests 为空（先填切片清单）`)
+  }
+  if (filled) {
+    const expanded = new Set(expansion.get(name) ?? [])
+    for (const f of entry.files ?? []) {
+      if (!expanded.has(f)) {
+        failures.push(
+          `域 "${name}"：domain-map.json 挂载文件 "${f}" 未被本切片域 tests 展开收录（W2-B 归属冻结，切片必须收录同名域全部 files）`,
+        )
+      }
+    }
+  }
+}
+
+/** 段4：W2-B 交叉核对（domain-map.json 冻结表 ⊆ 同名切片域展开）+ 非 W2-B 域禁带声明。 */
+function checkW2bCrossMap(slices, byName, expansion, root, failures) {
+  const domainMap = loadDomainMap(root, failures)
+  const w2bNames = new Set()
+  for (const [name, entry] of Object.entries(domainMap?.domains ?? {})) {
+    w2bNames.add(name)
+    checkW2bEntry(name, entry, byName.get(name), expansion, failures)
   }
   for (const slice of slices) {
     if (slice.w2bMountCompat !== undefined && !w2bNames.has(slice.name)) {
       failures.push(`域 "${slice.name}"：非 W2-B 域携带 w2bMountCompat（该声明仅 domain-map.json 14 域合法）`)
     }
   }
+}
 
-  // ── 5. sharedBy ──
+/** 段5：sharedBy 键必须在 owner 域展开中，注记域必须存在。 */
+function checkSharedBy(slices, byName, expansion, failures) {
   for (const slice of slices) {
     for (const [file, domains] of Object.entries(slice.sharedBy ?? {})) {
       const expanded = expansion.get(slice.name) ?? []
@@ -349,8 +379,10 @@ function main() {
       }
     }
   }
+}
 
-  // ── 6. contracts ──
+/** 段6：contracts carrier 必须被本域 scope 覆盖，on 域必须存在。 */
+function checkContracts(slices, byName, failures) {
   for (const slice of slices) {
     const scopeGlobs = Object.values(slice.scope ?? {}).flat()
     for (const c of slice.contracts ?? []) {
@@ -364,70 +396,67 @@ function main() {
       }
     }
   }
+}
 
-  // ── 7. e2eRules ──
+/** 段7a：读取 e2e-map.json 的 rule id 全集；不存在/解析失败登记后返回 null（核对跳过）。 */
+function loadE2eRuleIds(root, failures) {
   const e2eMapPath = path.join(root, E2E_MAP_REL)
-  let e2eIds = null
-  if (existsSync(e2eMapPath)) {
-    try {
-      e2eIds = new Set(JSON.parse(readFileSync(e2eMapPath, 'utf-8')).rules.map((r) => r.id))
-    } catch (err) {
-      failures.push(`${E2E_MAP_REL} 解析失败（${err.message}）——e2eRules 交叉核对无法进行`)
-    }
-  } else {
+  if (!existsSync(e2eMapPath)) {
     failures.push(`${E2E_MAP_REL} 不存在——e2eRules 交叉核对无法进行`)
+    return null
   }
-  if (e2eIds) {
-    for (const slice of slices) {
-      for (const id of slice.e2eRules ?? []) {
-        if (!e2eIds.has(id)) failures.push(`域 "${slice.name}"：e2eRules 引用 "${id}" 不存在于 ${E2E_MAP_REL}`)
-      }
+  try {
+    return new Set(JSON.parse(readFileSync(e2eMapPath, 'utf-8')).rules.map((r) => r.id))
+  } catch (err) {
+    failures.push(`${E2E_MAP_REL} 解析失败（${err.message}）——e2eRules 交叉核对无法进行`)
+    return null
+  }
+}
+
+/** 段7：e2eRules 引用的 rule id 必须存在于 e2e-map.json。 */
+function checkE2eRules(slices, root, failures) {
+  const e2eIds = loadE2eRuleIds(root, failures)
+  if (!e2eIds) return
+  for (const slice of slices) {
+    for (const id of slice.e2eRules ?? []) {
+      if (!e2eIds.has(id)) failures.push(`域 "${slice.name}"：e2eRules 引用 "${id}" 不存在于 ${E2E_MAP_REL}`)
     }
   }
+}
 
-  // ── 8. uncategorized 纪律 + 棘轮 ──
+/** 段8：uncategorized 纪律（只允许精确路径清单）+ 棘轮基线只降不升。 */
+function checkUncategorized(byName, meta, expansion, failures) {
   const uncat = byName.get('uncategorized')
-  if (uncat) {
-    for (const t of uncat.tests ?? []) {
-      if (t.endsWith('/**')) {
-        failures.push('域 "uncategorized"：tests 只允许精确路径清单（池不吞并目录，禁 /** glob）')
-        break
-      }
-    }
-    if (meta && typeof meta.uncategorizedBaseline === 'number') {
-      const n = (expansion.get('uncategorized') ?? []).length
-      if (n > meta.uncategorizedBaseline) {
-        failures.push(
-          `域 "uncategorized"：展开 ${n} 文件 > 棘轮基线 ${meta.uncategorizedBaseline}（基线只降不升；缩趋手段 = 按内含域拆注 sharedBy / 归 host/foundation）`,
-        )
-      }
+  if (!uncat) return
+  for (const t of uncat.tests ?? []) {
+    if (t.endsWith('/**')) {
+      failures.push('域 "uncategorized"：tests 只允许精确路径清单（池不吞并目录，禁 /** glob）')
+      break
     }
   }
+  if (meta && typeof meta.uncategorizedBaseline === 'number') {
+    const n = (expansion.get('uncategorized') ?? []).length
+    if (n > meta.uncategorizedBaseline) {
+      failures.push(
+        `域 "uncategorized"：展开 ${n} 文件 > 棘轮基线 ${meta.uncategorizedBaseline}（基线只降不升；缩趋手段 = 按内含域拆注 sharedBy / 归 host/foundation）`,
+      )
+    }
+  }
+}
 
-  // ── 9. 覆盖完备（coverageEnforced 硬验收；未启用时仅报告） ──
-  const roots = watchedRoots(root)
+/** 段9a：watched roots 全集展开 - 已归属 = 未覆盖清单（排序）。 */
+function collectUncovered(root, ownerOf) {
   const universe = new Set()
-  for (const r of roots) {
+  for (const r of watchedRoots(root)) {
     const out = []
     walkTests(path.join(root, r), r.replace(/\/$/, ''), out)
     for (const f of out) universe.add(f)
   }
-  const uncovered = [...universe].filter((f) => !ownerOf.has(f)).sort()
+  return [...universe].filter((f) => !ownerOf.has(f)).sort()
+}
 
-  if (meta?.coverageEnforced === true && uncovered.length > 0) {
-    failures.push(`覆盖不完备：watched roots 内 ${uncovered.length} 个测试文件未被任何域/池覆盖（coverageEnforced 已启用，未覆盖 = 红；清单 --uncovered）`)
-  }
-
-  // ── 输出 ──
-  if (failures.length > 0) {
-    console.error(`[domain-slices] 检查拦截：${failures.length} 项违规\n`)
-    for (const f of failures) console.error(`  ✗ ${f}`)
-    console.error('')
-    console.error('[FIX] 注册表 = docs/testing/domain-slices/（每域一个 JSON，字段说明见 _meta.json.fields）；')
-    console.error('    域触发 = node scripts/run-domain-tests.mjs <domain>... [--list]；选择器 = node scripts/select-affected-domain.mjs')
-    process.exit(1)
-  }
-
+/** 输出：OK 摘要行（域计数 / 登记文件数 / W2-B 进度 / 未覆盖数）。 */
+function printSummary(slices, ownerOf, uncovered, meta) {
   const filled = slices.filter((s) => (s.tests ?? []).length > 0)
   const pending = slices.filter((s) => (s.tests ?? []).length === 0)
   const enforcedN = slices.filter((s) => s.w2bMountCompat?.status === 'enforced').length
@@ -437,25 +466,69 @@ function main() {
     `[domain-slices] OK：${slices.length} 域（filled ${filled.length} / pending ${pending.length}），登记测试文件 ${totalFiles}，` +
       `唯一归属 0 冲突，W2-B 交叉核对 enforced ${enforcedN} / pending ${pendingW2b}，未覆盖 ${uncovered.length}（coverageEnforced=${meta?.coverageEnforced === true ? 'on' : 'off'}，完整清单 --uncovered）`,
   )
+}
 
-  if (wantStats) {
-    console.log('\n[domain-slices] --stats 全域统计\n')
-    console.log('| 域 | 状态 | 文件数 | 包分布 |')
-    console.log('|---|---|---:|---|')
-    const rows = slices
-      .map((s) => {
-        const files = expansion.get(s.name) ?? []
-        const byPkg = new Map()
-        for (const f of files) byPkg.set(pkgOf(f), (byPkg.get(pkgOf(f)) ?? 0) + 1)
-        return { name: s.name, status: (s.tests ?? []).length > 0 ? 'filled' : 'pending', n: files.length, dist: [...byPkg.entries()].map(([p, n]) => `${p}: ${n}`).join(' / ') || '—' }
-      })
-      .sort((a, b) => b.n - a.n || a.name.localeCompare(b.name))
-    for (const r of rows) console.log(`| ${r.name} | ${r.status} | ${r.n} | ${r.dist} |`)
-    const byPkgUncovered = new Map()
-    for (const f of uncovered) byPkgUncovered.set(pkgOf(f), (byPkgUncovered.get(pkgOf(f)) ?? 0) + 1)
-    console.log(`\n未覆盖（watched roots 内测试文件不在任何域/池）：${uncovered.length}`)
-    for (const [p, n] of [...byPkgUncovered.entries()].sort((a, b) => b[1] - a[1])) console.log(`  ${p}: ${n}`)
+/** 输出：--stats 全域统计（每域文件数/包分布 + 未覆盖包分布）。 */
+function printStats(slices, expansion, uncovered) {
+  console.log('\n[domain-slices] --stats 全域统计\n')
+  console.log('| 域 | 状态 | 文件数 | 包分布 |')
+  console.log('|---|---|---:|---|')
+  const rows = slices
+    .map((s) => {
+      const files = expansion.get(s.name) ?? []
+      const byPkg = new Map()
+      for (const f of files) byPkg.set(pkgOf(f), (byPkg.get(pkgOf(f)) ?? 0) + 1)
+      return { name: s.name, status: (s.tests ?? []).length > 0 ? 'filled' : 'pending', n: files.length, dist: [...byPkg.entries()].map(([p, n]) => `${p}: ${n}`).join(' / ') || '—' }
+    })
+    .sort((a, b) => b.n - a.n || a.name.localeCompare(b.name))
+  for (const r of rows) console.log(`| ${r.name} | ${r.status} | ${r.n} | ${r.dist} |`)
+  const byPkgUncovered = new Map()
+  for (const f of uncovered) byPkgUncovered.set(pkgOf(f), (byPkgUncovered.get(pkgOf(f)) ?? 0) + 1)
+  console.log(`\n未覆盖（watched roots 内测试文件不在任何域/池）：${uncovered.length}`)
+  for (const [p, n] of [...byPkgUncovered.entries()].sort((a, b) => b[1] - a[1])) console.log(`  ${p}: ${n}`)
+}
+
+function main() {
+  const { root, wantStats, wantUncovered } = parseCheckArgs(process.argv.slice(2))
+  const failures = []
+  const registryDir = path.join(root, 'docs', 'testing', 'domain-slices')
+  const { slices, byName, meta, errors } = readRegistry(registryDir)
+  if (errors.length > 0) {
+    console.error(`[domain-slices] 环境错误：\n  ${errors.join('\n  ')}`)
+    console.error('  恢复动作：确认 docs/testing/domain-slices/ 存在且各 JSON 合法')
+    process.exit(2)
   }
+  if (slices.length === 0) {
+    console.error('[domain-slices] 环境错误：注册表为空（docs/testing/domain-slices/ 无任何域 JSON）')
+    process.exit(2)
+  }
+
+  const expansion = expandSlices(slices, root, registryDir, failures)
+  checkNameUniqueness(slices, failures)
+  const ownerOf = checkUniqueOwnership(slices, expansion, failures)
+  checkW2bCrossMap(slices, byName, expansion, root, failures)
+  checkSharedBy(slices, byName, expansion, failures)
+  checkContracts(slices, byName, failures)
+  checkE2eRules(slices, root, failures)
+  checkUncategorized(byName, meta, expansion, failures)
+
+  // 段9：覆盖完备（coverageEnforced 硬验收；未启用时仅报告）
+  const uncovered = collectUncovered(root, ownerOf)
+  if (meta?.coverageEnforced === true && uncovered.length > 0) {
+    failures.push(`覆盖不完备：watched roots 内 ${uncovered.length} 个测试文件未被任何域/池覆盖（coverageEnforced 已启用，未覆盖 = 红；清单 --uncovered）`)
+  }
+
+  if (failures.length > 0) {
+    console.error(`[domain-slices] 检查拦截：${failures.length} 项违规\n`)
+    for (const f of failures) console.error(`  ✗ ${f}`)
+    console.error('')
+    console.error('[FIX] 注册表 = docs/testing/domain-slices/（每域一个 JSON，字段说明见 _meta.json.fields）；')
+    console.error('    域触发 = node scripts/run-domain-tests.mjs <domain>... [--list]；选择器 = node scripts/select-affected-domain.mjs')
+    process.exit(1)
+  }
+
+  printSummary(slices, ownerOf, uncovered, meta)
+  if (wantStats) printStats(slices, expansion, uncovered)
   if (wantUncovered) {
     console.log('\n[domain-slices] --uncovered 完整清单（批 D 登记 uncategorized 的工作清单）')
     for (const f of uncovered) console.log(`  ${f}`)

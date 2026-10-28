@@ -555,24 +555,22 @@ export interface PiSessionLog {
  * 任一 fs 失败 best-effort 不抛（tee 迁移失败不阻断会话创建；失败形态 = 文件留旧树，
  * 同旧布局平铺语义，无数据丢失）。
  */
-export function migratePiSessionLogTree(oldSessionId: string, newSessionId: string): void {
-  if (!logsDir || oldSessionId === newSessionId) return
-  const fromDir = sessionLogFileOrNull(oldSessionId, 'probe') // <root>/<oldId>/logs/probe
-  const toDir = sessionLogFileOrNull(newSessionId, 'probe')
-  if (!fromDir || !toDir) return
-  const from = dirname(fromDir)
-  const to = dirname(toDir)
-  const parentDir = dirname(from) // <root>/<oldId>（族④回收目标）
+/**
+ * 迁移阶段：旧树 logs/ 全部条目逐个 mv 到新树（同名冲突 skip + warn 不覆盖）。
+ * 返回 'skip' = 旧树不可读（无 tee 产生）或新树不可建（无迁移亦无回收）；'moved' = 逐条
+ * 迁移已执行（个别文件可能因 rename 失败留旧树，逐条 warn 留痕）。
+ */
+function moveLogEntries(from: string, to: string): 'skip' | 'moved' {
   let entries: string[]
   try {
     entries = readdirSync(from)
   } catch {
-    return // 旧树无 logs（无 tee 产生）→ 无需迁移
+    return 'skip' // 旧树无 logs（无 tee 产生）→ 无需迁移
   }
   try {
     mkdirSync(to, { recursive: true })
   } catch {
-    return
+    return 'skip'
   }
   for (const name of entries) {
     const src = join(from, name)
@@ -594,6 +592,17 @@ export function migratePiSessionLogTree(oldSessionId: string, newSessionId: stri
       })
     }
   }
+  return 'moved'
+}
+
+/**
+ * 回收阶段（族④根因修复，W3.5 / E-21）：logs/ 迁空后 rmdir（非递归，竞态下非空即
+ * ENOTEMPTY 上抛不会误删），父目录仅当除 logs/ 外无任何其他条目（安全条件①）才一起
+ * 回收；未迁空 / 有兄弟域 → 保留 + warn 留痕（不静默），兄弟树随会话删除走 ADR-0141
+ * 整树回收，本处不越权。任一 fs 失败 best-effort 不抛，留痕满足 no-silent-catch。
+ * 返回是否走到回收完成（false = 提前中止，跳过空壳清理——与原单函数 return 语义一致）。
+ */
+function reclaimMigratedTree(from: string, parentDir: string): boolean {
   try {
     const rest = readdirSync(from)
     if (rest.length > 0) {
@@ -603,7 +612,7 @@ export function migratePiSessionLogTree(oldSessionId: string, newSessionId: stri
         parent: parentDir,
         remaining: rest,
       })
-      return
+      return false
     }
     // logs/ 已迁空：rmdir 非递归（竞态下非空即 ENOTEMPTY 上抛，不会误删）
     rmdirSync(from)
@@ -611,7 +620,7 @@ export function migratePiSessionLogTree(oldSessionId: string, newSessionId: stri
     try {
       siblings = readdirSync(parentDir)
     } catch {
-      return // 父目录已不存在（并发回收）→ 回收目标已达成
+      return false // 父目录已不存在（并发回收）→ 回收目标已达成
     }
     if (siblings.length === 0) {
       // 安全条件① 成立（dirname(from) 内除 logs/ 外无任何条目）→ 连父目录一起回收
@@ -628,15 +637,33 @@ export function migratePiSessionLogTree(oldSessionId: string, newSessionId: stri
     // 清理失败不抛（半空目录无害）；留痕满足 no-silent-catch
     writeLogEntry('warn', '[logger] log tree cleanup ignored (best-effort)', { from, error: String(e) })
   }
-  // 旧树 <oldId>/ 空壳清理：logs/ 删除后上级目录若已空同样移除——否则 tempId 空壳目录
-  // 残留成 ext-sessions 孤儿（D3 验收 A15a 发现：管理会话每次编排泄漏一个空目录）。
-  // 只在确认空后删（readdirSync 抛错 = 不可判定，跳过）。
+  return true
+}
+
+/**
+ * 旧树 <oldId>/ 空壳清理：logs/ 删除后上级目录若已空同样移除——否则 tempId 空壳目录
+ * 残留成 ext-sessions 孤儿（D3 验收 A15a 发现：管理会话每次编排泄漏一个空目录）。
+ * 只在确认空后删（readdirSync 抛错 = 不可判定，跳过）。
+ */
+function removeEmptyOldTreeShell(from: string): void {
   try {
     const oldTreeRoot = dirname(from)
     if (readdirSync(oldTreeRoot).length === 0) rmSync(oldTreeRoot, { recursive: true, force: true })
   } catch (e) {
     writeLogEntry('warn', '[logger] temp-id tree shell cleanup ignored (best-effort)', { from: dirname(from), error: String(e) })
   }
+}
+
+export function migratePiSessionLogTree(oldSessionId: string, newSessionId: string): void {
+  if (!logsDir || oldSessionId === newSessionId) return
+  const fromDir = sessionLogFileOrNull(oldSessionId, 'probe') // <root>/<oldId>/logs/probe
+  const toDir = sessionLogFileOrNull(newSessionId, 'probe')
+  if (!fromDir || !toDir) return
+  const from = dirname(fromDir)
+  const to = dirname(toDir)
+  if (moveLogEntries(from, to) === 'skip') return
+  const reclaimed = reclaimMigratedTree(from, dirname(from)) // dirname(from) = <root>/<oldId>（族④回收目标）
+  if (reclaimed) removeEmptyOldTreeShell(from)
 }
 
 /**

@@ -46,117 +46,145 @@ const REGEX_PRECEDERS = new Set([
   '+', '-', '*', '%', '<', '>', '~', '^',
 ])
 
+/** 区间掩为等长空白（保留换行，行列号不变）。 */
+function blankRange(src, out, from, to) {
+  for (let k = from; k < to; k++) {
+    if (src[k] !== '\n' && src[k] !== '\r') out[k] = ' '
+  }
+}
+
+/** from 起向前最近一个非空白字符；无则返回 ''（正则 vs 除法的启发判据）。 */
+function lastMeaningfulChar(src, from) {
+  for (let k = from; k >= 0; k--) {
+    if (!/\s/.test(src[k])) return src[k]
+  }
+  return ''
+}
+
+/** 行注释掩码：返回注释段之后（换行符）下标。 */
+function maskLineComment(src, out, i) {
+  const end = src.indexOf('\n', i)
+  const stop = end === -1 ? src.length : end
+  blankRange(src, out, i, stop)
+  return stop
+}
+
+/** 块注释掩码：返回注释段之后下标。 */
+function maskBlockComment(src, out, i) {
+  const end = src.indexOf('*/', i + 2)
+  const stop = end === -1 ? src.length : end + 2
+  blankRange(src, out, i, stop)
+  return stop
+}
+
+/** 单双引号字符串掩码：返回字符串段之后下标（未闭合按保守中断不留跨行掩码）。 */
+function maskQuotedString(src, out, i) {
+  const n = src.length
+  const quote = src[i]
+  let j = i + 1
+  while (j < n && src[j] !== quote) {
+    if (src[j] === '\\') j++
+    if (src[j] === '\n') break // 未闭合字符串：保守中断，不留跨行掩码
+    j++
+  }
+  blankRange(src, out, i, Math.min(j + 1, n))
+  return j + 1
+}
+
+/** 正则字面量结束下标（越过 flags）；识别失败（不跨行 / 未闭合）返回 -1。 */
+function regexLiteralEnd(src, i) {
+  const n = src.length
+  let j = i + 1
+  let inClass = false
+  while (j < n) {
+    const rc = src[j]
+    if (rc === '\\') { j += 2; continue }
+    if (rc === '\n') return -1 // 正则不跨行：识别失败，按除法放弃
+    if (inClass) { if (rc === ']') inClass = false }
+    else if (rc === '[') inClass = true
+    else if (rc === '/') {
+      let end = j + 1
+      while (end < n && /[a-z]/.test(src[end])) end++ // flags
+      return end
+    }
+    j++
+  }
+  return -1
+}
+
+/** code 态 '/'：按前缀 token 启发判正则 vs 除法，正则掩码、除法原样。返回下一处理下标。 */
+function maskSlash(src, out, i) {
+  const prev = lastMeaningfulChar(src, i - 1)
+  const isRegex = prev === '' || REGEX_PRECEDERS.has(prev)
+  if (!isRegex) return i + 1
+  const end = regexLiteralEnd(src, i)
+  if (end === -1) return i + 1
+  blankRange(src, out, i, end)
+  return end
+}
+
+/** code 态单字符处理：注释 / 字符串 / 模板进入 / 插值深度跟踪 / 正则。返回下一处理下标。 */
+function maskCodeChar(src, out, stack, i) {
+  const n = src.length
+  const frame = stack[stack.length - 1]
+  const c = src[i]
+  const next = i + 1 < n ? src[i + 1] : ''
+  if (c === '/' && next === '/') return maskLineComment(src, out, i)
+  if (c === '/' && next === '*') return maskBlockComment(src, out, i)
+  if (c === "'" || c === '"') return maskQuotedString(src, out, i)
+  if (c === '`') {
+    out[i] = ' '
+    stack.push({ kind: 'template' })
+    return i + 1
+  }
+  if (c === '{' && frame.interpDepth !== undefined) frame.interpDepth++
+  if (c === '}' && frame.interpDepth !== undefined) {
+    if (frame.interpDepth === 0) {
+      // 配对插值的闭 }：退回模板态，该字符掩掉
+      out[i] = ' '
+      stack.pop()
+      return i + 1
+    }
+    frame.interpDepth--
+  }
+  if (c === '/') return maskSlash(src, out, i)
+  return i + 1
+}
+
+/** template 态单字符处理：内容整体掩码，遇 ${ 进插值帧（code 态 + 深度跟踪），遇 ` 结束。 */
+function maskTemplateChar(src, out, stack, i) {
+  const n = src.length
+  const c = src[i]
+  const next = i + 1 < n ? src[i + 1] : ''
+  if (c === '\\') {
+    out[i] = ' '
+    if (i + 1 < n) out[i + 1] = ' '
+    return i + 2
+  }
+  if (c === '$' && next === '{') {
+    out[i] = ' '
+    out[i + 1] = ' '
+    stack.push({ kind: 'code', interpDepth: 0 })
+    return i + 2
+  }
+  if (c === '`') {
+    out[i] = ' '
+    stack.pop()
+    return i + 1
+  }
+  if (c !== '\n' && c !== '\r') out[i] = ' '
+  return i + 1
+}
+
 function maskSource(src) {
   const out = src.split('')
   // 栈帧：'code' = 普通代码态（interpDepth 非 undefined = 由模板插值 ${ 进入，
   // 需跟踪花括号深度，配对的 } 处退回模板态）；'template' = 模板字面量态
   const stack = [{ kind: 'code' }]
   let i = 0
-  const n = src.length
-  const blank = (from, to) => {
-    for (let k = from; k < to; k++) {
-      if (src[k] !== '\n' && src[k] !== '\r') out[k] = ' '
-    }
-  }
-  const lastMeaningful = (from) => {
-    for (let k = from; k >= 0; k--) {
-      if (!/\s/.test(src[k])) return src[k]
-    }
-    return ''
-  }
-  while (i < n) {
+  while (i < src.length) {
     const frame = stack[stack.length - 1]
-    const c = src[i]
-    const next = i + 1 < n ? src[i + 1] : ''
-    if (frame.kind === 'code') {
-      if (c === '/' && next === '/') {
-        const end = src.indexOf('\n', i)
-        const stop = end === -1 ? n : end
-        blank(i, stop)
-        i = stop
-        continue
-      }
-      if (c === '/' && next === '*') {
-        const end = src.indexOf('*/', i + 2)
-        const stop = end === -1 ? n : end + 2
-        blank(i, stop)
-        i = stop
-        continue
-      }
-      if (c === "'" || c === '"') {
-        let j = i + 1
-        while (j < n && src[j] !== c) {
-          if (src[j] === '\\') j++
-          if (src[j] === '\n') break // 未闭合字符串：保守中断，不留跨行掩码
-          j++
-        }
-        blank(i, Math.min(j + 1, n))
-        i = j + 1
-        continue
-      }
-      if (c === '`') {
-        out[i] = ' '
-        stack.push({ kind: 'template' })
-        i++
-        continue
-      }
-      if (c === '{' && frame.interpDepth !== undefined) frame.interpDepth++
-      if (c === '}' && frame.interpDepth !== undefined) {
-        if (frame.interpDepth === 0) {
-          // 配对插值的闭 }：退回模板态，该字符掩掉
-          out[i] = ' '
-          stack.pop()
-          i++
-          continue
-        }
-        frame.interpDepth--
-      }
-      if (c === '/') {
-        const prev = lastMeaningful(i - 1)
-        const isRegex = prev === '' || REGEX_PRECEDERS.has(prev)
-        if (isRegex) {
-          let j = i + 1
-          let inClass = false
-          let closed = false
-          while (j < n) {
-            const rc = src[j]
-            if (rc === '\\') { j += 2; continue }
-            if (rc === '\n') break // 正则不跨行：识别失败，按除法放弃
-            if (inClass) { if (rc === ']') inClass = false }
-            else if (rc === '[') inClass = true
-            else if (rc === '/') { closed = true; break }
-            j++
-          }
-          if (closed) {
-            let end = j + 1
-            while (end < n && /[a-z]/.test(src[end])) end++ // flags
-            blank(i, end)
-            i = end
-            continue
-          }
-        }
-        i++
-        continue
-      }
-      i++
-      continue
-    }
-    // template 态：内容整体掩码，遇 ${ 进插值帧（code 态 + 深度跟踪），遇 ` 结束
-    if (c === '\\') { out[i] = ' '; if (i + 1 < n) out[i + 1] = ' '; i += 2; continue }
-    if (c === '$' && next === '{') {
-      out[i] = ' '; out[i + 1] = ' '
-      stack.push({ kind: 'code', interpDepth: 0 })
-      i += 2
-      continue
-    }
-    if (c === '`') {
-      out[i] = ' '
-      stack.pop()
-      i++
-      continue
-    }
-    if (c !== '\n' && c !== '\r') out[i] = ' '
-    i++
+    i = frame.kind === 'code' ? maskCodeChar(src, out, stack, i) : maskTemplateChar(src, out, stack, i)
   }
   return out.join('')
 }
@@ -210,43 +238,55 @@ const SKIP_IF_RE = /\bdescribe\s*\.\s*skipIf\s*\(/g
 const CASE_RE = /\b(?:it|test)(?:\s*\.\s*(\w+)\s*)?\s*\(/g
 const CASE_MODIFIERS_NEED_COVER = new Set([undefined, 'each', 'concurrent', 'fails'])
 
+/** 单个 describe.skipIf(...) 的门控 describe 调用区间（第二实参括号区间）；
+ * 无法静态配对 / 非标准形态时 push warning 并返回 null（保守放行）。 */
+function gatedDescribeRange(masked, fromIdx, relForLog, warnings) {
+  const condOpen = maskedIndexOf(masked, fromIdx, '(')
+  const condClose = condOpen === -1 ? -1 : matchBracket(masked, condOpen)
+  if (condClose === -1) {
+    warnings.push(`${relForLog}：describe.skipIf(...) 实参括号无法静态配对，跳过该处覆盖判定（请人工确认）`)
+    return null
+  }
+  // 跳过空白找 describe 调用的实参开括号
+  let callOpen = condClose + 1
+  while (callOpen < masked.length && /\s/.test(masked[callOpen])) callOpen++
+  if (masked[callOpen] !== '(') {
+    warnings.push(`${relForLog}：describe.skipIf(...) 后未紧跟调用括号（非标准形态），跳过该处覆盖判定`)
+    return null
+  }
+  const callClose = matchBracket(masked, callOpen)
+  if (callClose === -1) {
+    warnings.push(`${relForLog}：describe.skipIf(...) 调用体括号无法静态配对，跳过该处覆盖判定（请人工确认）`)
+    return null
+  }
+  return [callOpen, callClose]
+}
+
+/** 门控 describe 区间收集：describe.skipIf(...)( 'name', fn ) 的第二个实参括号区间。 */
+function collectGatedRanges(masked, relForLog, warnings) {
+  const gatedRanges = []
+  SKIP_IF_RE.lastIndex = 0
+  let m
+  while ((m = SKIP_IF_RE.exec(masked)) !== null) {
+    const range = gatedDescribeRange(masked, m.index + m[0].length - 1, relForLog, warnings)
+    if (range) gatedRanges.push(range)
+  }
+  return gatedRanges
+}
+
 /** 扫描单个成员文件：返回 { violations: string[], warnings: string[] }（含行号前缀）。 */
 function scanMemberFile(absPath, relForLog) {
   const violations = []
   const warnings = []
   const src = readFileSync(absPath, 'utf-8')
   const masked = maskSource(src)
-
-  // 门控 describe 区间：describe.skipIf(...)( 'name', fn ) 的第二个实参括号区间
-  const gatedRanges = []
-  SKIP_IF_RE.lastIndex = 0
-  let m
-  while ((m = SKIP_IF_RE.exec(masked)) !== null) {
-    const condOpen = maskedIndexOf(masked, m.index + m[0].length - 1, '(')
-    const condClose = condOpen === -1 ? -1 : matchBracket(masked, condOpen)
-    if (condClose === -1) {
-      warnings.push(`${relForLog}：describe.skipIf(...) 实参括号无法静态配对，跳过该处覆盖判定（请人工确认）`)
-      continue
-    }
-    // 跳过空白找 describe 调用的实参开括号
-    let callOpen = condClose + 1
-    while (callOpen < masked.length && /\s/.test(masked[callOpen])) callOpen++
-    if (masked[callOpen] !== '(') {
-      warnings.push(`${relForLog}：describe.skipIf(...) 后未紧跟调用括号（非标准形态），跳过该处覆盖判定`)
-      continue
-    }
-    const callClose = matchBracket(masked, callOpen)
-    if (callClose === -1) {
-      warnings.push(`${relForLog}：describe.skipIf(...) 调用体括号无法静态配对，跳过该处覆盖判定（请人工确认）`)
-      continue
-    }
-    gatedRanges.push([callOpen, callClose])
-  }
+  const gatedRanges = collectGatedRanges(masked, relForLog, warnings)
 
   const inGated = (idx) => gatedRanges.some(([a, b]) => idx > a && idx < b)
   const lineOf = (idx) => src.slice(0, idx).split('\n').length
 
   CASE_RE.lastIndex = 0
+  let m
   while ((m = CASE_RE.exec(masked)) !== null) {
     const start = m.index
     // 排除属性访问形态（foo.it( / x.test(）

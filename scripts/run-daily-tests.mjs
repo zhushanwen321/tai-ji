@@ -135,58 +135,79 @@ diff base 口径（优先级取第一个可用）：
   node scripts/run-daily-tests.mjs --list          只打印执行清单`)
 }
 
-function main() {
-  const args = process.argv.slice(2)
-  if (args.includes('--help') || args.includes('-h')) return printHelp()
+/** CLI 参数解析与校验；--help/-h 返回 null（由 main 打印用法后返回）。 */
+function parseDailyArgs(args) {
+  if (args.includes('--help') || args.includes('-h')) return null
   const argValue = (name) => {
     const i = args.indexOf(name)
     return i !== -1 ? args[i + 1] : undefined
   }
-  const listOnly = args.includes('--list')
-  const poolsFull = args.includes('--pools') ? argValue('--pools') === 'full' : false
-  if (args.includes('--pools') && !['full', 'core'].includes(argValue('--pools'))) {
+  const pools = argValue('--pools')
+  if (args.includes('--pools') && !['full', 'core'].includes(pools)) {
     console.error('[run-daily-tests] --pools 只接受 full | core')
     process.exit(2)
   }
+  return { base: argValue('--base'), listOnly: args.includes('--list'), poolsFull: pools === 'full' }
+}
 
-  const { slices, meta } = loadRegistry()
-  const mountDomains = loadMountMap()
-  const expand = strictExpander(ROOT)
+/** 命中域归因清单（每域首条 reason，多条时附计数）。 */
+function printAffectedReasons(reasons) {
+  for (const d of [...reasons.keys()].sort()) {
+    const rs = reasons.get(d)
+    console.log(`  - ${d} ← ${rs[0].file}（${rs[0].via}）${rs.length > 1 ? ` 等 ${rs.length} 条` : ''}`)
+  }
+}
 
-  const base = resolveBase(argValue('--base'))
-  const files = changedFiles(base.ref)
-  const { affected, reasons, broadcastHits } = selectAffectedDomains(slices, meta.broadcastCarriers ?? [], files)
-  const affectedDomains = affected.filter((d) => !POOLS.includes(d))
-  const poolHits = POOLS.filter((p) => affected.includes(p))
+/** 广播载体命中提示（宁全勿缺，不强制）。 */
+function printBroadcastHint(broadcastHits) {
+  if (broadcastHits.length === 0) return
+  console.error(`[run-daily-tests] 广播载体命中（基础层契约枢纽，宁全勿缺）：`)
+  for (const f of broadcastHits) console.error(`  - ${f}`)
+  console.error('  建议：本档结束后追加全量回归 pnpm test:all（提示不强制）')
+}
 
-  const collected = collectDomainFiles(slices, mountDomains, [...new Set([...POOLS, ...affected])], expand)
-  const execFiles = buildExecFileSet(collected, affected, { poolsFull })
-
+/** 执行前计划输出（diff 口径 / 命中域）。 */
+function printDailyPlan(base, files, affectedDomains, poolHits) {
   console.log('[run-daily-tests] 日常档（按域分流；全量 = pnpm test:all）')
   console.log(`- diff 口径：${base.desc}，变更 ${files.length} 文件（含未 commit 与 untracked）`)
   console.log(
     `- 命中域：${affectedDomains.length} 个${affectedDomains.length ? `（${affectedDomains.join('、')}）` : ''}` +
       `${poolHits.length ? `；基础池命中（${poolHits.join('、')} → 对应池全量）` : ''}`,
   )
-  if (affected.length > 0) {
-    for (const d of [...reasons.keys()].sort()) {
-      const rs = reasons.get(d)
-      console.log(`  - ${d} ← ${rs[0].file}（${rs[0].via}）${rs.length > 1 ? ` 等 ${rs.length} 条` : ''}`)
-    }
-  }
-  console.log(`- 执行清单：${execFiles.length} 文件（基础池 ${poolsFull ? '全量' : 'core'} + 域增量）`)
+}
 
-  if (broadcastHits.length > 0) {
-    console.error(`[run-daily-tests] 广播载体命中（基础层契约枢纽，宁全勿缺）：`)
-    for (const f of broadcastHits) console.error(`  - ${f}`)
-    console.error('  建议：本档结束后追加全量回归 pnpm test:all（提示不强制）')
-  }
+/** 执行清单规模行（归因明细之后，维持原输出顺序）。 */
+function printExecList(execFiles, poolsFull) {
+  console.log(`- 执行清单：${execFiles.length} 文件（基础池 ${poolsFull ? '全量' : 'core'} + 域增量）`)
+}
+
+function main() {
+  const parsed = parseDailyArgs(process.argv.slice(2))
+  if (parsed === null) return printHelp()
+
+  const { slices, meta } = loadRegistry()
+  const mountDomains = loadMountMap()
+  const expand = strictExpander(ROOT)
+
+  const base = resolveBase(parsed.base)
+  const files = changedFiles(base.ref)
+  const { affected, reasons, broadcastHits } = selectAffectedDomains(slices, meta.broadcastCarriers ?? [], files)
+  const affectedDomains = affected.filter((d) => !POOLS.includes(d))
+  const poolHits = POOLS.filter((p) => affected.includes(p))
+
+  const collected = collectDomainFiles(slices, mountDomains, [...new Set([...POOLS, ...affected])], expand)
+  const execFiles = buildExecFileSet(collected, affected, { poolsFull: parsed.poolsFull })
+
+  printDailyPlan(base, files, affectedDomains, poolHits)
+  if (affected.length > 0) printAffectedReasons(reasons)
+  printExecList(execFiles, parsed.poolsFull)
+  printBroadcastHint(broadcastHits)
 
   if (execFiles.length === 0) {
     console.error('[run-daily-tests] 执行清单为空（注册表异常）——恢复动作：node scripts/check-domain-slices.mjs')
     process.exit(2)
   }
-  if (listOnly) {
+  if (parsed.listOnly) {
     for (const f of execFiles) console.log(f)
     return
   }

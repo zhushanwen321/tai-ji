@@ -96,37 +96,55 @@ const TEST_SUFFIX = '.test.ts'
 
 const toPosix = (p) => p.split(path.sep).join('/')
 
+/** 引号段（含开闭引号）的收尾下标：反斜杠成对跳过，命中配对引号止；未闭合到文末。 */
+function quotedRunEnd(text, start) {
+  const quote = text[start]
+  let j = start + 1
+  while (j < text.length) {
+    if (text[j] === '\\') { j += 2; continue }
+    j++
+    if (text[j - 1] === quote) break
+  }
+  return j
+}
+
+/** 行注释收尾：换行符下标（未换行到文末）。 */
+function lineCommentEnd(text, i) {
+  while (i < text.length && text[i] !== '\n') i++
+  return i
+}
+
+/** 块注释结束符之后的下标（越过闭合符）；未闭合到文末。 */
+function blockCommentEnd(text, i) {
+  i += 2
+  while (i < text.length && !(text[i] === '*' && text[i + 1] === '/')) i++
+  return Math.min(i + 2, text.length)
+}
+
 /** 摘除字符串字面量外的注释（形态同 check-vitest-guard.mjs）：注释里提到 vi.mock 不算特征。 */
 function stripComments(text) {
   let out = ''
-  let quote = null
-  for (let i = 0; i < text.length; i++) {
+  let i = 0
+  while (i < text.length) {
     const ch = text[i]
-    if (quote) {
-      out += ch
-      if (ch === '\\') {
-        out += text[i + 1] ?? ''
-        i++
-      } else if (ch === quote) quote = null
-      continue
-    }
     if (ch === '"' || ch === "'" || ch === '`') {
-      quote = ch
-      out += ch
+      const end = quotedRunEnd(text, i)
+      out += text.slice(i, end)
+      i = end
       continue
     }
     if (ch === '/' && text[i + 1] === '/') {
-      while (i < text.length && text[i] !== '\n') i++
+      i = lineCommentEnd(text, i)
       out += '\n'
-      continue
-    }
-    if (ch === '/' && text[i + 1] === '*') {
-      i += 2
-      while (i < text.length && !(text[i] === '*' && text[i + 1] === '/')) i++
       i++
       continue
     }
+    if (ch === '/' && text[i + 1] === '*') {
+      i = blockCommentEnd(text, i)
+      continue
+    }
     out += ch
+    i++
   }
   return out
 }
