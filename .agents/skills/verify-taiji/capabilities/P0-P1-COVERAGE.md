@@ -216,3 +216,18 @@
 | `mobile-preferences-session-exit` | 27 | 偏好持久化/已退出会话恢复链路 | A11 裁决后断言形态（2026-10-25 主 agent 裁决：点开 dead 即惰性恢复为产品机制，语义修订呈报 D5） |
 
 **已知边界**：真机形态族（触控手感/真机 Safari 地址栏/相机扫码）为仿真等价覆盖，a13-visual degraded 登记待真机复验；A8 段外值（xhigh/max）呈现 faux 域钳制不可达（映射纯函数包内单测覆盖）。
+
+## 八、stream-follow-reshape 交付新增剧本（2026-10-28，D3 验收批次）
+
+> 本节是 stream-follow-reshape 设计交付（消息流滚动跟随信号源重构，ADR-0167）的新增剧本登记（四资产）；装配通道 = faux（TAIJI_FAUX_TPS 控速长流式回合）。行为变化的既有矩阵行：本设计不触达既有行覆盖的功能断言（跟随域此前无专属行），能力文档增量 = 本节。
+
+| 剧本 | 功能面 | verdict | 覆盖要点 |
+|---|---|---|---|
+| `follow-stream-quiet` | 流式长回合告警归零（S1）+ debounce 窗尾汇总可观测（S7） | ❌ fail（14 断言 2 失败，**检测力证明 + PR1 降级路径交付**） | A1：底层 RO loop 事件 148 次/60s 未归零（P1 证伪：virtua 内部测量回路自持触发，非应用层回写边），D5 聚合 console 148→1 条/窗、日志增量 1 行；A8：窗尾汇总行「本窗投递重置 N 次」在位。降级处置与残余源归因登记见 ADR-0167 |
+| `follow-stick-shrink` | 贴底跟随等价（S2）+ 收缩窗口落点（PR2） | ✅ pass（15 断言） | 末条持续贴底（钉住判据非容差判据）、流式中收缩窗口后末条仍贴底 |
+| `follow-detach-interactions` | 脱离/胶囊/回贴（S3）+ 历史前插（S5）+ 负面验证（S6）+ 发送即回底（S8） | ❌ fail（26 断言 3 失败，**与基线逐字同构 = 等价保持 degraded**） | A4/A6 三条失败为基线既有产品缺陷（流式中点胶囊回底停滞不恢复跟随；前插 :shift 保位失效视口跳顶 Δ≈5100px）——独立修复单，非本设计回归；A7 负面/A9 发送回底全过（A9 深脱离 6271px 精准收敛） |
+| `follow-blindzone-converge` | 盲区兜底（S4）+ append 收敛时序（S9，D2 声明行为变化项） | ✅ pass（16 断言） | shiki 高亮补滚 + 回合切换收敛均 ≤ 窗口值+两帧上界（基线实测 0ms/32ms，余量充足） |
+
+**形态与打包面（不入确定性剧本，L4 inspect 承载）**：S2 形态走查 + P6 判定 = inspect-a3（pass：forced reflow=0，测量支后备演进不触发）；S9 无半截形态 = inspect-a11（pass：4 观察窗零半截，含 bash 工具回合中段 append）；生产构建抽查 = inspect-a13（⚠️ degraded：构建链被既有缺陷拦断——`bundle-extensions.mjs` workflows 资源拷贝未排除双平台 `.ts`，`prepare-builtin-extensions.sh` R3 校验 exit 1，独立修复单）。
+
+**已知坑（剧本作者登记）**：① 末条贴底判据用「钉住」形态（gap ≤ 视口常量），不用固定 px 容差——尾部结构高度（~146px）会把结构量误当行为量；② 「加载更早」可达性依赖 runtime 截断窗口 + hydrate 刷新两前置，多回合历史需 ≥6 条短消息铺垫；③ CDP evaluate 传字符串函数体不会被调用，须传真实函数（faux 采样器三处同款坑）；④ 流式中滚轮脱离后有动量惯性，脱离断言须等惯性衰减（动量顶头坑）。
