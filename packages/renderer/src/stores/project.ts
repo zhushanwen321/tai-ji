@@ -12,7 +12,9 @@
  *   发 project.* 命令、以回执更新本地视图；同窗口命令**串行排队**（上一条回执到达后才
  *   发下一条——独立排队语义，非域同步器的并发合流），消除同窗口快速连续操作的版本竞争。
  * - revision 跟随回执更新（load 回执学得水位、命令回执推进），对域同步器暴露
- *   isStaleLoadReceipt 判据（§6.4 命令×同步交错裁决的输入）。
+ *   isStaleLoadReceipt 判据（§6.4 命令×同步交错裁决的输入）——判旧资格以本轮同步
+ *   发起时的水位为基线（见 syncStartRevision），低于基线的回执是服务端回退形态、
+ *   不判旧照常提交（防幻影水位无限补发死锁，见 isStaleLoadReceipt 注释）。
  * - 归一化（默认项补插 + stale id 回退）已迁 runtime 权威侧（§6.6①，load 回执即归一化
  *   视图）；legacy localStorage 一次性迁移已删除（旧通道整表写与缓存视图矛盾，§6.6②）。
  *
@@ -24,9 +26,8 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import type { Project, ProjectCommandReply, ProjectLoadReply } from '@taiji/shared'
-import { DEFAULT_PROJECT_ID } from '@taiji/shared'
+import { DEFAULT_PROJECT_ID, isDefaultProjectOf, makeDefaultProject } from '@taiji/shared'
 import { project as projectApi } from '@/api'
-import { isDefaultProjectOf } from '@/composables/logic/project-session'
 import i18n from '@/i18n'
 import { useToast } from '@/composables/useToast'
 
@@ -61,11 +62,6 @@ type ProjectLoadEvent =
   | { type: 'loadAbandoned' }
   | { type: 'commandApplied'; reply: ProjectCommandReply }
 
-/** 默认 project 工厂（name 空 = 未命名默认项目，未归类 session 的兜底聚合）。 */
-function makeDefaultProject(): Project {
-  return { id: DEFAULT_PROJECT_ID, name: '', lastUsedAt: 0 }
-}
-
 export const useProjectStore = defineStore('project', () => {
   // 缓存视图初值：默认 project 兜底（idle 窗口的 orderedProjects 消费方不空）；initApp
   // 等 project 域首次落定后才进落地页（§6.4②），正常路径下首个回执很快替换本初值。
@@ -82,6 +78,17 @@ export const useProjectStore = defineStore('project', () => {
    * 数据形态」判据输入，也是 §6.7 重拉子形态判据：loading 且非 null = 持有最后已知回执）。
    */
   const revision = ref<number | null>(null)
+
+  /**
+   * 本轮同步发起时已持有的 revision 水位（isStaleLoadReceipt 的判旧资格基线）：
+   * syncLoad 发起时快照。判旧只比对「基线之上、由命令回执推进出的超前水位」——低于
+   * 基线的回执 = 服务端状态早于本轮同步发起（runtime 崩溃重启 write-back debounce
+   * 窗口丢失写入致文件 revision 回退 / 实例变更重新计数），是服务端权威回退而非本窗口
+   * 交错，不判旧、照常 apply 整表并重置水位。无此基线则幻影水位恒判旧：load 回执恒被
+   * 丢弃 + 域同步器无限补发，同时命令携带幻影 revision 被 runtime assertRevision 恒拒
+   * ——双通道死锁，唯一恢复 = 刷新页面。
+   */
+  let syncStartRevision: number | null = null
 
   // ── 状态机（§6.5 转移表唯一执行体；表外转移 warn 不动作，正常路径由域同步器合流保证不发生）──
 
@@ -165,6 +172,9 @@ export const useProjectStore = defineStore('project', () => {
       transition({ type: 'loadAbandoned' })
     }
     transition({ type: 'loadStarted' })
+    // 判旧资格基线快照（每轮同步发起时刷新）：本轮回执只对「基线之上、期间由命令回执
+    // 推进的超前水位」判旧，见 syncStartRevision 注释。
+    syncStartRevision = revision.value
     loadRpcPending = true
     try {
       return await projectApi.load()
@@ -182,12 +192,16 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   /**
-   * 命令×同步交错判据（§6.4，知识与决策同地）：回执 revision 早于本地已提交水位 =
-   * 在途 load 期间有命令回执提交过，该回执是命令执行前旧快照——域同步器按过时内容
-   * 丢弃并在丢弃点补发。null 水位（从未读过）恒不判旧。
+   * 命令×同步交错判据（§6.4，知识与决策同地）：回执 revision 落在 [本轮同步发起基线,
+   * 当前水位) 区间 = 在途同步期间有命令回执提交过、该回执是命令执行前旧快照——域同步器
+   * 按过时内容丢弃并在丢弃点补发（否则旧快照提交回滚命令结果）。null 水位（从未读过）
+   * 恒不判旧；低于基线的回执不判旧（服务端回退形态：runtime 崩溃重启 revision 回退 /
+   * 实例变更重计数——照常提交并重置水位，防判旧资格跨同步窗口残留导致恒丢弃 + 无限
+   * 补发与命令通道 revision 校验恒拒的双通道死锁，见 syncStartRevision 注释）。
    */
   function isStaleLoadReceipt(receipt: ProjectLoadReply): boolean {
-    return revision.value !== null && receipt.revision < revision.value
+    if (revision.value === null || syncStartRevision === null) return false
+    return receipt.revision < revision.value && receipt.revision >= syncStartRevision
   }
 
   /**

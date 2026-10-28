@@ -347,36 +347,75 @@ describe('Project store: 编辑动作命令化（§6.6）', () => {
 
 // ── revision 跟随回执 + 命令×同步交错判据（§6.4/§6.5⑤）──────────────────────
 
-describe('Project store: revision 跟随与 isStaleLoadReceipt 判据（§6.4）', () => {
+describe('Project store: revision 跟随与 isStaleLoadReceipt 判据（§6.4；判旧资格基线 dmg-r2-1）', () => {
   it('未读过任何回执（revision null）恒不判旧', () => {
     const store = useProjectStore()
     expect(store.isStaleLoadReceipt(makeLoadReply([], DEFAULT_PROJECT_ID, 0))).toBe(false)
     expect(store.isStaleLoadReceipt(makeLoadReply([], DEFAULT_PROJECT_ID, 99))).toBe(false)
   })
 
-  it('load 回执学得水位后：更早 revision 的快照判旧（期间有命令回执提交），不早于则不判旧', async () => {
-    mockLoad.mockResolvedValue(makeLoadReply([makeProject(DEFAULT_PROJECT_ID, '')], DEFAULT_PROJECT_ID, 5))
+  it('load 回执学得水位后：重拉在途（基线 = 学得水位）无命令插入，等于/高于水位与服务端回退（低于基线）均不判旧', async () => {
+    mockLoad
+      .mockResolvedValueOnce(makeLoadReply([makeProject(DEFAULT_PROJECT_ID, '')], DEFAULT_PROJECT_ID, 5))
+      .mockReturnValueOnce(new Promise(() => {})) // 重拉在途（受控挂起，保持基线时点）
     const store = useProjectStore()
     store.applyLoadReceipt(await store.syncLoad())
+    expect(store.revision).toBe(5)
 
-    expect(store.isStaleLoadReceipt(makeLoadReply([], DEFAULT_PROJECT_ID, 4))).toBe(true) // 旧快照
-    expect(store.isStaleLoadReceipt(makeLoadReply([], DEFAULT_PROJECT_ID, 5))).toBe(false) // 当前水位
+    // 重拉发起：本轮判旧基线 = 5（syncStartRevision 快照），无命令插入（水位仍 5）
+    void store.syncLoad()
+    expect(store.isStaleLoadReceipt(makeLoadReply([], DEFAULT_PROJECT_ID, 5))).toBe(false) // 等于水位
     expect(store.isStaleLoadReceipt(makeLoadReply([], DEFAULT_PROJECT_ID, 6))).toBe(false) // 更新快照
+    // 服务端 revision 回退（runtime 崩溃重启丢写入形态）：低于基线 → 不判旧（照常
+    // apply 重置水位，防幻影水位恒判旧 + 无限补发死锁）
+    expect(store.isStaleLoadReceipt(makeLoadReply([], DEFAULT_PROJECT_ID, 4))).toBe(false)
   })
 
-  it('命令回执推进水位后，在途 load 的旧快照按新水位判旧（交错规则判据输入）', async () => {
+  it('在途 load 期间命令回执推进水位：基线之上的旧快照按新水位判旧（交错规则判据输入）', async () => {
     const projects = [makeProject(DEFAULT_PROJECT_ID, ''), makeProject('proj-a', 'Alpha')]
-    mockLoad.mockResolvedValue(makeLoadReply(projects, 'proj-a', 3))
+    mockLoad
+      .mockResolvedValueOnce(makeLoadReply(projects, 'proj-a', 3))
+      .mockReturnValueOnce(new Promise(() => {})) // 在途 load（受控挂起，保持基线时点）
     const store = useProjectStore()
     store.applyLoadReceipt(await store.syncLoad())
 
+    // 在途 load 发起：本轮基线 = 3（重拉子形态，编辑入口放行）
+    void store.syncLoad()
     mockSetActive.mockResolvedValue(makeCommandReply(projects, DEFAULT_PROJECT_ID, 4))
     await store.setActiveProject(DEFAULT_PROJECT_ID)
     expect(store.revision).toBe(4)
 
-    // 命令前发起、命令后到达的 load 回执（携带 revision=3）→ 判旧 → 域同步器丢弃 + 补发
+    // 命令前发起、命令后到达的 load 回执（revision 3，落在基线上、水位下）→ 判旧 →
+    // 域同步器丢弃 + 补发
     expect(store.isStaleLoadReceipt(makeLoadReply(projects, 'proj-a', 3))).toBe(true)
     expect(store.isStaleLoadReceipt(makeLoadReply(projects, 'proj-b', 4))).toBe(false)
+    // 低于基线（服务端回退形态）不判旧——即使水位已被命令推高
+    expect(store.isStaleLoadReceipt(makeLoadReply(projects, 'proj-a', 2))).toBe(false)
+  })
+
+  it('崩溃回退收敛（dmg-r2-1）：命令推进水位后 runtime revision 回退，新轮回执不判旧、applyLoadReceipt 重置水位（命令通道解锁）', async () => {
+    const projects = [makeProject(DEFAULT_PROJECT_ID, ''), makeProject('proj-a', 'Alpha')]
+    const rolledBack = makeLoadReply([makeProject(DEFAULT_PROJECT_ID, '')], DEFAULT_PROJECT_ID, 4)
+    mockLoad
+      .mockResolvedValueOnce(makeLoadReply(projects, 'proj-a', 5))
+      .mockResolvedValueOnce(rolledBack)
+    const store = useProjectStore()
+    store.applyLoadReceipt(await store.syncLoad())
+    expect(store.revision).toBe(5)
+
+    // 命令通道提交（水位 5 → 6）后 runtime 崩溃重启：debounce 窗口丢失写入 → 文件
+    // revision 回退 4；重连重拉（本轮基线 = 6 幻影水位）
+    mockSetActive.mockResolvedValue(makeCommandReply(projects, DEFAULT_PROJECT_ID, 6))
+    await store.setActiveProject(DEFAULT_PROJECT_ID)
+    expect(store.revision).toBe(6)
+
+    // 回执 revision 4 低于基线 → 不判旧（域同步器直接 apply，非丢弃 + 补发循环）
+    expect(store.isStaleLoadReceipt(rolledBack)).toBe(false)
+    store.applyLoadReceipt(await store.syncLoad())
+    // 水位重置为服务端权威值：命令通道 expectedRevision 与 runtime 重新对齐
+    expect(store.revision).toBe(4)
+    expect(store.loadState).toBe('loaded')
+    expect(store.projects.map((p) => p.id)).toEqual([DEFAULT_PROJECT_ID])
   })
 })
 

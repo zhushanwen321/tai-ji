@@ -27,7 +27,12 @@
 import { join, dirname } from 'node:path'
 import { readFileSync, existsSync, mkdirSync } from 'node:fs'
 import type { Project, ProjectCommandReply, ProjectStoreState } from '@taiji/shared'
-import { DEFAULT_PROJECT_ID } from '@taiji/shared'
+import {
+  DEFAULT_PROJECT_ID,
+  isDefaultProjectOf,
+  makeDefaultProject,
+  normalizeProjectState,
+} from '@taiji/shared'
 import { quarantineCorruptFile, WriteBackCache } from '../../utils/json-store.js'
 import { atomicWrite } from '../../utils/fs-utils.js'
 import { isEnoent } from '../../utils/errors.js'
@@ -63,30 +68,6 @@ interface ProjectStoreFileState extends ProjectStoreState {
   revision: number
 }
 
-/** 默认 project 工厂（name 空 = 未命名默认项目，未归类 session 的兜底聚合）。 */
-function makeDefaultProject(): Project {
-  return { id: DEFAULT_PROJECT_ID, name: '', lastUsedAt: 0 }
-}
-
-/**
- * 归一化（§6.6①，runtime 侧权威实现）：
- * ① nameless 默认项缺失（legacy/外部编辑数据）→ 按 id 占用判定补插头部（按 nameless
- *    判占用会在默认项被改名时补插第二个同 id 项）；
- * ② activeProjectId 失配 → 回退链「nameless 默认项 → 首个 → DEFAULT_PROJECT_ID」。
- * 纯函数：load 路径只修返回视图（不写盘）；命令路径把结果施加回 cache/内存字段。
- */
-function normalizeState(state: ProjectStoreState): ProjectStoreState {
-  const projects = [...state.projects]
-  if (!projects.some((p) => p.id === DEFAULT_PROJECT_ID)) {
-    projects.unshift(makeDefaultProject())
-  }
-  let activeProjectId = state.activeProjectId
-  if (!projects.some((p) => p.id === activeProjectId)) {
-    activeProjectId = projects.find((p) => !p.name)?.id ?? projects[0]?.id ?? DEFAULT_PROJECT_ID
-  }
-  return { projects, activeProjectId }
-}
-
 export class ProjectStore {
   private readonly cache: WriteBackCache<typeof PARTITION_KEY, string, Project>
   private readonly filePath: string
@@ -116,12 +97,12 @@ export class ProjectStore {
 
   /**
    * 全量加载 project 列表（前端启动 init 用）。
-   * 首启（文件不存在）→ 经 normalizeState 补插默认项，返回不变量满足视图（renderer
-   * 回执直装载，无前端兜底）。INV-4 读时修复：返回视图恒满足不变量；失配仅存在于
-   * 返回视图的变换，不写盘（cache 无 dirty，load 前后文件字节一致）。
+   * 首启（文件不存在）→ 经 normalizeProjectState 补插默认项，返回不变量满足视图
+   * （renderer 回执直装载，无前端兜底）。INV-4 读时修复：返回视图恒满足不变量；失配
+   * 仅存在于返回视图的变换，不写盘（cache 无 dirty，load 前后文件字节一致）。
    */
   load(): ProjectStoreState {
-    return normalizeState({ projects: this.listRaw(), activeProjectId: this.activeProjectId })
+    return normalizeProjectState({ projects: this.listRaw(), activeProjectId: this.activeProjectId })
   }
 
   /** 当前 revision 水位（project.load 回执携带；触达 cache 使 revision 从盘读入）。 */
@@ -158,7 +139,8 @@ export class ProjectStore {
 
   /**
    * 重命名 project。nameless 默认项目禁改名（默认项目身份 = 未归类/孤儿 session 的
-   * 兜底聚合，改名后孤儿无聚合可归）——判据对齐 renderer isDefaultProjectOf（!name）。
+   * 兜底聚合，改名后孤儿无聚合可归）——判据 = 共享 isDefaultProjectOf（!name，
+   * SSOT 见 @taiji/shared/project）。
    */
   renameProject(projectId: string, name: string, expectedRevision: number): Promise<ProjectCommandReply> {
     return this.enqueueCommand(() => {
@@ -172,7 +154,7 @@ export class ProjectStore {
       if (!target) {
         throw new ProjectCommandError(ERR_NOT_FOUND, `project 不存在：${projectId}——重新 project.load 后重试`)
       }
-      if (!target.name) {
+      if (isDefaultProjectOf(target)) {
         throw new ProjectCommandError(ERR_DEFAULT_PROTECTED, '默认项目不可改名（未归类会话的兜底聚合）——改名请指定命名项目')
       }
       this.cache.set(PARTITION_KEY, projectId, { ...target, name: trimmed })
@@ -258,13 +240,13 @@ export class ProjectStore {
   private ensureInvariants(): void {
     const projects = this.listRaw()
     if (!projects.some((p) => p.id === DEFAULT_PROJECT_ID)) {
-      // 补插默认项取头部序（对齐 normalizeState 视图）——
+      // 补插默认项取头部序（对齐 normalizeProjectState 视图）——
       // cache Map 只能追加，delete+set 重建键序；同一 flush 窗口，无第二次写盘。
       this.rewriteCache([makeDefaultProject(), ...projects])
     }
     const all = this.listRaw()
     if (!all.some((p) => p.id === this.activeProjectId)) {
-      this.activeProjectId = all.find((p) => !p.name)?.id ?? all[0]?.id ?? DEFAULT_PROJECT_ID
+      this.activeProjectId = all.find((p) => isDefaultProjectOf(p))?.id ?? all[0]?.id ?? DEFAULT_PROJECT_ID
     }
   }
 

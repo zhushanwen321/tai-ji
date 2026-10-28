@@ -370,9 +370,16 @@ export * from './file-tree'
 export * from './local-file-url'
 export type { RecentWorkspaceRecord } from './workspace'
 export type { Project, ProjectStoreState } from './project'
-// 默认项目 id（connection-datasync-ssot §6.6① 归一化迁 runtime）：runtime ProjectStore
-// 与 renderer project store 共用的领域常量，单一登记处禁止手抄字面量。
-export { DEFAULT_PROJECT_ID } from './project'
+// 默认项目领域规则（connection-datasync-ssot §6.6① 归一化迁 runtime）：id 常量 + 工厂
+// （makeDefaultProject）+ 谓词（isDefaultProjectOf）+ 归一化纯函数（normalizeProjectState）
+// ——runtime ProjectStore / renderer project store / core mock 三方共用的单一登记处，
+// 跨包禁止手抄副本（工厂/谓词/回退链副本收敛见 dmg-r2-2）。
+export {
+  DEFAULT_PROJECT_ID,
+  makeDefaultProject,
+  isDefaultProjectOf,
+  normalizeProjectState,
+} from './project'
 // [subagent-observability §3.3.3⑤] FailureCause 族 = sdk 权威的 type-only re-export
 // （subagent.ts 内转出口；wire 载体 = SubagentRecord.lastRound.failure，renderer 红点
 // 判据与 u8 测试的数据源）。SubagentLastRound = 轮收条事实快照契约（F4）。

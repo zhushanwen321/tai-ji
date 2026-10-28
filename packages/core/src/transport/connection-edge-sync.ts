@@ -25,7 +25,10 @@
  *   revision（期间有命令回执提交），按过时内容丢弃（与旧代回执同处置），并在丢弃点
  *   自动补发一轮该域同步。否则旧快照会提交回滚命令结果（重拉子形态编辑入口放行的
  *   窗口内，命令回执先于在途 load 回执到达）。判据 isStaleReceipt 由 store 提供
- *   （知识与决策同地：revision 状态在 store），机制在本模块。
+ *   （知识与决策同地：revision 状态在 store），机制在本模块。判旧资格以本轮同步发起
+ *   时水位为基线（store 侧承载）：低于基线的回执是服务端回退形态（runtime 崩溃重启
+ *   revision 回退），不判旧照常提交——否则幻影水位恒丢弃 + 无限补发，与命令通道
+ *   revision 校验恒拒形成双通道死锁。
  *
  * 提交形态两态（descriptor.apply 可选）：
  * - **拦截型**（apply 提供）：sync 只拉取返回回执，apply 由本模块在代次/revision 裁决
@@ -193,6 +196,12 @@ function attemptSync(domain: DomainRuntime, generation: number): void {
       // 有命令回执提交，按过时内容丢弃——否则旧快照提交回滚命令结果。
       const staleByRevision = domain.descriptor.isStaleReceipt?.(receipt) ?? false
       if (staleByGeneration || staleByRevision) {
+        // 判旧丢弃留痕（可观测性）：无日志时丢弃-补发循环不可见——正常交错一轮补发即
+        // 收敛，若持续出现 staleByRevision 丢弃日志 = store 判旧资格基线失效的排障线索
+        // （判据资格由 store 侧 isStaleReceipt 承载，见 stores/project.ts syncStartRevision）。
+        console.warn(
+          `[core/connection-edge-sync] domain '${domain.descriptor.id}' receipt discarded as ${staleByGeneration ? `outdated generation ${entry.meta.generation} < ${connectionGeneration}` : 'stale revision (older than committed baseline)'} — resyncing`,
+        )
         // 丢弃点补发（携带最新连接代；合流保证补发前无在途——断连恢复的刷新诉求由
         // 补发轮达成，任一时刻至多一个在途的不变量保持）。一体式 sync 侧若持有自身
         // 在途状态机（如 project 加载状态机的 loading）：回执判旧丢弃不经 store，在途

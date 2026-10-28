@@ -2405,30 +2405,28 @@ export const workspace: WorkspaceDomain = workspaceImpl
 // project 域 mock（D14，2026-08-04；命令通道 connection-datasync-ssot §6.6/u6a 补齐）：
 // mock 模式无 runtime 持久化，load/命令在内存态上运转（命令语义与 runtime ProjectStore
 // 对齐：默认项兜底 + revision 计数 + 校验），签名与 真实进程层 api/domains/project.ts
-// 同构（[G4] AssertExact 断言强制），避免门面三元崩溃。
+// 同构（[G4] AssertExact 断言强制），避免门面三元崩溃。默认项兜底与归一化规则消费
+// @taiji/shared/project 的共享 SSOT（makeDefaultProject / normalizeProjectState，与
+// runtime ProjectStore 同源——规则演进两方同步，mock 防的正是静默分叉）。
 import {
   DEFAULT_PROJECT_ID as PROJECT_DEFAULT_ID,
+  makeDefaultProject,
+  normalizeProjectState,
   type ProjectCommandReply,
   type ProjectLoadReply,
   type ProjectStoreState,
 } from '@taiji/shared'
 
-function mockDefaultProject(): ProjectStoreState['projects'][number] {
-  return { id: PROJECT_DEFAULT_ID, name: '', lastUsedAt: 0 }
-}
-
-const mockProjects: ProjectStoreState['projects'] = [mockDefaultProject()]
+const mockProjects: ProjectStoreState['projects'] = [makeDefaultProject()]
 let mockActiveProjectId = PROJECT_DEFAULT_ID
 let mockRevision = 0
 let mockProjectSeq = 0
 
+/** mock 内存态归一化：共享纯函数算出不变量满足视图后写回内存（mock 仍自持内存数据）。 */
 function mockNormalize(): ProjectStoreState {
-  if (!mockProjects.some((p) => p.id === PROJECT_DEFAULT_ID)) {
-    mockProjects.unshift(mockDefaultProject())
-  }
-  if (!mockProjects.some((p) => p.id === mockActiveProjectId)) {
-    mockActiveProjectId = mockProjects.find((p) => !p.name)?.id ?? mockProjects[0]?.id ?? PROJECT_DEFAULT_ID
-  }
+  const normalized = normalizeProjectState({ projects: mockProjects, activeProjectId: mockActiveProjectId })
+  mockProjects.splice(0, mockProjects.length, ...normalized.projects)
+  mockActiveProjectId = normalized.activeProjectId
   return { projects: mockProjects.map((p) => ({ ...p })), activeProjectId: mockActiveProjectId }
 }
 

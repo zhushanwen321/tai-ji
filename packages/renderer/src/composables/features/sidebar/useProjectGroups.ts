@@ -16,10 +16,10 @@
 import { computed, nextTick, ref, type ComponentPublicInstance, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { SessionGroup, SessionSummary } from '@taiji/shared'
+import { isDefaultProjectOf } from '@taiji/shared'
 import { requestDomainSync, sessionsInRuntimeGroupOrder } from '@taiji/core'
 import {
   collectNamedProjectIds,
-  isDefaultProjectOf,
   sessionBelongsToProject,
 } from '@/composables/logic/project-session'
 import { useProjectStore } from '@/stores/project'

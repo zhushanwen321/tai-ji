@@ -6,6 +6,9 @@
  * - 仅最新代提交：旧连接代回执丢弃 + 丢弃点补发收敛；拦截型 apply 不被旧代触达（验收 2）
  * - 命令×同步交错（project 域）：命令回执先于在途 load 回执到达 → 旧 revision 回执判旧
  *   丢弃（不回滚）+ 补发轮收敛（验收 3）
+ * - 交错判旧资格基线（dmg-r2-1）：命令回执提交后 runtime revision 回退（崩溃重启形态）
+ *   → 低于基线的回执不判旧直接 apply 重置水位，有限轮收敛（无无限补发死锁）；
+ *   判旧丢弃点日志留痕（可观测性）
  * - 首次落定 promise：成功与失败均落定；whenSettled ensure 语义（首轮未发起时由等待方
  *   发起）；后续边沿不改变已落定 promise
  * - whenToSync 谓词门控 / 辅助刷新边沿触发与兜底 catch / 未登记 id 的 fail-fast 与 warn
@@ -42,6 +45,59 @@ async function flushMicrotasks(): Promise<void> {
 function createReceiptLog<T>(): { applied: T[]; apply: (receipt: T) => void } {
   const applied: T[] = []
   return { applied, apply: (receipt: T) => void applied.push(receipt) }
+}
+
+/**
+ * 带重入守卫的 fake project store（集成形态，镜像 renderer stores/project.ts 的 sync
+ * 接线面）：loadState 状态机 + 「loading 态 sync 重入守卫」+「残留 loading 收尾（放弃
+ * 在途）」+ 判旧资格基线（syncStartRevision，dmg-r2-1：判旧只比对基线之上由命令回执
+ * 推进的超前水位，低于基线 = 服务端回退形态不判旧）。无守卫的 fake 检不出死锁形态
+ * （补发轮撞守卫被拒 → 在途状态永久卡 loading，F1-27 正是经此缺口全绿放行）；无基线
+ * 的 fake 检不出幻影水位死锁（dmg-r2-1）——「带重入守卫的 store 集成形态」与「交错
+ * 判旧资格基线」两节共用本 helper。
+ */
+type FakeReceipt = { revision: number; data: string }
+type FakeLoadState = 'idle' | 'loading' | 'loaded'
+function createGuardedProjectStore(rpc: () => Promise<FakeReceipt>) {
+  const store = {
+    loadState: 'idle' as FakeLoadState,
+    stateBeforeLoading: 'idle' as FakeLoadState,
+    revision: null as number | null,
+    syncStartRevision: null as number | null,
+    data: '',
+    rpcPending: false,
+  }
+  const sync = vi.fn(async (): Promise<FakeReceipt> => {
+    if (store.loadState === 'loading') {
+      if (store.rpcPending) {
+        throw new Error(
+          '[project-store] syncLoad re-entered while loading — load attempts must go through connection-edge-sync coalescing (requestDomainSync)',
+        )
+      }
+      // 残留 loading（上一轮回执被判旧丢弃，本 store 的 RPC 已落定）：放弃在途回滚
+      // 到发起前状态再重拉——镜像 stores/project.ts syncLoad 的收尾形态
+      store.loadState = store.stateBeforeLoading
+    }
+    store.stateBeforeLoading = store.loadState
+    store.loadState = 'loading'
+    store.syncStartRevision = store.revision
+    store.rpcPending = true
+    try {
+      return await rpc()
+    } finally {
+      store.rpcPending = false
+    }
+  })
+  const apply = (receipt: FakeReceipt): void => {
+    store.data = receipt.data
+    store.revision = receipt.revision
+    store.loadState = 'loaded'
+  }
+  const isStaleReceipt = (receipt: FakeReceipt): boolean => {
+    if (store.revision === null || store.syncStartRevision === null) return false
+    return receipt.revision < store.revision && receipt.revision >= store.syncStartRevision
+  }
+  return { store, sync, apply, isStaleReceipt }
 }
 
 beforeEach(() => {
@@ -206,52 +262,6 @@ describe('命令×同步交错（验收 3：命令回执先于在途 load 回执
 })
 
 describe('带重入守卫的 store 集成形态（F1-27：命令回执先行 → load 回执判旧丢弃 → 补发轮收敛）', () => {
-  /**
-   * 带重入守卫的 fake project store（集成形态，镜像 renderer stores/project.ts 的 sync
-   * 接线面）：loadState 状态机 + 「loading 态 sync 重入守卫」+「残留 loading 收尾（放弃
-   * 在途）」。无守卫的 fake 检不出死锁形态（补发轮撞守卫被拒 → 在途状态永久卡 loading，
-   * F1-27 正是经此缺口全绿放行）——本节用例锁定丢弃点补发在守卫 store 下可达且收敛。
-   */
-  type FakeReceipt = { revision: number; data: string }
-  type FakeLoadState = 'idle' | 'loading' | 'loaded'
-  function createGuardedProjectStore(rpc: () => Promise<FakeReceipt>) {
-    const store = {
-      loadState: 'idle' as FakeLoadState,
-      stateBeforeLoading: 'idle' as FakeLoadState,
-      revision: null as number | null,
-      data: '',
-      rpcPending: false,
-    }
-    const sync = vi.fn(async (): Promise<FakeReceipt> => {
-      if (store.loadState === 'loading') {
-        if (store.rpcPending) {
-          throw new Error(
-            '[project-store] syncLoad re-entered while loading — load attempts must go through connection-edge-sync coalescing (requestDomainSync)',
-          )
-        }
-        // 残留 loading（上一轮回执被判旧丢弃，本 store 的 RPC 已落定）：放弃在途回滚
-        // 到发起前状态再重拉——镜像 stores/project.ts syncLoad 的收尾形态
-        store.loadState = store.stateBeforeLoading
-      }
-      store.stateBeforeLoading = store.loadState
-      store.loadState = 'loading'
-      store.rpcPending = true
-      try {
-        return await rpc()
-      } finally {
-        store.rpcPending = false
-      }
-    })
-    const apply = (receipt: FakeReceipt): void => {
-      store.data = receipt.data
-      store.revision = receipt.revision
-      store.loadState = 'loaded'
-    }
-    const isStaleReceipt = (receipt: FakeReceipt): boolean =>
-      store.revision !== null && receipt.revision < store.revision
-    return { store, sync, apply, isStaleReceipt }
-  }
-
   it('命令回执先提交后，在途旧 revision load 回执判旧丢弃，丢弃点补发收敛且 loadState 终态正确', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
@@ -310,6 +320,128 @@ describe('带重入守卫的 store 集成形态（F1-27：命令回执先行 →
       expect(sync).toHaveBeenCalledTimes(3) // 收敛，不再补发
       expect(errorSpy).not.toHaveBeenCalled()
     } finally {
+      errorSpy.mockRestore()
+    }
+  })
+})
+
+describe('交错判旧资格基线（dmg-r2-1：命令回执提交后 runtime revision 回退的崩溃重启形态收敛）', () => {
+  /**
+   * 死锁形态锁定（dmg-r2-1）：runtime 崩溃重启 → write-back debounce 窗口丢失写入 →
+   * 文件 revision 回退；重连 load 回执 revision 恒低于 renderer 已提交水位（幻影水位）。
+   * 旧判据（receipt.revision < revision，无资格基线）下该回执恒被判旧丢弃 + 丢弃点
+   * 无限补发；同时命令携带幻影 revision 被 runtime assertRevision 恒拒——双通道死锁，
+   * 唯一恢复 = 刷新页面。判据加同步发起基线后：低于基线的回执 = 服务端权威回退，
+   * 不判旧直接 apply（水位随回执重置，命令通道解锁），有限轮（1 轮）收敛。
+   * fake store 用模块级 createGuardedProjectStore（含基线判据镜像）。
+   */
+  function registerBaselineProjectStore(loadGates: Array<{ promise: Promise<FakeReceipt> }>) {
+    const gates = [...loadGates]
+    const rpc = (): Promise<FakeReceipt> =>
+      gates.length > 0
+        ? (gates.shift()!.promise as Promise<FakeReceipt>)
+        : Promise.resolve({ revision: 0, data: 'x' })
+    return createGuardedProjectStore(rpc)
+  }
+
+  it('命令回执提交后 runtime revision 回退：跨代 load 回执低于基线不判旧，一轮 apply 重置水位收敛（无补发循环）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const gate1 = createGate<FakeReceipt>()
+      const gate2 = createGate<FakeReceipt>()
+      const { store, sync, apply, isStaleReceipt } = registerBaselineProjectStore([gate1, gate2])
+      registerDataDomain({
+        id: 'project',
+        sync,
+        apply,
+        whenToSync: () => true,
+        failure: 'blocking',
+        isStaleReceipt,
+      })
+
+      // gen1 首轮 load 提交（revision 水位 5）
+      notifyConnectedEdge()
+      gate1.resolve({ revision: 5, data: 'v5' })
+      await flushMicrotasks()
+      expect(store.revision).toBe(5)
+      expect(store.loadState).toBe('loaded')
+
+      // 命令通道提交（等价 commandApplied：水位 5 → 6）
+      store.revision = 6
+      store.data = 'cmd-v6'
+
+      // runtime 崩溃重启：debounce 窗口丢失写入 → 文件 revision 回退到 4；重连边沿
+      // （gen2）触发重拉，本轮判旧基线 = 6（幻影水位），服务端回执 revision 4
+      notifyConnectedEdge()
+      gate2.resolve({ revision: 4, data: 'rolledback-v4' })
+      await flushMicrotasks()
+
+      // 死锁锁定点：回执低于基线 = 服务端权威回退形态 → 不判旧直接 apply——水位重置
+      // 为回执值（命令通道 revision 校验随之解锁），无丢弃点补发（sync 恒 2 次，
+      // 无限补发循环被封死）
+      expect(store.revision).toBe(4)
+      expect(store.data).toBe('rolledback-v4')
+      expect(store.loadState).toBe('loaded')
+      expect(sync).toHaveBeenCalledTimes(2)
+      // 本场景无判旧丢弃（若判据回退成恒判旧，丢弃留痕 warn 会随补发循环出现）
+      expect(warnSpy).not.toHaveBeenCalled()
+      expect(errorSpy).not.toHaveBeenCalled()
+    } finally {
+      warnSpy.mockRestore()
+      errorSpy.mockRestore()
+    }
+  })
+
+  it('对照（同代交错保护不回退）：基线之上的旧快照照旧判旧丢弃（命令结果不回滚）+ 丢弃留痕 + 补发轮收敛', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const gate1 = createGate<FakeReceipt>()
+      const gate2 = createGate<FakeReceipt>()
+      const gate3 = createGate<FakeReceipt>()
+      const { store, sync, apply, isStaleReceipt } = registerBaselineProjectStore([gate1, gate2, gate3])
+      registerDataDomain({
+        id: 'project',
+        sync,
+        apply,
+        whenToSync: () => true,
+        failure: 'blocking',
+        isStaleReceipt,
+      })
+
+      notifyConnectedEdge() // gen1 首轮 load 提交（水位 5）
+      gate1.resolve({ revision: 5, data: 'v5' })
+      await flushMicrotasks()
+      expect(store.revision).toBe(5)
+
+      notifyConnectedEdge() // gen2 重拉（本轮基线 = 5，gate2 在途）
+      // 在途窗口内命令回执提交（等价 commandApplied：水位 5 → 6）
+      store.revision = 6
+      store.data = 'cmd-v6'
+
+      // 在途 load 回执（revision 5，命令执行前旧快照；落在基线之上、水位之下）
+      gate2.resolve({ revision: 5, data: 'stale-snapshot' })
+      await flushMicrotasks()
+      // 判旧保护保持：命令结果不回滚 + 丢弃点补发
+      expect(store.revision).toBe(6)
+      expect(store.data).toBe('cmd-v6')
+      expect(sync).toHaveBeenCalledTimes(3)
+      // 判旧丢弃留痕（可观测性：丢弃-补发循环排障入口）
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("domain 'project' receipt discarded as stale revision"),
+      )
+
+      // 补发轮回执（基线刷新为 6，回执 revision 6 不早于水位）→ 提交收敛
+      gate3.resolve({ revision: 6, data: 'v6' })
+      await flushMicrotasks()
+      expect(store.loadState).toBe('loaded')
+      expect(store.data).toBe('v6')
+      expect(store.revision).toBe(6)
+      expect(sync).toHaveBeenCalledTimes(3)
+      expect(errorSpy).not.toHaveBeenCalled()
+    } finally {
+      warnSpy.mockRestore()
       errorSpy.mockRestore()
     }
   })
