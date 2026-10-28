@@ -1,5 +1,5 @@
 {
-  "purpose": "功能域垂直切片注册表的元信息与门控配置。切片 SSOT = 本目录（docs/testing/domain-slices/，每域一个 JSON），消费方：scripts/select-affected-domain.mjs（改动→受影响域选择/门禁/广播）、scripts/run-domain-tests.mjs（域执行清单）、scripts/check-domain-slices.mjs（健康度校验）。与 docs/testing/domain-map.json 的关系：domain-map = 挂载重型默认档排除 SSOT（W2-B 冻结，登记即排除），本目录 = 全域切片 SSOT（登记即归属，默认档组成不变）；两表一致性（W2-B 14 域同名 files ⊆ 切片域 tests 展开）由 check-domain-slices 交叉核对。归属裁决规则（五条）与域词表见 .tmp/round6/wave4-slicing-plan.md §1.2/§3。",
+  "purpose": "功能域垂直切片注册表的元信息与门控配置。切片 SSOT = 本目录（docs/testing/domain-slices/，每域一个 JSON），消费方：scripts/select-affected-domain.mjs（改动→受影响域选择/门禁/广播）、scripts/run-domain-tests.mjs（域执行清单）、scripts/check-domain-slices.mjs（健康度校验）。与 docs/testing/domain-map.json 的关系：domain-map = 挂载重型默认档排除 SSOT（W2-B 冻结，登记即排除），本目录 = 全域切片 SSOT（登记即归属，默认档组成不变）；两表一致性（W2-B 14 域同名 files ⊆ 切片域 tests 展开）由 check-domain-slices 交叉核对。归属裁决 = 按被测模块与消费方证据判断唯一变更原因，文件名只用于定位、不作归属依据；跨域联动用 sharedBy / contracts 显式登记。",
   "fields": {
     "name": "域名，必须等于文件名去 .json 后缀",
     "summary": "一句话域覆盖说明",
@@ -22,5 +22,5 @@
   "uncategorizedBaseline": 161,
   "coverageEnforced": true,
   "version": 1,
-  "maintenance": "维护说明：① 新增测试文件产生登记义务——pre-commit 2f-4 跑 select-affected-domain --staged 拦未归域文件，归入所属域 tests（整目录可用 <prefix>/** glob）或 uncategorized 精确清单；② uncategorized 棘轮只降不升——check 校验展开数 ≤ uncategorizedBaseline，缩趋手段 = 按内含域拆注 sharedBy / 归 host/foundation / 按 pendingDomains 注记整簇立新城迁出（新城建立 = 新建 <域>.json + uncategorized 删对应条目 + 下调基线）；③ coverageEnforced 置 true 前提 = --uncovered 清零（当前 9 件为批 B/C 域归属残量，见 wave4-batchD 报告）；④ W2-B 14 域已全部 enforced，domain-map.json 冻结不变，两表一致性由 check 交叉核对。"
+  "maintenance": "维护说明：① 新增测试文件产生登记义务——pre-commit 2f-4 跑 select-affected-domain --staged 拦未归域文件，归入所属域 tests（整目录可用 <prefix>/** glob）或 uncategorized 精确清单；② uncategorized 棘轮只降不升——check 校验展开数 ≤ uncategorizedBaseline，缩趋手段 = 按内含域拆注 sharedBy / 归 host/foundation / 按 pendingDomains 注记整簇立新城迁出（新城建立 = 新建 <域>.json + uncategorized 删对应条目 + 下调基线）；③ coverageEnforced=true：任何未覆盖测试文件都由 check 红灯拦截，新增文件必须同 commit 归域；④ W2-B 14 域已全部 enforced，domain-map.json 冻结不变，两表一致性由 check 交叉核对。"
 }

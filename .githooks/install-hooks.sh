@@ -782,9 +782,9 @@ fi
 #     手抄清单）→ 默认档排除与域触发选中失配，本检查拦成红灯。触发条件 =
 #     权威源 / 消费方 / 检查脚本自身 / renderer·ui 测试文件任一 staged
 #     （test-guard/ 并入触发：排除清单派生器 domain-exclusions 载体所在域；
-#     测试文件并入触发：新增挂载特征文件未登记域表时提示自查——重型的
-#     结果性判定兜底 = CI check-slow-tests，静态特征区分不了轻重故只提示
-#     不拦）。复用 SKIP_CODE_RULES_CHECK 开关。
+#     测试文件并入触发：新增挂载特征文件未登记域表时提示自查——重型实测
+#     阈值以 domain-map meta.criterion 为准，>2s 慢用例红灯是最终兜底；
+#     静态特征区分不了轻重故只提示不拦）。复用 SKIP_CODE_RULES_CHECK 开关。
 # ============================================================================
 
 if echo "$STAGED_FILES" | grep -qE "^docs/testing/domain-map\.json$|^packages/(renderer|ui)/vitest\.config\.ts$|^scripts/(check-domain-map|run-domain-tests)\.mjs$|^test-guard/|^packages/(renderer|ui)/.+\.test\.tsx?$"; then
@@ -846,18 +846,20 @@ fi
 
 # ============================================================================
 # 2f-5. 零特征共享池健康度检查（round6 Wave5 三包 isolate:false 双池）
-#     scripts/check-zero-mock-pool.mjs：docs/testing/zero-mock-pool.json 是三包
-#     （subagent-core / core / zcode-subagent-cli）共享池成员清单的单一权威源，
-#     消费方 = test-guard/zero-mock-pool.ts（三包 vitest.config.ts 的 shared
+#     scripts/check-zero-mock-pool.mjs：docs/testing/zero-mock-pool.json 是五包
+#     零特征登记表的单一权威源；subagent-core / core / zcode-subagent-cli 三包
+#     已接线共享池，runtime / renderer 两包只维护候选清单。已接线包的消费方 =
+#     test-guard/zero-mock-pool.ts（三包 vitest.config.ts 的 shared
 #     project include）。检查 G1-G7：结构 / 存在性 / 池内文件特征复扫（G3：给
 #     池内文件新增 vi.mock 等特征 = 共享 worker 污染源，红）/ 门控复扫（G4）/
 #     动态出场表 / 消费方接线 / 未登记漂移提示。触发条件 = 权威源 / 检查脚本 /
-#     加载器 / 三包 config / 三包测试文件任一 staged（测试文件并入触发：池内
-#     文件被改出特征必须当场拦下，不能等下次登记表变更才发现）。
+#     加载器 / 五包 config / 五包测试文件任一 staged（测试文件并入触发：池内
+#     文件被改出特征必须当场拦下；未接线两包也维护候选清单与门控排除，不能
+#     等下次登记表变更才发现漂移）。
 #     复用 SKIP_CODE_RULES_CHECK 开关（与 2f 族一致）。
 # ============================================================================
 
-if echo "$STAGED_FILES" | grep -qE "^docs/testing/zero-mock-pool\.json$|^scripts/check-zero-mock-pool\.mjs$|^test-guard/zero-mock-pool\.ts$|^packages/(subagent-core|core|zcode-subagent-cli)/(vitest\.config\.ts|.+\.test\.ts)$"; then
+if echo "$STAGED_FILES" | grep -qE "^docs/testing/zero-mock-pool\.json$|^scripts/check-zero-mock-pool\.mjs$|^test-guard/zero-mock-pool\.ts$|^packages/(subagent-core|core|zcode-subagent-cli|runtime|renderer)/(vitest\.config\.ts|.+\.test\.ts)$"; then
     print_section "[零特征共享池健康度检查]"
     if [ "$SKIP_CODE_RULES_CHECK" != "1" ]; then
         if [ ! -f "scripts/check-zero-mock-pool.mjs" ]; then

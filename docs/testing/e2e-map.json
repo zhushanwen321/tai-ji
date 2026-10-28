@@ -1182,6 +1182,7 @@
         "scripts/pr-pre-merge.sh",
         "scripts/skill-data-dir.mjs",
         "scripts/check-slow-tests.mjs",
+        "scripts/__tests__/check-slow-tests.test.mjs",
         ".githooks/check-test-extremes.mjs"
       ],
       "layer": "L1",
@@ -1221,11 +1222,15 @@
         {
           "kind": "spec",
           "ref": "scripts/__tests__/check-test-extremes.test.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/check-slow-tests.test.mjs"
         }
       ],
       "trigger": "on-diff",
       "serial": false,
-      "run": "npx vitest run scripts/__tests__/quality-gates.test.mjs scripts/__tests__/changeset-check.test.mjs scripts/__tests__/cross-branch-overlap.test.mjs",
+      "run": "npx vitest run scripts/__tests__/quality-gates.test.mjs scripts/__tests__/changeset-check.test.mjs scripts/__tests__/cross-branch-overlap.test.mjs scripts/__tests__/check-slow-tests.test.mjs",
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "review-pipeline-redesign §5-U1 三脚本（含双向防拆断言的单测锁定）+ pr-pre-merge 一体化脚本的登记（2026-09-27 补登，脚本随 c5f8aab59 入库）。真实运行形态 = pr-cr-fix / dev-merge 流水线人工触发（quality-gates 依赖 .agents 内 coverage-gate.py 实体，gitignored 不登记为 asset）；本表 run = 零 token vitest 锁定侧（52 用例：聚合编排 / base 口径两侧 / 实体缺失报错 / 盲区判定 / changeset 文案对拍 / 交集计算，子进程命令全走依赖注入 fake，临时 git 仓库用例 mkdtemp 自建自删）"
@@ -4388,7 +4393,7 @@
       "run": "pnpm --filter @taiji/runtime exec vitest run test/plugin-esm-loader.test.ts src/services/plugin-service/__tests__/plugin-esm-loader.test.ts",
       "owner": "packages/runtime",
       "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
-      "note": "R2 态（2026-10-24 u-capability 交付登记，防漏门禁补登）。主池快用例 + fixture 插件（fixtures 被 E2E-INTEG-17/23 门控轨 fork 时消费，fixture 本体改动即触发本 rule 与门控轨）；真 fork 行为面归 E2E-INTEG-17/23。"
+      "note": "R2 态（2026-10-24 u-capability 交付登记，防漏门禁补登）。主池快用例 + fixture 插件（fixtures 被 E2E-INTEG-17/23 门控组 fork 时消费，fixture 本体改动即触发本 rule 与门控组）；真 fork 行为验证归 E2E-INTEG-17/23。"
     },
     {
       "id": "E2E-PLUGCAP-01",
@@ -4477,7 +4482,7 @@
     },
     {
       "id": "E2E-PLUGINAPI-01",
-      "summary": "插件侧消费面契约：Phase2AgentAPI providers.write/delete/credential + ui.openUrl + events.report + views.onUiEvent 出站帧形态（pluginId 命名空间校验）+ plugin.ui.event 下行通知消费分发",
+      "summary": "插件侧 API 消费契约：Phase2AgentAPI providers.write/delete/credential + ui.openUrl + events.report + views.onUiEvent 出站帧形态（pluginId 命名空间校验）+ plugin.ui.event 下行通知消费分发",
       "scope": [
         "packages/plugin-sdk/src/types.ts",
         "packages/plugin-sdk/src/mock.ts",
@@ -4758,7 +4763,7 @@
     },
     {
       "id": "E2E-PIPE-22",
-      "summary": "前端机器守卫脚本三件套（原 renderer 测试用例转出）：wool 退役防复活 / 动画源码 12 条判据 / z 基线全仓对拍——pre-commit 挂接（install-hooks.sh 2f+），负向探针三例已验",
+      "summary": "前端机器检查脚本三件套（原 renderer 测试用例转出）：wool 退役防复活 / 动画源码 12 条判据 / z 基线全仓对拍——pre-commit 挂接（install-hooks.sh 2f+），负向探针三例已验",
       "scope": [
         "scripts/check-wool-retirement.mjs",
         "scripts/check-animation-source-guards.mjs",
@@ -4784,7 +4789,7 @@
       "run": "node scripts/check-wool-retirement.mjs && node scripts/check-animation-source-guards.mjs && node scripts/check-z-surface-baseline.mjs",
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md",
-      "note": "2026-10-27 round6 wave1 前端片从 vitest 用例转出（原 animation-source-guards.test.ts 12 例 + z-scan 4 例 + wool 2 例），转出不挂接 = 零覆盖，已挂 pre-commit 2f+ 块（.githooks/install-hooks.sh）；改动脚本或守卫语义时跑 run 命令验证。"
+      "note": "2026-10-27 round6 wave1 前端片从 vitest 用例转出（原 animation-source-guards.test.ts 12 例 + z-scan 4 例 + wool 2 例），转出不挂接 = 零覆盖，已挂 pre-commit 2f+ 块（.githooks/install-hooks.sh）；改动脚本或检查语义时跑 run 命令验证。"
     },
     {
       "id": "E2E-INTEG-54",
@@ -5118,7 +5123,7 @@
     },
     {
       "id": "E2E-PIPE-23",
-      "summary": "测试执行域触发档机制（round6 Wave2）：domain-map.json 单一权威源（14 域 / 99 个挂载渲染重型文件）+ run-domain-tests 按域跑 + check-domain-map 健康度守卫（结构/存在性/唯一归属/挂载特征/消费方接线）+ 两包 vitest exclude 派生",
+      "summary": "测试执行域触发档机制（round6 Wave2）：domain-map.json 单一权威源（14 域 / 99 个挂载渲染重型文件）+ run-domain-tests 按域跑 + check-domain-map 健康度检查（结构/存在性/唯一归属/挂载特征/消费方接线）+ 两包 vitest exclude 派生",
       "scope": [
         "scripts/run-domain-tests.mjs",
         "scripts/check-domain-map.mjs",
@@ -5144,7 +5149,7 @@
     },
     {
       "id": "E2E-PIPE-24",
-      "summary": "集成载体守卫（round6 Wave2）：INTEGRATION_TESTS 成员文件内未被 describe.skipIf 包裹的用例必须登记 INTEGRATION_UNGATED_CARRIERS——漏登记 = 门控关闭时该用例静默不收集",
+      "summary": "集成载体检查（round6 Wave2）：INTEGRATION_TESTS 成员文件内未被 describe.skipIf 包裹的用例必须登记 INTEGRATION_UNGATED_CARRIERS——漏登记 = 门控关闭时该用例静默不收集",
       "scope": [
         "scripts/check-integration-carriers.mjs",
         "packages/runtime/vitest.config.ts",
@@ -5162,13 +5167,16 @@
       "run": "node scripts/check-integration-carriers.mjs",
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#测试执行四档",
-      "note": "掩码状态机剥离注释/字符串后提取两表并逐用例判定 skipIf 覆盖；解析不足输出 WARNING 放行不 fail（防守卫自身误报拖死提交）。挂 pre-commit 2f-2。"
+      "note": "掩码状态机剥离注释/字符串后提取两表并逐用例判定 skipIf 覆盖；解析不足输出 WARNING 放行不 fail（防检查自身误报拖死提交）。挂 pre-commit 2f-2。"
     },
     {
       "id": "E2E-PIPE-25",
-      "summary": "两段式调度退出码聚合判定（check-test-results）：pnpm --no-bail 保全貌但退出码恒 0，调度最终退出码改由各包 junit（工厂 DEFAULT 统一落点）聚合判定；--clean 防上一轮 stale 误判",
+      "summary": "全量/重型调度退出码聚合与 JUnit 用例守恒：check-test-results 汇总各包 failures/errors 并支持 --clean；check-test-junit-parity 在测试文件合并/迁移前后比较用例名多重集",
       "scope": [
         "scripts/check-test-results.mjs",
+        "scripts/check-test-junit-parity.mjs",
+        "scripts/__tests__/check-test-results.test.mjs",
+        "scripts/__tests__/check-test-junit-parity.test.mjs",
         "package.json"
       ],
       "layer": "L1",
@@ -5176,14 +5184,26 @@
         {
           "kind": "script",
           "ref": "scripts/check-test-results.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/check-test-junit-parity.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/check-test-results.test.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/check-test-junit-parity.test.mjs"
         }
       ],
       "trigger": "on-diff",
       "serial": false,
-      "run": "node scripts/check-test-results.mjs",
+      "run": "pnpm exec vitest run scripts/__tests__/check-test-results.test.mjs scripts/__tests__/check-test-junit-parity.test.mjs && node scripts/check-test-results.mjs",
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#测试执行四档",
-      "note": "test / test:integration 两段调度的收尾判定。改调度脚本或 junit 落点时：注入一个必败用例跑 test:small 应 exit 1 且列出 suite，还原后 exit 0。"
+      "note": "聚合范围 = packages/<pkg>、apps/<app>、apps/electron/main、extensions/<group>/<pkg> 的 test-results；pnpm --no-bail 只负责保全貌，最终失败退出码由本聚合判定。守恒工具默认要求包路径 + classname + 完整测试名一致，文件迁移与新增一层外层 describe 须显式参数放行；用法见 TEST-STRATEGY「测试文件组织与合并原则」。"
     },
     {
       "id": "E2E-RTBUNDLE-01",
@@ -5412,7 +5432,7 @@
     },
     {
       "id": "E2E-PIPE-26",
-      "summary": "功能域垂直切分引擎（Wave4 批 A）：domain-slices/ 注册表 38 域骨架（owner 唯一 + sharedBy 触发 + W2-B 14 域前向兼容）+ select-affected-domain 按变更选域 + check-domain-slices 健康度守卫 + run-domain-tests 多域/双源升级",
+      "summary": "功能域垂直切分引擎（Wave4 批 A）：domain-slices/ 注册表 38 域骨架（owner 唯一 + sharedBy 触发 + W2-B 14 域前向兼容）+ select-affected-domain 按变更选域 + check-domain-slices 健康度检查 + run-domain-tests 多域/双源升级",
       "scope": [
         "scripts/select-affected-domain.mjs",
         "scripts/check-domain-slices.mjs",
@@ -5499,7 +5519,7 @@
     },
     {
       "id": "E2E-PIPE-28",
-      "summary": "零特征共享池机制（round6 Wave5）：zero-mock-pool.json 单一权威源（subagent-core/core/zcode-subagent-cli 三包 isolate:false 共享池成员清单）+ check-zero-mock-pool 派生守卫（G1-G7：结构/存在性/池内特征复扫/门控复扫/动态出场表/三包 config 消费方接线/未登记漂移提示）+ loadZeroMockPool 加载器 + 三包 vitest projects 双池（shared isolate:false / isolated order 1）",
+      "summary": "零特征共享池机制（round6 Wave5）：zero-mock-pool.json 单一权威源（subagent-core/core/zcode-subagent-cli 三包 isolate:false 共享池成员清单）+ check-zero-mock-pool 派生检查（G1-G7：结构/存在性/池内特征复扫/门控复扫/动态出场表/三包 config 消费方接线/未登记漂移提示）+ loadZeroMockPool 加载器 + 三包 vitest projects 双池（shared isolate:false / isolated order 1）",
       "scope": [
         "scripts/check-zero-mock-pool.mjs",
         "test-guard/zero-mock-pool.ts",
@@ -5517,7 +5537,7 @@
       "run": "node scripts/check-zero-mock-pool.mjs",
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#测试执行四档",
-      "note": "池内文件新增 mock/门控特征由守卫 G3/G4 拦（防静默污染共享 worker）；三包 vitest.config.ts 的接线由 G6 静态校验覆盖，不重复进 scope。池成员清单变更（--update 重写登记表）除本守卫外必须三包各两轮全量动态验证（TAIJI_SKIP_REAL_PI=1 pnpm test 全绿 + junit 用例名与变更前基线守恒，红则该文件出局进隔离池并登记 dynamicExclusions）——判据与维护契约见登记表 _meta。"
+      "note": "池内文件新增 mock/门控特征由检查 G3/G4 拦（防静默污染共享 worker）；三包 vitest.config.ts 的接线由 G6 静态校验覆盖，不重复进 scope。池成员清单变更（--update 重写登记表）除本检查外必须三包各两轮全量动态验证（TAIJI_SKIP_REAL_PI=1 pnpm test 全绿 + junit 用例名与变更前基线守恒，红则该文件出局进隔离池并登记 dynamicExclusions）——判据与维护契约见登记表 _meta。"
     },
     {
       "id": "E2E-UPDATER-01",

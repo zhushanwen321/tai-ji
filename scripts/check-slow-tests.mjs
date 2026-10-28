@@ -20,7 +20,7 @@
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs'
 import { relative, join, resolve, dirname } from 'node:path'
 import { execSync } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -33,10 +33,18 @@ if (!Number.isFinite(MAX_MS) || MAX_MS <= 0) {
 }
 const IF_FRESH = args.includes('--if-fresh')
 
-/** 递归收集 <root>/…​/test-results/vitest-junit.xml（剪枝 node_modules/.git/dist） */
-function findJunitFiles(dir, out) {
+/** 与 domain-slices 登记的四种测试文件后缀保持一致。 */
+export const STAGED_TEST_RE = /(?:\.test\.(?:ts|tsx|mjs)|\.spec\.ts)$/
+
+/** staged 测试文件 → junit 落点所属包；扩展包与 Electron 主进程不是一级目录。 */
+export function packageForTestFile(file) {
+  return file.match(/^(packages\/[^/]+|apps\/electron\/main|apps\/[^/]+|extensions\/[^/]+\/[^/]+)\//)?.[1] ?? null
+}
+
+/** 递归收集 <root>/…​/test-results/vitest-junit.xml（剪枝依赖、构建产物与临时基线） */
+export function findJunitFiles(dir, out) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'dist') continue
+    if (['node_modules', '.git', 'dist', '.tmp'].includes(entry.name)) continue
     const full = join(dir, entry.name)
     if (entry.isDirectory()) {
       if (entry.name === 'test-results') {
@@ -72,17 +80,17 @@ function freshJunitFilter(junitFiles) {
   try {
     staged = execSync('git diff --cached --name-only --diff-filter=ACMR', { cwd: ROOT, encoding: 'utf-8' })
       .split('\n')
-      .filter((f) => /\.test\.tsx?$/.test(f))
+      .filter((f) => STAGED_TEST_RE.test(f))
   } catch {
     return { pass: true, files: [] }
   }
   if (staged.length === 0) return { pass: true, files: [] }
-  const pkgCutoff = new Map() // 包前缀（packages/<pkg> 等）→ staged 文件最新 mtime
+  const pkgCutoff = new Map() // junit 落点所属包 → staged 文件最新 mtime
   for (const f of staged) {
-    const m = f.match(/^(?:packages|apps|extensions)\/[^/]+/)
-    if (!m || !existsSync(join(ROOT, f))) continue
+    const pkgRel = packageForTestFile(f)
+    if (!pkgRel || !existsSync(join(ROOT, f))) continue
     const t = statSync(join(ROOT, f)).mtimeMs
-    pkgCutoff.set(m[0], Math.max(pkgCutoff.get(m[0]) ?? 0, t))
+    pkgCutoff.set(pkgRel, Math.max(pkgCutoff.get(pkgRel) ?? 0, t))
   }
   if (pkgCutoff.size === 0) return { pass: true, files: [] }
   const files = []
@@ -96,7 +104,7 @@ function freshJunitFilter(junitFiles) {
     if (statSync(junit).mtimeMs >= cutoff) files.push(junit)
     else stale.push(pkgRel)
   }
-  for (const [pkgRel, cutoff] of pkgCutoff) {
+  for (const pkgRel of pkgCutoff.keys()) {
     if (!junitPkgs.has(pkgRel)) stale.push(pkgRel) // 有 staged 改动但 junit 缺失
   }
   return { pass: false, files, stale }
@@ -150,4 +158,4 @@ function main() {
   console.log(`[check-slow-tests] OK（${junitFiles.length} 份 junit，超阈值 ${cases} 条中 ${exemptedCases} 条为门控资产豁免、默认组零慢用例；豁免清单 = e2e-map E2E-INTEG-* ${exemptFiles} 个文件）`)
 }
 
-main()
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main()

@@ -84,6 +84,8 @@ node scripts/verify-scheduler-e2e.cjs
 | 调度层 | 包内分池：零特征 shared（isolate:false 共享模块图）/ isolated（每文件新进程）/ integration 门控组 / real-pi 串行尾组；分池调度契约以各包 config 文件头为权威（范例 = `packages/runtime/vitest.config.ts`） | 各包 vitest.config.ts + [docs/testing/zero-mock-pool.json](testing/zero-mock-pool.json) | `scripts/check-vitest-guard.mjs`（防线必挂）/ `scripts/check-zero-mock-pool.mjs`（G1-G7）/ `scripts/check-integration-carriers.mjs`（门控载体） |
 | 判定层 | 用例级质量门禁：慢用例 / 极端形态 / flake 卫生 | junit（每次运行自动落盘 `test-results/vitest-junit.xml`）+ `.githooks/` 各 EXEMPT 表 | `scripts/check-slow-tests.mjs`（CI，默认组用例 >2s 红灯）/ `.githooks/check-test-extremes.mjs`（pre-commit 静态信号）/ `check_test_flake_hygiene.py` |
 
+上述 `check-domain-map` / `check-domain-slices` / `check-zero-mock-pool` / `check-integration-carriers` 四项静态检查除按 staged 路径接入 pre-commit 外，也在 CI invariants 每次全量运行，避免未命中本地触发路径时漏掉登记漂移。
+
 ### 测试执行四档（日常档 / 全量档 / 重型档 / 域触发档）
 
 > 四档是**执行入口**档位（什么改动跑哪一档）；「新写测试判据」节的三档判据是**用例形态**档位（新用例落哪一层），两者正交。回归排序按功能分级（P0-P3），见 [docs/FEATURE-PRIORITIES.md](FEATURE-PRIORITIES.md)。
@@ -91,15 +93,17 @@ node scripts/verify-scheduler-e2e.cjs
 | 档 | 入口 | 内容 | 何时跑 |
 |----|------|------|--------|
 | 日常档（默认） | `pnpm test`（= `node scripts/run-daily-tests.mjs`） | 按域分流：diff → 受影响域（选择器与 `select-affected-domain` 同源纯函数，含契约闭包与 sharedBy）→ foundation/host 基础池 core 快集（92 文件；runtime / electron-main / renderer / mobile-renderer 四重包的池文件默认排除、命中对应池时升级全量，分级依据见脚本 `POOL_SLOW_PREFIXES` 注释）∪ 命中功能域全量；无变更 / 无命中仅基础池 core；广播载体（`_meta.json` broadcastCarriers）命中输出建议全量提示；junit 聚合判定退出码 | 日常开发每次验证（迭代中 / 提交前）；diff base 口径（--base > 分支 upstream > dev-X.Y.Z 远端副本 > github/main）与参数见 `node scripts/run-daily-tests.mjs --help` |
-| 全量档 | `pnpm test:all`（三段式：`test:small` 10 小包 concurrency=3 → `test:mid` 5 中包（ui / mobile-renderer / core / zcode-subagent-cli / electron）concurrency=2 → `test:heavy` 3 大包（subagent-core / runtime / renderer）串行；段内包级并发与分段依据 = 10 核机包级并发实测，见「测试耗时基线与压缩裁决」节） | 全量单测层：逻辑层 + mock 冒烟，真进程 / 真 IO 用例默认跳过（门控关闭），挂载渲染重型文件默认排除（域触发档承接） | 发布前 / 日常档广播载体命中后的全量回归 / 需要全量兜底的场景；CI 各 test job 按包分 job 同口径直跑（`TAIJI_SKIP_REAL_PI=1`，不经根入口） |
-| 重型档 | `pnpm test:integration` | 与全量档同一两条链，带 `TAIJI_TEST_INTEGRATION=1`：runtime integration 组（`packages/runtime/vitest.config.ts` 的 INTEGRATION_TESTS 表）真跑 + 各包 `describe.skipIf` 门控用例真跑 | 改动触及集成门控资产时：`node scripts/select-affected-e2e.mjs --base <ref>` 命中 `E2E-INTEG-*` 规则即跑对应子集（单文件触发形态 = e2e-map 各规则的 run 命令），全量口径 = 本入口 |
+| 全量档 | `pnpm test:all`（三段式：`test:small` 10 小包 concurrency=3 → `test:mid` 5 中包（ui / mobile-renderer / core / zcode-subagent-cli / electron）concurrency=2 → `test:heavy` 3 大包（subagent-core / runtime / renderer）串行；段内包级并发与分段依据 = 10 核机包级并发实测，见「测试耗时优化方法」节） | 全量单测层：逻辑层 + mock 冒烟，真进程 / 真 IO 用例默认跳过（门控关闭），挂载渲染重型文件默认排除（域触发档承接） | 发布前 / 日常档广播载体命中后的全量回归 / 需要全量兜底的场景；CI 各 test job 按包分 job 同口径直跑（`TAIJI_SKIP_REAL_PI=1`，不经根入口） |
+| 重型档 | `pnpm test:integration` | 与全量档同一三段调度与包内测试集合，带 `TAIJI_TEST_INTEGRATION=1`：runtime integration 组（`packages/runtime/vitest.config.ts` 的 INTEGRATION_TESTS 表）真跑 + 各包 `describe.skipIf` 门控用例真跑 | 改动触及集成门控资产时：`node scripts/select-affected-e2e.mjs --base <ref>` 命中 `E2E-INTEG-*` 规则即跑对应子集（单文件触发形态 = e2e-map 各规则的 run 命令），全量口径 = 本入口 |
 | 域触发档 | `pnpm test:domain <域>`（= `node scripts/run-domain-tests.mjs <domain>`；`--domains` 列域） | 挂载渲染重型用例按功能域触发：设 `TAIJI_TEST_DOMAIN` 取消默认档排除 + 显式文件清单精确选中，单域秒级 | 改动命中某功能域的挂载渲染文件时跑该域；全量渲染回归 = 逐域跑或临时清空排除（不回流默认档） |
 
-**域触发档的登记与排除契约**（权威源 = [docs/testing/domain-map.json](testing/domain-map.json)，域清单以该文件实际条目为准）：挂载渲染重型测试文件（含 `@vue/test-utils` 引用或 `mount(` 调用）按功能域登记进 `domains` 表，每文件唯一归属；默认档排除与域触发选中都从该表派生——renderer / ui 的 vitest.config.ts 经 `test-guard/domain-exclusions.ts` 加载排除清单，域触发经 `scripts/run-domain-tests.mjs` 取清单，禁止任何一侧手抄文件副本。登记义务：新增挂载渲染重型文件须同 commit 登记进对应域（漏登记 = 文件落回默认档拖慢全量档）；逻辑层文件禁止登记（域清单只收挂载渲染）。健康度机器校验 = `scripts/check-domain-map.mjs`（结构 / 存在性 / 唯一归属 / 挂载特征 / 消费方接线五项；pre-commit 以权威源、消费方 config、两个脚本或 `test-guard/` 任一 staged 触发）。
+**与早期耗时目标的口径映射**：早期「第二类」对应现在的全量档；早期「第一类」对应重型档与独立 E2E 资产的合集，不等于单独某条命令。「重型档墙钟 − 全量档墙钟」只能用于归因门控用例新增的工作量，不能当作第一类总耗时。比较目标与优化收益时必须先固定档位、测试范围和负载窗口。
+
+**域触发档的登记与排除契约**（权威源 = [docs/testing/domain-map.json](testing/domain-map.json)，域清单以该文件实际条目为准）：同时满足 `meta.criterion` 的挂载型与重型条件的测试文件按功能域登记进 `domains` 表，每文件唯一归属；默认档排除与域触发选中都从该表派生——renderer / ui 的 vitest.config.ts 经 `test-guard/domain-exclusions.ts` 加载排除清单，域触发经 `scripts/run-domain-tests.mjs` 取清单，禁止任何一侧手抄文件副本。登记义务：新增挂载渲染重型文件须同 commit 登记进对应域（漏登记 = 文件落回默认档拖慢全量档）；逻辑层文件禁止登记（域清单只收挂载渲染）。健康度机器校验 = `scripts/check-domain-map.mjs`（结构 / 存在性 / 唯一归属 / 挂载特征 / 消费方接线五项；pre-commit 以权威源、消费方 config、两个脚本或 `test-guard/` 任一 staged 触发）。
 
 **功能域切片登记契约**（权威源 = [docs/testing/domain-slices/](testing/domain-slices/) 目录，38 域 = 35 功能域 + foundation / host / uncategorized 三池；引擎四件 = `scripts/select-affected-domain.mjs` 按变更选域、`scripts/check-domain-slices.mjs` 健康度检查、`scripts/run-domain-tests.mjs` 多域运行、`scripts/run-daily-tests.mjs` 日常档编排〔`pnpm test`：diff → 选域 → 基础池 core ∪ 命中域〕）：全部测试文件按被测模块的唯一变更原因登记进唯一 owner 域（owner 唯一保证并行登记不冲突；跨域触发的测试用 `sharedBy` 注记联跑域，键 = owner 域登记的文件路径、值 = 联跑域列表，超集方向不漏跑；域间联动义务用 `contracts` 登记）。与 domain-map 的分工：domain-map 只管挂载渲染重型文件（默认档排除 + 域触发选中），domain-slices 覆盖全量测试文件（改动了什么 → 该跑哪些域）。登记义务：新增测试文件须同 commit 登记进所属域 JSON（`coverageEnforced=true` 后检查对未覆盖文件红灯）；归属按消费方证据（被测模块 / describe 实测内容），禁文件名启发式（`new-task-bundle.test.ts` 目录名陷阱实例：实测全为 GitMessageHandler，归 git 域）。健康度机器校验 = `scripts/check-domain-slices.mjs`（结构 / 存在性 / 唯一归属 / W2-B 交叉核对 / 未覆盖强制；pre-commit 2f-4 段以注册表或三脚本任一 staged 触发）。
 
-**零特征共享池**（subagent-core / core / zcode-subagent-cli 三包接线，runtime / renderer 登记未接线；权威源 = [docs/testing/zero-mock-pool.json](testing/zero-mock-pool.json)，e2e-map 登记 = E2E-PIPE-28）：已接线三包的默认档测试按「零特征文件 → shared project（isolate:false，模块图与 worker 进程跨文件复用）；其余 → isolated project（每文件新进程，groupOrder 1 与 shared 组严格串行，vitest 4 分池调度契约见 `packages/runtime/vitest.config.ts` 文件头）」执行，入口命令不变（`pnpm test`）。准入判据三层：①静态零特征——七特征正则（vi.mock / vi.doMock / vi.resetModules / vi.useFakeTimers / vi.stubGlobal / process.env 直写 / globalThis 直写）全不命中；②非门控——集成门控（import integration-gate）与真机 live 门控（ENGINE_CONFORMANCE_LIVE）文件一律隔离，门控档执行语义只在隔离态验证过；③动态验证通过——零特征 ≠ 零污染（「正常 API 调用改写模块级单例」静态原理性漏判，core settings-store 实例），共享池实跑红过的文件出局进隔离池并登记 dynamicExclusions 附原因。维护契约：新测试文件默认落隔离池（漏登记无危害只是慢，方向安全）；池扩容 = `node scripts/check-zero-mock-pool.mjs --update` 重写登记表 → 已接线包各两轮全量动态验证（TAIJI_SKIP_REAL_PI=1 pnpm test 全绿 + junit 用例名与变更前基线守恒）→ 同 commit 提交；给池内文件引入 mock / 门控特征由机器检查 G3/G4 红灯拦截（健康度机器校验 = `scripts/check-zero-mock-pool.mjs`，G1-G7：结构 / 存在性 / 特征复扫 / 门控复扫 / 动态出场表 / 已接线包 config 消费方接线 / 未登记漂移提示）。**接线边界（同负载窗口交替 A/B 实证）**：包内零特征占比 ≥~50% 才有净收益（subagent-core 59% → 2.13x；core 1.55x）；占比 ~10% 时新增 project 的固定开销（第二个 vite server + 组串行化）反噬净慢 0.6~2.9s——runtime（24/235）、renderer（10/113）据此停在「已登记未接线」（登记表 `wired` 标记受 G6 检查约束，重新接线判据与 A/B 数据见登记表 `_meta` 与 `scripts/check-zero-mock-pool.mjs` POOL_PKGS 注释）；ui / mobile-renderer / electron-main 不登记（零特征文件过少，无提速对象）。
+**零特征共享池**（subagent-core / core / zcode-subagent-cli 三包接线，runtime / renderer 登记未接线；权威源 = [docs/testing/zero-mock-pool.json](testing/zero-mock-pool.json)，e2e-map 登记 = E2E-PIPE-28）：已接线三包的默认档测试按「零特征文件 → shared project（isolate:false，模块图与 worker 进程跨文件复用）；其余 → isolated project（每文件新进程，groupOrder 1 与 shared 组严格串行，vitest 4 分池调度契约见 `packages/runtime/vitest.config.ts` 文件头）」执行，入口命令不变（`pnpm test`）。准入判据四层：①静态零特征——七特征正则（vi.mock / vi.doMock / vi.resetModules / vi.useFakeTimers / vi.stubGlobal / process.env 直写 / globalThis 直写）全不命中；②非门控——集成门控（import integration-gate）与真机 live 门控（ENGINE_CONFORMANCE_LIVE）文件一律隔离，门控档执行语义只在隔离态验证过；③默认档 main 收集范围对齐——runtime 剔除 REAL_PI_TESTS / INTEGRATION_TESTS 成员，renderer 剔除 domain-map 默认档排除成员，防止同一文件被两个 project 双跑；④动态验证通过——零特征 ≠ 零污染（「正常 API 调用改写模块级单例」静态原理性漏判，core settings-store 实例），共享池实跑红过的文件出局进隔离池并登记 dynamicExclusions 附原因。维护契约：新测试文件默认落隔离池（漏登记无危害只是慢，方向安全）；池扩容 = `node scripts/check-zero-mock-pool.mjs --update` 重写登记表 → 已接线包各两轮全量动态验证（TAIJI_SKIP_REAL_PI=1 pnpm test 全绿 + junit 用例名与变更前基线守恒）→ 同 commit 提交；给池内文件引入 mock / 门控特征由机器检查 G3/G4 红灯拦截（健康度机器校验 = `scripts/check-zero-mock-pool.mjs`，G1-G7：结构 / 存在性 / 特征复扫 / 门控复扫 / 动态出场表 / 已接线包 config 消费方接线 / 未登记漂移提示）。**接线边界（同负载窗口交替 A/B 实证）**：包内零特征占比 ≥~50% 才有净收益（subagent-core 59% → 2.13x；core 1.55x）；占比 ~10% 时新增 project 的固定开销（第二个 vite server + 组串行化）反噬净慢 0.6~2.9s——runtime（25/235）、renderer（10/113）据此停在「已登记未接线」（登记表 `wired` 标记受 G6 检查约束，重新接线判据与 A/B 数据见登记表 `_meta` 与 `scripts/check-zero-mock-pool.mjs` POOL_PKGS 注释）；ui / mobile-renderer / electron-main 不登记（零特征文件过少，无提速对象）。
 
 **重型档的门控与载体登记维护契约**（SSOT = `packages/runtime/vitest.config.ts` 文件头维护契约 + [下方「集成测试门控约定」](#集成测试门控约定taiji_test_integration)）：真进程 / 真 IO 用例两种门控形态（用例级 `describe.skipIf` / 文件级 INTEGRATION_TESTS 登记）的选型、载体表登记义务见该节。漏登记（成员文件内存在未包裹用例却不在 INTEGRATION_UNGATED_CARRIERS）= 门控关闭时该文件不被收集、用例静默消失——机器检查 `scripts/check-integration-carriers.mjs`（pre-commit 以 runtime vitest.config.ts / `test-guard/` / runtime 测试文件任一 staged 触发；复用 `SKIP_CODE_RULES_CHECK` 开关）。
 
@@ -171,7 +175,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
 **机器防线**（新增测试的极端形态在提交与 CI 两级被拦，判断不留给人）：
 - pre-commit `.githooks/check-test-extremes.mjs`：staged 测试文件命中「真子进程调用但未挂门控 / 显式 timeout ≥5s / waitFor 显式 timeout ≥1s / performance.now 断言」任一信号即红；合法例外（锁语义需真实 pid 判定、检查器黑盒自测等）登记在该脚本的 EXEMPT 表，逐条附理由。
 - 慢用例门禁 `scripts/check-slow-tests.mjs`（提交与 CI 两级）：CI 侧各 test job 在测试步骤后解析 junit（`test-results/vitest-junit.xml` 每次运行自动落盘），默认组任一用例 >2s 即红——e2e-map `E2E-INTEG-*` 规则登记的门控资产文件豁免（其耗时属集成组语义）；pre-commit 侧 `--if-fresh`（2f-6）只查本次 staged 测试文件所属包、且 junit 新鲜（mtime ≥ staged 文件，即改完真跑过）的包，junit 缺失或陈旧的包黄字跳过不拦。本地对账入口：`node scripts/check-slow-tests.mjs`（扫当前已落盘的全部 junit）。
-- 挂载文件域登记提示 `scripts/check-domain-map.mjs` 检查项 7（warn 级）：staged 新增 .test.ts 含挂载特征且未登记 domain-map 时提示自查——静态特征区分不了重型（须登记走域触发档）与轻量（合法留默认档，存量数百个），重型的结果性判定兜底 = 上一条慢用例门禁，故只提示不拦。
+- 挂载文件域登记提示 `scripts/check-domain-map.mjs` 检查项 7（warn 级）：staged 新增 .test.ts 含挂载特征且未登记 domain-map 时提示自查——静态特征区分不了重型（须登记走域触发档）与轻量（合法留默认档，存量数百个），故只提示不拦。重型实测判据以 `domain-map.json meta.criterion` 为准（单用例 ≥300ms 或文件级 tests 段 ≥1s）；慢用例门禁的 >2s 是更靠后的结果红灯，不是重型迁入的唯一阈值。
 
 **派发纪律**：向 subagent 派发涉及写测试的任务时，提示词必须附带本节三档判据与门控写法要点（或直接指路本节），防新用例把极端形态带回单测层——项目 AGENTS.md 测试节已登记此要求。
 
@@ -180,7 +184,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
 | 登记处 | 什么文件必须登 | 漏登后果 | 机器检查 |
 |--------|--------------|---------|---------|
 | `docs/testing/domain-slices/` 域 JSON | **全部**测试文件（唯一 owner 域，按被测模块消费方证据归属，禁文件名启发式） | 日常档按域分流漏跑该文件；未覆盖文件检查红灯 | `select-affected-domain --staged`（pre-commit 无条件拦新增文件漏登记）+ `scripts/check-domain-slices.mjs` |
-| `docs/testing/domain-map.json` | 挂载渲染重型文件（`@vue/test-utils` 引用或 `mount(` 调用且用例重——CI 慢用例门禁 >2s 是重型的判定兜底） | 文件落默认档拖慢全量档 | `scripts/check-domain-map.mjs`（登记质量）；`scripts/check-slow-tests.mjs`（CI >2s 红灯逼登记）。轻量挂载文件（数百个存量）合法留默认档，静态特征区分不了轻重，勿反向硬卡 |
+| `docs/testing/domain-map.json` | 挂载渲染重型文件（挂载业务组件树，且满足 `meta.criterion`：单用例 ≥300ms 或文件级 tests 段 ≥1s） | 文件落默认档拖慢全量档 | `scripts/check-domain-map.mjs`（登记质量 + 新增挂载文件提示）；`scripts/check-slow-tests.mjs`（CI >2s 最终红灯）。轻量挂载文件合法留默认档，静态特征区分不了轻重，勿反向硬卡 |
 | `docs/testing/e2e-map.json` | 门控 / live / E2E 档资产（集成门控文件、真机验收用例、updater E2E 段等） | 触发式回归（select-affected-e2e）漏跑该资产 | `select-affected-e2e --check` + `scripts/validate-e2e-map.mjs` |
 | 所在包 `vitest.config.ts` 门控表 | 文件级集成组成员（INTEGRATION_TESTS）与门控关闭仍需收集的载体（INTEGRATION_UNGATED_CARRIERS）；real-pi 组成员（REAL_PI_TESTS） | 门控关闭时非门控用例静默不收集；或同一文件双执行 | `scripts/check-integration-carriers.mjs` + `scripts/check-vitest-guard.mjs` |
 | `docs/testing/zero-mock-pool.json` | 可选提速：已接线三包的零特征新文件（`--update` 入池） | 漏登只是慢（G7 warn），方向安全 | `scripts/check-zero-mock-pool.mjs` G7 |
@@ -530,23 +534,40 @@ pi 边界可靠性设计的测试范围落地（2026-08-27 事故对 → 四支�
 
 **测试卫生同批修复**：`AsyncErrorFallback.test.ts` 的 `void retry.loader()` 泄漏 unhandled rejection（稳定制造 exit 1、淹没补丁验证）→ 改显式 `.catch()`。规则："故意不 await 的 promise" 必须显式接住 rejection——`void` 不阻止 unhandledRejection。
 
-## 测试耗时基线与压缩裁决（2026-09-15 全仓 sweep 收尾）
+## 测试耗时优化方法（现行）
 
-> 记录在案来源：注入缝修复（commit `8a9a0b4a3`，消除 ~87s 纯 sleep）后的三项跟进实测。先立判据再谈优化，防止按求和值误判「慢」、按错误机理选错方案。
+> 适用于全量档、重型档与日常档的继续提速。先固定执行档、测试范围和机器负载，再判断瓶颈；不得用缩小收集范围、删除用例或改变计时口径制造提速数字。当前实测基线见下节。
 
-**判据：评价耗时看墙钟（Duration 行），不看 tests 求和值**。vitest forks 池的 `Tests Xs` 是全部测试文件在各自 worker 的执行时间加总；subagent-core 求和 32.4s 对应墙钟仅 9.5s（10 worker 并行）。求和值只用于用例间相对排序与慢文件定位（junit 按文件聚合）。
+### 测量口径：三个数字各回答一个问题
 
-**裁决一：慢池拆分（真实 IO 用例隔离到 maxWorkers=1 组）——不做，两包均为深度负收益**。实测：subagent-core 真实 IO 文件串行总和 S=13.1s > 当前满并行墙钟 9.45s（拆后慢 39%）；zcode S=29.4s ≈ 包总时长 98.5%（拆后慢 273%）。且 vitest 4.x projects 分组调度契约是**严格串行**（`groupSpecs` 逐组 await，主组完整结束慢组才开跑），实际墙钟 = 主池 + S，比 max 公式更差。runtime 包 REAL_PI_TESTS 双池先例的动机是**防饿死**（真实 LLM 轮次的长等待窗口在 CPU 饱和下被拖 19 倍），不是墙钟优化——本地毫秒级 fake 子进程（zcode fake-appserver / subagent-core fake-engine）不满足该前提，满并行已是墙钟最优。分池门槛：只有「真实外部长等待（网络/LLM）在 CPU 饱和下被饿死」才建慢池。
+1. **入口墙钟**回答「用户等多久」：按四档分别计时，是最终收益指标。不同档位的测试集合不同，不能混用。
+2. **Vitest `Duration` 分解**回答「工作量花在哪」：分别看 transform / setup / import / tests / environment。文件合并且标的是每文件重复支付的装载成本，不是断言数量。
+3. **JUnit testcase 时间**回答「哪些用例或文件是长尾」：用于排序、慢用例门禁与用例守恒对照。JUnit 求和受 worker 并行影响，既不等于入口墙钟，也不等于纯断言 CPU 时间。
 
-**裁决二：subagent-workflow 剩余耗时——架构固有，不动**（墙钟 14.3s / 944 用例）。求和大头的构成：review-fix-loop-e2e 13.1s（真实 worker 子进程）属真实 IO 语义成本；~8-10s 是 7 个「装配真实入口」测试文件的首用例动态 import 整棵组合根——forks 池无磁盘 transform 缓存、每 fork 重复付，属架构固有。三个压缩方案全部否决：入口懒加载会动组合根装配时序（u7a 验收固定「extension 加载完成时触发」）；deps.optimizer 内联 `@zhushanwen/subagent-core` 会破坏 vi.mock 深路径与 barrel 的物理模块等价性（mock 静默失效风险）；改测试 import 形态违背 D3 裁决（2026-09-03，测试深路径统一经 alias 正则不改写）。
+调度或装载优化必须做同负载 A/B：同一代码范围、同一机器窗口交替跑修改前后，至少看多轮中位数；±3s 级变化不能凭单轮端到端墙钟定论。先单独复跑可疑慢文件，区分负载型超时与真实回归。
 
-**裁决三：根全量入口（`pnpm test:all`）包级并发预算 = 三段式各段定档（small concurrency=3 / mid concurrency=2 / heavy 串行），调整须有同窗口对照实测**。机理依据（10 核机 4 重包对照，2026-09-15）：默认并发 31.6s < 全局 concurrency=2 的 32.9s < 串行 35.3s——并发膨胀（zcode 求和 +15%）被包间进程启动/IO 重叠收益抵消还有余，故小包放开并发、重包收串行。CI 不经此路径（走 `--filter <pkg> exec vitest run --shard=` 按包分 job）。
+### 优化顺序：先消除语义成本，再减少重复装载
+
+1. **先分层**。真实进程、真实 IO、真实挂钟窗口按「集成测试门控约定」移出默认组；挂载渲染重型文件登记 domain-map，走域触发档。分层首先恢复各档职责，同时避免默认档支付不属于它的成本。
+2. **再确定性化**。等待 promise / 回调 / 事件等确定性完成信号；时间逻辑注入时间参数或用 fake timers 驱动。禁止用提高 timeout、扩大等待窗口换绿灯。
+3. **再减少每文件装载**。对共同被测模块、mock 形态兼容的文件按「测试文件组织与合并原则」合并，减少重复的 transform / setup / import / environment。合并前后必须 JUnit 用例守恒且零失败。
+4. **只对合格文件共享执行环境**。共享池准入同时满足静态零特征、非门控、main 收集范围对齐、动态验证通过；池成员变化后跑两轮全绿并做 JUnit 守恒。零特征占比不足的包不接新 shared project。
+5. **最后调整包级调度**。现行全量档保持 small concurrency=3 / mid concurrency=2 / heavy 串行；任何调整都要同负载 A/B，不把提高并行度当默认手段。另设真实 IO 串行池只适用于「真实外部长等待在 CPU 饱和下被饿死」，本地毫秒级 fake 子进程不满足该前提。
+
+### 已验证不应优先投入的方向
+
+- 机械合并断言或用例：每例固定开销只有约 0.05–0.15ms，不是主要成本。
+- 把 `beforeEach` 机械提升为 `beforeAll`：这些钩子通常承担真实隔离职责，不能为省时改变测试语义。
+- 全池或按功能域开启 `isolate:false`：失败组合不稳定，域相关性不等于可共享；唯一稳定准入粒度是零特征登记与动态验证。
+- 在零特征占比约 10% 的包新增 shared project：第二个 vite server 与组串行化的固定开销超过复用收益。
+- `NODE_COMPILE_CACHE`、`deps.optimizer`、`fsModuleCache` 等缓存或实验性优化：既有实验未形成可采纳收益，实验性持久缓存不再投入。
+- 静态测算收益低于 0.1s 的包：不单独立项，优先处理长尾文件与重包。
 
 `[HISTORICAL]` 案例锚（扫描根锚错层）：zcode capabilities 零消费方检查的 `srcRoot` 上跳 5 级落到 **workspace 父目录**，实际扫所有兄弟 worktree 全部 .ts（3.1s 且耗时随兄弟 worktree 文件量漂移）；修正为本包 src 后 4ms。对照：renderer i18n 两个检查在 `__tests__/i18n` 子目录（深 2 层），5 级跳恰好落仓库根（正确）。规则：目录内 walk 扫描的根推导层数必须按「测试文件实际深度」核对，禁止从别包抄跳层数；改完用负向探针（植入消费点确认变红）验证检查仍有效。
 
 ## 测试文件组织与合并原则（2026-10 全仓整合定稿）
 
-> 全仓测试文件整合（10 包、约 600 源文件折入合并产物）收尾后定稿的可复用原则。适用场景：再次做测试文件合并、测试提速、或新增「同被测对象多文件」时的组织判据。现行耗时基线（10 核 mac、安静窗 load<8、`TAIJI_SKIP_REAL_PI=1`）：全量档 `test:all` 59.5s、重型档 `test:integration` 74.6s、日常档基础池 14.2s——耗时优化史 git 可追溯；度量必须按档分开看（同一手段对不同档收益差一个量级：文件合并对重型档收益远大于全量档，因集成用例的模块装载占比更高），且 ±3s 级调度优化在端到端单轮计时无鉴别力（窗口负载波动 ±14s），验证用包内 Duration 或多轮中位数。
+> 全仓测试文件整合（10 包、约 600 源文件折入合并产物）收尾后定稿的可复用原则。适用场景：再次做测试文件合并、测试提速、或新增「同被测对象多文件」时的组织判据。现行耗时参考值（10 核 mac、安静窗 load<8、`TAIJI_SKIP_REAL_PI=1`，不是跨机器固定 SLA）：全量档 `test:all` 59.5s、重型档 `test:integration` 74.6s、日常档基础池 14.2s——耗时优化史 git 可追溯；度量必须按档分开看（同一手段对不同档收益差一个量级：文件合并对重型档收益远大于全量档，因集成用例的模块装载占比更高），且 ±3s 级调度优化在端到端单轮计时无鉴别力（窗口负载波动 ±14s），验证用包内 Duration 或多轮中位数。
 
 **先测量再动刀，量级否决优先**。优化前先对目标做量级测算：用例合并的固定开销实测 0.05-0.15ms/例（全仓上限 0.4s 墙钟）、beforeEach→beforeAll 改造逐判全为语义隔离零收益——「体感大头」经常不是大头。能被量级否决的方案不进入实施。
 
@@ -556,7 +577,18 @@ pi 边界可靠性设计的测试范围落地（2026-08-27 事故对 → 四支�
 - 文件名前缀 ≠ 被测对象：合并前读码核对每成员的真实被测对象，「页面 vs 其依赖模块」型弱粘连不并。
 - 文件级 mock 与「测真模块」的用例（缺省直连/负面验证类）结构性互斥——剔单侧保留独立文件。
 
-**守恒红线**：用例一条不丢是硬底线。合并后逐包跑全量与 junit 基线精确对拍（总数相等 + 零失败）；改名只允许「旧名 + 基名 describe 一层前缀」，用测试名多重集 diff 程序化验证。每簇合并后单文件自检（全绿 + 用例数 == 基线期望之和）不过不进下一簇；修 2 轮不过回退该簇。
+**守恒红线**：用例一条不丢是硬底线。合并后逐包跑同范围测试，以修改前保存的 JUnit 为基线做用例名多重集对照（总数相等 + 零失败）；改名只允许「旧完整测试名外增加一层基名 describe 前缀」。每簇合并后单文件自检（全绿 + 用例数 == 基线期望之和）不过不进下一簇；修 2 轮不过回退该簇。
+
+```bash
+# 默认：包路径 + classname + 完整测试名逐项一致
+node scripts/check-test-junit-parity.mjs --baseline <修改前结果目录> --current <修改后结果目录>
+
+# 文件合并/迁移：显式允许文件位置变化与新增外层 describe；其余改名仍红灯
+node scripts/check-test-junit-parity.mjs --baseline <修改前结果目录> --current <修改后结果目录> \
+  --allow-relocation --allow-describe-prefix
+```
+
+工具按多重集处理重复用例名；新增外层 describe 只在能无歧义一对一配对时放行。基线目录可保存多个包的 `test-results/*.xml`，必须与 current 跑同一测试范围。零失败由测试命令与 `check-test-results.mjs` 判定，守恒工具不替代结果检查。
 
 **合并产物的机械坑**（vitest 4.1.9 实测，合并脚本/人工都必须执行）：
 - describe 内声明的 vi.mock 不提升且直接失效——vi.mock 块必须在产物文件顶。
@@ -567,9 +599,9 @@ pi 边界可靠性设计的测试范围落地（2026-08-27 事故对 → 四支�
 - 有「模块加载期注入状态」语义的文件级 hook（如 journal 目录注入）下沉时保持原时序，不得让其余节吃到注入。
 - 卫星段的 import 一律从原文件逐字取（`git show` 只读取回），禁止按模块路径猜导出符号名。
 
-**执行形态**：分域多 agent 并行（并发 ≤5，文件集互斥），主会话统一验证与分批提交；「做完再测」——合并阶段只跑单文件自检，全量验证统一在主会话做。测试文件增删/移动必须同步全部登记处：`docs/testing/e2e-map.json`（validate 全表校验资产存在性 + 新增文件防漏登记）、`.githooks/` 各登记表（STOCK / BLIND_WAIT_EXEMPT，注意活钩子与 `.githooks/` 两处副本）、文档内路径引用。e2e-map 的全表磁盘校验会拦截并行期的任何提交——分批提交统一推迟到全部落地后修完登记再执行。
+**执行形态**：分域多 agent 并行（并发 ≤2，文件集互斥），主会话统一验证与分批提交；「做完再测」——合并阶段只跑单文件自检，全量验证统一在主会话做。测试文件增删/移动必须同步全部登记处：`docs/testing/e2e-map.json`（validate 全表校验资产存在性 + 新增文件防漏登记）、`.githooks/` 各登记表（STOCK / BLIND_WAIT_EXEMPT，注意活钩子与 `.githooks/` 两处副本）、文档内路径引用。e2e-map 的全表磁盘校验会拦截并行期的任何提交——分批提交统一推迟到全部落地后修完登记再执行。
 
-**性能优化方向判据**（已裁决的边界，勿重开）：模块桶 shim 只在桶每文件求值成本 > ~70ms 时值得做（reka 286ms ✓ / lucide 63.6ms ✗）；isolate:false 全池方向已关闭（DOM 驻留红不收敛）；**域级共享池已否定**——同域文件的相关性不等于可共享（isolate:false 失败配对随文件组合涌现，两轮失败集交集仅 31%），共享池唯一稳定准入粒度是静态零特征判据；**零特征池接线有占比门槛**——包内零特征占比 ~10% 时接线净慢 0.6~2.9s（project 固定开销 > 复用收益），重新接线判据见 zero-mock-pool 登记 `_meta`；**integration 门控组并入 main 同池混跑需双窗实证**（安静三轮 + 人为饱和加压 A/B，范例与安全前提 = `packages/runtime/vitest.config.ts` 文件头），无实证的新门控组默认串行尾组；transform 持久缓存类实验特性（fsModuleCache 等）不做（2026-10-28 用户裁决）；慢池拆分门槛见「测试耗时基线与压缩裁决」节；静态省额 <0.1s 的包不立项（纯函数包装载本就快）。
+**性能优化方向判据**（已裁决的边界，勿重开）：模块桶 shim 只在桶每文件求值成本 > ~70ms 时值得做（reka 286ms ✓ / lucide 63.6ms ✗）；isolate:false 全池方向已关闭（DOM 驻留红不收敛）；**域级共享池已否定**——同域文件的相关性不等于可共享（isolate:false 失败配对随文件组合涌现，两轮失败集交集仅 31%），共享池唯一稳定准入粒度是静态零特征判据；**零特征池接线有占比门槛**——包内零特征占比 ~10% 时接线净慢 0.6~2.9s（project 固定开销 > 复用收益），重新接线判据见 zero-mock-pool 登记 `_meta`；**integration 门控组并入 main 同池混跑需双窗实证**（安静三轮 + 人为饱和加压 A/B，范例与安全前提 = `packages/runtime/vitest.config.ts` 文件头），无实证的新门控组默认串行尾组；transform 持久缓存类实验特性（fsModuleCache 等）不做（2026-10-28 用户裁决）；慢池拆分门槛见「测试耗时优化方法」节；静态省额 <0.1s 的包不立项（纯函数包装载本就快）。
 
 ## 附录：taiji 领域测试点清单
 

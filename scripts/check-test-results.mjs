@@ -7,13 +7,22 @@
 // 用法：
 //   node scripts/check-test-results.mjs --clean   # 调度开头清掉上一轮 junit（防 stale 误判）
 //   node scripts/check-test-results.mjs           # 调度末尾聚合判定：failures+errors>0 → exit 1
+//   node scripts/check-test-results.mjs --root <夹具仓>  # 脚本自测注入根目录
 import { readdirSync, rmSync, readFileSync, existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const rootIdx = process.argv.indexOf('--root')
+const rootArg = rootIdx >= 0 ? process.argv[rootIdx + 1] : null
+if (rootIdx >= 0 && !rootArg) {
+  console.error('[check-test-results] --root 需要目录参数')
+  process.exit(2)
+}
+const repoRoot = rootArg
+  ? path.resolve(rootArg)
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
-/** 展开三类 junit 落点：packages/<pkg>/test-results、apps/<app>/test-results、apps/electron/main/test-results */
+/** 展开四类 junit 落点：一级包、应用、Electron 主进程、extensions/<组>/<包> */
 function collectResultDirs() {
   const dirs = []
   for (const base of ['packages', 'apps']) {
@@ -27,6 +36,18 @@ function collectResultDirs() {
   }
   const mainResults = path.join(repoRoot, 'apps/electron/main/test-results')
   if (existsSync(mainResults)) dirs.push(mainResults)
+  const extensionsDir = path.join(repoRoot, 'extensions')
+  if (existsSync(extensionsDir)) {
+    for (const group of readdirSync(extensionsDir, { withFileTypes: true })) {
+      if (!group.isDirectory()) continue
+      const groupDir = path.join(extensionsDir, group.name)
+      for (const pkg of readdirSync(groupDir, { withFileTypes: true })) {
+        if (!pkg.isDirectory()) continue
+        const candidate = path.join(groupDir, pkg.name, 'test-results')
+        if (existsSync(candidate)) dirs.push(candidate)
+      }
+    }
+  }
   return dirs
 }
 

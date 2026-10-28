@@ -2,7 +2,7 @@
 /**
  * check-zero-mock-pool.mjs — 零特征共享池（isolate:false 双池）的清单派生与健康度检查。
  *
- * 机制背景（.tmp/round6/process-reuse-reeval.md 实证）：默认档测试按「零特征文件 →
+ * 机制背景（同负载 A/B 实证，测量纪律见 docs/TEST-STRATEGY.md「测试耗时优化方法」）：默认档测试按「零特征文件 →
  * 共享池（isolate:false，模块图与 worker 进程跨文件复用）；其余文件 → 隔离池
  * （isolate:true，每文件新进程）」分池执行。subagent-core / core / zcode-subagent-cli
  * 三包已接线（config 消费本表）；runtime / renderer 两包「已登记未接线」（候选清单与
@@ -61,10 +61,10 @@ const REGISTRY_PATH = path.join(ROOT, 'docs', 'testing', 'zero-mock-pool.json')
  *  runtime/renderer 两包为「已登记未接线」：候选清单与判据在册（判据 3 的 config/domain
  *  对齐解析照常维护），但 2026-10-28 A/B 实证接线为净负收益（runtime forks +0.9~1.3s /
  *  renderer forks +0.6~2.5s / renderer threads +2.9s，双 vite server 固定开销 + 组串行化
- *  > fork 复用收益；根因 = 零特征占比过低——runtime 24/234、renderer 10/113，对照
+ *  > fork 复用收益；根因 = 零特征占比过低——runtime 25/235、renderer 10/113，对照
  *  subagent-core 115/194 实证 2.13x），故 config 不接线（G6 只查 wired 包）。
  *  重新接线判据：零特征文件占比显著上升（域测试改造 / mock 清理后）或 vitest project
- *  固定开销下降时，按 .tmp/round6/zero-mock-expand-report.md 的 A/B 方法重测。 */
+ *  固定开销下降时，按 docs/TEST-STRATEGY.md「测试耗时优化方法」的同负载 A/B 方法重测。 */
 const POOL_PKGS = [
   { name: 'subagent-core', scanDirs: ['src'] },
   { name: 'core', scanDirs: ['src'] },

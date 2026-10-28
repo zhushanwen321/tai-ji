@@ -140,7 +140,7 @@ console.log(`[domain-map] OK：${Object.keys(domains).length} 域 / ${fileCount}
 
 // ── 7. staged 新增挂载文件的登记提示（warn 级，不红灯）────────────────────
 // 静态挂载特征区分不了「重型（须登记进域表）」与「轻量（合法留默认档，存量数百个）」，
-// 故只提示不拦；重型的结果性判定兜底 = CI check-slow-tests（默认组用例 >2s 红灯）。
+// 故只提示不拦；重型实测阈值以 meta.criterion 为准，>2s 慢用例红灯只是最终兜底。
 let stagedAdded = []
 try {
   stagedAdded = execSync('git diff --cached --name-only --diff-filter=A', { cwd: ROOT, encoding: 'utf-8' })
@@ -164,6 +164,6 @@ if (freshMounted.length > 0) {
   console.warn('')
   console.warn(`⚠ [domain-map] 本次新增 ${freshMounted.length} 个带挂载特征的测试文件未登记域表（不拦提交，按判据自查）：`)
   for (const f of freshMounted) console.warn(`    ${f}`)
-  console.warn('  · 用例实测 >2s（CI check-slow-tests 门禁口径）→ 属挂载渲染重型：同 commit 登记进 docs/testing/domain-map.json 对应域，走域触发档；')
-  console.warn('  · 轻量挂载文件留默认档即可（存量大量同类，合法形态）。')
+  console.warn('  · 满足 meta.criterion 重型阈值（单用例 ≥300ms 或文件级 tests 段 ≥1s）→ 同 commit 登记进 docs/testing/domain-map.json 对应域，走域触发档；')
+  console.warn('  · 默认组单用例 >2s 会再被 CI check-slow-tests 红灯拦截；轻量挂载文件留默认档即可。')
 }
