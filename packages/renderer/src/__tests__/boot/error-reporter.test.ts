@@ -21,7 +21,8 @@ import type { RendererLogPayload } from '@taiji/shared'
 
 // [HISTORICAL] lib/ipc 顶层 `const api = window.electronAPI` 在模块加载期捕获——
 // 必须先注 electronAPI mock 再动态 import（vi.resetModules + await import），
-// 对齐 ipc-reveal-in-folder.test.ts 范式。
+// 对齐 __tests__/lib/ipc.test.ts 范式（其 resetModules + 动态 import + electronAPI
+// stub 脚手架即所述范式）。
 
 /** electronAPI.reportRendererLog 桩（beforeEach 注入）。 */
 let reportMock: ReturnType<typeof vi.fn>
