@@ -160,6 +160,14 @@ export interface PluginDescriptor {
   readPaths?: string[]
   engines: { 'taiji': string }
   pluginPath: string
+  /**
+   * npm 包名（package.json name 透传，ns 推导唯一事实源——provider-plugin-access D4：
+   * providers.* 通道的命名空间边界由包名纯函数推导 deriveNamespace(pkgName)）。
+   * pluginId 是插件目录名（安装目录权威），与包名非同物——跨目录名/包名形态
+   * （scoped 包、目录名 sanitize）判 ns 必须用本字段。缺省 = 扫描时 package.json
+   * 无 name（畸形包形态）；消费方窄化为非空 string，缺失按不可用处理。
+   */
+  pkgName?: string
   /** 插件来源：built-in（随应用分发）或 external（用户安装） */
   source: PluginSource
   /** 该插件依赖的其他插件 ID 列表 */

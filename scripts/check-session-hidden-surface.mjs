@@ -182,7 +182,7 @@ export const HIDDEN_ALLOWLIST = new Map([
   ['packages/core/src/extension-host/header-action-store.ts:38', '插件 headerAction 声明侧静态形状 hidden（ContributionRegistry 侧）'],
   ['packages/core/src/extension-host/header-action-store.ts:78', '插件 headerAction 帧载荷 hidden 透传（set 写入）'],
   ['packages/core/src/extension-host/message-bus-bridge.ts:251', '插件 headerActionUpdate 帧 hidden 解析透传（241→251 随 dev-0.11.16 合并行号漂移）'],
-  ['packages/plugin-sdk/src/types.ts:884', 'plugin-sdk updateHeaderAction opts.hidden 声明（wire 契约 HeaderActionUpdatePayload.hidden，入口整体不渲染；与 ui-api.ts 校验行同族）'],
+  ['packages/plugin-sdk/src/types.ts:892', 'plugin-sdk updateHeaderAction opts.hidden 声明（wire 契约 HeaderActionUpdatePayload.hidden，入口整体不渲染；与 ui-api.ts 校验行同族；884→892 随 refactor-plugin-implement opts 字段注释扩写行号漂移）'],
   ['packages/runtime/src/services/plugin-service/api/ui-api.ts:254', '插件 ui.updateHeaderAction 入参 hidden 校验'],
   ['packages/runtime/src/services/plugin-service/api/ui-api.ts:256', '插件 ui.updateHeaderAction hidden 校验错误文案'],
   ['packages/runtime/src/services/plugin-service/api/ui-api.ts:271', '插件 ui.updateHeaderAction hidden 透传'],

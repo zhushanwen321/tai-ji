@@ -9,8 +9,8 @@
   全部归 OverlayShell；本组件是挂进壳标题栏 slot 与 body 的 workflow 内容层。
   header 三态（scheduler 整合一级 tab，2026-10-06 用户裁决；canvas 画布 tab，
   problem-solve-canvas §3.1(3)；容器扩展点统一 §7.3 三段标题/内容分支改注册表派生——
-  段集与元数据单点 workflow-viz-overlay-derivation，runs 保留显式内置分支不做 v-else
-  兜底）：tab=runs = 六元素行
+  段集与元数据单点 core/domain/overlay 的 content-slots（deriveOverlayTabSegments），
+  runs 保留显式内置分支不做 v-else 兜底）：tab=runs = 六元素行
   （图标 + workflow 名 + slug + 状态 pill + errorCode + 已用时长，关闭钮归壳不计入
   元素数；v5 终裁参数信息不进 header——workflow-overlay-refine D2）；tab=scheduler =
   Clock + 定时任务标题；tab=canvas = 画布图标 + 画布标题（run 元素整体让位，同
@@ -124,7 +124,7 @@
         </ModelSelectPopover>
       </template>
       <!-- 注册表派生段标题（§7.3 标题分支改派生）：icon + 文案从内置内容视图派生
-           （workflow-viz-overlay-derivation 单点）；testid 沿用 per-segment 形态
+           （core/domain/overlay content-slots 单点）；testid 沿用 per-segment 形态
            （wfvz-overlay-scheduler-title / -canvas-title），e2e 与单测锚点不变。 -->
       <template v-else-if="activeSegment !== null">
         <component :is="segmentIconComponent(activeSegment)" class="size-[15px] shrink-0 text-neutral-dim" aria-hidden="true" />
@@ -138,7 +138,7 @@
     <!-- 一级 tab 条（scheduler 整合 2026-10-06；容器扩展点统一 §7.3 改注册表派生）：
          TraceViewToggle 分段范式（凹陷槽 bg-bg-input + active 浮起 bg-surface-hover solid
          hover tone，2026-10-14 全族迁移旧 bg-bg-elevated 退役）。分段元数据从内置内容视图
-         派生（workflow-viz-overlay-derivation 单点）；禁用判据数据驱动（§6.15）：声明
+         派生（core/domain/overlay content-slots 单点）；禁用判据数据驱动（§6.15）：声明
          openableWithoutData=false 且当前无数据 → 灰置（runs 段既有规则的派生形态）；
          tab SSOT 在控制器（Host 受控透传），壳只上抛切换意图 -->
     <nav
@@ -350,11 +350,11 @@ import ModelSelectPopover from '@/components/panel/ModelSelectPopover.vue'
 import { ViewHost } from '@taiji/ui/extension-host'
 import { formatCompactDuration, MS_PER_SECOND } from '@/lib/duration-format'
 import { useOverlayControl } from '@taiji/core/domain/overlay'
+import { deriveOverlayTabSegments, type OverlayTabSegment } from '@taiji/core/domain/overlay'
 import OverlayShell from './OverlayShell.vue'
 import WorkflowVizDag from '../dag/WorkflowVizDag.vue'
 import { dotTone } from '../dag/tone'
 import { SCHEDULER_MODAL_VIEW_ID, type OverlayTab } from './workflow-viz-overlay'
-import { deriveOverlayTabSegments, type OverlayTabSegment } from './workflow-viz-overlay-derivation'
 import { buildFallbackGroups, buildUnmatchedGroups, hasExplicitPhase as hasAnyExplicitPhase, type FallbackGroup, type UnmatchedGroup } from './overlay-fallback-groups'
 import type { OverlayKind } from '@taiji/core/domain/overlay'
 import type { WorkflowUnmatchedInstance } from '../blueprint-match'

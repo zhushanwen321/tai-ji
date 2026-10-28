@@ -330,24 +330,11 @@ describe('S20/S21 磁盘断言（唯一权威落盘 + 拒绝路径零副作用�
   })
 })
 
-describe('createPluginManifestReader（包根定位：entry 在子目录形态）', () => {
-  let tmpDir: string | undefined
-  afterEach(() => {
-    if (tmpDir !== undefined) rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-    tmpDir = undefined
-  })
-
-  it('从 entry 文件目录向上找 package.json 命中包根（dist/index.js 形态）', () => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'wool-proxy-reader-'))
-    const pkgDir = join(tmpDir, 'plugin-wool-x')
-    mkdirSync(join(pkgDir, 'dist'), { recursive: true })
-    writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({
-      name: '@zhushanwen/plugin-wool-x',
-      taijiPlugin: { capabilities: ['network.http', 'crypto'] },
-    }), 'utf8')
-    const entryPath = join(pkgDir, 'dist', 'index.js')
-
-    const read = createPluginManifestReader({ getDescriptor: (id) => (id === 'plugin-wool-x' ? { pluginPath: entryPath } : undefined) })
+describe('createPluginManifestReader（descriptor 透传窄化：manifest 数据经 registry 注入）', () => {
+  it('descriptor pkgName/capabilities 透传投影（entry 在子目录形态同判——包根定位归 registry.scan）', () => {
+    const read = createPluginManifestReader({
+      getDescriptor: (id) => (id === 'plugin-wool-x' ? { pkgName: '@zhushanwen/plugin-wool-x', capabilities: ['network.http', 'crypto'] } : undefined),
+    })
 
     expect(read('plugin-wool-x')).toEqual({
       pkgName: '@zhushanwen/plugin-wool-x',
@@ -356,13 +343,15 @@ describe('createPluginManifestReader（包根定位：entry 在子目录形态�
     expect(read('unknown-plugin')).toBeUndefined()
   })
 
-  it('包清单缺 name → undefined（fail-closed 输入）', () => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'wool-proxy-reader-'))
-    const pkgDir = join(tmpDir, 'plugin-bad')
-    mkdirSync(pkgDir, { recursive: true })
-    writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ taijiPlugin: {} }), 'utf8')
+  it('descriptor 缺 pkgName / 空串 → undefined（fail-closed 输入，不猜测 ns）', () => {
+    const missing = createPluginManifestReader({ getDescriptor: () => ({}) })
+    expect(missing('plugin-bad')).toBeUndefined()
 
-    const read = createPluginManifestReader({ getDescriptor: () => ({ pluginPath: join(pkgDir, 'index.js') }) })
-    expect(read('plugin-bad')).toBeUndefined()
+    const empty = createPluginManifestReader({ getDescriptor: () => ({ pkgName: '' }) })
+    expect(empty('plugin-bad')).toBeUndefined()
+
+    // capabilities 缺省 = 空表（合法态：无能力声明的插件仍可走 providers.write/delete 命名空间判定）
+    const noCaps = createPluginManifestReader({ getDescriptor: () => ({ pkgName: 'pkg-ok' }) })
+    expect(noCaps('plugin-ok')).toEqual({ pkgName: 'pkg-ok', capabilities: [] })
   })
 })

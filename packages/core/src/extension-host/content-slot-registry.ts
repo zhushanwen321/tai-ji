@@ -697,5 +697,7 @@ export class ContentSlotRegistry {
  * （同一插件声明在一个容器的派生视图出现、另一个容器的实例缺失）。容器消费单元（U6 抽屉 /
  * U7 浮层 / U8 侧栏设置页）与壳层声明通路/清理接线（loadExternal / clearForPlugin）共用；
  * 单测隔离用 `new ContentSlotRegistry()` 构造独立实例。
+ *
+ * @data-owner #82 —— 容器位声明注册表（GUI 数据源登记表：四容器声明全集 + 派生视图）。
  */
 export const contentSlotRegistry = new ContentSlotRegistry()

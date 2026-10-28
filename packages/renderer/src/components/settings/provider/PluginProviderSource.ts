@@ -176,12 +176,15 @@ export type PluginProviderSourceReturn = {
   entryOfProvider: (providerId: string) => PluginCatalogItem | undefined
 }
 
-// taste:allow-no-data-owner W24-EX-B（模块级单例，设置域全局态非 per-session——ADR-0049
-// 例外清单形态，判定见文件头）：凭据状态 map（providerId → 插件上报的已知状态）。
+// @data-owner #83 —— 凭据状态 map（providerId → 插件上报的已知状态；模块级单例，设置域
+// 全局态非 per-session——ADR-0049 例外清单形态，判定见文件头。原 W24-EX-B 草稿标记随
+// 登记条目 #83 落定转正向注解）。
 const statusMap = ref(new Map<string, CredentialStatusPayload>())
-// taste:allow-no-data-owner W24-EX-B（同上）：清单可安装视图缓存（家族卡 + 安装/更新状态）。
+// @data-owner #83 —— 清单可安装视图缓存（家族卡 + 安装/更新状态；模块级单例形态判定同上，
+// 随 #83 落定）。
 const catalog = ref<PluginCatalogItem[]>([])
-// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构）：清单首次拉取完成标记（空态判定）。
+// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，随登记条目 #83 落定非草稿）：
+// 清单首次拉取完成标记（空态判定，非 GUI 数据本体）。
 const catalogLoaded = ref(false)
 
 let refCount = 0

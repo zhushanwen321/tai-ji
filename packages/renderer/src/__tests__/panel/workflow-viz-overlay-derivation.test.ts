@@ -2,7 +2,7 @@
  * workflow-viz overlay 派生视图测试（容器扩展点统一 §6.8/§7.3/§11.1-2，U7——三视角）。
  *
  * - 构建者（白盒）：标签条分段派生（tab 位映射 / 序 / openableWithoutData / browser 排除 /
- *   插件不进条）与壳承载 kind 集（workflow-viz-overlay-derivation 单点；派生源 =
+ *   插件不进条）与壳承载 kind 集（core/domain/overlay content-slots 单点；派生源 =
  *   builtinOverlayTypeViews(OVERLAY_REGISTRY)，§6.1 内置项不经声明通道）；
  * - 使用者（黑盒 DOM）：标签条分段渲染、§6.15 openableWithoutData 数据驱动禁用（runs 无
  *   run 灰置不上抛 / scheduler·canvas 恒可进）、段集外 tab 值零渲染（无 v-else 兜底）、
@@ -26,7 +26,7 @@ import WorkflowVizOverlayHost from '../../components/panel/workflow-viz/overlay/
 import {
   deriveOverlayHostedKinds,
   deriveOverlayTabSegments,
-} from '../../components/panel/workflow-viz/overlay/workflow-viz-overlay-derivation'
+} from '@taiji/core/domain/overlay'
 import { closeWorkflowVizOverlayForSession } from '../../components/panel/workflow-viz/overlay/workflow-viz-overlay'
 import { useWorkflowStore } from '@/stores/workflow'
 import { usePanelStore } from '@/stores/panel'

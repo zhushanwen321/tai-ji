@@ -9,8 +9,8 @@
     的 overlayOpen/overlayCurrent 已退役）；DAG 解析态（overlayDag/overlayDagError）与
     一级 tab 展示态（overlayTab，scheduler 整合 2026-10-06）留
     renderer 控制器 workflow-viz-overlay.ts；本容器壳承载 workflow / scheduler / canvas
-    三类内容（「是否打开」判定按注册表派生 kind 集合，workflow-viz-overlay-derivation
-    单点；browser 由 BrowserOverlay 承载，三壳互斥；plugin 载体由本组件的独立浮层内容位
+    三类内容（「是否打开」判定按注册表派生 kind 集合，core/domain/overlay 的
+    content-slots（deriveOverlayHostedKinds）单点；browser 由 BrowserOverlay 承载，三壳互斥；plugin 载体由本组件的独立浮层内容位
     承载，§6.8——不进 workflow 壳标签条）；scheduler 内容下 run 相关 props 按无 run
     形态透传（run/dag/dagError = null，「运行」tab 由壳按派生 openableWithoutData 数据驱动禁用）；
     run
@@ -125,7 +125,7 @@ import type { WorkflowVizDagNodeStatus } from '../dag/types'
 import type { WorkflowVizDagClickPayload } from '../dag/types'
 import { useOverlayControl } from '@taiji/core/domain/overlay'
 import type { OverlayKind } from '@taiji/core/domain/overlay'
-import { deriveOverlayHostedKinds } from './workflow-viz-overlay-derivation'
+import { deriveOverlayHostedKinds } from '@taiji/core/domain/overlay'
 import {
   closeWorkflowVizOverlay,
   overlayDag,
@@ -153,7 +153,7 @@ const { t } = useI18n()
 const isWorkflowOpen = computed(() => overlayOpen.value && overlayContent.value?.kind === 'workflow')
 
 /** 壳承载的内容 kind 集（§7.3 浮层宿主行「是否打开」判定改注册表派生）：内置三类经
- *  转换器产出（workflow-viz-overlay-derivation 单点）；browser 由 BrowserOverlay 专属壳
+ *  转换器产出（core/domain/overlay content-slots 单点）；browser 由 BrowserOverlay 专属壳
  *  承载（§7.4 互斥）、plugin 载体由独立浮层内容位承载（§6.8）——两者不在本集合。 */
 const HOSTED_KINDS: ReadonlySet<OverlayKind> = deriveOverlayHostedKinds()
 

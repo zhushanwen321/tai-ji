@@ -21,8 +21,6 @@
  * NAMESPACE_MISMATCH（越权触达）/ PERMISSION_DENIED（身份缺失 / 能力未声明）。
  */
 
-import { existsSync, readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
 import { deriveNamespace, NAMESPACE_MISMATCH } from '@taiji/shared/plugin-namespace'
 import type { PluginRpcServer, RpcDispatchContext } from './plugin-service/plugin-rpc-server.js'
 import { errorWithCode } from '../utils/errors.js'
@@ -46,7 +44,7 @@ export type ProviderCredentialReply =
   | { providerId: string; key: string; source: 'auth.json' | 'models.json'; kind: 'api_key' | 'oauth' }
   | { providerId: string; unsupported: 'command' | 'unresolved-env' }
 
-/** 插件包清单读取结果（命名空间与能力判定的输入）。 */
+/** 插件包清单信息（命名空间与能力判定的输入；registry.scan 装配 descriptor 时透传，非本模块直读）。 */
 export interface PluginManifestInfo { // oe-exempt:20261024:framework:ports/SDK 契约类型——接口先立、单实现常态（映射表/端口单一数据源）
   /** npm 包名（ns 推导唯一事实源，D4）。 */
   pkgName: string
@@ -75,12 +73,9 @@ export interface ProviderWriteProxyDeps { // oe-exempt:20261024:framework:ports/
     | { unsupported: 'command' | 'unresolved-env' }
     | undefined
   >
-  /** 插件包清单读取（包名 + capabilities；未装/清单不可读 = undefined → fail-closed）。 */
+  /** 插件包清单信息（包名 + capabilities，经 registry descriptor 注入；未装/包名不可用 = undefined → fail-closed）。 */
   readPluginManifest: (pluginId: string) => PluginManifestInfo | undefined
 }
-
-/** 包根定位的祖先遍历深度上界（entry → 包根通常 ≤3 层；上界防病态路径无限上溯）。 */
-const MAX_PACKAGE_ROOT_WALK_DEPTH = 8
 
 function asNonEmptyString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined
@@ -244,41 +239,20 @@ export function registerProviderWriteProxy(rpcServer: PluginRpcServer, deps: Pro
 }
 
 /**
- * 组合根装配的插件清单读取器：descriptor.pluginPath 是 entry 文件（可能在 dist/ 子目录），
- * 包根 = 自 entry 目录向上第一个含 package.json 的祖先（npm 生态通用语义）。
- * registry 以窄接口注入（{ getDescriptor } 子集），本模块不 import PluginRegistry 类型。
+ * 组合根装配的插件清单信息读取器：manifest 数据经 registry descriptor 注入
+ *（scan 已直读 package.json 装配 pkgName / capabilities——本读取器只做窄化投影，
+ * 不二次直读磁盘，services 层零 node:fs）。registry 以窄接口注入
+ *（{ getDescriptor } 子集），本模块不 import PluginRegistry 类型。pkgName 缺失/
+ * 空（畸形包形态）= undefined → fail-closed（与「未安装」同判，不猜测 ns）。
  */
 export function createPluginManifestReader(
-  registry: { getDescriptor(pluginId: string): { pluginPath: string } | undefined },
+  registry: { getDescriptor(pluginId: string): { pkgName?: string; capabilities?: readonly string[] } | undefined },
 ): (pluginId: string) => PluginManifestInfo | undefined {
   return (pluginId: string) => {
     const descriptor = registry.getDescriptor(pluginId)
     if (descriptor === undefined) return undefined
-    let dir = dirname(descriptor.pluginPath)
-    for (let depth = 0; depth < MAX_PACKAGE_ROOT_WALK_DEPTH; depth++) {
-      const pkgPath = join(dir, 'package.json')
-      if (existsSync(pkgPath)) {
-        try {
-          const raw = JSON.parse(readFileSync(pkgPath, 'utf8')) as {
-            name?: unknown
-            taijiPlugin?: { capabilities?: unknown }
-          }
-          if (typeof raw.name !== 'string' || raw.name.length === 0) return undefined
-          const capabilities = raw.taijiPlugin?.capabilities
-          return {
-            pkgName: raw.name,
-            capabilities: Array.isArray(capabilities)
-              ? capabilities.filter((entry): entry is string => typeof entry === 'string')
-              : [],
-          }
-        } catch {
-          return undefined
-        }
-      }
-      const parent = dirname(dir)
-      if (parent === dir) return undefined
-      dir = parent
-    }
-    return undefined
+    const pkgName = asNonEmptyString(descriptor.pkgName)
+    if (pkgName === undefined) return undefined
+    return { pkgName, capabilities: descriptor.capabilities ?? [] }
   }
 }
