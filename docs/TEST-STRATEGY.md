@@ -122,7 +122,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
 | 用例级门控 | 文件留在默认组（main project），只把需门控的 describe 用 `describe.skipIf(!INTEGRATION_TESTS_ENABLED)` 包裹 | 文件内既有快用例又有真进程 / 真 IO 用例——快用例继续占默认组 |
 | 文件级集成组 | 整文件迁出默认组：路径登记进所在包 `vitest.config.ts` 的 integration project（`include`），并加进 main project 的 `exclude`（漏加 = 同一文件双执行）；该 project `fileParallelism: false`（串行尾组）且经 `guardProjectSetup` 挂双防线 | 整文件都是门控用例，没有快用例值得留在默认组 |
 
-文件级集成组的维护契约写在各包 config 文件头（现行范例 = `packages/runtime/vitest.config.ts`：main 满并行组 / real-pi 串行尾组 / integration 串行尾组三池分工）。新建 integration project 漏挂双防线由 `scripts/check-vitest-guard.mjs` 第 5 条拦截。
+文件级集成组的维护契约写在各包 config 文件头（现行范例 = `packages/runtime/vitest.config.ts`：main 与 integration 同池满并行、real-pi 串行尾组的两池分工——integration 同池的实证背书与安全前提见该文件头调度契约段；无同池实证的新建组仍按上表默认串行尾组形态）。新建 integration project 漏挂双防线由 `scripts/check-vitest-guard.mjs` 第 5 条拦截。
 
 **收集条件化**（门控关闭时不付空转装载成本）：integration project 的 `include` 按门控组装——门控开启 = 全部登记文件；门控关闭 = 只收集 `INTEGRATION_UNGATED_CARRIERS` 表内文件。判据 = 该文件是否含未包 `describe.skipIf` 的用例（门控关闭时仍会真实执行）：含则登记进载体表（多一个「库内非门控用例载体」登记位），整文件都是门控用例则不进表——收集它是纯空转（只付 import/transform，产出 0 条断言）。漏登记载体表 = 该文件的非门控用例在门控关闭时静默不收集；机器守卫 = `scripts/check-integration-carriers.mjs`（静态解析两表 + 成员文件逐用例 skipIf 覆盖扫描，pre-commit 触发条件见「测试执行四档」节）。real-pi 池不适用条件化：其成员含不依赖凭证的 faux 层用例（`REAL_PI_READY` 关闭时仍真实执行），按门控跳过整个池会静默丢断言。
 

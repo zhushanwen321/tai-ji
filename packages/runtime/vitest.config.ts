@@ -3,23 +3,30 @@ import { taijiTestConfig, guardProjectSetup } from '../../test-guard/factory.ts'
 import { INTEGRATION_TESTS_ENABLED } from '../../test-guard/integration-gate.ts'
 
 /**
- * vitest 分池维护契约（三池：main 满并行组 / real-pi 串行尾组 / integration 受控并行尾组）。
+ * vitest 分池维护契约（调度两池：main+integration 同池满并行 / real-pi 串行尾组；
+ * 收集语义三个 project：main / real-pi / integration）。
  *
  * 调度契约（vitest 4.1.9，权威源 node_modules/vitest/dist/chunks/cli-api.24X8XwN1.js groupSpecs()）：
  * - `fileParallelism: false` 在配置解析层强制 `maxWorkers = 1`（任何显式 maxWorkers 被覆盖）；
  *   `maxWorkers === 1` + 默认 isolate/groupOrder 的文件进入 sequential 尾组（groups.push
  *   (sequential) 恒排所有分组之后）。
- * - `sequence.groupOrder` 是分桶键：同号 project 并入同一并行组（须同 maxWorkers），组号从低
- *   到高严格串行执行（`for...of` + `await`，零时间重叠）。main = order 0 默认满并行；
- *   integration = order 1 + 显式 maxWorkers 4 → main 完整结束、worker 全部释放后，integration
- *   整组以 ≤4 路文件级并行开跑（受控并行尾组）。`--project=integration` 单跑时无 main 组，
- *   integration 组直接并行执行。
+ * - `sequence.groupOrder` 是分桶键：同号 project 并入同一并行组（须同 maxWorkers，不同则
+ *   groupSpecs 直接 throw），组号从低到高严格串行执行（`for...of` + `await`，零时间重叠）。
+ *   main 与 integration 均 = order 0 且均不设显式 maxWorkers → 两者文件并入同一个默认
+ *   满并行 worker 池混跑（10 逻辑核 → 9 worker）；real-pi = sequential 尾组，在该池完整
+ *   结束后串行开跑。`--project=integration` 单跑时只收集该 project 的文件，同样满并行。
+ * - integration 与 main 同池的实证依据（2026-10-28 探针，10 逻辑核）：安静窗口三轮全量
+ *   22.5-22.9s（尾组隔离形态 24.9-26.1s），零失败；6 进程人为加压（load 1 分钟均值峰
+ *   14.5，瞬时过 15）A/B 对照下 integration 15 文件时间和仅 +5%（21.2→22.3s）、无超时、
+ *   零失败，skill-paths 真 spawn 用例（登记的 load>15 超时敏感项）1.17s 恒绿——integration
+ *   组的等待窗是 faux TPS 本地计算（毫秒级、零网络），与 real-pi 组的真实 LLM 长等待
+ *   （饱和饿死实证：单跑 15.8s 满并行 301s 顶满超时）性质不同，同池竞争不产生无上界等待。
  * - `poolOptions.forks.singleFork`（vitest 2/3 形态）在 vitest 4 已移除，勿再使用。
  * 入口命令不变（`npx vitest run` / scripts/pr-pre-merge.sh 不改）；分组只影响调度，不影响
  * 跑哪些用例；组内用例各自的 skip 门控（REAL_PI_READY / TAIJI_TEST_INTEGRATION）照常生效。
  *
- * 三池分工与建池理由：
- * - **main**：除两个尾组登记文件外的全部测试，保持默认满并行。
+ * 分工与建池理由：
+ * - **main**：除 real-pi 尾组与 integration 门控组登记文件外的全部测试，默认满并行。
  * - **real-pi**：真实 pi + 真实 LLM turn 的 equivalence 用例。建池理由 = 真实 LLM 轮次的
  *   长等待窗口在 CPU 饱和下被饿死（单跑 15.8s 的用例满并行下 301s 顶满超时，19 倍差距，
  *   事件流证明 LLM 轮次在推进、非死锁），故结构性隔离；组内用例另经 REAL_PI_READY 门控，
@@ -27,31 +34,38 @@ import { INTEGRATION_TESTS_ENABLED } from '../../test-guard/integration-gate.ts'
  * - **integration**：集成测试门控组（env 开关 SSOT = test-guard/integration-gate.ts 的
  *   TAIJI_TEST_INTEGRATION）——本地默认跳过、CI 或按改动范围触发时真跑的真进程 / 真 IO
  *   用例（spawn 真 pi 进程 + 真 extension jiti 冷编译、真实 chokidar fs.watch、跨进程
- *   spawn 等）。建池理由 = 这些用例测的是「代码 + OS 组合行为」，没有确定性完成信号可等，
- *   负载下拉长无稳定上界，不满足单测层「只测逻辑、高负载下也极快」的定位（判据与整治
- *   清单见 docs/TEST-STRATEGY.md「新写测试判据」节）；与 real-pi 的分界 = 是否需要真实 LLM
- *   凭证（本池不依赖凭证，故可进 CI）。组内文件级并行（非 real-pi 的串行）：等待窗口是
- *   faux TPS 制造的本地计算（毫秒级、零网络），并行饿死风险不成立；组间与 main 串行，
- *   满并行负载不与 main 重叠。
+ *   spawn 等）。建 project 的理由 = 门控收集语义（门控关闭时整文件不收集、不付装载成本，
+ *   见 integrationInclude）；调度上与 main 同池混跑（依据见上方调度契约段）。这些用例
+ *   测的是「代码 + OS 组合行为」，没有确定性完成信号可等，负载下拉长无稳定上界，不满足
+ *   单测层「只测逻辑、高负载下也极快」的定位（判据与整治清单见 docs/TEST-STRATEGY.md
+ *   「新写测试判据」节）；与 real-pi 的分界 = 是否需要真实 LLM 凭证（本池不依赖凭证，
+ *   故可进 CI）。
  *
- * integration 组内并行安全前提（新增成员必须满足，违反须先隔离改造）：
+ * integration 文件同池混跑的安全前提（新增成员必须满足，违反须先隔离改造）：
  * - 临时目录一律 mkdtempSync 唯一（fixture 的 sessionDir/agentDir、测试侧 dataRoot/workDir），
  *   禁固定路径共享；
  * - env 注入（TAIJI_FAUX_TPS 等）只写本 worker fork 进程（vitest forks 池每文件独立进程，
  *   spawn 子进程 env 经 {...process.env} 快照透传，天然隔离），禁依赖跨文件 env 残留；
  * - pi 子进程 IPC 全走 stdin/stdout 管道（--mode rpc），无 TCP 端口 / 文件锁 / 共享 fs.watch
  *   路径。
- * maxWorkers = 4 的机器占用上限：4 个 fork + 各自 pi 子进程（每文件常态至多 1-2 个 pi 在场）
- * ≈ ≤9 进程，不超 main 组满并行 9 worker（10 逻辑核 - 1）的总占用基线。
+ * - 等待窗必须是本地确定性计算（faux TPS / 固定超时窗），禁真实网络 / 慢盘长等待——同池
+ *   满并行下真实长等待会复发 real-pi 组的饱和饿死形态（该类用例改走 real-pi 组登记或
+ *   单独尾组，勿进本组）。
+ * 同池机器占用上限：9 worker fork + integration 文件各自的 pi 子进程（每文件常态至多
+ * 1-2 个 pi 在场，任意时刻 integration 文件至多占 9 worker 中的一部分）≈ 峰值 ~12 进程，
+ * 与 integration 文件在尾组隔离时代（≤6 fork + pi ≈ 12）同量级，10 逻辑核可承载（加压实
+ * 证见调度契约段）。
  *
  * 维护契约：
  * - 新增「真实 pi + 真实 LLM turn」的 equivalence 测试 → 文件路径同步加入 REAL_PI_TESTS
  *   （漏加会落回 main 满并行组，复发饿死超时）；纯 mock / fixture 重放用例不加。
  * - 新增「真进程 / 真 IO / 真实挂钟窗口」的集成用例 → 两种形态二选一：① 整文件都是门控
  *   用例 → 路径加入 INTEGRATION_TESTS（该数组喂 main project 的 exclude 与门控开启时
- *   integration project 的 include，漏加 = 文件落回 main 满并行组）；② 文件内只有部分
- *   用例需门控 → 文件留在 main 组，用 `describe.skipIf(!INTEGRATION_TESTS_ENABLED)` 包裹
- *   （用例级门控）。选型判据 = 文件内是否还有快用例值得留在默认组。
+ *   integration project 的 include；漏加 = 门控关闭时该文件失去「整文件跳过」语义，仍会
+ *   被 main 收集装载——若文件内已全包 skipIf 则仅多付装载成本，未包则会在门控关闭时真跑）；
+ *   ② 文件内只有部分用例需门控 → 文件留在 main 组，用 `describe.skipIf
+ *   (!INTEGRATION_TESTS_ENABLED)` 包裹（用例级门控）。选型判据 = 文件内是否还有快用例
+ *   值得留在默认组。
  * - INTEGRATION_TESTS 成员若含未包门控的用例（门控关闭时仍要跑），必须同时登记
  *   INTEGRATION_UNGATED_CARRIERS——门控关闭时 integration project 只收集该表，漏登记
  *   = 该文件的非门控用例静默不收集（无报错、无 skip 记录）。
@@ -59,6 +73,9 @@ import { INTEGRATION_TESTS_ENABLED } from '../../test-guard/integration-gate.ts'
  *   （不依赖凭证，REAL_PI_READY 关闭时照跑），按门控关闭跳过整个组会静默丢掉这 7 条
  *   断言；该文件的串行尾组注册理由见 REAL_PI_TESTS 注释（满并行下 faux 层整体红），
  *   故既不能跳过收集也不能并回 main。
+ * - main 与 integration 保持同 groupOrder（0）且同 maxWorkers 策略（都不设显式值）——
+ *   任一侧单独引入显式 maxWorkers 会触发 groupSpecs 的「same groupOrder 须同
+ *   maxWorkers」throw。
  * - faux LLM 层用例（spawnPiFixture 传 fauxResponses：真 pi 进程 + 真 extension 加载 + 假 LLM，
  *   门控 FAUX_PI_READY）**不进 real-pi 池**——该池的存在理由是真实 LLM 轮次的长等待窗口
  *   在 CPU 饱和下饿死，faux 轮次是毫秒级本地计算、零网络，该模式结构性不存在。但 faux 层
@@ -142,7 +159,9 @@ export default taijiTestConfig({
     outputFile: { junit: './test-results/vitest-junit.xml' },
     projects: [
       {
-        // 主组：除两个串行尾组登记文件外的全部测试，保持默认满并行（与分池前行为一致）
+        // 主组：除 real-pi 尾组与 integration 门控组登记文件外的全部测试，默认满并行。
+        // 与 integration 同 groupOrder（0）且同 maxWorkers 策略（都不设显式值）→ 两者文件
+        // 在同一 worker 池混跑（见文件头调度契约）。
         test: guardProjectSetup({
           name: 'main',
           include: ['test/**/*.test.ts', 'src/**/*.test.ts', 'scripts/**/*.test.ts'],
@@ -150,7 +169,8 @@ export default taijiTestConfig({
         }),
       },
       {
-        // 真实 pi 组：文件间串行（maxWorkers 解析为 1），且在主组完整结束后才开跑（见文件头调度契约）
+        // 真实 pi 组：文件间串行（maxWorkers 解析为 1），恒在所有并行组（main+integration
+        // 同池）完整结束后才开跑（见文件头调度契约）
         test: guardProjectSetup({
           name: 'real-pi',
           include: [...REAL_PI_TESTS],
@@ -158,16 +178,14 @@ export default taijiTestConfig({
         }),
       },
       {
-        // 集成测试门控组：真进程 / 真 IO 用例。受控并行尾组——sequence.groupOrder: 1 =
-        // main 组完整结束后整组开跑（调度契约见文件头），组内文件级并行 maxWorkers 4
-        //（并行安全前提与占用上限论证见文件头）；include 按门控组装（见
-        // integrationInclude 注释）：门控关闭时只收集非门控载体文件，其余成员全 skip
-        // 的 9 个文件不付装载成本。
+        // 集成测试门控组：真进程 / 真 IO 用例。groupOrder: 0 且不设显式 maxWorkers =
+        // 与 main 组同池满并行混跑（同池实证依据与安全前提见文件头）；include 按门控组装
+        // （见 integrationInclude 注释）：门控关闭时只收集非门控载体文件，其余成员不收集、
+        // 不付装载成本。
         test: guardProjectSetup({
           name: 'integration',
           include: integrationInclude,
-          maxWorkers: 4,
-          sequence: { groupOrder: 1 },
+          sequence: { groupOrder: 0 },
         }),
       },
     ],
