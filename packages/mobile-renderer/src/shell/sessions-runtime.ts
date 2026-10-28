@@ -18,18 +18,20 @@ import { normalizeContent } from '@taiji/shared'
 import { activeSessionId, deleteSession } from './app-runtime'
 import { closeSheet } from './sheet-manager'
 
-// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态）：未读 diff 基线（上一帧
-// config.sessions 快照的 lastActiveAt/status，diff 的比较源；基线无条目的首见会话另走
-// 落盘 lastVisitedAt 播种，见 seedUnreadFromLastVisited）
+// 未读 diff 基线（上一帧 config.sessions 快照的 lastActiveAt/status，diff 的比较源；基线
+// 无条目的首见会话另走落盘 lastVisitedAt 播种，见 seedUnreadFromLastVisited）。
+// @data-owner #82 —— 主表 #82 mobile 壳会话未读机制（基线/未读集/lastVisitedAt 三件同条目）
 const unreadBaseline = new Map<string, { lastActiveAt: number; status: SessionSummary['status'] }>()
 
-// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态）：未读会话 id 集合（§6.3 权威源 =
-// 客户端本地——落盘 lastVisitedAt 持久对照（首见播种）+ 帧间 diff；不可变替换触发响应式）。
+// 未读会话 id 集合（§6.3 权威源 = 客户端本地——落盘 lastVisitedAt 持久对照（首见播种）+
+// 帧间 diff；不可变替换触发响应式）。
 // 置位语义 = 新投递（lastActiveAt 推进）或新终态（status 翻转）且非当前活跃会话；流式中间态/
 // 等待输入不点亮（未订阅会话在客户端无信号源，§6.3 收窄口径）；点入即清（markSessionVisited）。
+// @data-owner #82 —— 同主表 #82（未读机制三件之一：未读集内存半，声明与基线/落盘键同条目）
 const unreadSessionIds = ref<ReadonlySet<string>>(new Set<string>())
 
-/** lastVisitedAt 持久键前缀（每会话一条目，§6.3/§7.1；删除级联按条目摘除防单调累积） */
+/** lastVisitedAt 持久键前缀（每会话一条目，§6.3/§7.1；删除级联按条目摘除防单调累积；
+ * 登记 = data-source-registry 主表 #82 mobile 壳会话未读机制） */
 export const LAST_VISITED_KEY_PREFIX = 'taiji.mobile.lastVisited.'
 
 function lastVisitedKey(sid: string): string {
@@ -120,9 +122,10 @@ void onGlobalType('config.sessions', (msg) => {
   if (changed) unreadSessionIds.value = next
 })
 
-// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态）：会话草稿分区（§7.1 草稿生命
-// 周期表的壳层载体：Composer 写、删除级联清；空串 = 摘除条目，不存空值）。
-// @data-owner #54 —— mobile 壳会话草稿分区（纯本地 UI 输入态，无 runtime 权威）
+// 会话草稿分区（§7.1 草稿生命周期表的壳层载体：Composer 写、删除级联清；空串 = 摘除
+// 条目，不存空值）。
+// @data-owner #81 —— 主表 #81 mobile 壳会话草稿分区（纯本地 UI 输入态，无 runtime 权威；
+// 分区形态与 #79 队列编辑锚定同构：模块级 Map + registerSessionCleanup 删除级联）
 const draftsBySid = new Map<string, string>()
 
 /** 会话草稿读口（Composer 消费；无草稿返回空串） */

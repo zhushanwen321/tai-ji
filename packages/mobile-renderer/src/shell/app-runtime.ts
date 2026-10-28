@@ -530,7 +530,8 @@ export interface MobilePrefs {
   fontSize: 'small' | 'medium' | 'large'
 }
 
-/** 偏好在 PlatformPort.storage 的持久键（单 JSON 键；登记 = data-source-registry 壳侧条目） */
+/** 偏好在 PlatformPort.storage 的持久键（单 JSON 键；登记 = data-source-registry 主表
+ *  #80 mobile 壳用户偏好） */
 export const MOBILE_PREFS_STORAGE_KEY = 'taiji.mobile.prefs'
 
 export const DEFAULT_MOBILE_PREFS: MobilePrefs = { theme: 'dark', fontSize: 'medium' }
