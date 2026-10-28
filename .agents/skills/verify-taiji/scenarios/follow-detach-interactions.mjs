@@ -97,7 +97,7 @@ export async function run(ctx) {
     '「回到最新」胶囊无 testid：断言锚点 = button[title="回到最新"]（panel.message.scrollToBottom，zh-CN 默认 locale）',
     'A6 点击走 DOM click（无滚动副作用）；触顶自动续载阈值 64px 且要求已脱离，若采样位已近顶抢先触发同一 handleLoadMore（防重入 guard 单一），按 triggeredBy 如实记录',
     '滚轮脱离一律小步推进（-150px/步，等惯性结束再下一步）：单次大 delta 的动量惯性会把整段内容顶到列表头（st=0），顶头 + 脱离态触发自动续载，前插打断后续回底/静态序列',
-    '流式增长中点「回到最新」回底实测停滞在距底 ~1000px（四轮一致复现 905/1134/1044/1078；静态内容对照实验冷/热缓存均正常收敛 6 拍内）——机制推断 = 跟随通路流式期间高频即时 scrollToIndex 打断原生 smooth 动画 + 中途视口下 scrollToIndex 估算目标偏差；基线行为发现，非本设计引入',
+    '「回到最新」流式增长期回底已由 smooth 通行门修复为即时跳（a574312bc，修复后实测 backDs=[30]）；历史缺陷签名 = 回底停滞在距底 ~1000px（四轮复现 905/1134/1044/1078；根因 = virtua smooth jump 相位坐标移位在流式期永不冲销）——复现该签名即门被旁路或 virtua 行为变更的回归信号',
     '滚轮注入前必须 hover 对话流中心（page.mouse.wheel 派发到当前鼠标位置下的可滚动容器）',
   ]
 
@@ -328,10 +328,21 @@ export async function run(ctx) {
       })
       let triggeredBy = 'dom-click'
       try {
-        await page.locator('[data-testid="load-more-history"]').first().evaluate((el) => el.click())
+        const clicked = await page
+          .locator('[data-testid="load-more-history"]')
+          .first()
+          .evaluate((el) => {
+            // el.click() 对 disabled 按钮是规范定义的静默 no-op（loading = 自动续载已抢先）
+            if (el.disabled) return false
+            el.click()
+            return true
+          })
+        if (!clicked) {
+          triggeredBy = 'auto-at-top（按钮 loading，DOM click 静默 no-op，按同一通路继续）'
+          log('load-more 按钮 loading 中，DOM click no-op（自动续载已抢先），按同一通路继续')
+        }
       } catch {
-        // DOM click 无滚动入视口副作用；走 catch 多为自动续载已抢先触发（采样位近顶 + 已脱离，
-        // 同一 handleLoadMore 通路）或按钮已 loading/卸载导致 evaluate 等待超时
+        // 走 catch = 按钮卸载 / locator 等待超时等异常路径（自动续载抢先或元素离场）
         triggeredBy = 'auto-at-top（按钮 loading/detached，按同一通路继续）'
         log('load-more DOM click 未生效（可能被自动续载抢先），按同一通路继续')
       }
