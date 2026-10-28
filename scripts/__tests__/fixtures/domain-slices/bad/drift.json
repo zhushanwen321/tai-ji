@@ -1,0 +1,13 @@
+{
+  "name": "chat",
+  "summary": "反例：tests 指向不在盘的精确路径 + glob 前缀目录不存在 → 登记漂移",
+  "layers": ["core"],
+  "scope": {
+    "core": ["packages/core/src/domain/chat/**"]
+  },
+  "tests": ["packages/core/src/domain/chat/__tests__/gone.test.ts", "packages/core/src/domain/vanished/**"],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": [],
+  "w2bMountCompat": { "mountSource": "docs/testing/domain-map.json", "status": "enforced" }
+}

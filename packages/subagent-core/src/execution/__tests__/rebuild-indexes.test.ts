@@ -174,7 +174,7 @@ describe("[U4c/G1] rebuildIndexes 双通道 + S5 缓存可丢锚点", () => {
     expect(fs.readdirSync(recordsDir).sort()).toEqual(["sa-closed.json", "sa-running.json"]);
 
     // sessions-index 经首扫自愈重写（fire-and-forget，等待落盘）
-    await vi.waitFor(() => expect(fs.existsSync(path.join(rootDir, INDEX_FILENAME))).toBe(true));
+    await vi.waitFor(() => expect(fs.existsSync(path.join(rootDir, INDEX_FILENAME))).toBe(true), { interval: 1 });
     const index = JSON.parse(fs.readFileSync(path.join(rootDir, INDEX_FILENAME), "utf-8")) as {
       version: number;
       entries: Record<string, unknown>;
@@ -244,6 +244,96 @@ describe("[U4c/G1] rebuildIndexes 双通道 + S5 缓存可丢锚点", () => {
     store.revive();
     store.collectRecords(100);
     expect(fs.existsSync(path.join(recordsDir, "sa-guard.json"))).toBe(true);
+    store.dispose();
+  });
+});
+
+describe("[crash 回归] 索引命中即崩：v3+ 收条统计字段（number 型 turns）泄漏进身份基底", () => {
+  let rootDir: string;
+  let sessionsDir: string;
+  let recordsDir: string;
+
+  beforeEach(() => {
+    rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "rebuild-index-crash-"));
+    sessionsDir = path.join(rootDir, "sessions");
+    recordsDir = path.join(rootDir, "records");
+    fs.mkdirSync(sessionsDir);
+    fs.mkdirSync(recordsDir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  it("索引条目带 receipt+turns+totalTokens 且无 .record-binding → 扫描不抛，统计按索引自承值投影", () => {
+    const id = "sa-idx-crash";
+    const basename = "20260912T000010_idxcrash.jsonl";
+    const file = path.join(sessionsDir, basename);
+    writeSessionJsonl(file, { id, task: "index hit task", startedAt: 1000, rootSessionId: "root-session" });
+    // 事件文件（首行头行 + record-settled 终态行；stopReason 取引擎停因词表值 "stop"）。
+    // 索引命中腿只 stat 事件文件比戳（eventsMtimeMs/eventsSize），不读内容。
+    const eventsPath = path.join(recordsDir, `${id}.events`);
+    fs.writeFileSync(
+      eventsPath,
+      [
+        JSON.stringify({ type: "record-events", id }),
+        JSON.stringify({ type: "record-settled", seq: 1, ts: 1500, stopReason: "stop", outcome: "completed", endedAt: 1500, turns: 3, totalTokens: 120 }),
+      ].join("\n") + "\n",
+      "utf-8",
+    );
+    // 手写 v4 索引：正条目带收条 + 统计域，不写 .record-binding sidecar（默认即无）。
+    // 四维戳（jsonl mtimeMs/size + events mtimeMs/size）写完数据文件后实测回填。
+    const jsonlStat = fs.statSync(file);
+    const eventsStat = fs.statSync(eventsPath);
+    fs.writeFileSync(
+      path.join(rootDir, INDEX_FILENAME),
+      JSON.stringify({
+        version: INDEX_VERSION,
+        pid: process.pid,
+        entries: {
+          [basename]: {
+            mtimeMs: jsonlStat.mtimeMs,
+            size: jsonlStat.size,
+            id,
+            agent: "worker",
+            mode: "background",
+            task: "index hit task",
+            slug: "rebuild",
+            startedAt: 1000,
+            rootSessionId: "root-session",
+            parentRecordId: undefined,
+            depth: 0,
+            model: "test/model",
+            eventsMtimeMs: eventsStat.mtimeMs,
+            eventsSize: eventsStat.size,
+            receipt: { stopReason: "stop", endedAt: 1500 },
+            turns: 3,
+            totalTokens: 120,
+          },
+        },
+      }),
+      "utf-8",
+    );
+
+    // 新进程语义：先落盘后建 store。修复前 collectRecords 在 buildEntryFromIndex
+    // 命中处迭代 number 型 turns 抛 TypeError（"<N> is not iterable"）。
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
+    expect(() => store.collectRecords(100)).not.toThrow();
+    expect(() => store.rebuildIndexes()).not.toThrow();
+
+    // 走轻量分支（零内容读取）且统计投影正确：turns/totalTokens 取索引自承值，
+    // 收条域（stopReason/endedAt）随 state marker 投影。
+    const rec = store.collectRecords(100).find((r) => r.id === id);
+    expect(rec).toBeDefined();
+    expect(rec?.turns).toBe(3);
+    expect(rec?.totalTokens).toBe(120);
+    expect(rec?.stopReason).toBe("stop");
+    expect(rec?.endedAt).toBe(1500);
+    // 正常索引命中路径零 warn（buildRecord 的泄漏防御 warn 只在 turns 键存在却非
+    // 数组时触发——防刷屏契约）。
+    loggerMock.warn.mockClear();
+    store.collectRecords(100);
+    expect(loggerMock.warn).not.toHaveBeenCalled();
     store.dispose();
   });
 });

@@ -97,7 +97,7 @@ export function isTurnEndEvent(e: unknown): e is { message?: { stopReason?: stri
 /** tool_execution_end event 结构检查（替代直接 cast，配合 taste/no-unsafe-cast）。 */
 export function isToolExecutionEndEvent(
 	e: unknown,
-): e is { toolName: unknown; isError: unknown; result?: unknown } {
+): e is { toolName: unknown; isError: unknown; toolCallId?: unknown; result?: unknown } {
 	return typeof e === "object" && e !== null && "toolName" in e && "isError" in e;
 }
 
@@ -107,4 +107,4 @@ export function isToolExecutionEndEvent(
  * 反向 import tool-definition 会成环。
  */
 export const CORRECT_USAGE_HINT =
-	"Correct: structured-output({schema:{type:'object',properties:{...}}, data:{...actual values}}). ";
+	"Correct: structured_output({schema:{type:'object',properties:{...}}, data:{...actual values}}). ";

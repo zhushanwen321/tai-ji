@@ -1,0 +1,18 @@
+{
+  "name": "pending-notifications",
+  "summary": "待处理通知（extensions/universal/pending-notifications 整包；pending-entries 共享机制归 foundation 广播载体，subagent reconcile-sweep 随 subagent 域）",
+  "layers": [
+    "extension"
+  ],
+  "scope": {
+    "extension": [
+      "extensions/universal/pending-notifications/**"
+    ]
+  },
+  "tests": [
+    "extensions/universal/pending-notifications/**"
+  ],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

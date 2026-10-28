@@ -107,7 +107,7 @@
     "build": "tsup",
     "build:bundle": "tsup",
     "build:workflows": "node scripts/build-review-fix-loop.mjs",
-    "test": "vitest run",
+    "test": "vitest run --pool=threads",
     "typecheck": "tsc --noEmit",
     "record:engine-fixtures": "node scripts/record-engine-fixtures.mjs",
     "test:engine-protocol": "vitest run src/execution/engine/__tests__/conformance/protocol-blackbox.test.ts src/execution/engine/__tests__/conformance/static-spawn-guard.test.ts"

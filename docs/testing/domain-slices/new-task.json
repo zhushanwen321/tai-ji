@@ -1,0 +1,33 @@
+{
+  "name": "new-task",
+  "summary": "新任务落地页（renderer new-task/__tests__ 落地页流程 + core domain/new-task-search 文件检索 + ui features/new-task 套件；runtime test/new-task/new-task-bundle 实测 git 域内容、不属本域）",
+  "layers": [
+    "renderer",
+    "ui",
+    "core"
+  ],
+  "scope": {
+    "core": [
+      "packages/core/src/domain/new-task-search/**"
+    ],
+    "renderer": [
+      "packages/renderer/src/components/new-task/**",
+      "packages/renderer/src/composables/features/new-task/**"
+    ],
+    "ui": [
+      "packages/ui/src/features/new-task/**"
+    ]
+  },
+  "tests": [
+    "packages/renderer/src/__tests__/new-task/**",
+    "packages/ui/src/features/new-task/__tests__/**",
+    "packages/core/src/domain/new-task-search/__tests__/**"
+  ],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": [],
+  "w2bMountCompat": {
+    "mountSource": "docs/testing/domain-map.json",
+    "status": "enforced"
+  }
+}

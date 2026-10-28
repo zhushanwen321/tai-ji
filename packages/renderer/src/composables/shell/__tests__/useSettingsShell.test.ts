@@ -85,13 +85,13 @@ describe('useSettingsShell · locale 接线（Fix-1）', () => {
     await nextTick() // watch flush:pre 派发 applyCurrent
     expect(setLocaleSpy).toHaveBeenCalledWith('en-US')
     // en-US 动态 import 完成后 locale 真实翻转（端到端，非仅 spy）
-    await vi.waitFor(() => expect(getLocale()).toBe('en-US'))
+    await vi.waitFor(() => expect(getLocale()).toBe('en-US'), { interval: 1 })
 
     // 切回中文同样即时生效（watch 源含 locale 后双向都有响应）
     await store.setSystem({ locale: 'zh-CN' })
     await nextTick()
     expect(setLocaleSpy).toHaveBeenLastCalledWith('zh-CN')
-    await vi.waitFor(() => expect(getLocale()).toBe('zh-CN'))
+    await vi.waitFor(() => expect(getLocale()).toBe('zh-CN'), { interval: 1 })
 
     wrapper.unmount()
   })

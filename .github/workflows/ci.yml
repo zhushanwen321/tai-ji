@@ -377,6 +377,9 @@ jobs:
       - name: Test
         run: pnpm --filter @zhushanwen/state-machine run test
 
+      - name: Slow-case gate (default track)
+        run: node scripts/check-slow-tests.mjs
+
   test-extensions:
     name: Test (extensions)
     runs-on: ubuntu-latest
@@ -496,7 +499,7 @@ jobs:
       - name: Test - scripts guards
         id: scripts-guards
         continue-on-error: true
-        run: pnpm exec vitest run scripts/__tests__/check-unsafe-stream-writes.test.mjs scripts/__tests__/check-core-dist-gate.test.mjs scripts/__tests__/gitcode-release-sync.test.mjs scripts/__tests__/check-publish-surface.test.mjs scripts/__tests__/check-layout-literals.test.mjs scripts/__tests__/check-provider-credential-reads.test.mjs scripts/__tests__/vue-rules-split-justified.test.mjs scripts/__tests__/check-subagent-service-boundary.test.mjs scripts/__tests__/check-subagent-core-value-cycles.test.mjs scripts/__tests__/check-global-slot-keys.test.mjs scripts/__tests__/check-record-write-surface.test.mjs scripts/__tests__/validate-constraints.test.mjs scripts/__tests__/check-thinking-levels.test.mjs scripts/__tests__/check-ci-vitest-targets.test.mjs scripts/__tests__/check-doc-symbol-drift.test.mjs scripts/__tests__/check-guide-contract-projection.test.mjs scripts/__tests__/check-infra-services-import.test.mjs scripts/__tests__/verify-scheduler-e2e.test.mjs scripts/__tests__/render-sampling-decisions.test.mjs scripts/__tests__/check-domain-type-path.test.mjs scripts/__tests__/check-capability-allowlist-sync.test.mjs scripts/__tests__/check-artifact-dir-formula-sync.test.mjs scripts/__tests__/check-posix-resolve-mirror-sync.test.mjs scripts/__tests__/pi-env-admission-gate.test.mjs scripts/__tests__/merge-gate.test.mjs scripts/__tests__/merge-state.test.mjs scripts/__tests__/merge-sync.test.mjs scripts/__tests__/merge-wait-for-ci.test.mjs scripts/__tests__/merge-release.test.mjs scripts/__tests__/merge-verify-ci-release.test.mjs scripts/__tests__/changeset-versionable.test.mjs scripts/__tests__/changeset-check.test.mjs scripts/__tests__/check-test-blind-wait.test.mjs scripts/__tests__/check-prompt-outposts.test.mjs scripts/__tests__/check-pi-subtree-shared-imports.test.mjs scripts/__tests__/probe-registry.test.mjs scripts/__tests__/check-repo-literal.test.mjs scripts/__tests__/quality-gates.test.mjs scripts/__tests__/check-test-extremes.test.mjs scripts/__tests__/cross-branch-overlap.test.mjs scripts/__tests__/zcode-session-db-cleanup.test.mjs scripts/__tests__/check-test-suite-wiring.test.mjs
+        run: pnpm exec vitest run scripts/__tests__/check-unsafe-stream-writes.test.mjs scripts/__tests__/check-core-dist-gate.test.mjs scripts/__tests__/gitcode-release-sync.test.mjs scripts/__tests__/check-publish-surface.test.mjs scripts/__tests__/check-layout-literals.test.mjs scripts/__tests__/check-provider-credential-reads.test.mjs scripts/__tests__/vue-rules-split-justified.test.mjs scripts/__tests__/check-subagent-service-boundary.test.mjs scripts/__tests__/check-subagent-core-value-cycles.test.mjs scripts/__tests__/check-global-slot-keys.test.mjs scripts/__tests__/check-record-write-surface.test.mjs scripts/__tests__/validate-constraints.test.mjs scripts/__tests__/check-thinking-levels.test.mjs scripts/__tests__/check-ci-vitest-targets.test.mjs scripts/__tests__/check-doc-symbol-drift.test.mjs scripts/__tests__/check-guide-contract-projection.test.mjs scripts/__tests__/check-infra-services-import.test.mjs scripts/__tests__/verify-scheduler-e2e.test.mjs scripts/__tests__/render-sampling-decisions.test.mjs scripts/__tests__/check-domain-type-path.test.mjs scripts/__tests__/check-capability-allowlist-sync.test.mjs scripts/__tests__/check-artifact-dir-formula-sync.test.mjs scripts/__tests__/check-posix-resolve-mirror-sync.test.mjs scripts/__tests__/pi-env-admission-gate.test.mjs scripts/__tests__/merge-gate.test.mjs scripts/__tests__/merge-state.test.mjs scripts/__tests__/merge-sync.test.mjs scripts/__tests__/merge-wait-for-ci.test.mjs scripts/__tests__/merge-release.test.mjs scripts/__tests__/merge-verify-ci-release.test.mjs scripts/__tests__/changeset-versionable.test.mjs scripts/__tests__/changeset-check.test.mjs scripts/__tests__/check-test-blind-wait.test.mjs scripts/__tests__/check-prompt-outposts.test.mjs scripts/__tests__/check-pi-subtree-shared-imports.test.mjs scripts/__tests__/probe-registry.test.mjs scripts/__tests__/check-repo-literal.test.mjs scripts/__tests__/quality-gates.test.mjs scripts/__tests__/check-test-extremes.test.mjs scripts/__tests__/cross-branch-overlap.test.mjs scripts/__tests__/zcode-session-db-cleanup.test.mjs scripts/__tests__/check-test-suite-wiring.test.mjs scripts/__tests__/select-affected-domain.test.mjs scripts/__tests__/check-domain-slices.test.mjs scripts/__tests__/check-slow-tests.test.mjs scripts/__tests__/check-test-results.test.mjs scripts/__tests__/check-test-junit-parity.test.mjs
 
       # 解掩蔽（同 lint job 聚合语义）：五个测试/门步骤并列暴露，任一非 success
       #（含 skipped）由聚合步骤判红。
@@ -885,6 +888,17 @@ jobs:
         continue-on-error: true
         run: node scripts/check-vitest-guard.mjs
 
+      # 测试注册表与分池静态健康检查：本地 hook 按 staged 路径触发，CI 每次全量核对，
+      # 防未触发路径上的死登记、双归属、门控载体漏登与共享池污染特征漂移。
+      - name: Test registry and pool guards
+        id: registry-pools
+        continue-on-error: true
+        run: |
+          node scripts/check-domain-map.mjs
+          node scripts/check-domain-slices.mjs
+          node scripts/check-zero-mock-pool.mjs
+          node scripts/check-integration-carriers.mjs
+
       # zcode-session-source bun 驱动双跑（D3 源级双跑，session-reader-shared-core U5，
       # 与 pre-commit 2h 段同源直调）：pi 扩展宿主是编译版 bun 二进制，bun:sqlite 是
       # 生产宿主唯一可用 sqlite 驱动——bun 趟只能在有 bun 的环境跑，本地开发者可无
@@ -978,6 +992,7 @@ jobs:
           if [ "${{ steps.prompt-outposts.outcome }}" != "success" ]; then echo "::error title=prompt-outposts::failed"; failed=1; fi
           if [ "${{ steps.alias-tsconfig.outcome }}" != "success" ]; then echo "::error title=alias-tsconfig::failed"; failed=1; fi
           if [ "${{ steps.vitest-guard.outcome }}" != "success" ]; then echo "::error title=vitest-guard::failed"; failed=1; fi
+          if [ "${{ steps['registry-pools'].outcome }}" != "success" ]; then echo "::error title=registry-pools::failed"; failed=1; fi
           if [ "${{ steps.bun-driver.outcome }}" != "success" ]; then echo "::error title=bun-driver::failed"; failed=1; fi
           if [ "${{ steps.p-bundle.outcome }}" != "success" ]; then echo "::error title=p-bundle::failed"; failed=1; fi
           if [ "${{ steps.ci-vitest-targets.outcome }}" != "success" ]; then echo "::error title=ci-vitest-targets::failed"; failed=1; fi

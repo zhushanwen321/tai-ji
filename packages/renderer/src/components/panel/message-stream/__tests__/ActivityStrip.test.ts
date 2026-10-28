@@ -177,7 +177,7 @@ describe('ActivityStrip · 四类状态各自渲染（P1）', () => {
     // 完成即通过，CPU 忙时自适应延长，不赌固定余量
     await vi.waitFor(() => {
       expect(document.querySelector('[data-testid="activity-strip-detail-body-bash"]')?.textContent).toBe('pnpm test')
-    })
+    }, { interval: 1 })
     expect(document.querySelector('[data-testid="activity-strip-detail-bash"]')?.textContent).toContain(
       t('panel.message.bashCommandLabel'),
     )

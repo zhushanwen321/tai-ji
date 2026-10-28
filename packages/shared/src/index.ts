@@ -54,6 +54,15 @@ export type {
   // 引擎默认模型族（engine-provider-unification D5）：setSubagentEngineDefaultModel 的
   // reply 具名类型 + per-engine 模型清单条目（core api 域 / settings UI 跨包具名消费）
   SubagentEngineDefaultModelMutationReply, SubagentEngineModelInfo,
+  // 插件清单域（provider-plugin-access U5）：v2-plugins 清单条目 + listAvailable / catalog
+  // reply 具名类型（runtime plugin-catalog service ↔ core plugin 域跨包具名消费）
+  PluginProviderFamilyMeta, PluginCatalogEntry, PluginListAvailableReply, PluginCatalogReply,
+  // provider-plugin-access D9（u-protocol 补登记）：plugin:event 广播载荷 + plugin.invoke
+  // reply 信封（core plugin 域 invokePlugin/onPluginEvent 跨包具名消费）
+  PluginEventPayload, PluginInvokeReply,
+  // 两段式安装 reply（provider-plugin-access U4/U6）：确认卡知情面 + 提交结果
+  //（core plugin 域 preparePluginInstall/confirmPluginInstall 跨包具名消费）
+  PluginPrepareInstallReply, PluginConfirmInstallReply,
 } from './protocol'
 // 消息撤回（U3）：__taiji_nav__ 信令命令名常量——U4 runtime 编排跨包消费；
 // 本文件对 protocol.ts 是显式 allowlist（非 export *），漏登记会使常量对下游不可达。
@@ -240,7 +249,7 @@ export type { ProviderApiType } from './constants'
 // renderer（浏览器）整包 import，import 本身安全（constants.ts 模块顶层无 process 访问），
 // 但 renderer 严禁调用（process 未定义 ReferenceError）；main / runtime 专用，
 // 完整警示见 constants.ts 内 JSDoc。
-export { OUTBOUND_FRAME_WARN_BYTES, OUTBOUND_FRAME_TRUNCATE_BYTES, RING_BUDGET_BYTES, READ_PRECHECK_MAX_BYTES, BYTES_PER_MB, HISTORY_BUDGET, DEFAULT_LOG_KEEP_DAYS, readLogKeepDays, RUNTIME_PLANNED_EXIT_CODE } from './constants'
+export { OUTBOUND_FRAME_WARN_BYTES, OUTBOUND_FRAME_TRUNCATE_BYTES, PLUGIN_EVENT_PAYLOAD_MAX_BYTES, RING_BUDGET_BYTES, READ_PRECHECK_MAX_BYTES, BYTES_PER_MB, HISTORY_BUDGET, DEFAULT_LOG_KEEP_DAYS, readLogKeepDays, RUNTIME_PLANNED_EXIT_CODE } from './constants'
 // Electron IPC 通道名 SSOT（u-foundation：全量 invoke / 推送通道常量——preload 与
 // main 两侧注册 import 消费，renderer 经 preload electronAPI 方法面间接使用）。
 export {
@@ -391,6 +400,15 @@ export {
   extractAgentCallSessionId,
   resolveVirtualSessionId,
 } from './virtual-session-id'
+// vid RPC 门（RPC command 入口统一拦截虚拟会话 id）——core transport request / renderer boot 共用
+export {
+  VID_RESOLVABLE_RPC,
+  VID_RPC_REJECTED_CODE,
+  VidRpcRejectedError,
+  registerVidOwnerResolver,
+  __clearVidOwnerResolverForTest,
+  gateVidRpcSessionId,
+} from './vid-rpc-gate'
 // 终端实例编号格式谓词（`term:<sid>:<seq>`，terminal-multi-instance §0.5 P7 精确前缀口径）——
 // runtime terminal-service / renderer terminal-instance-registry / core terminal-write-queue 三包共用 SSOT
 export {
@@ -575,6 +593,11 @@ export {
 export { RUNTIME_INSTANCE_FILE } from './runtime-instance'
 export type { RuntimeInstanceRecord } from './runtime-instance'
 export { displayAgentName, displayWorkflowName } from './display-name'
+// 插件视图归属作用域（provider-plugin-access U2 分区键泛化）：scope 联合 + scope 串
+// 推导与 wire 形态检查——runtime 快照存储 / core 渲染缓存 / renderer bridge 三方共用
+// 的跨包契约（type 与可执行函数同源单模块）。
+export type { PluginViewScope, SessionViewScope, GlobalViewScope } from './plugin-view-scope'
+export { pluginViewScopeKey, pluginViewScopeFromWire } from './plugin-view-scope'
 // session occupancy 域（chat-flow-consistency D1 契约根）：turn 相位值域 + 「回合进行中」
 // 判定集合与函数（laneOf 投递判定 / 发送位形态与角标 / Alt+⏎ 分流 / 活动条 / 前端回合判定
 // 统一引用）。形状 SSOT = ./session-occupancy，protocol.ts 的 'session.occupancy' 帧内联引用

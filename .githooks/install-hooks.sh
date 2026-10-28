@@ -703,6 +703,202 @@ if echo "$STAGED_FILES" | grep -qE "^(packages|extensions|apps)/.*(\.test\.(ts|m
 fi
 
 # ============================================================================
+# 2f+. 前端退役/动画/z 基线机器守卫（原 renderer 测试用例转 check 脚本）
+#     wool 残留防复活、动画源码 12 条判据、z 基线全仓对拍。2026-10-27 从
+#     renderer 测试转出（wave1 前端片）——转出不挂接 = 零覆盖，故挂 pre-commit。
+#     复用 SKIP_CODE_RULES_CHECK 开关（不新增逃生口）。
+# ============================================================================
+
+if echo "$STAGED_FILES" | grep -qE "^packages/renderer/src/components/settings/provider/|^packages/shared/src/.*wool|^scripts/check-wool-retirement\.mjs$"; then
+    print_section "[wool 退役防复活检查]"
+    if [ "$SKIP_CODE_RULES_CHECK" != "1" ]; then
+        if ! node scripts/check-wool-retirement.mjs; then
+            echo -e "${RED}[ERROR] wool 退役检查未通过——已退役载体不得复活，按上方 ✗ 明细修复后重试${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${YELLOW}[SKIP] wool 退役防复活检查已跳过${NC}"
+    fi
+fi
+
+if echo "$STAGED_FILES" | grep -qE "^packages/renderer/src/(components|composables)/|^packages/renderer/src/style\.css$|^packages/renderer/tailwind\.config\.ts$|^scripts/check-animation-source-guards\.mjs$"; then
+    print_section "[动画源码守卫检查]"
+    if [ "$SKIP_CODE_RULES_CHECK" != "1" ]; then
+        if ! node scripts/check-animation-source-guards.mjs; then
+            echo -e "${RED}[ERROR] 动画源码守卫未通过——动画类名/时长/keyframes 有越权改动，按上方 ✗ 明细修复后重试${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${YELLOW}[SKIP] 动画源码守卫检查已跳过${NC}"
+    fi
+fi
+
+if echo "$STAGED_FILES" | grep -qE "^packages/renderer/src/|^packages/ui/src/|^apps/|^extensions/|^scripts/check-z-surface-baseline\.mjs$"; then
+    print_section "[z 基线对账检查]"
+    if [ "$SKIP_CODE_RULES_CHECK" != "1" ]; then
+        if ! node scripts/check-z-surface-baseline.mjs; then
+            echo -e "${RED}[ERROR] z 基线对账未通过——新增 z 层未登记或登记表与扫描不一致，按上方 ✗ 明细修复后重试${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${YELLOW}[SKIP] z 基线对账检查已跳过${NC}"
+    fi
+fi
+
+# ============================================================================
+# 2f-2. 集成门控组载体登记漂移检查（round6 wave2）
+#     scripts/check-integration-carriers.mjs：INTEGRATION_TESTS 成员文件内存在未被
+#     describe.skipIf(!INTEGRATION_TESTS_ENABLED) 包裹的用例、却未登记
+#     INTEGRATION_UNGATED_CARRIERS → 门控关闭时 integration project 的 include 条件化
+#     只收集载体表，该文件不被收集，非门控用例静默消失（无报错、无 skip 记录）。
+#     触发条件 = runtime vitest.config.ts / test-guard/ / runtime 测试文件任一 staged
+#     （成员路径全集只存在于 config 两表，bash 侧以「runtime 域全部测试文件」宽匹配
+#     覆盖，成员表扩容后钩子零维护）。解析能力不足时脚本输出 WARNING 放行
+#     （误报趋零原则，只拦确定可证明的漂移）。复用 SKIP_CODE_RULES_CHECK 开关。
+# ============================================================================
+
+if echo "$STAGED_FILES" | grep -qE "^packages/runtime/vitest\.config\.ts$|^test-guard/|^packages/runtime/(src|test|scripts)/.*\.test\.ts$|^scripts/check-integration-carriers\.mjs$"; then
+    print_section "[集成门控组载体登记检查]"
+    if [ "$SKIP_CODE_RULES_CHECK" != "1" ]; then
+        if ! node scripts/check-integration-carriers.mjs; then
+            echo -e "${RED}[ERROR] 集成门控载体登记检查未通过——门控关闭时未包裹用例将静默消失，按上方 [FIX] 修复后重试${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${YELLOW}[SKIP] 集成门控组载体登记检查已跳过${NC}"
+    fi
+fi
+
+# ============================================================================
+# 2f-3. 挂载渲染域映射健康度检查（round6 wave2 域触发档）
+#     scripts/check-domain-map.mjs：docs/testing/domain-map.json 是「挂载渲染重型
+#     测试按域触发」的单一权威源——renderer/ui 的 vitest.config.ts（默认档排除）
+#     与 scripts/run-domain-tests.mjs（域触发选中）共同消费它，任何一侧漂移
+#     （文件改名/删除未同步登记、双收录、逻辑文件误登记、config 绕开权威源
+#     手抄清单）→ 默认档排除与域触发选中失配，本检查拦成红灯。触发条件 =
+#     权威源 / 消费方 / 检查脚本自身 / renderer·ui 测试文件任一 staged
+#     （test-guard/ 并入触发：排除清单派生器 domain-exclusions 载体所在域；
+#     测试文件并入触发：新增挂载特征文件未登记域表时提示自查——重型实测
+#     阈值以 domain-map meta.criterion 为准，>2s 慢用例红灯是最终兜底；
+#     静态特征区分不了轻重故只提示不拦）。复用 SKIP_CODE_RULES_CHECK 开关。
+# ============================================================================
+
+if echo "$STAGED_FILES" | grep -qE "^docs/testing/domain-map\.json$|^packages/(renderer|ui)/vitest\.config\.ts$|^scripts/(check-domain-map|run-domain-tests)\.mjs$|^test-guard/|^packages/(renderer|ui)/.+\.test\.tsx?$"; then
+    print_section "[挂载渲染域映射健康度检查]"
+    if [ "$SKIP_CODE_RULES_CHECK" != "1" ]; then
+        if ! node scripts/check-domain-map.mjs; then
+            echo -e "${RED}[ERROR] 域映射健康度检查未通过——默认档排除与域触发选中将失配，按上方 ✗ 明细修复后重试${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${YELLOW}[SKIP] 挂载渲染域映射健康度检查已跳过${NC}"
+    fi
+fi
+
+# ============================================================================
+# 2f-4. 功能域切片注册表健康度 + 新增文件归域门禁（round6 wave4 域垂直切分）
+#     scripts/check-domain-slices.mjs：docs/testing/domain-slices/ 是全域切片
+#     SSOT（登记即归属；38 域 = 35 功能域 + foundation/host/uncategorized 三池），
+#     消费方 = select-affected-domain.mjs（改动→受影响域）与 run-domain-tests.mjs
+#     （域触发执行）。本块两道检查：
+#     ① 注册表健康度（死 glob / 双归属 / W2-B 交叉核对 / uncategorized 棘轮 /
+#        sharedBy 与 contracts 一致性）——staged 命中注册表或三脚本时触发；
+#     ② 新增文件归域门禁 select-affected-domain --staged——无条件运行（e2e 防漏
+#        门禁同款：staged 新增测试文件但漏改注册表的形态，靠「注册表被 staged」
+#        条件拦不住；watched roots 全集只存在于脚本内推导，bash 侧复刻目录判断
+#        必然漂移成第二份事实源；非看护文件提交脚本零命中静默通过）。
+#     复用 SKIP_CODE_RULES_CHECK 开关（wave4 接线裁决，与 2f/2f-2/2f-3 一致）。
+# ============================================================================
+
+if echo "$STAGED_FILES" | grep -qE "^docs/testing/domain-slices/|^scripts/(select-affected-domain|check-domain-slices|run-domain-tests)\.mjs$"; then
+    print_section "[功能域切片注册表健康度检查]"
+    if [ "$SKIP_CODE_RULES_CHECK" != "1" ]; then
+        if [ ! -f "scripts/check-domain-slices.mjs" ]; then
+            echo -e "${RED}[ERROR] 找不到 scripts/check-domain-slices.mjs（检查脚本被删除）${NC}"
+            exit 1
+        fi
+        if ! node scripts/check-domain-slices.mjs; then
+            echo -e "${RED}[ERROR] 域切片注册表检查未通过——域触发清单已漂移，按上方 ✗ 明细修复后重试${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${YELLOW}[SKIP] 功能域切片注册表健康度检查已跳过${NC}"
+    fi
+fi
+
+if [ "$SKIP_CODE_RULES_CHECK" != "1" ]; then
+    if [ ! -f "scripts/select-affected-domain.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/select-affected-domain.mjs（检查脚本被删除）${NC}"
+        exit 1
+    fi
+    if ! node scripts/select-affected-domain.mjs --staged; then
+        echo -e "${RED}[ERROR] 域切片防漏登记未通过——按上方明细将新增/改名文件归入所属域 tests（docs/testing/domain-slices/<域>.json）或登记 uncategorized 后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+fi
+
+# ============================================================================
+# 2f-5. 零特征共享池健康度检查（round6 Wave5 三包 isolate:false 双池）
+#     scripts/check-zero-mock-pool.mjs：docs/testing/zero-mock-pool.json 是五包
+#     零特征登记表的单一权威源；subagent-core / core / zcode-subagent-cli 三包
+#     已接线共享池，runtime / renderer 两包只维护候选清单。已接线包的消费方 =
+#     test-guard/zero-mock-pool.ts（三包 vitest.config.ts 的 shared
+#     project include）。检查 G1-G7：结构 / 存在性 / 池内文件特征复扫（G3：给
+#     池内文件新增 vi.mock 等特征 = 共享 worker 污染源，红）/ 门控复扫（G4）/
+#     动态出场表 / 消费方接线 / 未登记漂移提示。触发条件 = 权威源 / 检查脚本 /
+#     加载器 / 五包 config / 五包测试文件任一 staged（测试文件并入触发：池内
+#     文件被改出特征必须当场拦下；未接线两包也维护候选清单与门控排除，不能
+#     等下次登记表变更才发现漂移）。
+#     复用 SKIP_CODE_RULES_CHECK 开关（与 2f 族一致）。
+# ============================================================================
+
+if echo "$STAGED_FILES" | grep -qE "^docs/testing/zero-mock-pool\.json$|^scripts/check-zero-mock-pool\.mjs$|^test-guard/zero-mock-pool\.ts$|^packages/(subagent-core|core|zcode-subagent-cli|runtime|renderer)/(vitest\.config\.ts|.+\.test\.ts)$"; then
+    print_section "[零特征共享池健康度检查]"
+    if [ "$SKIP_CODE_RULES_CHECK" != "1" ]; then
+        if [ ! -f "scripts/check-zero-mock-pool.mjs" ]; then
+            echo -e "${RED}[ERROR] 找不到 scripts/check-zero-mock-pool.mjs（检查脚本被删除）${NC}"
+            exit 1
+        fi
+        if ! node scripts/check-zero-mock-pool.mjs; then
+            echo -e "${RED}[ERROR] 零特征共享池检查未通过——按上方 ✗ 明细修复后重试（池内文件引入 mock/门控特征会污染共享 worker）${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${YELLOW}[SKIP] 零特征共享池健康度检查已跳过${NC}"
+    fi
+fi
+
+# ============================================================================
+# 2f-6. 慢用例本地门禁（--if-fresh：CI check-slow-tests 的提交前前置）
+#     scripts/check-slow-tests.mjs --if-fresh：把「默认组用例 >2s 红灯」从 CI
+#     提前到提交时——只查本次 staged 测试文件所属包、且 junit 新鲜（mtime ≥
+#     staged 文件，即改完真跑过）的包；junit 缺失或陈旧的包黄字跳过不拦
+#     （防陈旧数据误拦与「未跑测试不许提交」的过度强制）；无测试文件 staged
+#     静默通过。判据权威 = docs/TEST-STRATEGY.md「新写测试判据」节。
+#     无条件运行（脚本内自筛，与 2f-4 第二道同款设计）。复用 SKIP_CODE_RULES_CHECK。
+# ============================================================================
+
+if [ "$SKIP_CODE_RULES_CHECK" != "1" ]; then
+    if [ ! -f "scripts/check-slow-tests.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/check-slow-tests.mjs（检查脚本被删除）${NC}"
+        exit 1
+    fi
+    if ! node scripts/check-slow-tests.mjs --if-fresh; then
+        echo -e "${RED}[ERROR] 慢用例本地门禁未通过——按上方明细处置（确定性同步化 / 缩数据量 / 挂 TAIJI_TEST_INTEGRATION 门控并在 e2e-map 登记）后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+fi
+
+# ============================================================================
 # 2g. review-fix-loop 双实现锁步检查
 #     scripts/check-rfl-parity.mjs：review+fix 循环有两份实现（pi 内置
 #     packages/subagent-core/workflows/review-fix-loop-utils.cjs / zcode 原生
@@ -1748,7 +1944,7 @@ fi
 # i18n 使用面 vs 定义面比对守卫（源码引用的 key 必须在 zh-CN 聚合树存在——
 #   problem-solve-canvas D3 真机 9 个错位 key 渲染原文的根因防线；locale-sync
 #   只查双语一致，此段查使用面。检查本体 = renderer 的
-#   usage-definition-check.test.ts（import 真实聚合树，白名单与动态前缀提取
+#   src/i18n/__tests__/i18n.test.ts 的 locale-key-usage-guard 节（2026-10 合并宿主；import 真实聚合树，白名单与动态前缀提取
 #   在测试文件内维护）。无独立 SKIP 开关（R1 后惯例，SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
 
@@ -1758,13 +1954,13 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
     if [ -n "$I18N_USAGE_TRIGGER" ]; then
         echo -e "${BLUE}[INFO] 运行 i18n 使用面-定义面比对守卫...${NC}"
 
-        (cd packages/renderer && npx vitest run src/__tests__/i18n/usage-definition-check.test.ts)
+        (cd packages/renderer && npx vitest run src/i18n/__tests__/i18n.test.ts)
         EXIT_CODE=$?
 
         if [ $EXIT_CODE -ne 0 ]; then
             echo ""
             echo -e "${RED}[ERROR] i18n 使用面-定义面守卫失败：源码引用的 key 在定义树不存在（或动态前缀无落点）${NC}"
-            echo -e "${RED}[FIX] 修 key 拼写 / 补词条（zh+en 双侧同步），确认合法的非 i18n 同形字面量登记白名单（usage-definition-check.test.ts 的 USAGE_WHITELIST，附理由）${NC}"
+            echo -e "${RED}[FIX] 修 key 拼写 / 补词条（zh+en 双侧同步），确认合法的非 i18n 同形字面量登记白名单（src/i18n/__tests__/i18n.test.ts 内 locale-key-usage-guard 节的 USAGE_WHITELIST，附理由）${NC}"
             exit 1
         fi
     fi
@@ -2585,7 +2781,8 @@ fi
 #   全部是 SDK 包内编译期断言（contract-types.ts + contract-closure.test.ts）。
 #   core 侧锁：C-proc-23 四张词表锁的镜像副本——SDK SSOT ↔ core 镜像类型双向可赋值 +
 #   engine-manifest 两表键集互等，断言在 packages/subagent-core/src/execution/engine/
-#   client/__tests__/protocol-closure.test.ts，只在 core 包 typecheck 下生效（SDK 类型
+#   __tests__/engine-manifest.test.ts（round5-g 合并产物，原 protocol-closure.test.ts 并入），
+#   只在 core 包 typecheck 下生效（SDK 类型
 #   改动只编译 SDK 恒绿，core 锚点不在其 include 内；缺 core 侧执行点则镜像锁为纸面）。
 #   检查路径自身变更不触发（typecheck 断言在两包内自持，由包 staged 必然连带触发）。
 #   触发范围用 pathspec 清单式（与相邻段同款；天然含 staged 删除，删除不构成风险敞口）。
@@ -2605,7 +2802,7 @@ if echo "$SDK_CORE_TYPECHECK_STAGED" | grep -qE "^packages/(subagent-engine-sdk|
     if ! (cd packages/subagent-core && npx tsc --noEmit 2>&1); then
         echo ""
         echo -e "${RED}[ERROR] subagent-core typecheck 失败——C-proc-23 引擎协议词表锁 core 侧锚点检出漂移（SDK SSOT ↔ core 镜像类型双向可赋值 / 能力位两表键集互等）${NC}"
-        echo -e "${YELLOW}[INFO] 断言本体：packages/subagent-core/src/execution/engine/client/__tests__/protocol-closure.test.ts + src/execution/engine/engine-manifest.ts（CONSERVATIVE_CAPABILITIES / CAPABILITY_ENUMS 两表）；SDK 与 core 任一侧漏同步即在此红，按上方 ✗ 明细修复后重试${NC}"
+        echo -e "${YELLOW}[INFO] 断言本体：packages/subagent-core/src/execution/engine/__tests__/engine-manifest.test.ts + src/execution/engine/engine-manifest.ts（CONSERVATIVE_CAPABILITIES / CAPABILITY_ENUMS 两表）；SDK 与 core 任一侧漏同步即在此红，按上方 ✗ 明细修复后重试${NC}"
         echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
         exit 1
     fi
@@ -2956,6 +3153,7 @@ echo -e "  ${GREEN}[+]${NC} oe-assert 过度设计自动初筛（code-overdesign
 echo -e "  ${GREEN}[+]${NC} chat store facet 双清单对账（E2E-CHATOPS-01：store.ts ChatStoreOps × taste-lint OPS_FIELDS 双向差集，载体变更时触发）"
 echo -e "  ${GREEN}[+]${NC} useSessionScopedState 调用点 census 静态锁（E2E-CENSUS-01：ADR-0049 入口边界快照对账，.ts/.tsx/.vue 变更时触发）"
 echo -e "  ${GREEN}[+]${NC} 跨进程契约字面量多侧对账（taiji.client-msg-id / taiji:revoked 登记侧变更时触发：AST 字面量同串断言）"
+echo -e "  ${GREEN}[+]${NC} 零特征共享池健康度检查（三包测试/config/登记表变更时触发：G1-G7，池内文件引入 mock/门控特征即红）"
 echo ""
 echo -e "${CYAN}Hook 脚本位置:${NC} .githooks/"
 echo ""

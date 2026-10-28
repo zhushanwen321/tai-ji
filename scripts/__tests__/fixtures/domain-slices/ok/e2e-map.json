@@ -1,0 +1,4 @@
+{
+  "_meta": { "purpose": "夹具：e2e-map 最小形态（供 e2eRules 存在性交叉核对）" },
+  "rules": [{ "id": "E2E-CHAT-01", "summary": "夹具 rule", "scope": ["packages/core/**"], "assets": [], "trigger": "on-diff", "layer": "L2", "serial": false, "run": "echo fixture", "owner": "packages/core", "authority": "fixture" }]
+}

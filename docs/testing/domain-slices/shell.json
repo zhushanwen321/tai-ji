@@ -1,0 +1,37 @@
+{
+  "name": "shell",
+  "summary": "容器原语层（ui drawer/overlay/dialog/select/rendering-protocol + core domain/drawer 与 rendering-protocol 右抽屉协议；W2-B 冻结 5 个 ui 容器挂载件）",
+  "layers": [
+    "ui",
+    "core"
+  ],
+  "scope": {
+    "ui": [
+      "packages/ui/src/features/drawer/**",
+      "packages/ui/src/overlays/**",
+      "packages/ui/src/primitives/dialog/**",
+      "packages/ui/src/primitives/select/**",
+      "packages/ui/src/rendering-protocol/**"
+    ],
+    "core": [
+      "packages/core/src/domain/drawer/**",
+      "packages/core/src/rendering-protocol/**"
+    ]
+  },
+  "tests": [
+    "packages/ui/src/features/drawer/__tests__/**",
+    "packages/ui/src/overlays/__tests__/**",
+    "packages/ui/src/primitives/dialog/__tests__/**",
+    "packages/ui/src/primitives/select/__tests__/**",
+    "packages/ui/src/rendering-protocol/__tests__/**",
+    "packages/core/src/domain/drawer/**",
+    "packages/core/src/rendering-protocol/**"
+  ],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": [],
+  "w2bMountCompat": {
+    "mountSource": "docs/testing/domain-map.json",
+    "status": "enforced"
+  }
+}

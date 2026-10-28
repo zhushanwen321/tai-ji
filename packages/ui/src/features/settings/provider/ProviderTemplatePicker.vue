@@ -13,7 +13,7 @@
  */
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Library, Pencil, Plus } from '@lucide/vue'
+import { Library, Pencil, Plug, Plus } from '@lucide/vue'
 import {
   Popover,
   PopoverContent,
@@ -34,6 +34,8 @@ const emit = defineEmits<{
   select: [template: BuiltinProviderTemplate]
   /** 菜单「自定义」条目 → 父走原手填流程（createAndExpand） */
   custom: []
+  /** 菜单「插件 Provider」条目 → 父打开插件接入流程（家族卡，provider-plugin-access D1） */
+  'plugin-source': []
 }>()
 
 const { t } = useI18n()
@@ -109,6 +111,12 @@ function onMenuCustom(): void {
   emit('custom')
 }
 
+/** 菜单：插件 Provider → 关闭 + emit（插件提供家族/授权/凭据，宿主只提供壳，D1） */
+function onMenuPlugin(): void {
+  open.value = false
+  emit('plugin-source')
+}
+
 function onSelect(tpl: BuiltinProviderTemplate): void {
   dialogOpen.value = false
   emit('select', tpl)
@@ -157,6 +165,17 @@ function onSelect(tpl: BuiltinProviderTemplate): void {
       >
         <Pencil class="size-4 shrink-0 text-neutral-dim" />
         <span class="flex-1 truncate text-left font-medium">{{ t('settings.provider.builtinTemplate.menuCustom') }}</span>
+      </Button>
+      <!-- 第三来源类型「插件 Provider」（provider-plugin-access D1：与内置模板、自定义并列；
+           家族元数据/授权流程/模型目录由插件提供，宿主只提供壳与落盘） -->
+      <Button
+        variant="ghost"
+        data-testid="add-menu-plugin"
+        class="flex h-auto w-full items-center gap-2 rounded-sm px-2.5 py-2 text-[length:var(--text-sm)] text-neutral-fg hover:bg-surface-hover"
+        @click="onMenuPlugin"
+      >
+        <Plug class="size-4 shrink-0 text-neutral-dim" />
+        <span class="flex-1 truncate text-left font-medium">{{ t('settings.provider.builtinTemplate.menuPlugin') }}</span>
       </Button>
     </PopoverContent>
   </Popover>

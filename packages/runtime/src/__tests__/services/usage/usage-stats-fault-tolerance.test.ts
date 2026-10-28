@@ -81,7 +81,7 @@ describe('UsageStatsService 流级容错（设计 §3.3 D3）', () => {
     const promise = service.getStats()
 
     // 等 createInterface 已挂上 input 流后再注入数据与 error（保证走"读取中途"路径）
-    await vi.waitFor(() => expect(mockedCreateReadStream).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(mockedCreateReadStream).toHaveBeenCalledTimes(1), { interval: 1 })
     faultyInput.push(assistantLine(100) + '\n')
     faultyInput.emit('error', new Error('injected mid-read stream failure'))
 

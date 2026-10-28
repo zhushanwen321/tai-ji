@@ -1,0 +1,26 @@
+{
+  "name": "worktree",
+  "summary": "worktree 管理（runtime services/worktree + worktree-config-helper + transport/worktree-message-handler + core transport/api worktree 客户端；renderer worktree 页面 W2-B 冻结在 settings 域）",
+  "layers": [
+    "runtime",
+    "core"
+  ],
+  "scope": {
+    "runtime": [
+      "packages/runtime/src/services/worktree/**",
+      "packages/runtime/src/services/worktree-config-helper.ts",
+      "packages/runtime/src/transport/worktree-message-handler.ts"
+    ],
+    "core": [
+      "packages/core/src/transport/api/domains/worktree.ts"
+    ]
+  },
+  "tests": [
+    "packages/runtime/src/services/worktree/workspace-detector.test.ts",
+    "packages/runtime/src/services/worktree/worktree-bundle.test.ts",
+    "packages/core/src/transport/api/__tests__/worktree.test.ts"
+  ],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

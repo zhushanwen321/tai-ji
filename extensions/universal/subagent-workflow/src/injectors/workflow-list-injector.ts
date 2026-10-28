@@ -44,7 +44,7 @@ import { createResourceListInjector } from "./resource-list-injector.ts";
  * 而不进模板 meta——zsw 宿主清单注入不会照搬本句。
  */
 export const WORKFLOW_LIST_GUIDE =
-	"The following workflows are available. Do NOT call list to discover available workflows — they are listed below; use list only for running state. All listed workflows run directly via the workflow_run tool — do NOT use workflow-script generate for any listed workflow. For parameter details, read the <location> script file (script header has @pi-meta parameters + usage). For 2+ independent tasks dispatched together, prefer the `subagent_batch` tool — it drives the fan-out workflow for you.";
+	"The following workflows are available. Do NOT call list to discover available workflows — they are listed below; use list only for running state. All listed workflows run directly via the workflow_run tool — do NOT use workflow_script generate for any listed workflow. For parameter details, read the <location> script file (script header has @pi-meta parameters + usage). For 2+ independent tasks dispatched together, prefer the `subagent_batch` tool — it drives the fan-out workflow for you.";
 
 /**
  * 解析 workflow .js 文件的 meta（name + description），经 IF1 parseResourceMeta。

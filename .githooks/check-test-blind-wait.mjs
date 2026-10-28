@@ -41,7 +41,7 @@ const BLIND_WAIT_EXEMPT = {
   'extensions/universal/subagent-workflow/src/__tests__/scenario-25-host-projection.test.ts':
     'CDP 条件轮询间隔 + 用例经 it.skipIf 门控',
   // waitFor helper：每轮先查条件再 sleep，超时预算 + flake 归因注释——仓内条件轮询标准形态
-  'apps/electron/main/test/updater-script-integration.test.ts': 'waitFor helper 条件轮询间隔',
+  'apps/electron/main/test/updater.test.ts': 'waitFor helper 条件轮询间隔（updater-script-integration 并入产物后随迁，round5-g）',
   // waitUntil helper：先查谓词再 sleep，超时抛错带状态快照（文件头声明「事件同步，禁固定 sleep」）
   'packages/runtime/src/__tests__/equivalence/delivery-compaction-window-e2e.test.ts':
     'waitUntil 条件轮询的循环间隔',

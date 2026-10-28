@@ -1,0 +1,62 @@
+{
+  "name": "usage",
+  "summary": "用量/配额/统计三合一（runtime services/usage + quota-* 服务与 quota-providers + session 内 gen-stats 三文件 + transport usage/quota handler + core domain/usage + renderer 量卡（GenStats/ContextUsageRing/PlanQuotaFloatPanel，Plan=套餐配额非 plan mode）+ shared 契约）",
+  "layers": [
+    "runtime",
+    "core",
+    "renderer",
+    "shared"
+  ],
+  "scope": {
+    "runtime": [
+      "packages/runtime/src/services/usage/**",
+      "packages/runtime/src/services/quota-service.ts",
+      "packages/runtime/src/services/quota-cache.ts",
+      "packages/runtime/src/services/quota-auto-enable.ts",
+      "packages/runtime/src/services/quota-providers/**",
+      "packages/runtime/src/services/quota-params.ts",
+      "packages/runtime/src/services/session/gen-stats-service.ts",
+      "packages/runtime/src/services/session/gen-stats-store.ts",
+      "packages/runtime/src/services/session/event-interpreter-gen-stats.ts",
+      "packages/runtime/src/transport/usage-message-handler.ts",
+      "packages/runtime/src/transport/quota-message-handler.ts"
+    ],
+    "core": [
+      "packages/core/src/domain/usage/**"
+    ],
+    "renderer": [
+      "packages/renderer/src/composables/features/model/useGenStats.ts",
+      "packages/renderer/src/components/panel/ComposerMetricsAggregate.vue",
+      "packages/renderer/src/components/panel/ContextUsageRing.vue",
+      "packages/renderer/src/components/panel/PlanQuotaFloatPanel.vue"
+    ],
+    "shared": [
+      "packages/shared/src/gen-stats.ts",
+      "packages/shared/src/usage-stats.ts",
+      "packages/shared/src/quota-presets.ts",
+      "packages/shared/src/quota-types.ts"
+    ]
+  },
+  "tests": [
+    "packages/runtime/src/services/usage/**",
+    "packages/runtime/src/__tests__/services/usage/**",
+    "packages/runtime/src/services/session/__tests__/gen-stats-service.test.ts",
+    "packages/runtime/test/services/quota-service.test.ts",
+    "packages/runtime/test/services/quota-cache.test.ts",
+    "packages/runtime/test/services/quota-auth-chain.integration.test.ts",
+    "packages/runtime/src/services/quota-providers/**",
+    "packages/core/src/domain/usage/__tests__/usage.test.ts",
+    "packages/renderer/src/__tests__/panel/gen-stats-composable.test.ts",
+    "packages/renderer/src/__tests__/panel/context-capacity-card.test.ts",
+    "packages/renderer/src/components/panel/__tests__/PlanQuotaFloatPanel.test.ts",
+    "packages/shared/src/__tests__/gen-stats.test.ts",
+    "packages/shared/src/__tests__/quota-cookie-normalize.test.ts",
+    "packages/shared/src/__tests__/quota-credential-source.test.ts",
+    "packages/shared/src/__tests__/quota-pct-format.test.ts",
+    "packages/shared/src/__tests__/quota-presets.test.ts",
+    "packages/shared/src/__tests__/quota-workspace.test.ts"
+  ],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

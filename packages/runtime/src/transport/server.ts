@@ -12,7 +12,7 @@
  */
 import type { WebSocket as WsType } from 'ws'
 import type { ClientMessage, ClientMessageType, RollingRestartStatusPayload, ServerMessage, ServerMessageType, SkillCacheScope } from '@taiji/shared'
-import { EXTENSION_EVENTS, OUTBOUND_FRAME_WARN_BYTES, OUTBOUND_FRAME_TRUNCATE_BYTES } from '@taiji/shared'
+import { EXTENSION_EVENTS, OUTBOUND_FRAME_WARN_BYTES, OUTBOUND_FRAME_TRUNCATE_BYTES, isSubagentVirtualId, isAgentCallVirtualId, VID_RPC_REJECTED_CODE } from '@taiji/shared'
 import type { SessionManagerAction, CanvasMarkerAction } from '@zhushanwen/extension-protocol'
 import type { ISessionService, IConfigService, IModelService, IMessageBroker, IExtensionService, IPluginService, IAuthService, SubagentModelSwitchGateway } from '../interfaces.js'
 
@@ -727,6 +727,25 @@ export class RuntimeServer implements IMessageBroker {
   // ── Message routing ───────────────────────────────────────────
 
   private async handleMessage(msg: ClientMessage, ws: WsType): Promise<void> {
+    // vid 兜底（shared vid 契约，防复发守卫）：renderer 侧 command 入口的 vid 门被绕过
+    //（直连 ws send 等旁路）时，vid 以 payload.sessionId 形态到达 runtime，表现为模糊的
+    // session_not_found / not active（与「会话真的已删除」不可区分，会被降级逻辑吞成噪音）。
+    // 此处按 shared 谓词识别 vid，命中即返回专用错误码（与 renderer 门同 code，调用方可归因）。
+    // runtime 不在此解析归属（解析职责在 renderer 门 + owner 注册表）——renderer 门正常时
+    // 本分支不可达，触达 = 契约违规。
+    const vid = (msg.payload as { sessionId?: unknown } | undefined)?.sessionId
+    if (typeof vid === 'string' && (isSubagentVirtualId(vid) || isAgentCallVirtualId(vid))) {
+      // S-1 同款：error envelope 只达当前 ws（关闭/刷新即丢），runtime 日志是唯一持久取证侧
+      console.warn(`[server] vid reached runtime unhandled: type=${msg.type} sessionId=${vid} — 检查 renderer 侧 vid 门（core command 入口 / shared VID_RESOLVABLE_RPC）`)
+      this.broker.sendError(
+        ws,
+        VID_RPC_REJECTED_CODE,
+        `RPC ${msg.type} 的虚拟会话 id（${vid}）未解析即到达 runtime——runtime 全部 RPC 零方法认 vid，检查 renderer 侧 vid 门（core command 入口 / shared vid-rpc-gate）`,
+        msg.id,
+        { sessionId: vid },
+      )
+      return
+    }
     try {
       const route = this.routes.get(msg.type)
       if (route) {

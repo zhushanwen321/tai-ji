@@ -1,0 +1,1296 @@
+// errors.test.ts —— core C32 簇合并产物（round5-G）。
+// 共同被测业务模块：`src/transport/errors.ts`。mock 相容：单侧 mock ../../ws-client、../events、../request——合并后 mock 全文件生效，未 mock 方用例经产物自检全绿核对。
+// 顶层正文按来源包 describe 纯前缀分节，it 层名零改动。
+//
+// 来源：
+//   - src/transport/api/__tests__/domains.test.ts（86 用例，skip 0）
+//   - src/transport/__tests__/errors.test.ts（5 用例，skip 0）
+
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import * as btw from '../domains/btw'
+import * as chat from '../domains/chat'
+import { notDeliveredError, transportUnavailableError, isNotDeliveredError } from '../../errors'
+import * as composer from '../domains/composer'
+import * as config from '../domains/config'
+import * as extension from '../domains/extension'
+import * as file from '../domains/file'
+import * as git from '../domains/git'
+import * as model from '../domains/model'
+import * as plugin from '../domains/plugin'
+import * as preset from '../domains/preset'
+import * as project from '../domains/project'
+import * as quota from '../domains/quota'
+import * as session from '../domains/session'
+import * as subagent from '../domains/subagent'
+import * as settings from '../domains/settings'
+import * as terminal from '../domains/terminal'
+import * as tts from '../domains/tts'
+import * as usage from '../domains/usage'
+import * as workspace from '../domains/workspace'
+import { RPC_BACKSTOP_TIMEOUT_MS } from '../pending'
+
+const mockCommand = vi.fn<(type: string, payload: unknown, timeoutMs?: number) => Promise<Record<string, unknown>>>()
+/** events mock：捕获 handler 供测试手动派发消息（模拟 server-push） */
+const mockOn = vi.fn<(sessionId: string, handler: (msg: unknown) => void) => () => void>()
+const mockOnGlobalType = vi.fn<(type: string, handler: (msg: { payload: unknown }) => void) => () => void>()
+const mockWsSend = vi.fn<(msg: unknown) => boolean>()
+
+vi.mock('../request', () => ({
+  command: (type: string, payload: unknown, timeoutMs?: number) => mockCommand(type, payload, timeoutMs),
+}))
+vi.mock('../events', () => ({
+  on: (sessionId: string, handler: (msg: unknown) => void) => mockOn(sessionId, handler),
+  onGlobalType: (type: string, handler: (msg: { payload: unknown }) => void) => mockOnGlobalType(type, handler),
+}))
+vi.mock('../../ws-client', () => ({
+  send: (msg: unknown) => mockWsSend(msg),
+}))
+
+// ======== 来源：domains.test.ts ========
+describe("domains", () => {
+  beforeEach(() => {
+    // resetAllMocks（非 clearAllMocks）：mockClear 只清 calls/results，不清
+    // mockResolvedValueOnce 队列——前测中断残留的 Once 值会在下测前几次调用顶掉兜底
+    // 实现，失败原因指向被测函数而非前测残留。reset 连实现一并清，基线 stub 在下
+    // 一行重播；各用例对 mockOn / mockOnGlobalType / mockWsSend 均为用例内显式配置，
+    // 无需在 beforeEach 重建。vi.mock 工厂内的箭头函数转发层非 vi.fn 本体，reset 不影响。
+    vi.resetAllMocks()
+    mockCommand.mockImplementation(async () => ({}))
+  })
+
+  // ── chat 域 ────────────────────────────────────────────────────────────────
+  describe('chat 域 RPC 封装', () => {
+    it('getHistory 解包 messages + [u4d] 窗口契约字段透传（[u6] legacy historyTruncated 退役）', async () => {
+      mockCommand.mockResolvedValue({
+        messages: [{ id: 'm1' }],
+        truncated: true,
+        loadedTurns: 20,
+        totalTurnsEstimate: 42,
+      })
+      const r = await chat.getHistory('s1')
+      expect(mockCommand).toHaveBeenCalledWith('session.history', { sessionId: 's1' }, RPC_BACKSTOP_TIMEOUT_MS)
+      expect(r).toEqual({ messages: [{ id: 'm1' }], truncated: true, loadedTurns: 20, totalTurnsEstimate: 42 })
+    })
+
+    it('[u6] getHistory 游标翻页：query 透传（cursor/limitTurns/maxBytes，缺省键不带）', async () => {
+      mockCommand.mockResolvedValue({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 })
+      await chat.getHistory('s1', { cursor: 'entry-9' })
+      expect(mockCommand).toHaveBeenLastCalledWith('session.history', { sessionId: 's1', cursor: 'entry-9' }, RPC_BACKSTOP_TIMEOUT_MS)
+      await chat.getHistory('s1', { cursor: 'entry-9', limitTurns: 5, maxBytes: 1024 })
+      expect(mockCommand).toHaveBeenLastCalledWith('session.history', { sessionId: 's1', cursor: 'entry-9', limitTurns: 5, maxBytes: 1024 }, RPC_BACKSTOP_TIMEOUT_MS)
+      await chat.getHistory('s1')
+      expect(mockCommand).toHaveBeenLastCalledWith('session.history', { sessionId: 's1' }, RPC_BACKSTOP_TIMEOUT_MS)
+    })
+
+    it('send 无 images 时 payload 不带 images 键', async () => {
+      await chat.send('s1', 'hi')
+      const [type, payload] = mockCommand.mock.calls[0]
+      expect(type).toBe('message.send')
+      expect(payload).toEqual({ sessionId: 's1', content: 'hi' })
+    })
+
+    it('send 带 images 时透传 images 数组', async () => {
+      const images = [{ data: 'abc', mimeType: 'image/png' }]
+      await chat.send('s1', 'hi', images)
+      expect(mockCommand.mock.calls[0][1]).toEqual({ sessionId: 's1', content: 'hi', images })
+    })
+
+    // [u5a 退役] 前身用例「steer / followUp / abort 走对应 type」已删：前两方法的客户端封装随
+    // u5a 退役（u3b 统一 submit 化后零活调用方；协议条目存续原因见 shared/protocol.ts u5a 裁决）。
+    it('abort 走对应 type', async () => {
+      await chat.abort('s1')
+      expect(mockCommand.mock.calls[0]).toEqual(['message.abort', { sessionId: 's1' }, RPC_BACKSTOP_TIMEOUT_MS])
+    })
+
+    it('compact 超时 = COMPACT_RPC_TIMEOUT_MS + RENDERER_RPC_MARGIN_MS（校准链不变量）', async () => {
+      await chat.compact('s1', 'instr')
+      const [type, payload, timeout] = mockCommand.mock.calls[0]
+      expect(type).toBe('session.compact')
+      expect(payload).toEqual({ sessionId: 's1', customInstructions: 'instr' })
+      // 钉字面毫秒值（COMPACT_RPC_TIMEOUT_MS 1_800_000 + RENDERER_RPC_MARGIN_MS 60_000）：
+      // 不引用同批常量防镜像互证，compact/bash 两档互换（1860s ↔ 3660s）即红
+      expect(timeout).toBe(1_860_000)
+    })
+
+    it('bash：excludeFromContext 未传时不带该键，传了透传；超时用 BASH 档', async () => {
+      await chat.bash('s1', 'ls')
+      expect(mockCommand.mock.calls[0][1]).toEqual({ sessionId: 's1', command: 'ls' })
+      await chat.bash('s1', 'ls', true)
+      expect(mockCommand.mock.calls[1][1]).toEqual({ sessionId: 's1', command: 'ls', excludeFromContext: true })
+      // 钉字面毫秒值（BASH_RPC_TIMEOUT_MS 3_600_000 + RENDERER_RPC_MARGIN_MS 60_000），同上防镜像互证
+      expect(mockCommand.mock.calls[1][2]).toBe(3_660_000)
+    })
+
+    it('bash 回执契约（dmg-r1-2）：回执透传；未送达错误翻译为 rejected 回执；其余 reject 原样抛出', async () => {
+      // 回执透传（status 携带执行状态——消费方判定是否恢复草稿的权威依据）
+      mockCommand.mockResolvedValueOnce({ status: 'settled' })
+      await expect(chat.bash('s1', 'ls')).resolves.toEqual({ status: 'settled' })
+      // 消息未送达 runtime（可证明未执行）→ 翻译为 rejected 回执（消费方恢复草稿安全）
+      mockCommand.mockRejectedValueOnce(notDeliveredError('transport unavailable (ws not open)'))
+      await expect(chat.bash('s1', 'ls')).resolves.toEqual({ status: 'rejected', error: 'transport unavailable (ws not open)' })
+      // 回执不可达（断连 rejectAll 等同 code 错误：命令可能已执行）→ 原样抛出，消费方保守处置
+      mockCommand.mockRejectedValueOnce(transportUnavailableError('disconnected'))
+      await expect(chat.bash('s1', 'ls')).rejects.toMatchObject({ code: 'disconnected' })
+    })
+
+    it('abortBash 走 message.abortBash', async () => {
+      await chat.abortBash('s1')
+      expect(mockCommand.mock.calls[0][0]).toBe('message.abortBash')
+    })
+
+    // ── [投递所有权内核 u3b/D5] delivery 四面封装 ──
+    it('delivery.submit：type/payload 透传（无 images 不带键）+ reply 解包', async () => {
+      mockCommand.mockImplementation(async () => ({ clientUuid: 'u-x', state: 'in-flight', lane: 'direct' }))
+      const r = await chat.submitDelivery('s1', 'hi', 'u-x')
+      expect(mockCommand.mock.calls[0][0]).toBe('delivery.submit')
+      expect(mockCommand.mock.calls[0][1]).toEqual({ sessionId: 's1', content: 'hi', clientUuid: 'u-x' })
+      expect(mockCommand.mock.calls[0][2]).toBe(RPC_BACKSTOP_TIMEOUT_MS)
+      expect(r).toEqual({ clientUuid: 'u-x', state: 'in-flight', lane: 'direct' })
+      const images = [{ data: 'abc', mimeType: 'image/png' }]
+      await chat.submitDelivery('s1', 'hi', 'u-x', images)
+      expect(mockCommand.mock.calls[1][1]).toEqual({ sessionId: 's1', content: 'hi', images, clientUuid: 'u-x' })
+    })
+
+    it('delivery.cancel / drain / resync 走对应 type + payload 形状', async () => {
+      mockCommand.mockImplementation(async () => ({ sessionId: 's1', entries: [] }))
+      await chat.cancelDelivery('s1', 'u-x')
+      expect(mockCommand.mock.calls[0]).toEqual(['delivery.cancel', { sessionId: 's1', clientUuid: 'u-x' }, RPC_BACKSTOP_TIMEOUT_MS])
+      await chat.drainDelivery('s1')
+      expect(mockCommand.mock.calls[1][0]).toBe('delivery.drain')
+      expect(mockCommand.mock.calls[1][1]).toEqual({ sessionId: 's1' })
+      await chat.resyncDelivery('s1', ['u-a', 'u-b'])
+      expect(mockCommand.mock.calls[2]).toEqual(['delivery.resync', { sessionId: 's1', clientUuids: ['u-a', 'u-b'] }, RPC_BACKSTOP_TIMEOUT_MS])
+    })
+
+    it('streamSubscribe 经 events.on 注册并返回其取消函数', () => {
+      const off = vi.fn()
+      mockOn.mockReturnValue(off)
+      const handler = vi.fn()
+
+      const unsub = chat.streamSubscribe('s1', handler)
+
+      expect(mockOn).toHaveBeenCalledWith('s1', expect.any(Function))
+      // 派发一条消息 → handler 收到透传
+      const registered = mockOn.mock.calls[0][1]
+      const msg = { type: 'message.text_delta', payload: { text: 'x' } }
+      registered(msg)
+      expect(handler).toHaveBeenCalledWith(msg)
+      expect(unsub).toBe(off)
+    })
+  })
+
+  // ── composer 域 ────────────────────────────────────────────────────────────
+  describe('composer 域', () => {
+    it('getFileCandidates 走 file.search 并解包 files', async () => {
+      mockCommand.mockResolvedValue({ files: [{ path: 'a.ts' }] })
+      const r = await composer.getFileCandidates('s1')
+      expect(mockCommand).toHaveBeenCalledWith('file.search', { sessionId: 's1' }, RPC_BACKSTOP_TIMEOUT_MS)
+      expect(r).toEqual([{ path: 'a.ts' }])
+    })
+
+    it('getMentionCandidates 已废弃：恒返回空数组（零 RPC）', async () => {
+      await expect(composer.getMentionCandidates()).resolves.toEqual([])
+      expect(mockCommand).not.toHaveBeenCalled()
+    })
+  })
+
+  // ── file 域 ────────────────────────────────────────────────────────────────
+  describe('file 域', () => {
+    it('tree / expand 解包 reply 字段', async () => {
+      mockCommand.mockResolvedValueOnce({ tree: [{ path: 'src' }] })
+      await expect(file.tree('s1')).resolves.toEqual([{ path: 'src' }])
+      expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['file.tree', { sessionId: 's1' }])
+
+      mockCommand.mockResolvedValueOnce({ children: [{ path: 'src/a.ts' }] })
+      await expect(file.expand('s1', 'src')).resolves.toEqual([{ path: 'src/a.ts' }])
+      expect(mockCommand.mock.calls[1].slice(0, 2)).toEqual(['file.tree.expand', { sessionId: 's1', path: 'src' }])
+    })
+
+    it('read 带 sessionId 时透传；不带时（白名单模式）省略 sessionId 键', async () => {
+      mockCommand.mockResolvedValue({ content: 'x', truncated: true })
+      await expect(file.read('/abs/skill.md', 's1')).resolves.toEqual({ content: 'x', truncated: true })
+      expect(mockCommand.mock.calls[0][1]).toEqual({ path: '/abs/skill.md', sessionId: 's1' })
+
+      await file.read('/abs/skill.md')
+      expect(mockCommand.mock.calls[1][1]).toEqual({ path: '/abs/skill.md' })
+    })
+  })
+
+  // ── git 域 ─────────────────────────────────────────────────────────────────
+  describe('git 域', () => {
+    it('status / getDiff 解包', async () => {
+      mockCommand.mockResolvedValueOnce({ isRepo: true, changes: [] })
+      await expect(git.status('s1')).resolves.toEqual({ isRepo: true, changes: [] })
+
+      mockCommand.mockResolvedValueOnce({ patch: 'diff', binary: false })
+      await expect(git.getDiff('s1', 'a.ts')).resolves.toEqual({ patch: 'diff', binary: false })
+      expect(mockCommand.mock.calls[1].slice(0, 2)).toEqual(['git.diff', { sessionId: 's1', path: 'a.ts' }])
+    })
+
+    it('stage / unstage 透传可选 filePaths；commit 空 message 归一为空串', async () => {
+      await git.stage('s1', ['a.ts'])
+      expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['git.stage', { sessionId: 's1', filePaths: ['a.ts'] }])
+      await git.unstage('s1')
+      expect(mockCommand.mock.calls[1][1]).toEqual({ sessionId: 's1', filePaths: undefined })
+      await git.commit('s1')
+      expect(mockCommand.mock.calls[2][1]).toEqual({ sessionId: 's1', message: '' })
+    })
+
+    it('checkout / checkoutByCwd / createBranch 走对应 type', async () => {
+      await git.checkout('s1', 'dev')
+      expect(mockCommand.mock.calls[0][0]).toBe('git.checkout')
+      await git.checkoutByCwd('/repo', 'dev')
+      expect(mockCommand.mock.calls[1].slice(0, 2)).toEqual(['git.checkoutCwd', { cwd: '/repo', name: 'dev' }])
+      await git.createBranch('s1', 'feat')
+      expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual(['git.createBranch', { sessionId: 's1', name: 'feat' }])
+    })
+  })
+
+  // ── extension 域 ───────────────────────────────────────────────────────────
+  describe('extension 域 RPC 动作', () => {
+    it('toggle/install/uninstall/upgrade/setAutoUpgrade 透传 payload', async () => {
+      await extension.toggle('pkg-a', false)
+      expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['extension.toggle', { name: 'pkg-a', enabled: false }])
+      await extension.install('@scope/pkg')
+      expect(mockCommand.mock.calls[1].slice(0, 2)).toEqual(['extension.install', { source: '@scope/pkg' }])
+      await extension.uninstall('pkg-a')
+      expect(mockCommand.mock.calls[2][0]).toBe('extension.uninstall')
+      await extension.upgrade('pkg-a')
+      expect(mockCommand.mock.calls[3].slice(0, 2)).toEqual(['extension.upgrade', { name: 'pkg-a' }])
+      await extension.setAutoUpgrade('pkg-a', true)
+      expect(mockCommand.mock.calls[4].slice(0, 2)).toEqual(['extension.setAutoUpgrade', { name: 'pkg-a', autoUpgrade: true }])
+    })
+
+    it('installDir/installGit/finishInstall/cancelInstall 多步安装流', async () => {
+      await extension.installDir('/tmp/dir')
+      expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['extension.installDir', { path: '/tmp/dir' }])
+      await extension.installGitRepository('https://git')
+      expect(mockCommand.mock.calls[1][0]).toBe('extension.installGit')
+      await extension.finishInstall('/tmp/t', ['cand'])
+      expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual(['extension.finishInstall', { tempDir: '/tmp/t', selected: ['cand'] }])
+      await extension.cancelInstall('/tmp/t')
+      expect(mockCommand.mock.calls[3].slice(0, 2)).toEqual(['extension.cancelInstall', { tempDir: '/tmp/t' }])
+    })
+
+    it('fetchRecommended / scan 解包与零断言', async () => {
+      mockCommand.mockResolvedValueOnce({ recommended: [{ id: 'r', installed: false }] })
+      await expect(extension.fetchRecommended()).resolves.toEqual([{ id: 'r', installed: false }])
+      mockCommand.mockResolvedValueOnce({})
+      await expect(extension.scan()).resolves.toBeUndefined()
+      expect(mockCommand.mock.calls[1][0]).toBe('extension.list')
+    })
+
+    it('getPendingRequests 按类型检查过滤非法条目', async () => {
+      mockCommand.mockResolvedValueOnce({
+        requests: [
+          { requestId: 'ok1', dialogKind: 'confirm', sessionId: 's1' },
+          null,
+          'bad',
+          { requestId: 1, dialogKind: 'confirm' },
+          { requestId: 'no-dialogKind' },
+        ],
+      })
+      const r = await extension.getPendingRequests('s1')
+      expect(r).toEqual([{ requestId: 'ok1', dialogKind: 'confirm', sessionId: 's1' }])
+    })
+
+    it('onExtensions 经 onGlobalType(config.extensions) 解包 extensions', () => {
+      const off = vi.fn()
+      mockOnGlobalType.mockReturnValue(off)
+      const handler = vi.fn()
+
+      const unsub = extension.onExtensions(handler)
+
+      expect(mockOnGlobalType).toHaveBeenCalledWith('config.extensions', expect.any(Function))
+      mockOnGlobalType.mock.calls[0][1]({ payload: { extensions: [{ name: 'x' }] } })
+      expect(handler).toHaveBeenCalledWith([{ name: 'x' }])
+      expect(unsub).toBe(off)
+    })
+
+    it('onUIRequest：命中本 session 的 ui_request 派发，异 session / 异 type 忽略', () => {
+      mockOn.mockReturnValue(vi.fn())
+      const handler = vi.fn()
+      extension.onUIRequest('s1', handler)
+
+      const registered = mockOn.mock.calls[0][1]
+      const req = { sessionId: 's1', requestId: 'r1', dialogKind: 'confirm' }
+      registered({ type: 'extension.dialog', payload: req })
+      expect(handler).toHaveBeenCalledWith(req)
+
+      registered({ type: 'extension.dialog', payload: { sessionId: 'other', requestId: 'r2', dialogKind: 'input' } })
+      registered({ type: 'message.text_delta', payload: { sessionId: 's1' } })
+      expect(handler).toHaveBeenCalledTimes(1)
+    })
+
+    it('onNotify：解包 message/level，异 session / 异 type 忽略', () => {
+      mockOn.mockReturnValue(vi.fn())
+      const handler = vi.fn()
+      extension.onNotify('s1', handler)
+
+      const registered = mockOn.mock.calls[0][1]
+      registered({ type: 'extension:notify', payload: { sessionId: 's1', message: 'hi', level: 'warn' } })
+      expect(handler).toHaveBeenCalledWith({ message: 'hi', level: 'warn' })
+      registered({ type: 'extension:notify', payload: { sessionId: 'other', message: 'x', level: 'info' } })
+      expect(handler).toHaveBeenCalledTimes(1)
+    })
+
+    it('sendExtensionUIResponse 经 ws send fire-and-forget，透传 boolean 送达结果（M1 环 3）', () => {
+      mockWsSend.mockReturnValue(true)
+      expect(extension.sendExtensionUIResponse('s1', 'r1', 'select', 'opt-1')).toBe(true)
+      expect(mockWsSend).toHaveBeenCalledWith({
+        type: 'extension.ui_response',
+        payload: { sessionId: 's1', requestId: 'r1', method: 'select', result: 'opt-1' },
+      })
+
+      // WS 非 OPEN：send 返 false → 透传 false（调用方据此保留请求 + 提示重发，不再 :void 吞掉）
+      mockWsSend.mockReturnValue(false)
+      expect(extension.sendExtensionUIResponse('s1', 'r2', 'confirm', false)).toBe(false)
+    })
+  })
+
+  // ── model 域 ───────────────────────────────────────────────────────────────
+  describe('model 域', () => {
+    it('onModels 经 onGlobalType(model.list) 解包 models', () => {
+      const off = vi.fn()
+      mockOnGlobalType.mockReturnValue(off)
+      const handler = vi.fn()
+
+      const unsub = model.onModels(handler)
+
+      expect(mockOnGlobalType).toHaveBeenCalledWith('model.list', expect.any(Function))
+      mockOnGlobalType.mock.calls[0][1]({ payload: { models: [{ id: 'm' }] } })
+      expect(handler).toHaveBeenCalledWith([{ id: 'm' }])
+      expect(unsub).toBe(off)
+    })
+
+    it('listModels 请求-响应兜底解包 models', async () => {
+      mockCommand.mockResolvedValueOnce({ models: [{ id: 'm1' }] })
+      await expect(model.listModels()).resolves.toEqual([{ id: 'm1' }])
+      expect(mockCommand).toHaveBeenCalledWith('model.list', {}, RPC_BACKSTOP_TIMEOUT_MS)
+    })
+
+    it('switchModel 透传 sessionId/provider/modelId 并原样返回回执', async () => {
+      const reply = { sessionId: 's1', provider: 'p', modelId: 'm' }
+      mockCommand.mockResolvedValueOnce(reply)
+      await expect(model.switchModel('s1', 'p' as never, 'm')).resolves.toEqual(reply)
+      expect(mockCommand).toHaveBeenCalledWith('model.switch', { sessionId: 's1', provider: 'p', modelId: 'm' }, RPC_BACKSTOP_TIMEOUT_MS)
+    })
+  })
+
+  // ── plugin 域 ──────────────────────────────────────────────────────────────
+  describe('plugin 域', () => {
+    it('onPlugins 经 onGlobalType(config.plugins) 解包 plugins', () => {
+      const off = vi.fn()
+      mockOnGlobalType.mockReturnValue(off)
+      const handler = vi.fn()
+
+      const unsub = plugin.onPlugins(handler)
+
+      expect(mockOnGlobalType).toHaveBeenCalledWith('config.plugins', expect.any(Function))
+      mockOnGlobalType.mock.calls[0][1]({ payload: { plugins: [{ id: 'pl' }] } })
+      expect(handler).toHaveBeenCalledWith([{ id: 'pl' }])
+      expect(unsub).toBe(off)
+    })
+
+    it('approvePermissions / revokePermissions / denyPermissions 透传并丢弃 reply', async () => {
+      mockCommand.mockResolvedValue({ plugins: [] })
+      await expect(plugin.approvePermissions('pl', ['fs.read'])).resolves.toBeUndefined()
+      expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['plugin.approvePermissions', { pluginId: 'pl', permissions: ['fs.read'] }])
+      await expect(plugin.revokePermissions('pl')).resolves.toBeUndefined()
+      expect(mockCommand.mock.calls[1].slice(0, 2)).toEqual(['plugin.revokePermissions', { pluginId: 'pl' }])
+      await expect(plugin.denyPermissions('pl')).resolves.toBeUndefined()
+      expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual(['plugin.denyPermissions', { pluginId: 'pl' }])
+    })
+  })
+
+  // ── preset 域 ──────────────────────────────────────────────────────────────
+  describe('preset 域', () => {
+    it('list / getDefault / setDefault 契约', async () => {
+      mockCommand.mockResolvedValueOnce({ presets: [{ id: 'builtin:full' }] })
+      await expect(preset.list()).resolves.toEqual([{ id: 'builtin:full' }])
+      expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['preset.list', {}])
+
+      mockCommand.mockResolvedValueOnce({ presetId: 'builtin:full' })
+      await expect(preset.getDefault()).resolves.toBe('builtin:full')
+      expect(mockCommand.mock.calls[1][0]).toBe('preset.getDefault')
+
+      await preset.setDefault('custom-1')
+      expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual(['preset.setDefault', { presetId: 'custom-1' }])
+    })
+
+    it('create / update 解包 .preset；remove 为 ack', async () => {
+      const p = { id: 'c1', name: 'C' } as never
+      mockCommand.mockResolvedValueOnce({ preset: { id: 'c1', order: 1 } })
+      await expect(preset.create(p)).resolves.toEqual({ id: 'c1', order: 1 })
+      expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['preset.create', { preset: p }])
+
+      mockCommand.mockResolvedValueOnce({ preset: { id: 'c1' } })
+      await expect(preset.update(p)).resolves.toEqual({ id: 'c1' })
+      expect(mockCommand.mock.calls[1][0]).toBe('preset.update')
+
+      await preset.remove('c1')
+      expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual(['preset.delete', { presetId: 'c1' }])
+    })
+  })
+
+  // ── project 域 ─────────────────────────────────────────────────────────────
+  describe('project 域', () => {
+    it('load 全量拉取 / save 全量写入', async () => {
+      const state = { projects: [{ id: 'pj' }] } as never
+      mockCommand.mockResolvedValueOnce(state)
+      await expect(project.load()).resolves.toEqual(state)
+      expect(mockCommand).toHaveBeenCalledWith('project.load', {}, RPC_BACKSTOP_TIMEOUT_MS)
+
+      await expect(project.save(state)).resolves.toBeUndefined()
+      expect(mockCommand).toHaveBeenCalledWith('project.save', state, RPC_BACKSTOP_TIMEOUT_MS)
+    })
+  })
+
+  // ── quota 域 ───────────────────────────────────────────────────────────────
+  describe('quota 域', () => {
+    const RESULT = { data: { label: 'X' }, lastFetchAt: 123 }
+
+    it('getCached / fetchQuota / refreshQuota 统一解包 QuotaResult', async () => {
+      mockCommand.mockResolvedValueOnce({ ...RESULT, reason: 'cookie_expired' })
+      await expect(quota.getCached('p')).resolves.toEqual({ ...RESULT, reason: 'cookie_expired' })
+      expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['quota.getCached', { providerId: 'p' }])
+
+      mockCommand.mockResolvedValueOnce({ data: null, lastFetchAt: null, reason: 'not_configured' })
+      await expect(quota.fetchQuota('p')).resolves.toEqual({ data: null, lastFetchAt: null, reason: 'not_configured' })
+      expect(mockCommand.mock.calls[1][0]).toBe('quota.fetch')
+
+      mockCommand.mockResolvedValueOnce(RESULT)
+      await expect(quota.refreshQuota('p')).resolves.toEqual({ ...RESULT, reason: undefined })
+      expect(mockCommand.mock.calls[2][0]).toBe('quota.refresh')
+    })
+
+    it('configure 透传全量字段并解包 ok/error', async () => {
+      mockCommand.mockResolvedValueOnce({ ok: true })
+      await expect(
+        quota.configure({ providerId: 'p', enabled: true, cookie: 'ck', fetcher: 'fetcher', apiKey: 'key', params: { workspaceUrl: 'ws1' } }),
+      ).resolves.toEqual({ ok: true, error: undefined })
+      expect(mockCommand.mock.calls[0][1]).toEqual({ providerId: 'p', enabled: true, cookie: 'ck', fetcher: 'fetcher', apiKey: 'key', params: { workspaceUrl: 'ws1' } })
+    })
+  })
+
+  // ── session 域 ─────────────────────────────────────────────────────────────
+  describe('session 域 请求-响应', () => {
+    it('list 解包 groups；create 可选键省略 + 透传', async () => {
+      mockCommand.mockResolvedValueOnce({ groups: [{ cwd: '/a' }] })
+      await expect(session.list()).resolves.toEqual([{ cwd: '/a' }])
+      expect(mockCommand).toHaveBeenCalledWith('config.sessions', {}, RPC_BACKSTOP_TIMEOUT_MS)
+      // 仅 cwd：其余可选键全部省略
+      mockCommand.mockResolvedValueOnce({ session: { id: 's1' } })
+      await expect(session.create('/a')).resolves.toEqual({ id: 's1' })
+      expect(mockCommand.mock.calls[1][1]).toEqual({ cwd: '/a' })
+
+      // 全量参数透传
+      mockCommand.mockResolvedValueOnce({ session: { id: 's2' } })
+      await session.create('/a', 'L', 'preset-1', 'pj', 'p/m', 'high')
+      expect(mockCommand.mock.calls[2][1]).toEqual({ cwd: '/a', label: 'L', presetId: 'preset-1', projectId: 'pj', modelOverride: 'p/m', thinkingOverride: 'high' })
+
+      // clientUuid 幂等键透传（发现 B）：传入时 payload 含 clientUuid；缺省省略（见上例，向后兼容）
+      mockCommand.mockResolvedValueOnce({ session: { id: 's3' } })
+      await session.create('/a', 'L', 'preset-1', 'pj', 'p/m', 'high', 'u-create-1')
+      expect(mockCommand.mock.calls[3][1]).toEqual({ cwd: '/a', label: 'L', presetId: 'preset-1', projectId: 'pj', modelOverride: 'p/m', thinkingOverride: 'high', clientUuid: 'u-create-1' })
+    })
+
+    it('listSessions（W4b 通用查询）：type=session.list + 过滤参数原样透传 + 解包 groups', async () => {
+      // 无参 = 全量（与 config.sessions 查询侧同形）
+      mockCommand.mockResolvedValueOnce({ groups: [{ cwd: '/a' }] })
+      await expect(session.listSessions({})).resolves.toEqual([{ cwd: '/a' }])
+      expect(mockCommand).toHaveBeenCalledWith('session.list', {}, RPC_BACKSTOP_TIMEOUT_MS)
+
+      // 显式过滤参数（调用侧显式传参，不依赖无参默认语义——搜索传 surface:'sidebar'、
+      // 抽屉传 surface:'btw' + mainSessionId）
+      mockCommand.mockResolvedValueOnce({ groups: [{ cwd: '/a', sessions: [{ id: 'l1', surface: 'btw' }] }] })
+      await expect(session.listSessions({ surface: 'btw', mainSessionId: 's-main' })).resolves.toEqual([
+        { cwd: '/a', sessions: [{ id: 'l1', surface: 'btw' }] },
+      ])
+      expect(mockCommand).toHaveBeenLastCalledWith('session.list', { surface: 'btw', mainSessionId: 's-main' }, RPC_BACKSTOP_TIMEOUT_MS)
+    })
+
+    it('switchSession / restoreSession / forceQuit / fork', async () => {
+      await session.switchSession('s1')
+      expect(mockCommand.mock.calls[0][0]).toBe('session.switch')
+
+      mockCommand.mockResolvedValueOnce({ session: { id: 's1' } })
+      await expect(session.restoreSession('s1')).resolves.toEqual({ id: 's1' })
+      expect(mockCommand.mock.calls[1][0]).toBe('session.restore')
+
+      await session.forceQuit('s1')
+      expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual(['session.forceQuit', { sessionId: 's1' }])
+
+      mockCommand.mockResolvedValueOnce({ session: { id: 's9' } })
+      await expect(session.fork('s1', { piEntryId: 'e1', includeFrom: true, modelOverride: 'p/m' })).resolves.toEqual({ id: 's9' })
+      expect(mockCommand.mock.calls[3][1]).toEqual({
+        srcSessionId: 's1', fromPiEntryId: 'e1', fromMessageTimestamp: undefined, fromMessageRole: undefined,
+        includeFrom: true, label: undefined, modelOverride: 'p/m', thinkingOverride: undefined,
+      })
+    })
+
+    it('getCommands / getContext / rename / setProject / remove / removeByCwd', async () => {
+      mockCommand.mockResolvedValue({ })
+      await session.getCommands('s1')
+      expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['session.getCommands', { sessionId: 's1' }])
+      await session.getContext('s1')
+      expect(mockCommand.mock.calls[1].slice(0, 2)).toEqual(['session.getContext', { sessionId: 's1' }])
+      await session.rename('s1', 'L')
+      expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual(['session.rename', { sessionId: 's1', name: 'L' }])
+      await session.setProject('s1', 'pj')
+      expect(mockCommand.mock.calls[3].slice(0, 2)).toEqual(['session.setProject', { sessionId: 's1', projectId: 'pj' }])
+      await session.remove('s1')
+      expect(mockCommand.mock.calls[4][0]).toBe('session.delete')
+      await session.removeByCwd('/a')
+      expect(mockCommand.mock.calls[5].slice(0, 2)).toEqual(['session.deleteByCwd', { cwd: '/a' }])
+    })
+
+    it('归档域四函数：archive / unarchive / purgeArchive / listArchives 的 type + payload + reply 解包', async () => {
+      // archive：ack 型回执 { sessionId } 原样透传
+      mockCommand.mockResolvedValueOnce({ sessionId: 's1' })
+      await expect(session.archive('s1')).resolves.toEqual({ sessionId: 's1' })
+      expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['session.archive', { sessionId: 's1' }])
+
+      // unarchive：reply 解包 .session（恢复后的 SessionSummary）
+      mockCommand.mockResolvedValueOnce({ session: { id: 's1', label: '恢复的会话' } })
+      await expect(session.unarchive('s1')).resolves.toEqual({ id: 's1', label: '恢复的会话' })
+      expect(mockCommand.mock.calls[1].slice(0, 2)).toEqual(['session.unarchive', { sessionId: 's1' }])
+
+      // purgeArchive：keptSubagentsDir 条件键透传
+      mockCommand.mockResolvedValueOnce({ sessionId: 's1' })
+      await expect(session.purgeArchive('s1')).resolves.toEqual({ sessionId: 's1' })
+      expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual(['session.purgeArchive', { sessionId: 's1' }])
+      mockCommand.mockResolvedValueOnce({ sessionId: 's1', keptSubagentsDir: '/tmp/keep' })
+      await expect(session.purgeArchive('s1')).resolves.toEqual({ sessionId: 's1', keptSubagentsDir: '/tmp/keep' })
+
+      // listArchives：config.archives 拉取 + reply 解包 .archives
+      mockCommand.mockResolvedValueOnce({ archives: [{ sessionId: 'arc-1', name: '旧会话' }] })
+      await expect(session.listArchives()).resolves.toEqual([{ sessionId: 'arc-1', name: '旧会话' }])
+      expect(mockCommand.mock.calls[4].slice(0, 2)).toEqual(['config.archives', {}])
+    })
+
+    it('setThinkingLevel / getSubagents / getSubagentHistory / 引擎配置', async () => {
+      mockCommand.mockResolvedValueOnce({ sessionId: 's1', level: 'max' })
+      await expect(session.setThinkingLevel('s1', 'max')).resolves.toEqual({ sessionId: 's1', level: 'max' })
+      expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['session.setThinkingLevel', { sessionId: 's1', level: 'max' }])
+
+      mockCommand.mockResolvedValueOnce({ subagents: [{ id: 'sa' }] })
+      // [RT-4#8] 结构化返回透传（subagents + oversize?）：api domain 不再解包 .subagents
+      await expect(session.getSubagents('s1')).resolves.toEqual({ subagents: [{ id: 'sa' }] })
+      expect(mockCommand.mock.calls[1][0]).toBe('session.getSubagents')
+
+      mockCommand.mockResolvedValueOnce({ messages: [{ id: 'm' }] })
+      await expect(session.getSubagentHistory('s1', 'sa')).resolves.toEqual([{ id: 'm' }])
+      expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual(['session.getSubagentHistory', { sessionId: 's1', subagentId: 'sa' }])
+
+      // engineModels/engineDefaults = engine-provider-unification D5 扩展键（exact toEqual 证明新键透传）
+      const eng = {
+        engines: ['zcode'],
+        defaultEngine: 'zcode',
+        engineModels: { zcode: [{ id: 'zai-coding-cn/glm-5.3', name: 'GLM 5.3' }] },
+        engineDefaults: { zcode: 'zai-coding-cn/glm-5.3' },
+      }
+      mockCommand.mockResolvedValueOnce(eng)
+      await expect(session.getSubagentEngineConfig()).resolves.toEqual(eng)
+      expect(mockCommand.mock.calls[3][0]).toBe('session.getSubagentEngineConfig')
+
+      mockCommand.mockResolvedValueOnce({ engineId: 'zcode' })
+      await expect(session.setSubagentDefaultEngine('zcode')).resolves.toEqual({ engineId: 'zcode' })
+      expect(mockCommand.mock.calls[4][0]).toBe('session.setSubagentDefaultEngine')
+
+      // D5：per-engine 默认模型写入（engineId + modelRef 透传，reply = mutation 回显原样透传）
+      mockCommand.mockResolvedValueOnce({ engineId: 'zcode', modelRef: 'zai-coding-cn/glm-5.3' })
+      await expect(session.setSubagentEngineDefaultModel('zcode', 'zai-coding-cn/glm-5.3')).resolves.toEqual({ engineId: 'zcode', modelRef: 'zai-coding-cn/glm-5.3' })
+      expect(mockCommand.mock.calls[5].slice(0, 2)).toEqual(['session.setSubagentEngineDefaultModel', { engineId: 'zcode', modelRef: 'zai-coding-cn/glm-5.3' }])
+    })
+
+    it('workflow 派生：getWorkflows / getAgentCallHistory / getAgentCallFilePath / workflowAction / subagentAction', async () => {
+      mockCommand.mockResolvedValueOnce({ workflows: [{ runId: 'r1' }] })
+      // [RT-4#8] 结构化返回透传（workflows + oversize?）：api domain 不再解包 .workflows
+      await expect(session.getWorkflows('s1')).resolves.toEqual({ workflows: [{ runId: 'r1' }] })
+      expect(mockCommand.mock.calls[0][0]).toBe('session.getWorkflows')
+
+      mockCommand.mockResolvedValueOnce({ messages: [] })
+      await session.getAgentCallHistory('s1', 'ac1')
+      expect(mockCommand.mock.calls[1].slice(0, 2)).toEqual(['session.getAgentCallHistory', { sessionId: 's1', agentCallSessionId: 'ac1' }])
+
+      mockCommand.mockResolvedValueOnce({ filePath: '/p.jsonl' })
+      await expect(session.getAgentCallFilePath('s1', 'ac1')).resolves.toBe('/p.jsonl')
+      expect(mockCommand.mock.calls[2][0]).toBe('session.getAgentCallFilePath')
+
+      await session.workflowAction('s1', 'abort', 'r1')
+      expect(mockCommand.mock.calls[3].slice(0, 2)).toEqual(['session.workflowAction', { sessionId: 's1', action: 'abort', runId: 'r1' }])
+
+      await session.subagentAction('s1', 'message', { subagentId: 'sa', text: 'hi' })
+      expect(mockCommand.mock.calls[4][1]).toEqual({ sessionId: 's1', action: 'message', subagentId: 'sa', text: 'hi' })
+    })
+
+    it('workflow 可视化拉取：getWorkflowRunEvents / getWorkflowDag 结构化领域回执透传', async () => {
+      // reply 联合类型两臂均整体透传（成功 { runId, events } / 领域回执 { runId, code, message }），api domain 不解包
+      const eventsReply = { runId: 'r1', events: [{ kind: 'unit_start' }] }
+      mockCommand.mockResolvedValueOnce(eventsReply)
+      await expect(session.getWorkflowRunEvents('s1', 'r1')).resolves.toEqual(eventsReply)
+      expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['session.getWorkflowRunEvents', { sessionId: 's1', runId: 'r1' }])
+
+      const notFoundReply = { runId: 'r1', code: 'record_not_found', message: 'no record' }
+      mockCommand.mockResolvedValueOnce(notFoundReply)
+      await expect(session.getWorkflowDag('s1', 'r1')).resolves.toEqual(notFoundReply)
+      expect(mockCommand.mock.calls[1].slice(0, 2)).toEqual(['session.getWorkflowDag', { sessionId: 's1', runId: 'r1' }])
+    })
+
+    it('handoff 用 660s 超时；abortHandoff 用 backstop', async () => {
+      await session.handoff('s1', 'reply-1', { modelOverride: 'p/m' })
+      expect(mockCommand.mock.calls[0]).toEqual(['session.handoff', {
+        sessionId: 's1', reply: 'reply-1', modelOverride: 'p/m', thinkingOverride: undefined,
+      }, 660_000])
+
+      await session.abortHandoff('s1')
+      expect(mockCommand.mock.calls[1].slice(0, 2)).toEqual(['session.abortHandoff', { sessionId: 's1' }])
+      expect(mockCommand.mock.calls[1][2]).toBe(RPC_BACKSTOP_TIMEOUT_MS)
+    })
+
+    it('subscribe / unsubscribe', async () => {
+      const sub = { snapshot: [], stateSnapshot: [], lastSeq: 7, gap: false }
+      mockCommand.mockResolvedValueOnce(sub)
+      await expect(session.subscribe('s1', 3)).resolves.toEqual(sub)
+      expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['session.subscribe', { sessionId: 's1', fromSeq: 3 }])
+
+      await session.unsubscribe('s1')
+      expect(mockCommand.mock.calls[1].slice(0, 2)).toEqual(['session.unsubscribe', { sessionId: 's1' }])
+    })
+
+    it('图片持久化与 segments sidecar 写', async () => {
+      const imgPayload = { sessionId: 's1', base64: 'b64', mimeType: 'image/png', name: 'n.png' }
+      const imgReply = { path: '/p', fileName: 'n.png', displayName: 'n.png', id: 'i1', persisted: true }
+      mockCommand.mockResolvedValueOnce(imgReply)
+      await expect(session.writeImage(imgPayload)).resolves.toEqual(imgReply)
+      expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['session.writeImage', imgPayload])
+
+      mockCommand.mockResolvedValueOnce({ path: '/p2' })
+      await expect(session.migrateImage({ fromPath: '/f', sessionId: 's1', fileName: 'n.png' })).resolves.toEqual({ path: '/p2' })
+      expect(mockCommand.mock.calls[1][0]).toBe('session.migrateImage')
+
+      await expect(session.writeSegments({ sessionId: 's1', entry: { id: 'e' } as never })).resolves.toBeUndefined()
+      expect(mockCommand.mock.calls[2][0]).toBe('session.writeSegments')
+    })
+
+    it('trace / system prompt / 导入', async () => {
+      const traceReply = { source: 'rpc', entries: [] }
+      mockCommand.mockResolvedValueOnce(traceReply)
+      await expect(session.getTraceEntries('s1')).resolves.toEqual(traceReply)
+      expect(mockCommand.mock.calls[0][0]).toBe('session.getTraceEntries')
+
+      const promptReply = { prompt: 'sp' }
+      mockCommand.mockResolvedValueOnce(promptReply)
+      await expect(session.fetchCurrentSystemPrompt('s1')).resolves.toEqual(promptReply)
+      expect(mockCommand.mock.calls[1][0]).toBe('session.fetchCurrentSystemPrompt')
+
+      const candReply = { candidates: [] }
+      mockCommand.mockResolvedValueOnce(candReply)
+      await expect(session.importCandidates({ query: 'x' } as never)).resolves.toEqual(candReply)
+      expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual(['session.importCandidates', { query: 'x' }])
+
+      const impReply = { sessionId: 's2' }
+      mockCommand.mockResolvedValueOnce(impReply)
+      await expect(session.importSession({ sourcePath: '/s' } as never)).resolves.toEqual(impReply)
+      expect(mockCommand.mock.calls[3].slice(0, 2)).toEqual(['session.import', { sourcePath: '/s' }])
+    })
+  })
+
+  // ── settings 域（transport 转发 + worktree 等配置 RPC）────────────────────
+  describe('settings 域', () => {
+    it('订阅与请求转发与源域同引用', () => {
+      expect(settings.onProviders).toBe(config.onProviders)
+      expect(settings.onSkills).toBe(config.onSkills)
+      expect(settings.onAgents).toBe(config.onAgents)
+      expect(settings.onExtensions).toBe(extension.onExtensions)
+      expect(settings.onDefaults).toBe(config.onDefaults)
+      expect(settings.listProviders).toBe(config.listProviders)
+      expect(settings.setProvider).toBe(config.setProvider)
+    })
+
+    it('worktree 配置 get/set 走 config.* type', async () => {
+      mockCommand.mockResolvedValue({ dir: '/wt' })
+      await settings.setWorktreeRootDir('/wt')
+      expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['config.setWorktreeRootDir', { dir: '/wt' }])
+      await settings.getWorktreeRootDir()
+      expect(mockCommand.mock.calls[1][0]).toBe('config.getWorktreeRootDir')
+
+      await settings.setSetupScript('s.sh')
+      expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual(['config.setSetupScript', { script: 's.sh' }])
+      await settings.getSetupScript()
+      expect(mockCommand.mock.calls[3][0]).toBe('config.getSetupScript')
+
+      await settings.setBareSetupScript('b.sh')
+      expect(mockCommand.mock.calls[4][0]).toBe('config.setBareSetupScript')
+      await settings.getBareSetupScript()
+      expect(mockCommand.mock.calls[5][0]).toBe('config.getBareSetupScript')
+
+      mockCommand.mockResolvedValue({ timeout: 60 })
+      await settings.setWorktreeTimeout(60)
+      expect(mockCommand.mock.calls[6].slice(0, 2)).toEqual(['config.setTimeout', { timeout: 60 }])
+      await settings.getWorktreeTimeout()
+      expect(mockCommand.mock.calls[7][0]).toBe('config.getTimeout')
+    })
+
+    it('行为配置：defaultBaseBranch / autoRename / renameModel / renameMode', async () => {
+      mockCommand.mockResolvedValue({ baseBranch: 'main' })
+      await settings.setDefaultBaseBranch('main')
+      expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['config.setDefaultBaseBranch', { baseBranch: 'main' }])
+      await settings.getDefaultBaseBranch()
+      expect(mockCommand.mock.calls[1][0]).toBe('config.getDefaultBaseBranch')
+
+      mockCommand.mockResolvedValue({ enabled: true })
+      await settings.setAutoRenameEnabled(true)
+      expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual(['config.setAutoRenameEnabled', { enabled: true }])
+      await settings.getAutoRenameEnabled()
+      expect(mockCommand.mock.calls[3][0]).toBe('config.getAutoRenameEnabled')
+
+      mockCommand.mockResolvedValue({ model: 'p/m' })
+      await settings.setRenameModel('p/m')
+      expect(mockCommand.mock.calls[4].slice(0, 2)).toEqual(['config.setRenameModel', { model: 'p/m' }])
+      await settings.getRenameModel()
+      expect(mockCommand.mock.calls[5][0]).toBe('config.getRenameModel')
+
+      mockCommand.mockResolvedValue({ mode: 'first-prompt' })
+      await settings.setRenameMode('first-prompt')
+      expect(mockCommand.mock.calls[6].slice(0, 2)).toEqual(['config.setRenameMode', { mode: 'first-prompt' }])
+      await settings.getRenameMode()
+      expect(mockCommand.mock.calls[7][0]).toBe('config.getRenameMode')
+    })
+
+    it('rename 标题提示词配置组：renamePrompt / renameMaxLength', async () => {
+      mockCommand.mockResolvedValue({ style: 'slug', instruction: '', corrupted: false })
+      await settings.setRenamePrompt('sentence', 'probe-instruction')
+      expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual([
+        'config.setRenamePrompt',
+        { style: 'sentence', instruction: 'probe-instruction' },
+      ])
+      await settings.getRenamePrompt()
+      expect(mockCommand.mock.calls[1][0]).toBe('config.getRenamePrompt')
+
+      mockCommand.mockResolvedValue({ maxLength: 50 })
+      await settings.setRenameMaxLength(80)
+      expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual(['config.setRenameMaxLength', { maxLength: 80 }])
+      await settings.getRenameMaxLength()
+      expect(mockCommand.mock.calls[3][0]).toBe('config.getRenameMaxLength')
+    })
+
+    it('smart-context 配置组', async () => {
+      mockCommand.mockResolvedValue({ compactModel: '', thresholds: [] })
+      await settings.getSmartContextConfig()
+      expect(mockCommand.mock.calls[0][0]).toBe('config.getSmartContextConfig')
+
+      await settings.setSmartContextEnabled(true)
+      expect(mockCommand.mock.calls[1].slice(0, 2)).toEqual(['config.setSmartContextEnabled', { enabled: true }])
+      await settings.setSmartContextCompactModel('p/m')
+      expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual(['config.setSmartContextCompactModel', { model: 'p/m' }])
+      await settings.setSmartContextThresholds([1, 2, 3])
+      expect(mockCommand.mock.calls[3].slice(0, 2)).toEqual(['config.setSmartContextThresholds', { thresholds: [1, 2, 3] }])
+      await settings.setSmartContextExcludedModels(['p/m'])
+      expect(mockCommand.mock.calls[4].slice(0, 2)).toEqual(['config.setSmartContextExcludedModels', { models: ['p/m'] }])
+    })
+  })
+
+  // ── terminal 域 ────────────────────────────────────────────────────────────
+  describe('terminal 域', () => {
+    it('spawn/write/resize/kill/attach/list 六命令（多实例：既有实例操作带 terminalId）', async () => {
+      mockCommand.mockResolvedValue({})
+      const params = { sessionId: 's1', cwd: '/a' } as never
+      await terminal.terminalApi.spawn(params)
+      expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['terminal.spawn', params])
+      await terminal.terminalApi.write('s1', 'term:s1:1', 'ls\n')
+      expect(mockCommand.mock.calls[1].slice(0, 2)).toEqual([
+        'terminal.write',
+        { sessionId: 's1', terminalId: 'term:s1:1', data: 'ls\n' },
+      ])
+      await terminal.terminalApi.resize('s1', 'term:s1:1', 80, 24)
+      expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual([
+        'terminal.resize',
+        { sessionId: 's1', terminalId: 'term:s1:1', cols: 80, rows: 24 },
+      ])
+      await terminal.terminalApi.kill('s1', 'term:s1:1')
+      expect(mockCommand.mock.calls[3].slice(0, 2)).toEqual(['terminal.kill', { sessionId: 's1', terminalId: 'term:s1:1' }])
+      await terminal.terminalApi.attach('s1', 'term:s1:1')
+      expect(mockCommand.mock.calls[4].slice(0, 2)).toEqual(['terminal.attach', { sessionId: 's1', terminalId: 'term:s1:1' }])
+    })
+
+    it('list 返回 ack.instances（缺省空数组）', async () => {
+      mockCommand.mockResolvedValueOnce({ instances: [{ terminalId: 'term:s1:1', alive: true }] })
+      await expect(terminal.terminalApi.list('s1')).resolves.toEqual([{ terminalId: 'term:s1:1', alive: true }])
+      expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['terminal.list', { sessionId: 's1' }])
+      mockCommand.mockResolvedValueOnce({})
+      await expect(terminal.terminalApi.list('s1')).resolves.toEqual([])
+    })
+  })
+
+  // ── usage 域 ───────────────────────────────────────────────────────────────
+  describe('usage 域', () => {
+    it('getUsageStats 原样返回 reply', async () => {
+      const reply = { rows: [], scannedAt: 1, sessionCount: 0, skippedLines: 0 }
+      mockCommand.mockResolvedValueOnce(reply)
+      await expect(usage.getUsageStats()).resolves.toEqual(reply)
+      expect(mockCommand).toHaveBeenCalledWith('usage.getStats', {}, RPC_BACKSTOP_TIMEOUT_MS)
+    })
+  })
+
+  // ── workspace 域 ───────────────────────────────────────────────────────────
+  describe('workspace 域', () => {
+    it('listRecent / record 解包 records', async () => {
+      mockCommand.mockResolvedValueOnce({ records: [{ cwd: '/a' }] })
+      await expect(workspace.listRecent()).resolves.toEqual([{ cwd: '/a' }])
+      expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['workspace.listRecent', {}])
+
+      mockCommand.mockResolvedValueOnce({ records: [{ cwd: '/b' }] })
+      await expect(workspace.record('/b')).resolves.toEqual([{ cwd: '/b' }])
+      expect(mockCommand.mock.calls[1].slice(0, 2)).toEqual(['workspace.record', { cwd: '/b' }])
+    })
+
+    it('detect 三态透传', async () => {
+      const bareReply = { mode: 'bare-workspace', wsRoot: '/ws', barePath: '/bare', repoRoot: '', defaultBranch: 'main' }
+      mockCommand.mockResolvedValueOnce(bareReply)
+      await expect(workspace.detect('/ws/proj')).resolves.toEqual(bareReply)
+      expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['workspace.detect', { cwd: '/ws/proj' }])
+    })
+
+    it('setPinned 解包 records + degraded 透传（pin 上限拒绝降级链路）', async () => {
+      mockCommand.mockResolvedValueOnce({ records: [{ cwd: '/a' }], degraded: true })
+      await expect(workspace.setPinned('/a', true)).resolves.toEqual({ records: [{ cwd: '/a' }], degraded: true })
+      expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['workspace.setPinned', { cwd: '/a', pinned: true }])
+    })
+
+    it('defaultSessionDir 解包 dir（空串 = runtime ensure 失败，透传不吞）', async () => {
+      mockCommand.mockResolvedValueOnce({ dir: '/data/defaultSession' })
+      await expect(workspace.defaultSessionDir()).resolves.toBe('/data/defaultSession')
+      expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['workspace.defaultSessionDir', {}])
+    })
+  })
+
+  // ── config 域 ──────────────────────────────────────────────────────────────
+  describe('config 域 请求-响应', () => {
+    it('provider 相关：listProviders 解包 + scopedModels 透传', async () => {
+      mockCommand.mockResolvedValueOnce({ providers: [{ id: 'p' }], scopedModels: ['m1'] })
+      await expect(config.listProviders()).resolves.toEqual({ providers: [{ id: 'p' }], scopedModels: ['m1'] })
+
+      mockCommand.mockResolvedValueOnce({ refreshed: ['a'], failed: [{ providerId: 'b', reason: 'x' }] })
+      await expect(config.refreshProviderCatalogs()).resolves.toEqual({ refreshed: ['a'], failed: [{ providerId: 'b', reason: 'x' }] })
+
+      // RT-7#8：损坏缓存源 / 落盘失败标志透传（api domain 不吞新字段）
+      mockCommand.mockResolvedValueOnce({ refreshed: [], failed: [], corrupt: ['own'], persistFailed: true })
+      await expect(config.refreshProviderCatalogs()).resolves.toEqual({ refreshed: [], failed: [], corrupt: ['own'], persistFailed: true })
+
+      mockCommand.mockResolvedValueOnce({ providers: [{ id: 'p' }] })
+      await expect(config.listProviders()).resolves.toEqual({ providers: [{ id: 'p' }], scopedModels: undefined })
+    })
+
+    it('quota presets 下发 + models-store watch 开关（W3c/W1 新增 config.* RPC 封装）', async () => {
+      mockCommand.mockResolvedValueOnce({ presets: [{ fetcher: 'zhipu', label: 'L', auth: ['api-key'], match: {} }] })
+      await expect(config.listQuotaPresets()).resolves.toEqual([{ fetcher: 'zhipu', label: 'L', auth: ['api-key'], match: {} }])
+      expect(mockCommand).toHaveBeenLastCalledWith('config.listQuotaPresets', {}, RPC_BACKSTOP_TIMEOUT_MS)
+
+      await expect(config.setProviderCatalogWatch(true)).resolves.toBeUndefined()
+      expect(mockCommand).toHaveBeenLastCalledWith('config.setProviderCatalogWatch', { enable: true }, RPC_BACKSTOP_TIMEOUT_MS)
+    })
+
+    it('skill/agent 扫描与检测：解包数组', async () => {
+      mockCommand.mockResolvedValueOnce({ skills: [{ id: 'sk' }] })
+      await expect(config.scanSkills(['/dir'])).resolves.toEqual([{ id: 'sk' }])
+      mockCommand.mockResolvedValueOnce({ skills: [{ id: 'g' }] })
+      await expect(config.getGlobalSkills()).resolves.toEqual([{ id: 'g' }])
+      mockCommand.mockResolvedValueOnce({ skills: [{ id: 'pj' }] })
+      await expect(config.getProjectSkills('/cwd')).resolves.toEqual([{ id: 'pj' }])
+      mockCommand.mockResolvedValueOnce({ skills: [{ id: 'ss' }] })
+      await expect(config.scanSessionSkills('/cwd')).resolves.toEqual([{ id: 'ss' }])
+      mockCommand.mockResolvedValueOnce({ agents: [{ id: 'ag' }] })
+      await expect(config.scanAgents(['/dir'])).resolves.toEqual([{ id: 'ag' }])
+      mockCommand.mockResolvedValueOnce({ sources: [{ source: 'claude' }] })
+      await expect(config.detectSources()).resolves.toEqual([{ source: 'claude' }])
+    })
+
+    it('内置模板与导入：listBuiltinProviders / preview / apply', async () => {
+      mockCommand.mockResolvedValueOnce({ providers: [{ id: 'b' }] })
+      await expect(config.listBuiltinProviders()).resolves.toEqual([{ id: 'b' }])
+
+      const errReply = { error: { code: 'parse', message: 'bad' } }
+      mockCommand.mockResolvedValueOnce(errReply)
+      await expect(config.previewImportProviders('claude')).resolves.toEqual(errReply)
+
+      const okReply = { result: { imported: 2 } }
+      mockCommand.mockResolvedValueOnce(okReply)
+      await expect(config.applyImportProviders('imp-1', ['a'])).resolves.toEqual(okReply)
+    })
+
+    it('discoverModels 原样透传 req', async () => {
+      mockCommand.mockResolvedValueOnce({ models: [], success: false, error: 'e' })
+      const r = await config.discoverModels({ baseUrl: 'https://x', apiKey: 'k' })
+      expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['config.discoverModels', { baseUrl: 'https://x', apiKey: 'k' }])
+      expect(r).toEqual({ models: [], success: false, error: 'e' })
+    })
+
+    it('system prompt / terminal / retry 配置：get/set + corrupted 缺省 false', async () => {
+      mockCommand.mockResolvedValueOnce({ config: { enabled: true } })
+      await expect(config.getSystemPrompt()).resolves.toEqual({ config: { enabled: true }, corrupted: false })
+      mockCommand.mockResolvedValueOnce({ config: { enabled: false }, corrupted: true })
+      await expect(config.setSystemPrompt({ enabled: false } as never)).resolves.toEqual({ config: { enabled: false }, corrupted: true })
+
+      mockCommand.mockResolvedValueOnce({ config: { shell: 'zsh' } })
+      await expect(config.getTerminalConfig()).resolves.toEqual({ config: { shell: 'zsh' }, corrupted: false })
+      mockCommand.mockResolvedValueOnce({ config: { shell: 'zsh' }, corrupted: true })
+      await expect(config.setTerminalConfig({ shell: 'zsh' } as never)).resolves.toEqual({ config: { shell: 'zsh' }, corrupted: true })
+
+      const retry = { config: { maxRetries: 3 }, configured: true }
+      mockCommand.mockResolvedValueOnce(retry)
+      await expect(config.getRetryConfig()).resolves.toEqual(retry)
+      mockCommand.mockResolvedValueOnce(retry)
+      await expect(config.setRetryConfig({ maxRetries: 3 } as never)).resolves.toEqual(retry)
+    })
+
+    it('retry 规则视图（subagent-observability §3.3.12）：get/set 走对应 type + customRules 透传', async () => {
+      const view = { builtinRules: [{ id: 'b' }], customRules: [{ id: 'c' }] }
+      mockCommand.mockResolvedValueOnce(view)
+      await expect(config.getRetryRules()).resolves.toEqual(view)
+      expect(mockCommand).toHaveBeenLastCalledWith('config.getRetryRules', {}, RPC_BACKSTOP_TIMEOUT_MS)
+
+      const rules = [{ id: 'probe', name: 'p', verdict: 'retryable', class: 'provider', source: 'custom', match: [{ kind: 'pattern', pattern: 'x' }] }]
+      mockCommand.mockResolvedValueOnce(view)
+      await expect(config.setRetryRules(rules as never)).resolves.toEqual(view)
+      expect(mockCommand).toHaveBeenLastCalledWith('config.setRetryRules', { customRules: rules }, RPC_BACKSTOP_TIMEOUT_MS)
+    })
+
+    it('OAuth：login/cancel/logout/hasOAuth/checkEnvVars', async () => {
+      mockCommand.mockResolvedValueOnce({ started: true })
+      await expect(config.oauthLogin('p')).resolves.toEqual({ started: true })
+      mockCommand.mockResolvedValueOnce({ cancelled: false })
+      await expect(config.oauthCancel('p')).resolves.toEqual({ cancelled: false })
+      mockCommand.mockResolvedValueOnce({ ok: true })
+      await expect(config.oauthLogout('p')).resolves.toEqual({ ok: true })
+      mockCommand.mockResolvedValueOnce({ hasOAuth: true })
+      await expect(config.hasOAuth('p')).resolves.toBe(true)
+      mockCommand.mockResolvedValueOnce({ results: { K: true } })
+      await expect(config.checkEnvVars(['K'])).resolves.toEqual({ K: true })
+    })
+
+    it('网络代理（llm-network-proxy U1）：get/set/test/stats/reset 走对应 type + reply 透传', async () => {
+      const cfg = {
+        enabled: true,
+        proxy: { protocol: 'http' as const, host: '127.0.0.1', port: 7890, username: '', password: '' },
+        noProxy: ['localhost'],
+        rules: ['api.anthropic.com'],
+        ipv4Only: [],
+      }
+      mockCommand.mockResolvedValueOnce({ config: cfg })
+      await expect(config.getNetworkProxyConfig()).resolves.toEqual({ config: cfg })
+      expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['config.getNetworkProxy', {}])
+
+      mockCommand.mockResolvedValueOnce({ config: cfg })
+      await expect(config.setNetworkProxyConfig(cfg)).resolves.toEqual({ config: cfg })
+      expect(mockCommand.mock.calls[1].slice(0, 2)).toEqual(['config.setNetworkProxy', { config: cfg }])
+
+      const testReply = { ok: false, stage: 'proxy' as const, message: '无法连接代理', elapsedMs: 1200 }
+      mockCommand.mockResolvedValueOnce(testReply)
+      await expect(config.testNetworkProxy(cfg)).resolves.toEqual(testReply)
+      expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual(['config.testNetworkProxy', { config: cfg }])
+
+      const statsReply = { stats: [{ host: 'api.anthropic.com', proxied: 3, direct: 1 }] }
+      mockCommand.mockResolvedValueOnce(statsReply)
+      await expect(config.getNetworkProxyStats('24h')).resolves.toEqual(statsReply)
+      expect(mockCommand.mock.calls[3].slice(0, 2)).toEqual(['config.getNetworkProxyStats', { range: '24h' }])
+
+      mockCommand.mockResolvedValueOnce(statsReply)
+      await expect(config.resetNetworkProxyStats()).resolves.toEqual(statsReply)
+      expect(mockCommand.mock.calls[4].slice(0, 2)).toEqual(['config.resetNetworkProxyStats', {}])
+    })
+  })
+
+  describe('config 域 动作-ack', () => {
+    it('目录与 provider/skill/agent 写操作走对应 type', async () => {
+      await config.setSkillDirs([])
+      expect(mockCommand.mock.calls[0][0]).toBe('config.setSkillDirs')
+      await config.setAgentDirs([])
+      expect(mockCommand.mock.calls[1][0]).toBe('config.setAgentDirs')
+      await config.setExtensionDirs([])
+      expect(mockCommand.mock.calls[2][0]).toBe('config.setExtensionDirs')
+      await config.setProvider('p1' as never, {} as never)
+      expect(mockCommand.mock.calls[3][0]).toBe('config.setProvider')
+      await config.setDefaultModel('p1' as never, 'm')
+      expect(mockCommand.mock.calls[4].slice(0, 2)).toEqual(['config.setDefaultModel', { provider: 'p1', modelId: 'm' }])
+      await config.deleteProvider('p1' as never)
+      expect(mockCommand.mock.calls[5][0]).toBe('config.deleteProvider')
+      await config.toggleProviderEnabled('p1' as never, true)
+      expect(mockCommand.mock.calls[6][0]).toBe('config.toggleProviderEnabled')
+      await config.removeProviderByKind('p1' as never, 'catalog')
+      expect(mockCommand.mock.calls[7][0]).toBe('config.removeProviderByKind')
+      await config.setSkill({ id: 'sk' } as never)
+      expect(mockCommand.mock.calls[8][0]).toBe('config.setSkill')
+      await config.deleteSkill('sk')
+      expect(mockCommand.mock.calls[9][0]).toBe('config.deleteSkill')
+      await config.setAgent({ id: 'ag' } as never)
+      expect(mockCommand.mock.calls[10][0]).toBe('config.setAgent')
+      await config.deleteAgent('ag')
+      expect(mockCommand.mock.calls[11][0]).toBe('config.deleteAgent')
+    })
+
+    it('setScopedModels 解包规范化结果', async () => {
+      mockCommand.mockResolvedValueOnce({ scopedModels: ['a', 'b'] })
+      await expect(config.setScopedModels(['a', 'b'])).resolves.toEqual(['a', 'b'])
+    })
+
+    it('revealProviderApiKey 透传 providerId 并解包回显结果', async () => {
+      mockCommand.mockResolvedValueOnce({ available: true, apiKey: 'sk-1', source: 'auth.json' })
+      await expect(config.revealProviderApiKey('p1')).resolves.toEqual({
+        available: true,
+        apiKey: 'sk-1',
+        source: 'auth.json',
+      })
+      expect(mockCommand).toHaveBeenCalledWith(
+        'config.revealProviderApiKey',
+        { providerId: 'p1' },
+        RPC_BACKSTOP_TIMEOUT_MS,
+      )
+    })
+  })
+
+  describe('config 域 订阅（onGlobalType 通道）', () => {
+    it('onProviders / onSkills / onAgents / onDefaults 解包 payload', () => {
+      const subs: Array<[string, (msg: { payload: unknown }) => void]> = []
+      mockOnGlobalType.mockImplementation((type, handler) => {
+        subs.push([type, handler])
+        return vi.fn()
+      })
+      const onProviders = vi.fn(); config.onProviders(onProviders)
+      const onSkills = vi.fn(); config.onSkills(onSkills)
+      const onAgents = vi.fn(); config.onAgents(onAgents)
+      const onDefaults = vi.fn(); config.onDefaults(onDefaults)
+
+      const byType = Object.fromEntries(subs)
+      byType['config.providers']({ payload: { providers: [1], scopedModels: ['m'] } })
+      expect(onProviders).toHaveBeenCalledWith([1], ['m'])
+      byType['config.skills']({ payload: { skills: [2] } })
+      expect(onSkills).toHaveBeenCalledWith([2])
+      byType['config.agents']({ payload: { agents: [3] } })
+      expect(onAgents).toHaveBeenCalledWith([3])
+      byType['config.defaults']({ payload: { defaultModel: 'dm' } })
+      expect(onDefaults).toHaveBeenCalledWith('dm')
+    })
+
+    it('onDefaultsWithSource / onSkillDirs / onAgentDirs / onExtensionDirs', () => {
+      const subs: Array<[string, (msg: { payload: unknown }) => void]> = []
+      mockOnGlobalType.mockImplementation((type, handler) => {
+        subs.push([type, handler])
+        return vi.fn()
+      })
+      const h1 = vi.fn(); config.onDefaultsWithSource(h1)
+      const h2 = vi.fn(); config.onSkillDirs(h2)
+      const h3 = vi.fn(); config.onAgentDirs(h3)
+      const h4 = vi.fn(); config.onExtensionDirs(h4)
+
+      const byType = Object.fromEntries(subs)
+      byType['config.defaults']({ payload: { defaultModel: 'dm', source: 'provider-updated' } })
+      expect(h1).toHaveBeenCalledWith({ defaultModel: 'dm', source: 'provider-updated' })
+      byType['config.skillDirs']({ payload: { dirs: ['d1'] } })
+      expect(h2).toHaveBeenCalledWith(['d1'])
+      byType['config.agentDirs']({ payload: { dirs: ['d2'] } })
+      expect(h3).toHaveBeenCalledWith(['d2'])
+      byType['config.extensionDirs']({ payload: { dirs: ['d3'] } })
+      expect(h4).toHaveBeenCalledWith(['d3'])
+    })
+
+    it('onSkillCacheInvalidated / onSystemPrompt / onTerminalConfig / onRetryConfig', () => {
+      const subs: Array<[string, (msg: { payload: unknown }) => void]> = []
+      mockOnGlobalType.mockImplementation((type, handler) => {
+        subs.push([type, handler])
+        return vi.fn()
+      })
+      const hInv = vi.fn(); config.onSkillCacheInvalidated(hInv)
+      const hSp = vi.fn(); config.onSystemPrompt(hSp)
+      const hTc = vi.fn(); config.onTerminalConfig(hTc)
+      const hRc = vi.fn(); config.onRetryConfig(hRc)
+
+      const byType = Object.fromEntries(subs)
+      byType['config.skillCacheInvalidated']({ payload: { scope: 'project', cwd: '/c' } })
+      expect(hInv).toHaveBeenCalledWith({ scope: 'project', cwd: '/c' })
+      byType['config.systemPrompt']({ payload: { config: { enabled: true } } })
+      expect(hSp).toHaveBeenCalledWith({ enabled: true }, false)
+      byType['config.terminalConfig']({ payload: { config: { shell: 'zsh' }, corrupted: true } })
+      expect(hTc).toHaveBeenCalledWith({ shell: 'zsh' }, true)
+      byType['config.retryConfig']({ payload: { config: { maxRetries: 1 }, configured: false } })
+      expect(hRc).toHaveBeenCalledWith({ config: { maxRetries: 1 }, configured: false })
+    })
+
+    it('onRetryRules 经 onGlobalType(config.retryRules) 解包 payload（subagent-observability §3.3.12）', () => {
+      const subs: Array<[string, (msg: { payload: unknown }) => void]> = []
+      mockOnGlobalType.mockImplementation((type, handler) => {
+        subs.push([type, handler])
+        return vi.fn()
+      })
+      const h = vi.fn(); config.onRetryRules(h)
+      const byType = Object.fromEntries(subs)
+      const view = { builtinRules: [{ id: 'b' }], customRules: [{ id: 'c' }] }
+      byType['config.retryRules']({ payload: view })
+      expect(h).toHaveBeenCalledWith(view)
+    })
+
+    it('onNetworkProxyConfig 解包 payload.config（llm-network-proxy U1）', () => {
+      const subs: Array<[string, (msg: { payload: unknown }) => void]> = []
+      mockOnGlobalType.mockImplementation((type, handler) => {
+        subs.push([type, handler])
+        return vi.fn()
+      })
+      const hNp = vi.fn()
+      config.onNetworkProxyConfig(hNp)
+      const byType = Object.fromEntries(subs)
+      const cfg = { enabled: true, proxy: { protocol: 'http', host: '127.0.0.1', port: 7890, username: '', password: '' }, noProxy: [], rules: [], ipv4Only: [] }
+      byType['config.networkProxy']({ payload: { config: cfg } })
+      expect(hNp).toHaveBeenCalledWith(cfg)
+    })
+
+    it('OAuth 事件订阅：auth.deviceCode / authUrl / success / error', () => {
+      const subs: Array<[string, (msg: { payload: unknown }) => void]> = []
+      mockOnGlobalType.mockImplementation((type, handler) => {
+        subs.push([type, handler])
+        return vi.fn()
+      })
+      const h1 = vi.fn(); config.onAuthDeviceCode(h1)
+      const h2 = vi.fn(); config.onAuthAuthUrl(h2)
+      const h3 = vi.fn(); config.onAuthSuccess(h3)
+      const h4 = vi.fn(); config.onAuthError(h4)
+
+      const byType = Object.fromEntries(subs)
+      byType['auth.deviceCode']({ payload: { userCode: '123' } })
+      expect(h1).toHaveBeenCalledWith({ userCode: '123' })
+      byType['auth.authUrl']({ payload: { url: 'u' } })
+      expect(h2).toHaveBeenCalledWith({ url: 'u' })
+      byType['auth.success']({ payload: { providerId: 'p' } })
+      expect(h3).toHaveBeenCalledWith({ providerId: 'p' })
+      byType['auth.error']({ payload: { error: 'expired' } })
+      expect(h4).toHaveBeenCalledWith({ error: 'expired' })
+    })
+  })
+
+  // ── btw 域（btw-question D6，M2-a；线枚举随 W4b 退役，改走 session.listSessions）──────
+  describe('btw 域 RPC 封装（D6 控制帧）', () => {
+    it('create：type/payload { mainSid } + reply 全字段透传（sessionId + mainSid + forkState）', async () => {
+      mockCommand.mockResolvedValueOnce({ sessionId: 'pi-1', mainSid: 's-main', forkState: 'none' })
+      await expect(btw.create('s-main')).resolves.toEqual({ sessionId: 'pi-1', mainSid: 's-main', forkState: 'none' })
+      expect(mockCommand).toHaveBeenCalledWith('btw.create', { mainSid: 's-main' }, RPC_BACKSTOP_TIMEOUT_MS)
+    })
+
+    it('remove：type/payload { sessionId }，ack 型（command 返回 void，完成即 resolve）', async () => {
+      await btw.remove('pi-1')
+      expect(mockCommand).toHaveBeenCalledWith('btw.remove', { sessionId: 'pi-1' }, RPC_BACKSTOP_TIMEOUT_MS)
+    })
+  })
+
+  // ── tts 域（ai-voice-tts 设计 §7.5，M0 四 RPC）────────────────────────────
+  describe('tts 域 RPC 封装', () => {
+    it('getConfig / getCapabilities：空 payload + backstop 超时 + reply 原样透传', async () => {
+      const cfg = { config: { activeProvider: 'minimax', providers: {} } }
+      mockCommand.mockResolvedValueOnce(cfg)
+      await expect(tts.getConfig()).resolves.toEqual(cfg)
+      expect(mockCommand).toHaveBeenCalledWith('tts.getConfig', {}, RPC_BACKSTOP_TIMEOUT_MS)
+
+      const forms = { forms: { stepfun: { capabilities: {} }, minimax: { capabilities: {} }, mimo: { capabilities: {} } } }
+      mockCommand.mockResolvedValueOnce(forms)
+      await expect(tts.getCapabilities()).resolves.toEqual(forms)
+      expect(mockCommand).toHaveBeenCalledWith('tts.getCapabilities', {}, RPC_BACKSTOP_TIMEOUT_MS)
+    })
+
+    it('configure：payload 整对象透传 + 解包 ok/error', async () => {
+      const payload = {
+        providerId: 'minimax' as const,
+        config: { baseUrl: 'https://api.minimax.cn/v1', model: 'speech-2.6-hd', voice: 'male-qn-qingse', vendor: {} },
+        apiKeys: { minimax: 'sk-test' },
+      }
+      mockCommand.mockResolvedValueOnce({ ok: true, config: { activeProvider: 'minimax', providers: {} } })
+      await expect(tts.configure(payload)).resolves.toMatchObject({ ok: true })
+      expect(mockCommand).toHaveBeenCalledWith('tts.configure', payload, RPC_BACKSTOP_TIMEOUT_MS)
+
+      mockCommand.mockResolvedValueOnce({ ok: false, error: 'invalid_payload' })
+      await expect(tts.configure({ ...payload, apiKeys: undefined })).resolves.toEqual({ ok: false, error: 'invalid_payload' })
+    })
+
+    it('speak：payload 含可选 sessionId 透传；超时传 0（任务级不限时，§7.5 要点 2）', async () => {
+      mockCommand.mockResolvedValueOnce({ filePath: '/data/tts-cache/abc.wav' })
+      await expect(tts.speak({ sessionId: 's1', text: '你好' })).resolves.toEqual({ filePath: '/data/tts-cache/abc.wav' })
+      expect(mockCommand.mock.calls[0]).toEqual(['tts.speak', { sessionId: 's1', text: '你好' }, 0])
+
+      mockCommand.mockResolvedValueOnce({ filePath: '/x.wav' })
+      await tts.speak({ text: '设置页测试样句' })
+      expect(mockCommand.mock.calls[1]).toEqual(['tts.speak', { text: '设置页测试样句' }, 0])
+    })
+  })
+
+  // ── subagent 域（subagent-model-switch §7.1，U1）───────────────────────────
+  describe('subagent 域 RPC 封装', () => {
+    it('setModel：recordId 形态 command 透传 + backstop 超时 + 应答原样返回（已生效型）', async () => {
+      const reply = {
+        kind: 'effective',
+        effectiveModel: { provider: 'p', modelId: 'm' },
+        effectiveThinkingLevel: 'high',
+      }
+      mockCommand.mockResolvedValueOnce(reply)
+      await expect(subagent.setModel({ recordId: 'rec-1', provider: 'p' as never, modelId: 'm' })).resolves.toEqual(reply)
+      expect(mockCommand).toHaveBeenCalledWith(
+        'subagent.setModel',
+        { recordId: 'rec-1', provider: 'p', modelId: 'm' },
+        RPC_BACKSTOP_TIMEOUT_MS,
+      )
+    })
+
+    it('setModel：runId 聚合形态 + thinkingLevel 可选键透传', async () => {
+      const reply = { members: [], failures: [], summary: '2 switched' }
+      mockCommand.mockResolvedValueOnce(reply)
+      await expect(
+        subagent.setModel({ runId: 'run-1', provider: 'p' as never, modelId: 'm', thinkingLevel: 'high' }),
+      ).resolves.toEqual(reply)
+      expect(mockCommand).toHaveBeenCalledWith(
+        'subagent.setModel',
+        { runId: 'run-1', provider: 'p', modelId: 'm', thinkingLevel: 'high' },
+        RPC_BACKSTOP_TIMEOUT_MS,
+      )
+    })
+  })
+});
+
+// ======== 来源：errors.test.ts ========
+describe("errors", () => {
+  describe('transportUnavailableError（D10① 工厂单点）', () => {
+    it('Error 实例 + message 透传 + code === "disconnected"', () => {
+      const error = transportUnavailableError('transport unavailable (ws not open)')
+      expect(error).toBeInstanceOf(Error)
+      expect(error.message).toBe('transport unavailable (ws not open)')
+      expect(error.code).toBe('disconnected')
+    })
+
+    it('i18n 解析后的文案（ports.t 产物）原样透传', () => {
+      const error = transportUnavailableError('[connection.disconnectedError]')
+      expect(error.message).toBe('[connection.disconnectedError]')
+      expect(error.code).toBe('disconnected')
+    })
+
+    it('每次调用产出独立实例（不共享可变对象）', () => {
+      const a = transportUnavailableError('a')
+      const b = transportUnavailableError('b')
+      expect(a).not.toBe(b)
+      expect(a.message).toBe('a')
+      expect(b.message).toBe('b')
+    })
+  })
+
+  describe('notDeliveredError / isNotDeliveredError（「可证明未送达」标记，bash 投递可靠性）', () => {
+    it('notDeliveredError 保留 code="disconnected" 契约 + notDelivered 标记', () => {
+      const error = notDeliveredError('transport unavailable (ws not open)')
+      expect(error).toBeInstanceOf(Error)
+      expect(error.code).toBe('disconnected') // 既有识别方契约不破坏
+      expect(error.notDelivered).toBe(true)
+    })
+
+    it('isNotDeliveredError 只认 notDelivered 标记：普通 transportUnavailableError / 其他错误不命中', () => {
+      expect(isNotDeliveredError(notDeliveredError('x'))).toBe(true)
+      // 断连 rejectAll 的同 code 错误（可能已送达）不得被当成「未送达」
+      expect(isNotDeliveredError(transportUnavailableError('disconnected'))).toBe(false)
+      expect(isNotDeliveredError(new Error('other'))).toBe(false)
+      expect(isNotDeliveredError(undefined)).toBe(false)
+    })
+  })
+});

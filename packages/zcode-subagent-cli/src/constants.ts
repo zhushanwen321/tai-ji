@@ -145,6 +145,13 @@ export const ZCODE_APPSERVER_ERR_BUSY_SESSION = -32010;
 export const ZCODE_APPSERVER_HARVEST_GRACE_MS = 1_000;
 
 /**
+ * [测试注入缝] HARVEST_GRACE 的 env 覆盖通道（STOP_TIMEOUT / ABORT_GRACE 同款
+ * 形态与纪律：仅测试注入用，生产不设即走默认 1000ms、行为零变化）。窗口数值不是
+ * 被测契约——断言的是「close 永不到达时有界返回」，默认值另有静态断言保护。
+ */
+export const ZCODE_APPSERVER_HARVEST_GRACE_ENV = "TAIJI_ZCODE_TEST_HARVEST_GRACE_MS";
+
+/**
  * 失败终态判据（⛔P-Z2 门修正）：真实 status 枚举 = ["success","interrupted",
  * "failed"]（app-server dist schema f.enum 实证，**无 "error"**——v1 判据
  * `=== "error"` 对真实 failed 终态漏分流即假成功，本修复轮从根源修复）。裁决：

@@ -211,7 +211,8 @@ export function registerWorkflowScriptTool(
   isRunning: (name: string) => boolean,
 ): void {
   pi.registerTool({
-    name: "workflow-script",
+    // 工具名下划线规范（codemode 恒等映射，避免连字符在沙箱变形出双名）。
+    name: "workflow_script",
     label: "Workflow Script",
     description:
       "Manage workflow scripts: generate (AI creates tmp script), lint (static check), " +

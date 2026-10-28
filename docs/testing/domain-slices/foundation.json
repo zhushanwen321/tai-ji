@@ -1,0 +1,170 @@
+{
+  "name": "foundation",
+  "summary": "池：基础层（被多域共用的基座测试：shared 协议/常量基座、extension-protocol core+helpers+pending-entries+ui-form、state-machine、pi-rpc、dom-core、core 基座 foundation/coordination/testing/utils/assembly/bootstrap + core transport 基座与 mock、ui 原语 Tooltip/PopoverContent + form-protocol、extensions/shared 7 包、runtime 基座横切 infra/pi 集成与 RPC client、logger/crash-journal/watchdog、message-bus、skill 注册表扫描、json-store/npm-installer 安装基座；域独占契约文件随域走）",
+  "layers": [
+    "shared",
+    "core",
+    "ui",
+    "protocol",
+    "extension",
+    "runtime"
+  ],
+  "scope": {
+    "shared": [
+      "packages/shared/src/constants.ts",
+      "packages/shared/src/paths.ts",
+      "packages/shared/src/skill-marker.ts",
+      "packages/shared/src/segments.ts",
+      "packages/shared/src/sound-defaults.ts",
+      "packages/shared/src/timeouts.ts",
+      "packages/shared/src/index.ts",
+      "packages/shared/src/display-name.ts",
+      "packages/shared/src/extension.ts",
+      "packages/shared/src/pi-default-prompt.ts",
+      "packages/shared/src/spawn-env-contract.ts",
+      "packages/shared/src/crash-journal-schema.ts"
+    ],
+    "protocol": [
+      "packages/extension-protocol/src/core/**",
+      "packages/extension-protocol/src/index.ts",
+      "packages/extension-protocol/src/output-tail.ts",
+      "packages/extension-protocol/src/pending-entries.ts",
+      "packages/extension-protocol/src/extensions/ui-form/**"
+    ],
+    "core": [
+      "packages/core/src/foundation/**",
+      "packages/core/src/coordination/**",
+      "packages/core/src/testing/**",
+      "packages/core/src/utils/**",
+      "packages/core/src/assembly/**",
+      "packages/core/src/bootstrap.ts",
+      "packages/core/src/transport/**"
+    ],
+    "ui": [
+      "packages/ui/src/form-protocol.ts",
+      "packages/ui/src/primitives/tooltip/**",
+      "packages/ui/src/primitives/popover/**"
+    ],
+    "extension": [
+      "extensions/shared/delivery-port/src/**",
+      "extensions/shared/exec-skills/src/**",
+      "extensions/shared/ext-guards/src/**",
+      "extensions/shared/extension-logger/src/**",
+      "extensions/shared/file-lock/src/**",
+      "extensions/shared/llm-shared/src/**",
+      "extensions/shared/session-path/src/**"
+    ],
+    "runtime": [
+      "packages/state-machine/src/**",
+      "packages/pi-rpc/src/**",
+      "packages/dom-core/src/**",
+      "packages/runtime/src/infra/pi/**",
+      "packages/runtime/src/infra/logger.ts",
+      "packages/runtime/src/infra/crash-journal.ts",
+      "packages/runtime/src/infra/crash-correlation.ts",
+      "packages/runtime/src/infra/watchdog.ts",
+      "packages/runtime/src/services/message-bus/**",
+      "packages/runtime/src/services/skill-registry.ts",
+      "packages/runtime/src/services/scanners/**",
+      "packages/runtime/src/utils/json-store.ts"
+    ]
+  },
+  "tests": [
+    "packages/state-machine/src/**",
+    "packages/pi-rpc/src/__tests__/**",
+    "packages/dom-core/src/**",
+    "packages/core/src/foundation/**",
+    "packages/core/src/coordination/**",
+    "packages/core/src/testing/**",
+    "packages/core/src/utils/__tests__/**",
+    "packages/core/src/assembly/__tests__/**",
+    "packages/core/src/__tests__/bootstrap.test.ts",
+    "packages/core/src/transport/__tests__/**",
+    "packages/core/src/transport/mock/**",
+    "packages/core/src/transport/api/__tests__/errors.test.ts",
+    "packages/core/src/transport/api/__tests__/events.test.ts",
+    "packages/core/src/transport/api/__tests__/pending.test.ts",
+    "packages/core/src/transport/api/__tests__/pending-sweep.test.ts",
+    "packages/core/src/transport/api/__tests__/request.test.ts",
+    "packages/extension-protocol/src/core/**",
+    "packages/extension-protocol/src/helpers.test.ts",
+    "packages/extension-protocol/src/output-tail.test.ts",
+    "packages/extension-protocol/src/pending-entries.test.ts",
+    "packages/extension-protocol/src/extensions/ui-form/ui-form.test.ts",
+    "packages/shared/src/__tests__/constants.test.ts",
+    "packages/shared/src/__tests__/crash-journal-schema.test.ts",
+    "packages/shared/src/__tests__/display-name.test.ts",
+    "packages/shared/src/__tests__/extension.test.ts",
+    "packages/shared/src/__tests__/log-keep-days.test.ts",
+    "packages/shared/src/__tests__/paths.test.ts",
+    "packages/shared/src/__tests__/pi-default-prompt.test.ts",
+    "packages/shared/src/__tests__/protocol-seq.test.ts",
+    "packages/shared/src/__tests__/segments.test.ts",
+    "packages/shared/src/__tests__/skill-marker.test.ts",
+    "packages/shared/src/__tests__/sound-defaults.test.ts",
+    "packages/shared/src/__tests__/spawn-env-contract.test.ts",
+    "packages/shared/src/__tests__/timeouts.test.ts",
+    "packages/ui/src/primitives/__tests__/Tooltip.test.ts",
+    "packages/ui/src/primitives/popover/__tests__/PopoverContent.test.ts",
+    "packages/ui/src/__tests__/form-protocol.test.ts",
+    "extensions/shared/delivery-port/src/**",
+    "extensions/shared/exec-skills/src/**",
+    "extensions/shared/ext-guards/src/**",
+    "extensions/shared/extension-logger/src/**",
+    "extensions/shared/file-lock/src/**",
+    "extensions/shared/llm-shared/src/**",
+    "extensions/shared/session-path/src/**",
+    "packages/runtime/src/infra/pi/__tests__/**",
+    "packages/runtime/src/__tests__/infra/pi/entry-tree-builder.test.ts",
+    "packages/runtime/src/__tests__/infra/pi/rpc-client-activity.test.ts",
+    "packages/runtime/src/__tests__/infra/pi/rpc-client-sendraw-delivery.test.ts",
+    "packages/runtime/src/infra/pi/argv-redact.test.ts",
+    "packages/runtime/src/infra/__tests__/**",
+    "packages/runtime/src/infra/infra-root-bundle.test.ts",
+    "packages/runtime/src/__tests__/logger.test.ts",
+    "packages/runtime/src/__tests__/logger-rotation.test.ts",
+    "packages/runtime/src/__tests__/crash-forensics-logger.test.ts",
+    "packages/runtime/src/__tests__/rpc-client-bundle.test.ts",
+    "packages/runtime/src/__tests__/rpc-client-exit-multicast.test.ts",
+    "packages/runtime/src/__tests__/rpc-client-rt2-hardening.test.ts",
+    "packages/runtime/src/__tests__/rpc-client-spawn-env.test.ts",
+    "packages/runtime/test/rpc-server-bundle.test.ts",
+    "packages/runtime/test/rpc-client-start-args-anchor.test.ts",
+    "packages/runtime/src/services/message-bus/**",
+    "packages/runtime/test/skill-registry.test.ts",
+    "packages/runtime/test/skill-paths.test.ts",
+    "packages/runtime/test/skill-registry-watcher-real.test.ts",
+    "packages/runtime/test/skill-registry-fallback-rescan.test.ts",
+    "packages/runtime/src/services/scanners/__tests__/scanner-degraded-warn.test.ts",
+    "packages/runtime/test/json-store.test.ts",
+    "packages/runtime/test/helpers/free-port.test.ts",
+    "packages/runtime/test/pending.test.ts",
+    "packages/runtime/test/npm-installer-tarball-stall.test.ts",
+    "packages/runtime/src/utils/__tests__/utils-bundle.test.ts"
+  ],
+  "sharedBy": {
+    "packages/runtime/src/__tests__/rpc-client-bundle.test.ts": [
+      "chat"
+    ],
+    "packages/runtime/src/infra/__tests__/infra-bundle.test.ts": [
+      "provider"
+    ],
+    "packages/runtime/src/utils/__tests__/utils-bundle.test.ts": [
+      "chat"
+    ],
+    "packages/runtime/src/infra/pi/__tests__/pi-store-bundle.test.ts": [
+      "provider",
+      "settings"
+    ]
+  },
+  "contracts": [
+    {
+      "carrier": "packages/dom-core/src/**",
+      "on": [
+        "panel"
+      ],
+      "note": "dom-core composer input 是 panel 域 composer 的 DOM 层实现，按方案 §2.1 整包归池；改 composer input 联跑 panel 域补齐 composer 挂载测试（超集方向，不漏）"
+    }
+  ],
+  "e2eRules": []
+}

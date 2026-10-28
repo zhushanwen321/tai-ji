@@ -1,26 +1,49 @@
 // @vitest-environment node
 
 /**
- * terminal-write-queue store 测试（Phase 5 联动 2 / 多实例 u2）。
+ * terminal 写域测试合并文件（波 2a 簇 1-10 语义子集）。
  *
- * 验证写队列 + ptyAlive 状态管理（per-terminalId 分键）+ 关闭沿入队检查 + 清理扇出：
- * - enqueueWrite PTY 未活 → 入队（不立即 write）
- * - enqueueWrite PTY 已活 → 立即 write（命令经编号解析会话段后调 terminalApi.write）
- * - markAlive → flush 队列；markExited → ptyAlive=false
- * - 未注册实例入队被拒（关闭沿检查，不建档）
- * - removeInstance / removeSession（精确前缀）/ clearAll 清理 + dropToastTimers
+ * 节 1 — terminal-write-queue：写队列 + ptyAlive 状态管理（per-terminalId 分键）
+ *        + 关闭沿入队检查 + 清理扇出。
+ * 节 2 — use-terminal-reconcile-generation：terminal.list 对账的连接世代防护
+ *        （greptile PR #30 发现 2）。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/terminal/terminal-write-queue.test.ts
+ * 合并说明：domains/terminal mock 取超集共享（节 2 工厂含节 1 的 write，
+ * 节 1 断言绑定的 terminalApiMock.write 与超集为同一 vi.fn）；节 2 的
+ * ws-client 保留式 mock（仅覆写 getCurrentToken）对节 1 链零消费。
+ * 两节原本各自的文件级 beforeEach/afterEach 下沉到各自 describe 节内
+ * （节 1 的 registerInstance 预注册会破坏节 2 的 hasInstance===false 断言，
+ * 必须节内隔离）；节 2 的 const T1 与节 1 同名同值，按节改名 RG_T1。
+ * describe/it 名零改动。
+ *
+ * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/terminal/terminal-write-queue.test.ts --pool=threads
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 
+// ── mock terminalApi（隔离 RPC；超集工厂 = write/spawn/resize/kill/attach/list）──
 const terminalApiMock = vi.hoisted(() => ({
+  spawn: vi.fn(() => Promise.resolve({})),
   write: vi.fn(() => Promise.resolve()),
+  resize: vi.fn(() => Promise.resolve()),
+  kill: vi.fn(() => Promise.resolve()),
+  attach: vi.fn(() => Promise.resolve()),
+  list: vi.fn(() => Promise.resolve([] as Array<{ terminalId: string; alive: boolean }>)),
 }))
 vi.mock('@taiji/core/transport/api/domains/terminal', () => ({
   terminalApi: terminalApiMock,
 }))
+
+// ── 可控 ws-client 世代 token（其余导出保留真实实现；节 2 专用）────────────────
+const wsControl = vi.hoisted(() => ({ token: null as string | null }))
+vi.mock('@taiji/core/transport/ws-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@taiji/core/transport/ws-client')>()
+  return {
+    ...actual,
+    getCurrentToken: () => wsControl.token,
+  }
+})
 
 import { useTerminalWriteQueueStore } from '@/stores/terminal-write-queue'
 import { useToast } from '@/composables/useToast'
@@ -28,29 +51,46 @@ import { MAX_PENDING_WRITES } from '@taiji/core/domain/drawer'
 import {
   __resetTerminalInstanceRegistryForTest,
   registerInstance,
+  hasInstance,
 } from '@/composables/features/terminal/terminal-instance-registry'
+import {
+  useTerminal,
+  __resetTerminalStateForTest,
+  __terminalPartitionCountForTest,
+  __terminalSubscriptionCountForTest,
+} from '@/composables/features/terminal/useTerminal'
 
+// ══════════ 节 1/2 — 来源: terminal-write-queue.test.ts ══════════
+
+/**
+ * 验证写队列 + ptyAlive 状态管理（per-terminalId 分键）+ 关闭沿入队检查 + 清理扇出：
+ * - enqueueWrite PTY 未活 → 入队（不立即 write）
+ * - enqueueWrite PTY 已活 → 立即 write（命令经编号解析会话段后调 terminalApi.write）
+ * - markAlive → flush 队列；markExited → ptyAlive=false
+ * - 未注册实例入队被拒（关闭沿检查，不建档）
+ * - removeInstance / removeSession（精确前缀）/ clearAll 清理 + dropToastTimers
+ */
 const T1 = 'term:s1:1'
 const T2 = 'term:s1:2'
 const T_OTHER = 'term:s2:1'
 
-beforeEach(() => {
-  setActivePinia(createPinia())
-  terminalApiMock.write.mockClear()
-  useToast().toasts.value = []
-  __resetTerminalInstanceRegistryForTest()
-  // 已建档（关注册成员资格）——入队检查放行；测试按需再注册
-  registerInstance(T1, true)
-  registerInstance(T2, true)
-  registerInstance(T_OTHER, true)
-})
-
-afterEach(() => {
-  vi.useRealTimers()
-  vi.restoreAllMocks()
-})
-
 describe('terminal-write-queue store（多实例）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    terminalApiMock.write.mockClear()
+    useToast().toasts.value = []
+    __resetTerminalInstanceRegistryForTest()
+    // 已建档（关注册成员资格）——入队检查放行；测试按需再注册
+    registerInstance(T1, true)
+    registerInstance(T2, true)
+    registerInstance(T_OTHER, true)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
   it('WQ-1: enqueueWrite PTY 未活 → 入队（不立即 write）', () => {
     const store = useTerminalWriteQueueStore()
     store.enqueueWrite(T1, 'npm test')
@@ -168,7 +208,7 @@ describe('terminal-write-queue store（多实例）', () => {
     const store = useTerminalWriteQueueStore()
     store.markAlive(T1)
     store.enqueueWrite(T1, 'boom')
-    await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled())
+    await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled(), { interval: 1 })
     const { toasts } = useToast()
     expect(toasts.value).toHaveLength(1)
     expect(toasts.value[0]!.type).toBe('error')
@@ -215,5 +255,55 @@ describe('terminal-write-queue store（多实例）', () => {
     const { toasts } = useToast()
     expect(toasts.value).toHaveLength(1)
     expect(toasts.value[0]!.message).toContain('1')
+  })
+})
+
+// ══════════ 节 2/2 — 来源: use-terminal-reconcile-generation.test.ts ══════════
+
+/**
+ * 场景：list 请求在途期间 auth token 变化（runtime 重启换 token = 连接世代变更），
+ * 旧世代落定的清单响应必须被丢弃——不进实例注册表、按失败路径返回（不自动新建）。
+ * 当前接线下断连时 use-connection 的 pendingApi.rejectAll 已把在途请求 reject 走失败路径，
+ * 本防护是纵深第二层：传输层行为变化（旧响应不再被 reject 直达注册表）时兜住
+ * 「旧清单响应复活幽灵终端」，与 resetTerminalDomain 的世代重置语义配套。
+ */
+const RG_T1 = 'term:s1:1'
+
+describe('terminal.list 对账的连接世代防护（greptile PR #30 发现 2）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    __resetTerminalStateForTest()
+    wsControl.token = null
+    for (const key of Object.keys(terminalApiMock) as (keyof typeof terminalApiMock)[]) {
+      terminalApiMock[key].mockClear()
+    }
+    terminalApiMock.list.mockResolvedValue([])
+  })
+
+  it('请求在途期间世代变更 → 落定的旧世代清单响应被丢弃，注册表/分区/订阅零污染', async () => {
+    terminalApiMock.list.mockImplementation(async () => {
+      // 模拟 list RPC 在途期间 runtime 重启（auth token 更换 = 连接世代变更）
+      wsControl.token = 'token-B'
+      return [{ terminalId: RG_T1, alive: true }]
+    })
+    const terminal = useTerminal(ref('s1'))
+    const result = await terminal.reconcileInstances()
+
+    // 失败路径语义：不自动新建、保留既有条目（响应整体丢弃，不按清单增删注册表）
+    expect(result).toEqual({ ok: false, count: -1 })
+    expect(hasInstance(RG_T1)).toBe(false)
+    expect(terminal.instances.value).toEqual([])
+    expect(__terminalPartitionCountForTest()).toBe(0)
+    expect(__terminalSubscriptionCountForTest()).toBe(0)
+  })
+
+  it('同世代（token 未变）响应照常建档（防护不吞正常清单）', async () => {
+    terminalApiMock.list.mockResolvedValue([{ terminalId: RG_T1, alive: true }])
+    const terminal = useTerminal(ref('s1'))
+    const result = await terminal.reconcileInstances()
+
+    expect(result).toEqual({ ok: true, count: 1 })
+    expect(hasInstance(RG_T1)).toBe(true)
+    expect(terminal.instances.value.map((i) => i.terminalId)).toEqual([RG_T1])
   })
 })

@@ -64,7 +64,7 @@ function makeFakeChild(pid = 4242): ChildProcess & EventEmitter {
   return child;
 }
 
-interface ServiceInternals {
+interface ServiceInternals { // oe-exempt:20261027:test:测试夹具接口（合并产物内多节共用的 mock 形状契约）
   store: RecordStore;
 }
 
@@ -128,7 +128,7 @@ describe("u7a 生产迁移点 → 在途推送（wiring）", () => {
     const handle = await service.execute({ task: "first round", slug: "t", ctxModel: CTX_MODEL });
     // detached 派发链异步（dispatchRoundAsync → kickOffChatRound → pool acquire）：
     // 等协议 run 被 fake 捕获（与 delivery-methods.test.ts 同款等待惯例）。
-    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1), { interval: 1 });
     const run = fake.runs[0]!;
     // 引擎侧活句柄（生产经 EngineClient 反向通道桥接派生视图——此处直接落 core 镜像，
     // 桥接本体在下方 EngineClient 套件独立验证）
@@ -137,7 +137,7 @@ describe("u7a 生产迁移点 → 在途推送（wiring）", () => {
 
     seen.length = 0;
     run.settle({ content: "round 1 done" }); // run 应答 = agent_settled（轮终分流触发器）
-    await vi.waitFor(() => expect(hasIdleTimer(handle.subagentId)).toBe(true)); // 轮终 = timer armed
+    await vi.waitFor(() => expect(hasIdleTimer(handle.subagentId)).toBe(true), { interval: 1 }); // 轮终 = timer armed
     expect(seen.at(-1)).toEqual({ inFlight: 0 }); // 保活不算在途（D5 谓词）
   });
 
@@ -154,7 +154,7 @@ describe("u7a 生产迁移点 → 在途推送（wiring）", () => {
     await service.chatActions.deliverChatMessage(record, "next round msg");
 
     // 续聊投递 = 新协议 run 承载（H1 U6 后无 interact 面；task.prompt = 聚合消息正文）
-    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1), { interval: 1 });
     expect(fake.runs[0]!.task.prompt).toBe("next round msg");
     expect(hasIdleTimer(record.id)).toBe(false);
     expect(seen.at(-1)).toEqual({ inFlight: 1 }); // disarm 后该 record 计在途

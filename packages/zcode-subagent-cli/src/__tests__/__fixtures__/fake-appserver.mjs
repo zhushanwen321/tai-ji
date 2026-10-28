@@ -135,9 +135,14 @@ else out({ protocol: { name: 'ZCode Protocol', version: 1 } });
 
 // SIGTERM 优雅窗口：默认终止会丢弃「已写入管道但尚未读到」的帧——延迟退出让
 // stdin 排空后收尾（dispose 的 close-帧-先于-SIGTERM 顺序在本侧可观测：
-// killChain 的 grace 远大于本窗口，不会升级 SIGKILL）
+// killChain 的 grace 远大于本窗口，不会升级 SIGKILL）。
+// [耗时] 窗口取值只需覆盖「管道里已就绪的数据被读走」的一个 I/O 回合（数据在
+// SIGTERM 前已写入内核管道缓冲，读端一旦被调度即可取走），不需要 100ms：每个
+// 用例 teardown 都付一次这个窗口，100ms × 每文件几十个真进程用例即秒级白等。
+const SIGTERM_DRAIN_MS = 25;
+
 process.on('SIGTERM', () => {
-  setTimeout(() => process.exit(0), 100);
+  setTimeout(() => process.exit(0), SIGTERM_DRAIN_MS);
 });
 
 // env 快照 + boot 流水（惰性启动 / argv 形态 / env 惯例断言的数据源）。sessionDb

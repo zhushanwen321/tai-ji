@@ -122,13 +122,23 @@ export const SCHEMA = JSON.stringify({ type: "object", properties: { count: { ty
 // 校验失败时 Pi 把错误文本（参数层 immediate 路径 / execute 抛错）塞进 result.content[0].text。
 export const FAILED_TOOL_END = {
   type: "tool_execution_end",
-  toolName: "structured-output",
+  toolName: "structured_output",
   isError: true,
   result: { content: [{ type: "text", text: "Schema validation failed: /count must be number" }] },
 };
 export const SUCCESS_TOOL_END = {
   type: "tool_execution_end",
-  toolName: "structured-output",
+  toolName: "structured_output",
+  isError: false,
+  result: { details: { count: 5 } },
+};
+// 嵌套调用（codemode tools.xxx API 经 ctx.executeTool 执行）的成功事件：pi 嵌套
+// 管线 id 形态 `${callerId}/${序号}`（nested-tool-calls.js）——hook 按含 "/" 判嵌套，
+// 不计入 soSucceededEver（嵌套结果不持久化，workflow 引擎只采顶层 toolCalls）。
+export const NESTED_SUCCESS_TOOL_END = {
+  type: "tool_execution_end",
+  toolCallId: "call_00_zQS7HVFi1LYksIsUAzpI8185/call_01",
+  toolName: "structured_output",
   isError: false,
   result: { details: { count: 5 } },
 };
@@ -140,7 +150,7 @@ export const turnEndPayload = (stopReason = "stop") => ({ message: { stopReason 
  * U2（D3 门禁）增量：按错误文本构造 structured-output 失败事件——
  * 同/异签名、参数层回显形态（"Received arguments:" 起的实参块）的测试原料。
  */
-export function failedToolEndWith(errorText: string, toolName = "structured-output") {
+export function failedToolEndWith(errorText: string, toolName = "structured_output") {
   return {
     type: "tool_execution_end",
     toolName,
@@ -151,5 +161,5 @@ export function failedToolEndWith(errorText: string, toolName = "structured-outp
 
 /** pi-ai 参数层错误的原生格式（validation.js errorMessage）：错误行 + 实参回显。 */
 export function paramLayerErrorText(errorLines: string, argsEcho: string): string {
-  return `Validation failed for tool "structured-output":\n${errorLines}\n\nReceived arguments:\n${argsEcho}`;
+  return `Validation failed for tool "structured_output":\n${errorLines}\n\nReceived arguments:\n${argsEcho}`;
 }

@@ -61,6 +61,13 @@ const SCRIPTS_GUARD_FILES = [
   'scripts/__tests__/cross-branch-overlap.test.mjs',
   'scripts/__tests__/zcode-session-db-cleanup.test.mjs',
   'scripts/__tests__/check-test-suite-wiring.test.mjs',
+  // 以下五个为 dev 线 wave3 新增守卫（域切片/慢用例/junit 守恒/结果聚合/域触发选择器），
+  // main 的 SUITES 登记处引入时补录，顺序与 ci.yml scripts guards run 行一致
+  'scripts/__tests__/select-affected-domain.test.mjs',
+  'scripts/__tests__/check-domain-slices.test.mjs',
+  'scripts/__tests__/check-slow-tests.test.mjs',
+  'scripts/__tests__/check-test-results.test.mjs',
+  'scripts/__tests__/check-test-junit-parity.test.mjs',
 ]
 
 /**

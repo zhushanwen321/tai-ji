@@ -417,7 +417,7 @@ bash scripts/validate-runtime-bundle.sh    # 作为第 7 步自动运行（pre-c
 | 症状 | 定位 |
 |------|------|
 | A1/A2 失败（不激活） | 看 `[FAIL]` 指向的 runtime stdout 中 `plugin-process` / `plugin-host-process` 行；`ERR_MODULE_NOT_FOUND` = F1 类回归（fork loader），`PERMISSION_DENIED` = 权限预批准失效 |
-| A3 失败（scheduler-manager 缺失） | 先手工跑 `bash scripts/prepare-builtin-plugins.sh`；仍缺失查 `plugin-registry.ts` 的 `resolveBuiltinPluginsDir` 候选探测（两形态单测在 `packages/runtime/test/plugin-registry.test.ts` TC-1-09/10/11） |
+| A3 失败（scheduler-manager 缺失） | 先手工跑 `bash scripts/prepare-builtin-plugins.sh`；仍缺失查 `plugin-registry.ts` 的 `resolveBuiltinPluginsDir` 候选探测（两形态单测在 `packages/runtime/test/plugin-registry-bundle.test.ts` TC-1-09/10/11） |
 | D 步无 hook 日志行 | 查 `message-dispatcher` 的 hook 时序（hook 必须先于 ensureActive）；fake session 的 error envelope 属预期，不算失败 |
 | E 步失败（批准后不激活/超 10s） | 查 `PluginService.approvePermissions` 是否调 `activator.resolvePermissionApproval(pluginId, true)`、`PluginActivator.activatePlugin` 的 in-flight 幂等是否被删（回归特征：E2 耗时逼近 30000ms = 干等超时路径复活） |
 | 脚本起不来 | `tsx 不可解析` → `pnpm install`；`node < 22` → 升级 node；端口占用 → 脚本自动重试 10 个随机端口，仍失败查 `lsof -nP -i :41000-43999` |

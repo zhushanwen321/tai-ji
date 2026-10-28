@@ -777,16 +777,29 @@ export function buildFileCacheEntry(
   };
 }
 
+/**
+ * [crash 回归加固] 全量重建基底判别谓词：turns 键存在且是 Turn[]。
+ * 纯 `"turns" in base` 判键会把泄漏进身份基底的索引统计字段（number 型 turns，
+ * 见 record-store.ts identityBaseFromIndexEntry 头注）误判成全量基底——
+ * getDisplayItems 迭代 number 抛 TypeError。必须封装为类型谓词而非内联进 if
+ * 条件（`"turns" in base && Array.isArray(base.turns)` 内联会在 else 分支产生
+ * TS2339 摩擦逼人加 cast）。
+ */
+function isFullReconBase(base: IdentityHeaderRecon | ReconstructedRecord): base is ReconstructedRecord {
+  return "turns" in base && Array.isArray(base.turns);
+}
+
 /** identity 基底（头部 light 或全量 recon）+ `.state` 收尾矩阵 → SubagentRecord（§3.2.4 重建单规则）。
- *  [R4/D6-③] base 直查路径同批归一（存量索引 "" 条目）：索引命中分支把 `...hit` 展开为
- *  IdentityHeaderRecon 直入本函数，R4 升级前旧写侧落盘的 `model:""` 条目（loadIndex 检查
- *  接受 "" 合法 string）经此水合——与 entry/manifest/孤儿合并三水合点同批 modelOrUndefined。 */
+ *  [R4/D6-③] base 直查路径同批归一（存量索引 "" 条目）：索引命中分支经
+ *  identityBaseFromIndexEntry 显式装配 IdentityHeaderRecon 直入本函数，R4 升级前
+ *  旧写侧落盘的 `model:""` 条目（loadIndex 检查接受 "" 合法 string）经此水合——与
+ *  entry/manifest/孤儿合并三水合点同批 modelOrUndefined。 */
 export function buildRecord(
   base: IdentityHeaderRecon | ReconstructedRecord,
   m: SidecarMatrix,
 ): SubagentRecord {
   let rec: SubagentRecord;
-  if ("turns" in base) {
+  if (isFullReconBase(base)) {
     // 全量：turnCount/totalTokens/model/eventLog/displayItems/result/error 齐全。
     rec = {
       id: base.id,
@@ -821,6 +834,18 @@ export function buildRecord(
       worktree: base.worktree,
     };
   } else {
+    // [crash 回归加固·防御] turns 键存在却非数组 = 索引统计域字段（number 型
+    // turns）再次泄漏进身份基底的信号。正常轻量基底无 turns 键（不 warn 防刷屏）；
+    // 主修（identityBaseFromIndexEntry 显式装配）到位后本 warn 理论不可达——它是
+    // 防御 + 可观测，不是正常路径。按轻量基底降级处理不抛。
+    if ("turns" in base) {
+      logger.warn(
+        "[subagents] 身份基底混入索引统计字段：turns 键存在但非 Turn[]，已按轻量基底降级。" +
+          "恢复动作：检查 record-store.ts 的 identityBaseFromIndexEntry 是否被改回 { ...hit } 对象展开写法" +
+          "（索引统计域字段 turns/totalTokens 漏进身份基底是冷启动扫描崩溃的根因）",
+        { detail: { id: base.id, sessionFile: base.sessionFile, turns: base.turns } },
+      );
+    }
     // light：详情字段缺省（turns=0/eventLog=[]/result=undefined），getFullRecord 懒补。
     rec = {
       id: base.id,

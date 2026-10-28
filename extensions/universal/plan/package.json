@@ -40,7 +40,7 @@
   },
   "scripts": {
     "typecheck": "npx tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --pool=threads"
   },
   "devDependencies": {
     "@earendil-works/pi-tui": "^1.0.0",

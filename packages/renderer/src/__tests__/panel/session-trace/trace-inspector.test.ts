@@ -1,7 +1,16 @@
 /**
  * A44 drawer inspector 联动单测（trace-ui，设计 D5b 终态：trace 一级 tab）。
  *
- * 覆盖：
+ * 单文件多源合并（4 源同装载簇）：trace-inspector（本节，最大源）+ queue-bubble-s8 +
+ * queue-bubble-edit + block-ansi——vitest 按测试文件隔离模块图，合并让全部用例共享
+ * 一份组件树装载与环境初始化（4 文件各付一次装载 → 合并后一份）。
+ * 未并入：mode-declaration-row.test.ts——其真实 @/stores/chat + shell-mount mock
+ * useChat 形态与本文件 mock @/stores/chat + 真实 useChat 互为相反（同模块不同形态
+ * 实质冲突），保持独立文件。
+ * 三个小组件源（QueueBubble 纯 props / Block 经 mockChatProvide）不消费本文件 mock
+ * 集任何模块，各节以裸块隔离节内 helper。
+ *
+ * 覆盖（trace-inspector 源）：
  * - trace 一级 tab：selectTraceEntry → openDrawerTab('trace') 自动打开并切 tab，
  *   inspector = trace tab 内容面板（详情按 kind 渲染：文本全文 / kv / 原始 JSON）
  * - 返回空态：「← 返回」清 selectedKey → inspector 卸载 → trace tab 空态 fallback
@@ -19,8 +28,12 @@ import { computed, defineComponent, nextTick, reactive } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { usePanelStore, ROOT_PANEL_ID } from '@/stores/panel'
-import type { ServerMessageMap } from '@taiji/shared'
+import type { ServerMessageMap, ToolCall } from '@taiji/shared'
+import { Block } from '@taiji/ui'
 import { bindDrawerSessionId, _resetDrawerForTest } from '@taiji/core/domain/drawer'
+import { mockChatProvide } from '@/__tests__/helpers/chat-view-deps'
+import QueueBubble from '@/components/panel/QueueBubble.vue'
+import type { QueueRow } from '@/composables/panel/useQueueRows'
 
 // ── mock 壳层依赖（PanelContainer setup 阶段执行，避免真实 WS/session 副作用）──
 vi.mock('@/composables/features/file-tree/useGitStatus', () => ({
@@ -31,16 +44,41 @@ vi.mock('@/composables/features/chat/useSessionDerivations', () => ({
   useSessionDerivations: () => ({ derivedStatus: () => ({ value: 'done' }) }),
 }))
 
-// ── 静态重面板 vi.mock（import 期替换：global.stubs 只在渲染期替换，import 期仍加载原
-// 模块触发 PanelContainer 整图 transform；占位组件与原 stubs 等价——同名 testid）。两点
-// 边界：① TraceInspector 本体不 mock——组件级用例直接 mount 本体（L74 静态 import），
-// mock 会污染本体；② 懒加载 DetailPane/TerminalView（PanelContainer 动态 import，不在
-// 静态图内）保留渲染期 stub。──
+// ── 静态重面板 + 壳层组件 vi.mock（import 期替换：global.stubs 只在渲染期替换，import 期
+// 仍加载原模块触发 PanelContainer 整图 transform；mock 集对齐 panel-container-drawer-mode.test.ts
+// ——Panel/PanelHeader/ToastContainer/PlanDocsPanel/BtwPanel/BackgroundTaskDetailPanel 在本文件
+// 零断言，占位只砍 transform；工厂零外部引用（普通 options 对象组件），规避 vi.mock hoisting
+// 对顶层绑定的限制）。两点边界：① TraceInspector 本体不 mock——组件级用例直接 mount 本体
+// （L74 静态 import），mock 会污染本体（@taiji/ui/extension-host 链经 PanelHeader 引入，
+// PanelHeader 已 mock 即被切断，无需直 mock）；② 懒加载 DetailPane/TerminalView
+// （PanelContainer 动态 import，不在静态图内）保留渲染期 stub。──
 vi.mock('@/components/panel/GitPanel.vue', () => ({
   default: { name: 'GitPanel', template: '<div data-testid="git-panel" />' },
 }))
 vi.mock('@/components/panel/CommandDocPanel.vue', () => ({
   default: { name: 'CommandDocPanel', template: '<div data-testid="doc-panel" />' },
+}))
+vi.mock('@/components/extension/BackgroundTaskDetailPanel.vue', () => ({
+  default: { name: 'BackgroundTaskDetailPanel', template: '<div data-testid="bash-task-detail-panel" />' },
+}))
+vi.mock('@/components/panel/plan/PlanDocsPanel.vue', () => ({
+  default: { name: 'PlanDocsPanel', template: '<div data-testid="plan-docs-panel" />' },
+}))
+vi.mock('@/components/panel/BtwPanel.vue', () => ({
+  default: { name: 'BtwPanel', template: '<div data-testid="btw-panel" />' },
+}))
+vi.mock('@/components/panel/Panel.vue', () => ({
+  default: {
+    name: 'Panel',
+    props: { panelId: String, sessionId: { type: String, default: null } },
+    template: '<div data-testid="panel" :data-panel-id="panelId" />',
+  },
+}))
+vi.mock('@/components/panel/PanelHeader.vue', () => ({
+  default: { name: 'PanelHeader', template: '<div />' },
+}))
+vi.mock('@/components/ui/ToastContainer.vue', () => ({
+  default: { name: 'ToastContainer', template: '<div />' },
 }))
 vi.mock('@/components/panel/SubagentTab.vue', () => ({
   default: { name: 'SubagentTab', template: '<div data-testid="subagent-panel" />' },
@@ -147,12 +185,6 @@ function buildSnapshot(): ServerMessageMap['session.traceEntries'] {
 const DesktopStub = (name: string, testid: string) =>
   defineComponent({ name, template: `<div data-testid="${testid}" />` })
 
-const PanelStub = defineComponent({
-  name: 'Panel',
-  props: { panelId: String, sessionId: { type: String, default: null } },
-  template: '<div data-testid="panel" :data-panel-id="panelId" />',
-})
-
 // PanelContainer 组件构造器（beforeAll 预热填充）：整图 transform 首载成本（junit 实测
 // 单条 13s+）一次性移入文件级 beforeAll，不落在任何单条用例预算内（TEST-STRATEGY「新写测试判据」
 // h 类处置：模块图首载预热共享；vi.mock 声明提升到文件顶部，预热 import 时 mock 已生效）
@@ -166,7 +198,6 @@ async function mountContainer() {
   return mount(PanelContainerCtor, {
     global: {
       stubs: {
-        Panel: PanelStub,
         DetailPane: DesktopStub('DetailPane', 'detail-panel'),
         TerminalView: DesktopStub('TerminalView', 'terminal-panel'),
       },
@@ -532,3 +563,318 @@ describe('safeJson 检查 + 损坏行行号未知降级（RD-2#5 / RD-2#6）', (
     view.unmount()
   })
 })
+
+// ══════════ 来源：queue-bubble-s8.test.ts ══════════
+{
+  /** 队列行构造（state 三态；默认 queued 投递路径行） */
+  function row(clientUuid: string, preview: string, state: QueueRow['state'] = 'queued'): QueueRow {
+    return { clientUuid, preview, state }
+  }
+
+  /** mount 助手：rows/hint 为必传（Composer 恒传），缺省给中性值 */
+  function mountQB(overrides: { rows?: QueueRow[]; hint?: string; expanded?: boolean } = {}) {
+    return mount(QueueBubble, {
+      props: {
+        rows: overrides.rows ?? [],
+        hint: overrides.hint ?? '等待上下文压缩完成后发送',
+        ...(overrides.expanded !== undefined ? { expanded: overrides.expanded } : {}),
+      },
+    })
+  }
+
+  describe('QueueBubble · 根门与单源行渲染', () => {
+    it('rows 为空 → 不渲染（无待发条目即无队列区）', () => {
+      const wrapper = mountQB()
+      expect(wrapper.find('[data-testid="queue-bubble"]').exists()).toBe(false)
+    })
+
+    it('单条 queued 行 → Hourglass icon + 「排队中」chip + 预览文本（用户可见状态）', () => {
+      const wrapper = mountQB({ rows: [row('u-1', '补充注册页校验', 'queued')] })
+      expect(wrapper.find('[data-testid="queue-bubble"]').exists()).toBe(true)
+      expect(wrapper.text()).toContain('补充注册页校验')
+      expect(wrapper.text()).toContain('排队中')
+      expect(wrapper.find('svg.lucide-hourglass').exists()).toBe(true)
+      expect(wrapper.find('svg.lucide-zap').exists()).toBe(false)
+    })
+
+    it('in-flight 行 → Zap icon（accent）+「投递中」chip', () => {
+      const wrapper = mountQB({ rows: [row('u-2', '正在投递的消息', 'in-flight')] })
+      expect(wrapper.text()).toContain('正在投递的消息')
+      expect(wrapper.text()).toContain('投递中')
+      expect(wrapper.find('svg.lucide-zap').exists()).toBe(true)
+      expect(wrapper.find('svg.lucide-hourglass').exists()).toBe(false)
+    })
+
+    it('failed 行 → AlertCircle（danger）+「发送未确认」chip（Q6 统一口径）+ 重试钮可见（§3.4 失败行）', () => {
+      const wrapper = mountQB({ rows: [row('u-3', '未确认送达的文本', 'failed')] })
+      expect(wrapper.text()).toContain('发送未确认')
+      expect(wrapper.find('svg.lucide-circle-alert').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="queue-retry-u-3"]').exists()).toBe(true)
+      // 状态 chip 用 danger 底/前景（红色标识）
+      const chip = wrapper.find('[data-testid="queue-state-u-3"]')
+      expect(chip.classes()).toContain('text-danger')
+    })
+
+    it('queued/in-flight 行不渲染重试钮（仅 failed 行有重试入口）', () => {
+      const wrapper = mountQB({ rows: [row('u-4', '排队', 'queued'), row('u-5', '投递中', 'in-flight')] })
+      expect(wrapper.find('[data-testid="queue-retry-u-4"]').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="queue-retry-u-5"]').exists()).toBe(false)
+    })
+
+    it('多条 → 显前 3 条 + 「+N」溢出计数（行序 = 帧序 = 内核 FIFO 发送序）', () => {
+      const wrapper = mountQB({
+        rows: [row('u-1', 'm1'), row('u-2', 'm2'), row('u-3', 'm3'), row('u-4', 'm4'), row('u-5', 'm5')],
+      })
+      expect(wrapper.findAll('.qb-item-text').map((w) => w.text())).toEqual(['m1', 'm2', 'm3'])
+      expect(wrapper.text()).toContain('+2')
+      expect(wrapper.text()).not.toContain('m4')
+    })
+
+    it('行 hover title = 传入的 hint（session 级占用分档文案）', () => {
+      const wrapper = mountQB({ rows: [row('u-1', 'x')], hint: '等待命令执行结束后发送' })
+      expect(wrapper.find('[data-testid="queue-item-u-1"]').attributes('title')).toBe('等待命令执行结束后发送')
+    })
+
+    it('failed 行 title 在 hint 之外附判重说明（Q6 分层：行 = 状态 + 恢复指引）', () => {
+      const wrapper = mountQB({ rows: [row('u-6', '失败的', 'failed')], hint: '占用结束后发送' })
+      const title = wrapper.find('[data-testid="queue-item-u-6"]').attributes('title') ?? ''
+      expect(title).toContain('占用结束后发送')
+      expect(title).toContain('点重试会自动判重，不会重复投递')
+    })
+
+    it('rows 变化 → 行跟随更新（响应式）；清空 → 根门关闭', async () => {
+      const wrapper = mountQB({ rows: [row('u-1', 'first')] })
+      expect(wrapper.text()).toContain('first')
+      await wrapper.setProps({ rows: [row('u-1', 'first'), row('u-2', 'second')] })
+      await nextTick()
+      expect(wrapper.text()).toContain('second')
+      await wrapper.setProps({ rows: [] })
+      await nextTick()
+      expect(wrapper.find('[data-testid="queue-bubble"]').exists()).toBe(false)
+    })
+  })
+
+  describe('QueueBubble · 行操作（撤销 / 重试）', () => {
+    it('× 撤销：点击 emit cancel(clientUuid)，title=撤销排队（hover 揭示载体）', async () => {
+      const wrapper = mountQB({ rows: [row('u-9', '待撤销消息')] })
+      const cancel = wrapper.find('[data-testid="queue-cancel-u-9"]')
+      expect(cancel.exists()).toBe(true)
+      expect(cancel.attributes('disabled')).toBeUndefined()
+      const anchor = wrapper.find('[data-testid="queue-cancel-anchor-u-9"]')
+      expect(anchor.attributes('title')).toBe('撤销排队')
+      await cancel.trigger('click')
+      expect(wrapper.emitted('cancel')).toEqual([['u-9']])
+    })
+
+    it('in-flight 行 × 同样可撤（V10：投递中走内核收回-重投，UI 无禁用态）', async () => {
+      const wrapper = mountQB({ rows: [row('u-10', '投递中的消息', 'in-flight')] })
+      const cancel = wrapper.find('[data-testid="queue-cancel-u-10"]')
+      await cancel.trigger('click')
+      expect(wrapper.emitted('cancel')).toEqual([['u-10']])
+    })
+
+    it('failed 行重试：点击 emit retry(clientUuid)，title=重试发送', async () => {
+      const wrapper = mountQB({ rows: [row('u-11', '失败的消息', 'failed')] })
+      const retry = wrapper.find('[data-testid="queue-retry-u-11"]')
+      const anchor = retry.element.closest('span')
+      expect(anchor?.getAttribute('title')).toBe('重试发送')
+      await retry.trigger('click')
+      expect(wrapper.emitted('retry')).toEqual([['u-11']])
+      // 重试不等于撤销：cancel 通道未被触发
+      expect(wrapper.emitted('cancel')).toBeUndefined()
+    })
+
+    it('无 chevron 折叠控件（+N 开关为纯文字 Button，无 chevron 图标形态）', () => {
+      const wrapper = mountQB({ rows: [row('u-1', 'x')] })
+      expect(wrapper.find('svg.lucide-chevron-right').exists()).toBe(false)
+    })
+  })
+
+  describe('QueueBubble · +N 展开开关（Q2）与重试全部（Q5）', () => {
+    const FIVE_ROWS = [row('u-1', 'm1'), row('u-2', 'm2'), row('u-3', 'm3'), row('u-4', 'm4'), row('u-5', 'm5')]
+
+    it('+N 为可点开关：点击 emit toggleExpand，aria-expanded 反映展开态（用户可见展开入口）', async () => {
+      const wrapper = mountQB({ rows: FIVE_ROWS })
+      expect(wrapper.text()).toContain('+2')
+      const expander = wrapper.find('[data-testid="queue-expand"]')
+      expect(expander.exists()).toBe(true)
+      expect(expander.attributes('aria-expanded')).toBe('false')
+      await expander.trigger('click')
+      expect(wrapper.emitted('toggleExpand')).toHaveLength(1)
+    })
+
+    it('expanded=true → 全部行渲染（被折叠行可见，行操作天然可用）+ 无 +N 溢出', async () => {
+      const wrapper = mountQB({ rows: FIVE_ROWS, expanded: true })
+      expect(wrapper.findAll('.qb-item-text').map((w) => w.text())).toEqual(['m1', 'm2', 'm3', 'm4', 'm5'])
+      expect(wrapper.find('[data-testid="queue-expand"]').exists()).toBe(false)
+      // 收起出口：收起后仍有溢出行才显示
+      expect(wrapper.find('[data-testid="queue-collapse"]').exists()).toBe(true)
+      await wrapper.find('[data-testid="queue-collapse"]').trigger('click')
+      expect(wrapper.emitted('toggleExpand')).toHaveLength(1)
+    })
+
+    it('展开但无溢出（行数 ≤ 上限）→ 不渲染收起出口', () => {
+      const wrapper = mountQB({ rows: [row('u-1', 'm1'), row('u-2', 'm2')], expanded: true })
+      expect(wrapper.find('[data-testid="queue-collapse"]').exists()).toBe(false)
+    })
+
+    it('failed ≥2 → 「重试全部失败项」入口可见，点击 emit retryAll', async () => {
+      const wrapper = mountQB({
+        rows: [row('u-11', '失败一', 'failed'), row('u-12', '失败二', 'failed'), row('u-13', '排队', 'queued')],
+      })
+      const retryAll = wrapper.find('[data-testid="queue-retry-all"]')
+      expect(retryAll.exists()).toBe(true)
+      expect(retryAll.text()).toContain('重试全部失败项')
+      await retryAll.trigger('click')
+      expect(wrapper.emitted('retryAll')).toHaveLength(1)
+    })
+
+    it('failed <2 → 不渲染重试全部入口（单条走行内重试钮）', () => {
+      const wrapper = mountQB({ rows: [row('u-11', '失败一', 'failed'), row('u-13', '排队', 'queued')] })
+      expect(wrapper.find('[data-testid="queue-retry-all"]').exists()).toBe(false)
+    })
+  })
+}
+
+// ══════════ 来源：queue-bubble-edit.test.ts ══════════
+{
+  function row(clientUuid: string, preview: string, state: QueueRow['state'] = 'queued'): QueueRow {
+    return { clientUuid, preview, state }
+  }
+
+  function mountQB(
+    overrides: { rows?: QueueRow[]; hint?: string; editingClientUuid?: string | null } = {},
+  ) {
+    return mount(QueueBubble, {
+      props: {
+        rows: overrides.rows ?? [row('u-1', '排队的消息文本')],
+        hint: '占用结束后发送',
+        ...(overrides.editingClientUuid !== undefined ? { editingClientUuid: overrides.editingClientUuid } : {}),
+      },
+    })
+  }
+
+  describe('QueueBubble · ✎ 编辑入口（D6）', () => {
+    it('queued 行渲染 ✎ 钮，点击 emit edit 带条目 id', async () => {
+      const wrapper = mountQB({ rows: [row('u-1', '排队中的消息')] })
+      const btn = wrapper.find('[data-testid="queue-edit-u-1"]')
+      expect(btn.exists()).toBe(true)
+      await btn.trigger('click')
+      expect(wrapper.emitted('edit')).toEqual([['u-1']])
+    })
+
+    it('failed 行 ✎ 钮同样可用（E7：failed 行可编辑），与重试/撤销并存', async () => {
+      const wrapper = mountQB({ rows: [row('u-f', '发送未确认的文本', 'failed')] })
+      expect(wrapper.find('[data-testid="queue-edit-u-f"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="queue-retry-u-f"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="queue-cancel-u-f"]').exists()).toBe(true)
+      await wrapper.find('[data-testid="queue-edit-u-f"]').trigger('click')
+      expect(wrapper.emitted('edit')).toEqual([['u-f']])
+    })
+  })
+
+  describe('QueueBubble · 编辑态提示条（D6）', () => {
+    it('editingClientUuid 非空 → 提示条渲染（编辑态文案 + 放弃编辑入口）', () => {
+      const wrapper = mountQB({ editingClientUuid: 'u-1' })
+      const banner = wrapper.find('[data-testid="queue-edit-banner"]')
+      expect(banner.exists()).toBe(true)
+      expect(banner.text()).toContain('正在编辑排队消息')
+      expect(banner.text()).toContain('放弃编辑')
+      expect(wrapper.find('[data-testid="queue-edit-abandon"]').exists()).toBe(true)
+    })
+
+    it('editingClientUuid 空（缺省）→ 提示条不渲染', () => {
+      const wrapper = mountQB({})
+      expect(wrapper.find('[data-testid="queue-edit-banner"]').exists()).toBe(false)
+    })
+
+    it('提示条显隐跟随 prop 变化（条目离场由壳层解除锚定 → prop 翻空 → 提示条消失）', async () => {
+      const wrapper = mountQB({ editingClientUuid: 'u-1' })
+      expect(wrapper.find('[data-testid="queue-edit-banner"]').exists()).toBe(true)
+      await wrapper.setProps({ editingClientUuid: null })
+      expect(wrapper.find('[data-testid="queue-edit-banner"]').exists()).toBe(false)
+    })
+
+    it('「放弃编辑」点击 emit abandonEdit（解除锚定草稿保留——语义在壳层）', async () => {
+      const wrapper = mountQB({ editingClientUuid: 'u-1' })
+      await wrapper.find('[data-testid="queue-edit-abandon"]').trigger('click')
+      expect(wrapper.emitted('abandonEdit')).toHaveLength(1)
+    })
+  })
+}
+
+// ══════════ 来源：block-ansi.test.ts ══════════
+{
+  function makeTool(over: Partial<ToolCall> = {}): ToolCall {
+    return {
+      id: 'tc-1',
+      toolName: 'bash',
+      input: { command: 'echo hello' },
+      output: 'hello',
+      status: 'completed',
+      startTime: Date.now(),
+      ...over,
+    }
+  }
+
+  /** Tool 默认收起，需点击 header 展开。返回展开后的 wrapper。 */
+  async function mountExpanded(tool: ToolCall) {
+    const wrapper = mount(Block, {
+      props: { type: 'tool', tool },
+      // Block setup 顶部经 useChatViewDeps inject 壳依赖（ui-optimize-unified N1 起），直接 mount 必须注入 mock deps
+      global: { provide: mockChatProvide() },
+    })
+    // tool 详情默认收起（toolCollapsed=true），点击 header 展开
+    const header = wrapper.find('.cursor-pointer')
+    expect(header.exists()).toBe(true)
+    await header.trigger('click')
+    return wrapper
+  }
+
+  describe('Block ANSI 兜底渲染', () => {
+    it('E1: outputRaw 含 ANSI → 用 AnsiText 渲染（data-testid="ansi-text" 存在）', async () => {
+      const tool = makeTool({
+        output: 'hello',
+        outputRaw: '\x1b[32mhello\x1b[0m',
+      })
+      const wrapper = await mountExpanded(tool)
+
+      // AnsiText 组件渲染了 data-testid="ansi-text"
+      expect(wrapper.find('[data-testid="ansi-text"]').exists()).toBe(true)
+    })
+
+    it('outputRaw 不存在 → 回退纯文本 span（无 AnsiText）', async () => {
+      const tool = makeTool({
+        output: 'plain result',
+      })
+      const wrapper = await mountExpanded(tool)
+
+      // 无 AnsiText
+      expect(wrapper.find('[data-testid="ansi-text"]').exists()).toBe(false)
+      // 有纯文本 result
+      expect(wrapper.text()).toContain('plain result')
+    })
+
+    it('details.__gui__ 存在 → 优先用 GuiComponentRenderer 渲染 card（data-testid="gui-card" 存在）', async () => {
+      const tool = makeTool({
+        toolName: 'read',
+        output: 'done',
+        details: {
+          __gui__: {
+            v: 1,
+            component: {
+              type: 'card',
+              props: { variant: 'default', body: [] },
+            },
+          },
+        },
+      })
+      const wrapper = await mountExpanded(tool)
+
+      // GuiComponentRenderer 渲染（容器 testid 存在）
+      expect(wrapper.find('[data-testid="gui-component-renderer"]').exists()).toBe(true)
+      // card 已实现，GuiComponentRenderer 路由到 Card 组件（gui-card testid 存在）
+      expect(wrapper.find('[data-testid="gui-card"]').exists()).toBe(true)
+    })
+  })
+}

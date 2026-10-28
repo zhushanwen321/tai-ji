@@ -68,7 +68,7 @@ import {
 import { ACTION_EXECUTOR_KEY } from '@taiji/ui/rendering-protocol'
 import { SLASH_COMMAND_SOURCE_KEY } from '@/components/panel/command-popover-source'
 import { onPlugins, getPluginUiSnapshot } from '@taiji/core/transport/api/domains/plugin'
-import type { PluginUiSnapshotPayload } from '@taiji/shared'
+import type { PluginUiSnapshotPayload, PluginViewScope } from '@taiji/shared'
 import { createNotifyToastHandler } from './notify-toast'
 import { notifyUiResponseNotDelivered } from './ui-response-feedback'
 import { useChatStore } from '@/stores/chat'
@@ -152,15 +152,26 @@ function ensureCommandDeclarationsSync(
 
 /**
  * 插件 UI 快照条目 → bus 帧回放（ADR-0097 拉为主的三路同函数原则：快照回放与实时推送
- * 喂同一 store 订阅路径——条目按实时帧形状逐条 emit，窄化 / (sessionId, id) 分区写入 /
+ * 喂同一 store 订阅路径——条目按实时帧形状逐条 emit，窄化 / (scope, id) 分区写入 /
  * `[null]` 清除语义全部由既有订阅端承担，零新写入口、零语义复制）。
+ * 视图条目归属二选一透传（U2）：sessionId（会话域）或 mountId（全局域）——ViewHostStore
+ * 按 scope 形态落分区，generation 全量替换代际随帧透传。
  */
 export function applyUiSnapshot(bus: InternalEventBus, snap: PluginUiSnapshotPayload): void {
   for (const payload of snap.headerActions) {
     bus.emit({ kind: 'plugin:headerActionUpdate', headerAction: payload })
   }
   for (const item of snap.views) {
-    bus.emit({ kind: 'extension-widget', sessionId: item.sessionId, widget: { viewId: item.viewId, pluginId: item.pluginId, guiTree: item.guiTree } })
+    bus.emit({
+      kind: 'extension-widget',
+      ...(item.sessionId !== undefined ? { sessionId: item.sessionId } : { mountId: item.mountId }),
+      widget: {
+        viewId: item.viewId,
+        pluginId: item.pluginId,
+        guiTree: item.guiTree,
+        ...(item.generation !== undefined ? { generation: item.generation } : {}),
+      },
+    })
   }
 }
 
@@ -390,11 +401,13 @@ export function initExtensionHostBridge(app: App): void {
   // 由全量拉取恢复；实时推送仍承担运行中的即时性（失效提示）。
   const stopPluginUiSnapshotSync = ensurePluginUiSnapshot(bus)
 
-  // ui 组件数据源（ViewHost 经 inject 取，壳 provide 真实实现；形状对齐 IF10）
+  // ui 组件数据源（ViewHost 经 inject 取，壳 provide 真实实现；形状对齐 IF10 + U2）。
+  // 会话域三法 = 托盘 widget 区既有消费面（sessionId 形态，壳内适配为 session scope）；
+  // scope 联合两法 = ViewHost scope prop 消费面（全局域 Provider 页挂载位走此路径）。
   app.provide(VIEW_HOST_SOURCE_KEY, {
-    getView: (sessionId, viewId) => viewHostStore.getView(sessionId, viewId),
+    getView: (sessionId, viewId) => viewHostStore.getView({ kind: 'session', sessionId }, viewId),
     // widget 视图消费方（Composer 托盘 widget 区）：枚举该 session 全部缓存 viewId（纯透传 core store）
-    getViewIds: (sessionId: string) => viewHostStore.getViewIds(sessionId),
+    getViewIds: (sessionId: string) => viewHostStore.getViewIds({ kind: 'session', sessionId }),
     // 分区缺失自举补拉（ADR-0097 事件边沿拉）：ViewHost 挂载发现分区无内容时按
     // (sessionId, viewId) 过滤拉取（幂等读，无节流；断连 reject 静默 warn，实时帧或
     // 下次 connected 全量拉取收敛）
@@ -402,6 +415,18 @@ export function initExtensionHostBridge(app: App): void {
       getPluginUiSnapshot({ sessionId, viewId }).then(
         (snap) => applyUiSnapshot(bus, snap),
         (e) => console.warn('[extension-host] plugin.ui.snapshot refreshView failed:', e),
+      )
+    },
+    // U2 scope 联合消费面：全局域读 + 补拉（分区键 global:<mountId>:<pluginId>，
+    // 过滤参数带插件维度）；会话域与上方三法同分区
+    getViewInScope: (scope, viewId) => viewHostStore.getView(scope, viewId),
+    refreshViewInScope: (scope: PluginViewScope, viewId: string) => {
+      const filter = scope.kind === 'session'
+        ? { sessionId: scope.sessionId, viewId }
+        : { mountId: scope.mountId, pluginId: scope.pluginId, viewId }
+      getPluginUiSnapshot(filter).then(
+        (snap) => applyUiSnapshot(bus, snap),
+        (e) => console.warn('[extension-host] plugin.ui.snapshot refreshViewInScope failed:', e),
       )
     },
   })

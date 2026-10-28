@@ -1,26 +1,13 @@
-/**
- * Session 残留清扫精确判定测试（code-harden RT-3#10）。
- *
- * 审计推断（修复前 fixture 验证过）：tmp 家族用 `name.includes(marker)` 子串判定，
- * 中段含标记的真实会话文件（如 `a.tmp-migrate-b.jsonl`，session id 本身含标记串）
- * 既被 scanner 排除（isScannableSessionFile）又被启动清扫删除（超 1h 龄后）——
- * 数据丢失。修复 = 统一为「`.tmp-(migrate|import)-<纯数字ts>.jsonl$」后缀形态精确判定，
- * 候选侧（isScannableSessionFile）/ 清扫侧（removeResiduesInDir）/ 导入拒绝侧
- * （import-source-external-file）三消费点同一谓词。
- *
- * 测试框架：vitest。运行：cd packages/runtime && npx vitest run src/infra/pi/__tests__/session-residue-cleanup.test.ts
- */
-import { describe, it, expect } from 'vitest'
-import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, rmSync, existsSync, readdirSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import {
-  cleanupTmpMigrateResidue,
-  cleanupMigrateResidues,
-  isTmpResidueFileName,
-  TMP_RESIDUE_MARKERS,
-} from '../session-residue-cleanup.js'
-import { isScannableSessionFile } from '../session-file-utils.js'
+import { getSessionsDir } from '../pi-paths.js';
+import { isScannableSessionFile, scanPiSessions } from '../session-file-utils.js';
+import { TMP_RESIDUE_MARKERS, cleanupMigrateResidues, cleanupTmpMigrateResidue, isTmpResidueFileName } from '../session-residue-cleanup.js';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// 机械合并产物（同目录合并，vi.mock 相对路径不变）；源文件见各节横幅。重名顶层标识符已加 _mN 后缀。
+
 
 function makeSessionsDir(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), prefix))
@@ -29,12 +16,15 @@ function makeSessionsDir(prefix: string): string {
   return sessionsDir
 }
 
+
 /** 把文件 mtime 拨回到指定年龄前（清扫按龄闸判定 stale）。 */
 function ageFile(filePath: string, ageMs: number): void {
   const atime = new Date(Date.now() - ageMs)
   utimesSync(filePath, atime, atime)
 }
 
+// wave3 包装：本段原文件顶层语句收进 describe 作用域（顶层 hook 不再外溢到同文件其他来源的用例）
+describe('session-residue-cleanup', () => {
 describe('isTmpResidueFileName（精确后缀形态判定）', () => {
   it('真残留（归一化/导入崩溃中间态）命中', () => {
     expect(isTmpResidueFileName('s-abc.jsonl.tmp-migrate-1770000000000.jsonl')).toBe(true)
@@ -59,7 +49,6 @@ describe('isTmpResidueFileName（精确后缀形态判定）', () => {
     }
   })
 })
-
 describe('cleanupTmpMigrateResidue · 精确判定 + 按龄闸', () => {
   it('中段含标记的真实会话文件：不被收录（isScannableSessionFile）也绝不被删除', () => {
     const sessionsDir = makeSessionsDir('rt3-10-real-')
@@ -113,7 +102,6 @@ describe('cleanupTmpMigrateResidue · 精确判定 + 按龄闸', () => {
     }
   })
 })
-
 describe('cleanupMigrateResidues · session 级（前缀精确，既有语义）', () => {
   it('只删本 basename 前缀精确匹配的残留，不碰其他文件', () => {
     const sessionsDir = makeSessionsDir('rt3-10-slevel-')
@@ -135,3 +123,56 @@ describe('cleanupMigrateResidues · session 级（前缀精确，既有语义）
     }
   })
 })
+});
+
+// ======================================================================
+// ← session-scan-degraded-tolerance.test.ts
+// ======================================================================
+
+let prevDataDir: string | undefined
+
+let dir: string
+
+// wave3 包装：本段原文件顶层语句收进 describe 作用域（顶层 hook 不再外溢到同文件其他来源的用例）
+describe('session-scan-degraded-tolerance', () => {
+beforeEach(() => {
+  prevDataDir = process.env.TAIJI_AGENT_DATA_DIR
+  dir = mkdtempSync(join(tmpdir(), 'taiji-scan-degraded-'))
+  process.env.TAIJI_AGENT_DATA_DIR = dir
+  mkdirSync(getSessionsDir(), { recursive: true })
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
+})
+afterEach(() => {
+  // 权限恢复先于自删（chmod 000 目录 rm 枚举会 EACCES）；已删/已恢复则吞掉。
+  try { chmodSync(getSessionsDir(), 0o755) } catch { /* noop */ }
+  if (prevDataDir === undefined) delete process.env.TAIJI_AGENT_DATA_DIR
+  else process.env.TAIJI_AGENT_DATA_DIR = prevDataDir
+  rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  vi.restoreAllMocks()
+})
+describe('scanPiSessions 降级容错（读取故障不炸进程，降级留痕）', () => {
+  it('健康轮 → []；顶层 readdir EACCES → 降级 [] 不抛 + console.error 留痕；恢复后正常', () => {
+    expect(scanPiSessions({ force: true })).toEqual([])
+    expect(console.error).not.toHaveBeenCalled()
+
+    chmodSync(getSessionsDir(), 0o000)
+    expect(scanPiSessions({ force: true })).toEqual([]) // 降级空与权威空返回值同形，不抛 EACCES
+    expect(console.error).toHaveBeenCalled()
+
+    chmodSync(getSessionsDir(), 0o755)
+    expect(scanPiSessions({ force: true })).toEqual([])
+  })
+
+  it('cwd 分组子目录列举失败（dirFail，整组缺失）→ 降级为缺失该组，不抛异常', () => {
+    const cwdDir = join(getSessionsDir(), 'proj-a')
+    mkdirSync(cwdDir, { recursive: true })
+    chmodSync(cwdDir, 0o000)
+
+    expect(scanPiSessions({ force: true })).toEqual([])
+
+    chmodSync(cwdDir, 0o755)
+    expect(scanPiSessions({ force: true })).toEqual([])
+  })
+})
+});

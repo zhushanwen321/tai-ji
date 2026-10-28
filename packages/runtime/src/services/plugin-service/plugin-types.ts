@@ -15,7 +15,8 @@ import type { ISessionService, IConfigService } from '../../interfaces.js'
 // 分层标注（IF2）沿承 SDK 侧定义：
 // - @stable — Phase1AgentAPI 核心部分 storage/notify/sessions、PermissionConstants、
 //   PluginRpcErrorCodes、Disposable、SessionInfo、PluginStateStorage
-// - @experimental — events 插件间事件总线（未实现，调用即抛 NOT_IMPLEMENTED）
+// - @experimental — events.on 插件间事件总线订阅侧（未实现，调用即抛 NOT_IMPLEMENTED）；
+//   emit/report 已接 plugin.event 上报通道（D5/D9，plugin-bootstrap 单一实现）
 // - @proposed — Phase2AgentAPI 扩展范围 tools/hooks/config/sessionData/ui/agent/
 //   workspace、ToolRegistration、HookEntry 等
 // - @internal — runtime 内部塑形对象（WorkerHandle、PluginContext、Bridge* 等）
@@ -42,6 +43,9 @@ export type {
   UiDialogOptions,
   HookEntry,
   Phase2AgentAPI,
+  ProviderWriteParams,
+  ProviderCredentialReply,
+  PluginUiEventPayload,
 } from 'taiji-plugin-sdk'
 export { PermissionConstants } from 'taiji-plugin-sdk'
 
@@ -102,6 +106,33 @@ export interface IPluginServiceDeps {
    * （NpmPluginInstaller）。installPlugin 在缺省时返回 { success:false } 而非 spawn。
    */
   pluginInstaller?: import('../ports/plugin-installer.js').IPluginInstaller
+  /**
+   * provider 条目存取 port（provider-plugin-access U4 卸载编排）：listIds 返回
+   * models.json 全部 providerId，delete 删除单条（实现走 setProvider 同一写策略链，
+   * 组合根接线，不在 plugin-service 内自建第二写入点——C-proc-15）。
+   * 缺省时卸载编排跳过 provider 条目清理（warn 留痕，插件目录删除不受影响）。
+   */
+  providerEntries?: {
+    listIds(): Promise<string[]>
+    delete(providerId: string): Promise<void>
+  }
+  /**
+   * pi 扩展安装 port（provider-plugin-access U7/D6 双产物安装编排的接线点）：清单条目
+   * 携带 piExtensionVersion（双产物条目标记）时，confirmPluginInstall 成功后调用——
+   * 实现方（wool-extension-installer 的 WoolExtensionInstaller，组合根注入）负责
+   * wool-manifest 资产解析、版本配对校验（VERSION_PAIR_MISMATCH）与
+   * extensionService.installExtension 钉版安装。缺省时双产物条目只装插件侧（warn
+   * 留痕——测试与独立仓联调环境常态；生产组合根必注入，缺省 = S23 扩展侧断链）。
+   *
+   * 卸载侧（U4 卸载编排，D6「完整移除 = 条目 + 插件 + pi 扩展」）：uninstallPlugin
+   * 在插件目录删除前以包内 package.json 的包名调用 uninstallForCatalogEntry——家族
+   * 推导在实现方内做（plugin-service 不持 wool 域知识），非羊毛形态包名 = 单产物
+   * 插件，实现方 no-op。
+   */
+  piExtensionInstaller?: {
+    installForCatalogEntry(entry: { packageName: string; piExtensionVersion: string }): Promise<{ installedVersion: string }>
+    uninstallForCatalogEntry(packageName: string): Promise<void>
+  }
   /**
    * 文件软删除 port（结构匹配 ITrash.trashFile）。组合根注入 infra adapter（trash）；
    * session 真删除时 session-data 清理经 trash（mac 废纸篓 / 非 mac unlink），缺省 undefined

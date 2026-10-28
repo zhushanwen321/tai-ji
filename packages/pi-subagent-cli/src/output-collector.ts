@@ -416,7 +416,18 @@ export interface CollectResultArgs {
 }
 
 /** structured-output tool 名（与 structured-output 扩展 TOOL_NAME 一致）。 */
-const STRUCTURED_OUTPUT_TOOL = "structured-output";
+const STRUCTURED_OUTPUT_TOOL = "structured_output";
+/**
+ * 旧名（连字符，工具命名规范改下划线前的注册名）。识别旧 run 的 session/journal
+ * 重放记录（resume / 结果补收路径读到的 toolCall.toolName 是旧名）——只用于
+ * 读侧兼容识别，不再有任何新产出去写这个值。
+ */
+const STRUCTURED_OUTPUT_TOOL_LEGACY = "structured-output";
+
+/** 顶层 toolCall 是否为 structured-output 调用（新名 + 旧名重放兼容）。 */
+function isStructuredOutputToolCall(tc: ToolCall): boolean {
+  return tc.toolName === STRUCTURED_OUTPUT_TOOL || tc.toolName === STRUCTURED_OUTPUT_TOOL_LEGACY;
+}
 
 /** F-1 失败摘要截断长度（字符）。 */
 const FAILED_SO_SUMMARY_MAX_CHARS = 300;
@@ -428,7 +439,7 @@ const FAILED_SO_SUMMARY_MAX_CHARS = 300;
 export function extractParsedOutput(toolCalls: ToolCall[]): unknown {
   for (let i = toolCalls.length - 1; i >= 0; i--) {
     const tc = toolCalls[i]!;
-    if (tc.toolName === STRUCTURED_OUTPUT_TOOL && tc.isError !== true && tc.result?.details !== undefined) {
+    if (isStructuredOutputToolCall(tc) && tc.isError !== true && tc.result?.details !== undefined) {
       return tc.result.details;
     }
   }
@@ -454,11 +465,11 @@ export function neutralizeStalePatterns(text: string): string {
  */
 export function describeMissingParsedOutput(toolCalls: ToolCall[]): string | undefined {
   if (extractParsedOutput(toolCalls) !== undefined) return undefined;
-  const soCalls = toolCalls.filter((tc) => tc.toolName === STRUCTURED_OUTPUT_TOOL);
+  const soCalls = toolCalls.filter(isStructuredOutputToolCall);
   if (soCalls.length === 0) {
     return (
       `${DETERMINISTIC_SCHEMA_FAILURE_PREFIX} ` +
-      "Agent finished without producing a structured output: the structured-output tool was never called. " +
+      "Agent finished without producing a structured output: the structured_output tool was never called. " +
       "Recovery: verify the structured-output extension is installed and enabled for this agent, " +
       "and that the agent's final answer conforms to the requested schema."
     );
@@ -472,12 +483,12 @@ export function describeMissingParsedOutput(toolCalls: ToolCall[]): string | und
       : "execution failure";
     return (
       `${DETERMINISTIC_SCHEMA_FAILURE_PREFIX} ` +
-      `Agent finished without a valid structured output: ${failed.length} structured-output call(s) failed ` +
+      `Agent finished without a valid structured output: ${failed.length} structured_output call(s) failed ` +
       `(${failureKind}). Last error: ${lastErrorSummary}`
     );
   }
   return (
-    "Agent finished without a valid structured output: structured-output was called but none of the " +
+    "Agent finished without a valid structured output: structured_output was called but none of the " +
     "successful calls carried result details."
   );
 }

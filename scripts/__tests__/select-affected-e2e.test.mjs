@@ -35,7 +35,7 @@ function fixtureMap() {
         summary: '目录 glob rule',
         scope: ['packages/runtime/src/infra/pi/**'],
         layer: 'L2.5',
-        assets: [{ kind: 'spec', ref: 'packages/runtime/src/__tests__/equivalence/pi-protocol-contract.test.ts' }],
+        assets: [{ kind: 'spec', ref: 'packages/runtime/src/__tests__/equivalence/equivalence-bundle.test.ts' }],
         trigger: 'on-diff',
         serial: false,
         run: 'echo fake-01',
@@ -203,7 +203,7 @@ describe('watchedRoots + unregisteredWatchedFiles（--check）', () => {
     const uncovered = unregisteredWatchedFiles(map, [
       'e2e/workspace-real.spec.ts', // FAKE-02 asset 精等
       'packages/runtime/src/infra/pi/pi-protocol.ts', // FAKE-01/02 scope
-      'packages/runtime/src/__tests__/equivalence/pi-protocol-contract.test.ts', // FAKE-01 asset
+      'packages/runtime/src/__tests__/equivalence/equivalence-bundle.test.ts', // FAKE-01 asset
     ])
     expect(uncovered).toEqual([])
   })

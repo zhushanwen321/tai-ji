@@ -1,0 +1,25 @@
+{
+  "name": "scheduler",
+  "summary": "调度（extensions/universal/scheduler 整包单域 + extension-protocol scheduler/scheduler-create 协议；renderer 调度内联卡 W2-B 冻结在 panel 域）",
+  "layers": [
+    "extension",
+    "protocol"
+  ],
+  "scope": {
+    "extension": [
+      "extensions/universal/scheduler/**"
+    ],
+    "protocol": [
+      "packages/extension-protocol/src/extensions/scheduler/**",
+      "packages/extension-protocol/src/extensions/scheduler-create/**"
+    ]
+  },
+  "tests": [
+    "extensions/universal/scheduler/**",
+    "packages/extension-protocol/src/extensions/scheduler/**",
+    "packages/extension-protocol/src/extensions/scheduler-create/**"
+  ],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

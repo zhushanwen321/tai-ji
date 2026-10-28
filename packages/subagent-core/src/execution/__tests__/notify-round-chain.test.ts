@@ -179,7 +179,7 @@ describe("[N2] chatMode 轮次通知正文：真实执行链路（协议引擎�
       task: "tell me something",
       slug: "round-notify",
     });
-    await vi.waitFor(() => expect(fake.runs).toHaveLength(1));
+    await vi.waitFor(() => expect(fake.runs).toHaveLength(1), { interval: 1 });
     const run = fake.runs[0];
     expect(run.ctx.resume?.recordId).toBe(handle.subagentId);
 
@@ -193,7 +193,7 @@ describe("[N2] chatMode 轮次通知正文：真实执行链路（协议引擎�
     // → 立即 flush → pi.sendMessage。
     await vi.waitFor(() => {
       expect(pi.sendMessage).toHaveBeenCalledTimes(1);
-    });
+    }, { interval: 1 });
 
     const sentMsg = pi.sendMessage.mock.calls[0]![0] as { customType: string; content: string };
     expect(sentMsg.customType).toBe("subagent-bg-notify");
@@ -271,12 +271,12 @@ describe("首轮闭环独有断言范围（迁自壳 first-round-closure-service
     const spy = vi.spyOn(internals.notifyHost, "notifyComplete");
 
     const handle = await service.execute({ task: "do something", slug: "test" });
-    await vi.waitFor(() => expect(fake.runs).toHaveLength(1));
+    await vi.waitFor(() => expect(fake.runs).toHaveLength(1), { interval: 1 });
     fake.runs[0]!.settle({ content: "first-round-done" });
 
     // [two-state-convergence U4/D3] 写侧翻边：轮终落 idle（idle 即 resumable）+
     // round 0→1（dedup key 递增）+ record.result 从应答 content 写入。
-    await vi.waitFor(() => expect(spy).toHaveBeenCalled());
+    await vi.waitFor(() => expect(spy).toHaveBeenCalled(), { interval: 1 });
     const record = internals.store.getMutable(handle.subagentId);
     expect(record).toBeDefined();
     expect(record!.status).toBe("idle");
@@ -307,11 +307,11 @@ describe("首轮闭环独有断言范围（迁自壳 first-round-closure-service
     // 主 agent 的续聊回复固定延迟 60s（G1 失效）。修复后排除 isIdle（timer armed）
     // record → 立即 flush。
     const handle = await service.execute({ task: "do something", slug: "test" });
-    await vi.waitFor(() => expect(fake.runs).toHaveLength(1));
+    await vi.waitFor(() => expect(fake.runs).toHaveLength(1), { interval: 1 });
     fake.runs[0]!.settle({ content: "first-round-done" });
 
     // [M3] 立即 flush——同步断言 sendMessage 已发出（旧实现此处挂 60s timer，0 次调用）
-    await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalledTimes(1), { interval: 1 });
     const settled = internals.store.getMutable(handle.subagentId)!;
     expect(settled.round).toBe(1);
     expect(settled.result).toBe("first-round-done"); // 真实派生（非手工预置）
@@ -342,12 +342,12 @@ describe("首轮闭环独有断言范围（迁自壳 first-round-closure-service
     service.initSession({ pi, sessionId: "root-session" }); // 换上带 spy 捕获的 pi
 
     const handle = await service.execute({ task: "one shot task", slug: "oneshot-n1" });
-    await vi.waitFor(() => expect(fake.runs).toHaveLength(1));
+    await vi.waitFor(() => expect(fake.runs).toHaveLength(1), { interval: 1 });
     fake.runs[0]!.settle({ content: "done" });
 
     await vi.waitFor(() => {
       expect(pi.sendMessage).toHaveBeenCalledTimes(1);
-    });
+    }, { interval: 1 });
     const sentMsg = pi.sendMessage.mock.calls[0]![0] as {
       customType: string;
       content: string;

@@ -1,0 +1,34 @@
+{
+  "name": "app-shell",
+  "summary": "应用装配壳（App/boot/全局快捷键 key-orchestrator/modal-surface-registry + renderer 根横切散测 lib/ipc、ui 兜底件 AsyncErrorFallback/ToastContainer；W2-B 冻结 4 挂载件）",
+  "layers": [
+    "renderer"
+  ],
+  "scope": {
+    "renderer": [
+      "packages/renderer/src/App.vue",
+      "packages/renderer/src/boot/**",
+      "packages/renderer/src/composables/features/app/**",
+      "packages/renderer/src/lib/ipc.ts",
+      "packages/renderer/src/components/ui/**"
+    ]
+  },
+  "tests": [
+    "packages/renderer/src/__tests__/App.test.ts",
+    "packages/renderer/src/__tests__/boot/**",
+    "packages/renderer/src/__tests__/composables/fork-keymap.test.ts",
+    "packages/renderer/src/__tests__/composables/modal-surface-registry/local-esc-two-tier.test.ts",
+    "packages/renderer/src/__tests__/composables/key-orchestrator/is-composing.test.ts",
+    "packages/renderer/src/__tests__/shell/app-shell-topology.test.ts",
+    "packages/renderer/src/__tests__/shell/useGlobalShortcuts-forward-keys.test.ts",
+    "packages/renderer/src/__tests__/lib/ipc.test.ts",
+    "packages/renderer/src/components/ui/__tests__/**"
+  ],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": [],
+  "w2bMountCompat": {
+    "mountSource": "docs/testing/domain-map.json",
+    "status": "enforced"
+  }
+}

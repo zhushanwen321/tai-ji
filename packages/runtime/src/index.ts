@@ -84,7 +84,7 @@ import { appendProcessEscapeLog, isContainedStreamError } from './infra/system/u
 import { trash, trashDirectory } from './infra/system/trash.js'
 
 import { ProcessManager } from './infra/pi/process-manager.js'
-import { getProviderConfig, clearProviderApiKey, initProviderCredentialResolver, cleanLeakedPackages, sanitizeInvalidProviders, isModelsStoreCorrupted } from './infra/pi/pi-provider-store.js'
+import { getProviderConfig, clearProviderApiKey, initProviderCredentialResolver, cleanLeakedPackages, sanitizeInvalidProviders, isModelsStoreCorrupted, readModels } from './infra/pi/pi-provider-store.js'
 // engine-provider-unification u2：pi→zcode provider 启动同步接线（路径拼装 + D7 降级
 // 包装收敛在该模块——组合根 import 即执行 main()，降级分支抽独立模块才可单测，
 // run-extras-migration 同族先例）。
@@ -115,6 +115,7 @@ import { SkillRegistry } from './services/skill-registry.js'
 import { SkillInjector } from './services/session/skill-injector.js'
 import { PluginRegistry } from './services/plugin-service/plugin-registry.js'
 import { PluginService } from './services/plugin-service/plugin-service.js'
+import { WoolExtensionInstaller } from './services/wool-extension-installer.js'
 import { GitService } from './services/git-service.js'
 import { GitExecutor } from './infra/git-executor.js'
 import { GitStateService } from './services/git/git-state-service.js'
@@ -129,6 +130,9 @@ import { TerminalService } from './services/terminal/terminal-service.js'
 import { disposeTerminalPtysStep } from './services/terminal/dispose-terminal-ptys-step.js'
 import { QuotaService } from './services/quota-service.js'
 import { TtsService } from './services/tts-service.js'
+// providers.write/delete/credential 三 RPC 受控代理（provider-plugin-access D4）：命名空间
+// 前缀校验 + setProvider 写策略链 + credential resolver 唯一读通道，组合根装配。
+import { registerProviderWriteProxy, createPluginManifestReader } from './services/provider-write-proxy.js'
 // 三家 TTS driver 工厂与表单派生视图（ai-voice-tts u2，infra/tts 唯一装配出口）——组合根 import
 // infra 装配是 C-comm-03 的合法例外（services 层禁 infra，组合根不在此列）。
 import { createTtsDriver, getTtsFormModels } from './infra/tts/index.js'
@@ -670,16 +674,43 @@ async function main(): Promise<void> {
   // 缺失（dev 直跑/测试）时 registry 回退探测链并落 warning。
   const pluginRegistry = new PluginRegistry(effectiveRoot, configDir, builtinPluginsDir)
   const pluginInstaller = new NpmPluginInstaller(join(configDir, 'plugins'))
+  // U4 卸载清理编排的组合根接线（provider-plugin-access U7 修复）：providerEntries port
+  // 缺省时 uninstallPlugin 静默跳过 models.json 条目清理（apiKey 残留，S14 孤儿条目
+  // 不变量落空）。listIds 读 models.json providers 键集（readModels 与 setProvider 写链
+  // 同源同 store）；delete 走 configService.deleteProvider（与下方 registerProviderWriteProxy
+  // 的 providers.delete 落点同点同源——C-proc-15 不建第二写入点）。
+  const providerEntriesPort = {
+    listIds: async () => Object.keys(readModels().providers),
+    delete: async (providerId: string) => { await configService.deleteProvider(providerId) },
+  }
   const pluginService = new PluginService(pluginRegistry, server, {
     configService,
     modelService,
     configDir,
     pluginInstaller,
+    providerEntries: providerEntriesPort,
+    // U7/D6 双产物安装编排接线：羊毛 pi 扩展成员（registerProvider / streamSimple）的
+    // 钉版安装走 WoolExtensionInstaller（wool-manifest 资产解析 + 版本配对校验）。插件
+    // 沙箱 fs 只读装不了（D3），必须由宿主在 confirmPluginInstall 成功后编排安装——
+    // 缺省 = 装完插件无对话扩展（S23 扩展侧断链）。
+    piExtensionInstaller: new WoolExtensionInstaller({ extensionService }),
     // B5：软删除 port 装配（trash = mac 废纸篓 / 非 mac unlink，失败保留原地报错——
     // trash.ts G4 语义；结构匹配 ITrash.trashFile）。
     trashFile: trash,
     broadcastFn: (type, payload) => server.broadcast({ type: type as 'config.sessions', id: `push_${Date.now()}`, payload } as import('@taiji/shared').ServerMessage),
   })
+  // U4 装配自检（启动 fail-fast）：port 漏接的降级分支（卸载跳过 provider 清理）只有
+  // 生产装配路径会踩——测试轨显式注入 port 所以绿。此处断言让「删掉注入行」类回归在
+  // 启动即失败，而非静默留凭据残留。
+  if (!pluginService.hasProviderEntries) {
+    throw new Error('[runtime] PluginService.deps.providerEntries 未接线（卸载时 models.json 条目清理将静默跳过，apiKey 残留）。恢复：组合根构造 deps 注入 providerEntries port')
+  }
+  // U7 装配自检（与 hasProviderEntries 同构，启动 fail-fast）：piExtensionInstaller 漏接
+  // 的降级分支（双产物条目只装插件侧）在生产对话链才可见——对话报「模型不存在」而非
+  // 安装时失败。此处断言让「删掉注入行」类回归在启动即失败。
+  if (!pluginService.hasPiExtensionInstaller) {
+    throw new Error('[runtime] PluginService.deps.piExtensionInstaller 未接线（双产物条目安装时 pi 扩展成员将被静默跳过，对话无 streamSimple 扩展）。恢复：组合根构造 deps 注入 WoolExtensionInstaller 实例')
+  }
   // wave:perf-w09（接口收敛 wire 归位）：plugin 的 session 级广播点（plugin:viewUpdate /
   // plugin:uiRequest）接 bus 定向发布。原在 server.setServices 内 wire（wave:perf-w08 的
   // 过渡位置），services 间依赖注入统一归组合根——与下方 sessionService.setMessageBus 同模式。
@@ -1537,6 +1568,32 @@ async function main(): Promise<void> {
     if (active) return { cwd: active.cwd, mainTurnActive: isGeneratingTurn(active.occupancy?.turn) }
     const scanned = sessionService.findScannedSession(mainSid)
     return scanned ? { cwd: scanned.cwd, mainTurnActive: false } : undefined
+  }
+
+  // ── wool 插件化退役收尾（provider-plugin-access D6/U7）──────────────────
+  // WoolManager 已随羊毛管理域插件化整体删除（管理动作在插件进程内执行，providers.*
+  // 受控通道见下方 provider-write-proxy 装配）。宿主保留两件：
+  // ① providers.write/delete/credential 三 RPC 注册（D4 受控读写代理：命名空间前缀
+  //    校验 + setProvider 写策略链 + credential resolver 唯一读通道）；
+  // ② wool-catalog.json 存量缓存一次性清理（目录权威已收敛进 models.json 条目，
+  //    存量文件是无消费方的孤儿——启动时 best-effort 删除，失败只 warn 不阻塞）。
+  registerProviderWriteProxy(pluginService.rpcServer, {
+    setProvider: (providerId, data) => configService.setProvider(providerId, data),
+    deleteProvider: (providerId) => configService.deleteProvider(providerId),
+    resolveProviderCredential: (providerId) => providerCredentialResolver.resolveProviderCredential(providerId),
+    readPluginManifest: createPluginManifestReader(pluginService.registry),
+    // ISSUES-2 ⑧ 写落点广播：插件 providers.write/delete 写回 models.json 后经去抖调度
+    // 广播 provider 列表（与 12 处 config.* 写 handler 的 broadcastProviderList 收尾同构；
+    // 直连 broadcastProviderList，去抖在 proxy 模块内）。缺它则插件写回后 renderer
+    // Provider 页条目行卡不出现（变化感知 watch 只盯 models-store.json），重开设置窗才可见。
+    notifyProvidersMutated: () => server.broadcastProviderList(),
+  })
+  try {
+    const legacyCatalogPath = join(getDataDir(), 'wool-catalog.json')
+    if (fs.existsSync(legacyCatalogPath)) fs.unlinkSync(legacyCatalogPath)
+  } catch (e) {
+    // best-effort 一次性清理：存量文件已是无消费方的孤儿，删除失败只留痕，不阻塞启动。
+    console.warn(`[runtime] legacy wool-catalog.json cleanup failed (ignored): ${toErrorMessage(e)}`)
   }
 
   const tServicesReady = performance.now()

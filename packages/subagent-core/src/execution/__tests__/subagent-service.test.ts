@@ -13,23 +13,47 @@
 //
 // 策略:用真实 ModelConfigService 指向 os.tmpdir() 空目录(loadGlobalConfig
 // 对不存在文件返回默认配置,AgentRegistry 空目录也安全),mock PiLike。
+//
+// [round5-g 合并产物] 吸收 SubagentService 壳级行为姊妹件四件（logger 桩提升为
+// 公共；makeTmpAgentDir 统一用本文件版；parent-guard 的 ServiceInternals 改名
+// ParentGuardInternals 消歧）：
+// - delivery-methods.test.ts（chat 投递车道与并发检查）
+// - subagent-service-notify-gate.test.ts（notify 门二元组 + idleTimeoutMs fail-fast）
+// - subagent-service-parent-guard.test.ts（getRecordForAction 直接父校验）
+// - subagent-service-model-switch.test.ts（setModel 壳接线）
 
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createRecord } from "../persistence/execution-record.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { ModelInfo } from "../assembly/model-resolver.ts";
-import type { RecordStore } from "../persistence/record-store.ts";
 import type { UiRequest, UiRequestHandler } from "../ui/dialog-queue.ts";
 import { SubagentService } from "../subagent-service.ts";
 // [H3/R6] 单例访问器外移支撑文件 service/service-bootstrap.ts（壳不再导出）。
 import { getSubagentService, setSubagentService } from "../service/service-bootstrap.ts";
 import type { ExecutionRecord } from "../domain/record-model.ts";
 import { makePi, type PiMock } from "./helpers/pi-mock.ts";
+import { clearEngines } from "../engine/registry.ts";
+import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
+import * as lifecycle from "../lifecycle/lifecycle-manager.ts";
+import { notifyGateAllowsDelivery } from "../subagent-service.ts";
+import { MAX_TIMER_DELAY_MS } from "../../shared/timer-delay.ts";
+import { RecordStore } from "../persistence/record-store.ts";
+import type { ChildProcess } from "node:child_process";
+import type { ModelRegistryLike } from "../assembly/model-resolver.ts";
+import {
+  _resetCoreSpawnedChildrenMirrorForTest,
+  registerSpawnedChildForRecord,
+} from "../engine/host/spawned-children.ts";
+
+const { loggerMock } = vi.hoisted(() => ({
+  loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 // ── 工具:建临时 agentDir + 真实 ModelConfigService ──
 
@@ -46,9 +70,13 @@ function makeModelService(agentDir: string): ModelConfigService {
 describe("SubagentService", () => {
   let agentDir: string;
   let modelService: ModelConfigService;
+  // [round6 慢用例治理] 删除推迟 afterAll：每例 mkdtempSync 独占目录（隔离不变——
+  // stubEnv 收进各自目录，records 树仍零共享）。
+  const mainAgentDirs: string[] = [];
 
   beforeEach(() => {
     agentDir = makeTmpAgentDir();
+    mainAgentDirs.push(agentDir);
     modelService = makeModelService(agentDir);
     // [session-store-layout-inversion] 生产 store 目录经
     // getSubagentSessionDir(resolveStoreRootSessionId())（env dataDir 兜底）解析——
@@ -59,7 +87,10 @@ describe("SubagentService", () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
-    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  afterAll(() => {
+    for (const d of mainAgentDirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   // ============================================================
@@ -672,9 +703,12 @@ describe("SubagentService", () => {
 describe("[§1.4 (a)] pi 绑定作废（dispose 收尾 + 显式作废转发）", () => {
   let agentDir: string;
   let modelService: ModelConfigService;
+  // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+  const bindInvalDirs: string[] = [];
 
   beforeEach(() => {
     agentDir = makeTmpAgentDir();
+    bindInvalDirs.push(agentDir);
     modelService = makeModelService(agentDir);
     // [session-store-layout-inversion] 生产 store 目录经
     // getSubagentSessionDir(resolveStoreRootSessionId())（env dataDir 兜底）解析——
@@ -685,7 +719,10 @@ describe("[§1.4 (a)] pi 绑定作废（dispose 收尾 + 显式作废转发）",
 
   afterEach(() => {
     vi.unstubAllEnvs();
-    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  afterAll(() => {
+    for (const d of bindInvalDirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   /** baselines 私有字段读侧（深绑测试先例：Reflect.get(service, "字段")）。 */
@@ -722,5 +759,812 @@ describe("[§1.4 (a)] pi 绑定作废（dispose 收尾 + 显式作废转发）",
     // dispose 幂等：重复 dispose 不再触发作废副作用（_disposed 早退）。
     expect(() => service.dispose()).not.toThrow();
     expect(baselinesOf(service).pi).toBeNull();
+  });
+});
+
+// ══════ 来源: delivery-methods.test.ts ══════
+
+// src/execution/__tests__/delivery-methods.test.ts
+//
+// 会话形态续聊投递单元测试（M2-B1 投递基础设施 → H1 chat-run 统一定形）。
+//
+// [W3 改写] 投递链路协议化：deliverChatMessage → pi EnginePort（registry cli 形态
+// port 的替身 registerFakePiEngine）。
+// [H1 U2/U6 改写] 每轮 = 新 run + resume 锚点（ctx.resume，键切换后唯一会话形态键），
+// Continuation 单飞承接防双写者检查（原 resumeColdRound resumesInFlight 检查退役）；
+// 轮末分流 = run 应答驱动（onRunSettled，D7）——[H1 U6] 旧 interact 热路径/冷路径
+// 分流与 settleChatRoundFromResponse 结算载体的断言段随载体退役删除。
+// 原 inproc stdin 字节断言（sendPromptCommand/streamingBehavior/EPIPE 写后死检测）
+// 随 inproc pi 引擎目录 删除归 pi-subagent-cli 包内测试。
+//
+// 本文件断言的编排语义（检查/状态迁移/单飞隔离）与改线前逐点同构。
+
+
+
+
+
+/** chatMode idle record（第一轮已完成，等待续聊）。sessionFile 由调用方覆盖为 agentDir 下路径。 */
+function makeIdleRecord(id = "sa-chat"): ExecutionRecord {
+  const record = createRecord(id, {
+    agent: "general-purpose",
+    model: "test/test-model",
+    thinkingLevel: "low",
+    mode: "background",
+    task: "initial task",
+    slug: "chat",
+    startedAt: 1000,
+    rootSessionId: "root-session",
+  });
+  // v4 B-1：idle 折入 running。"等待续聊"态现为 status="running"（hasArmedIdleTimer/isResumable 派生谓词区分）。
+  record.status = "running";
+  record.round = 1;
+  record.controller = new AbortController();
+  return record;
+}
+
+describe("会话形态续聊投递（run + resume 锚点）", () => {
+  let agentDir: string;
+  let service: SubagentService;
+  let record: ExecutionRecord;
+  let fake: FakePiEnginePort;
+  // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+  const resumeAnchorDirs: string[] = [];
+
+  beforeEach(() => {
+    agentDir = makeTmpAgentDir();
+    resumeAnchorDirs.push(agentDir);
+    clearEngines();
+    fake = registerFakePiEngine();
+    const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
+    service = new SubagentService({ cwd: agentDir, modelService });
+    service.initSession({ pi: makePi(), sessionId: "root-session" });
+    record = makeIdleRecord();
+    // sessionFile 用 agentDir 下路径（finalizeRoundToIdle 写 .idle sidecar 不留 /tmp 垃圾）
+    record.sessionFile = path.join(agentDir, "fake-session.jsonl");
+    // [U4] 锚可解析性要求文件真实在盘（isAnchorResolvable = existsSync），否则续聊
+    // 误触 reopen 降级——fixture 补实体空文件。
+    fs.writeFileSync(record.sessionFile, "{}\n", "utf-8");
+    // [U2a/B5] 轮终簿记收敛 store.markRoundIdle（按 id 查内存）——record 须 register 进
+    // store（生产链路 getRecordForAction/run 流程的 record 恒在内存，测试补齐同形态）。
+    (service as unknown as { store: { register: (r: ExecutionRecord) => void } }).store.register(record);
+  });
+
+  afterEach(() => {
+    service.dispose();
+    clearEngines();
+  });
+
+  afterAll(() => {
+    for (const d of resumeAnchorDirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  it("续聊 message → run 收到 resume 锚点（ctx.resume 唯一会话形态键）；轮终 round+1 翻 idle（[two-state-convergence U4] 写侧翻边）", async () => {
+    const beforeRound = record.round;
+
+    await service.chatActions.deliverChatMessage(record, "next round msg");
+
+    // Continuation：锚点校验通过后派发（record 保持 running）
+    expect(record.status).toBe("running");
+
+    // detached：等协议 run 被调（续聊 = ctx.resume 锚点）
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1), { interval: 1 });
+    const run = fake.runs[0]!;
+    expect(run.task.prompt).toBe("next round msg");
+    expect(run.ctx.resume).toEqual({
+      recordId: record.id,
+      resume: {
+        sessionRef: { recordId: record.id, sessionFile: record.sessionFile },
+      },
+    });
+
+    // 模拟引擎 agent_settled 应答（轮末分流 = run 应答驱动，D7）
+    run.settle({ content: "round text" });
+
+    // 等 detached 完成：round 累加、轮终翻 idle（[two-state-convergence U4/D3] 写侧
+    // 翻边——idle 即 resumable，续聊经 revive 过站，SP-5 寻址链不查 status）
+    await vi.waitFor(() => expect(record.round).toBe(beforeRound! + 1), { interval: 1 });
+    expect(record.status).toBe("idle");
+    expect(record.result).toBe("round text");
+    expect(record.stopReason).toBe("completed");
+  });
+
+  it("[P3 ⛔ two-state-convergence U4] chat 轮终翻 idle → message → revive 过站直通：status 翻 running + 恰一条迁移 entry + 无其他簿记变更（round/closedReason 不动）", async () => {
+    // 前置：让 record 先真实轮终一轮（写侧翻边 idle 形态——markRoundIdle 收尾）。
+    // 等 stopReason（轮终产物）而非 round——makeIdleRecord 预置 round=1，round 判据
+    // 会在 settle 前立即通过。
+    await service.chatActions.deliverChatMessage(record, "first round");
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1), { interval: 1 });
+    fake.runs[0]!.settle({ content: "first round text" });
+    await vi.waitFor(() => expect(record.stopReason).toBe("completed"), { interval: 1 });
+    // 翻边形态自检：轮终落 idle（resumable 无、closedReason 清、stopReason=completed）
+    expect(record.status).toBe("idle");
+    expect(record.closedReason).toBeUndefined();
+    expect(record.stopReason).toBe("completed");
+
+    // revive 过站检查自检：锚可解析（sessionFile 实体文件 beforeEach 已落盘）。
+    // [modeless 波1] 升级 gate 分支消亡——引擎轴资格与 record 形态无关。
+
+    // message 前清迁移上报计数——「恰一条」锚定 message 触发的 entry 序列。快照式
+    // 捕获（spread 字段）而非存引用：revive entry 与轮始 entry 共享同一 record 对象，
+    // markRoundStarted 清 result 会回写污染引用捕获。
+    const storeLike = service as unknown as {
+      store: { reportRecordTransition: (rec: ExecutionRecord) => void };
+    };
+    const entrySnapshots: Array<{ status?: string; result?: string; round?: number }> = [];
+    const transitionSpy = vi.spyOn(storeLike.store, "reportRecordTransition").mockImplementation((rec) => {
+      entrySnapshots.push({ status: rec.status, result: rec.result, round: rec.round });
+    });
+    const roundBefore = record.round;
+
+    await service.chatActions.deliverChatMessage(record, "revive after idle round");
+
+    // revive 过站：tryEnterRunning 翻回 running（dispatchRoundGuarded 检查由此放行）
+    expect(record.status).toBe("running");
+    // 迁移 entry 精确断言（R3——断言「恰一条」而非「无副作用」）：message 链共落两条
+    // 设计内 entry——①revive 迁移 entry（reviveClosedRecord 无条件落，携带上轮 result）
+    // 恰一条；②轮始重置 entry（markRoundStarted 簿记，result 已清）恰一条。
+    const reviveEntries = entrySnapshots.filter((e) => e.result !== undefined);
+    const startedEntries = entrySnapshots.filter((e) => e.result === undefined);
+    expect(reviveEntries).toHaveLength(1);
+    expect(reviveEntries[0]!.result).toBe("first round text");
+    expect(startedEntries).toHaveLength(1);
+    // 无其他簿记变更：round 不推进（revive 格不累加，轮始 markRoundStarted 才收敛）、
+    // closedReason 保持清除态。result 在 message 返回时点已被轮始清点
+    //（markRoundStarted 收敛——isStreaming 公式要求），revive 过站瞬间 result 保留的
+    // 证据由上方 revive entry 快照承载（e.result = "first round text"）。
+    expect(record.round).toBe(roundBefore);
+    expect(record.closedReason).toBeUndefined();
+    expect(record.result).toBeUndefined();
+    // 新轮派发：fake 引擎收到续轮 run（resume 续写原文件）
+    await vi.waitFor(() => expect(fake.runs.length).toBe(2), { interval: 1 });
+    expect(fake.runs[1]!.task.prompt).toBe("revive after idle round");
+    expect(entrySnapshots).toHaveLength(2);
+  });
+
+  it("[U4 万物可续] 旧终态遗留位 record（idle + closedReason=gc）→ 直接接管派发，不硬拒（形态枚举 gate 消亡）", async () => {
+    record.status = "idle";
+    // [U4 / §3.2.3] 旧终态遗留位（closedReason 有值，无论是否可重连集）只是展示位，
+    // 不参与资格判定——message 到达直接翻回 running 派发新轮（万物可续）。
+    record.closedReason = "gc";
+    await service.chatActions.deliverChatMessage(record, "msg");
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1), { interval: 1 });
+    expect(record.status).toBe("running");
+    expect(record.closedReason).toBeUndefined(); // 翻边清遗留位（notifyGate 门判据）
+  });
+
+  it("[U3 / §3.2.4 桥接] 新侧 idle（closedReason undefined，轮间空闲）→ 直接接管派发，不硬拒", async () => {
+    record.status = "idle";
+    // markSettled 轮收尾 / 磁盘重建单规则产出的 idle 无旧终态遗留位——message 到达
+    // 直接翻回 running 派发新轮（万物可续）
+    expect(record.closedReason).toBeUndefined();
+    await service.chatActions.deliverChatMessage(record, "msg after settle");
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1), { interval: 1 });
+    expect(record.status).toBe("running");
+  });
+
+  it("[U4] record 无 sessionFile（从未开跑）→ 全新 session 直派（resume:undefined），不拒绝", async () => {
+    record.sessionFile = undefined;
+    // [U4 / §3.2.3] 原锚点缺失同步拒绝格消亡：无锚 = 无历史可摘要，按全新 session
+    // 派发承接（新锚由 run 应答回填）。
+    await service.chatActions.deliverChatMessage(record, "msg");
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1), { interval: 1 });
+    expect(fake.runs[0]!.ctx.resume?.resume).toBeUndefined();
+    expect(fake.runs[0]!.task.prompt).toBe("msg"); // 无锚无历史，不注入 reopen 摘要
+  });
+
+  it("record 无 controller → 投递 throw 行动语言（MF-4），不触发 kickOff", async () => {
+    record.controller = undefined;
+    await expect(service.chatActions.deliverChatMessage(record, "msg")).rejects.toThrow(/not ready for a new message/);
+    expect(fake.runs.length).toBe(0);
+  });
+});
+
+// ============================================================
+// deliverChatMessage（chatMode 统一投递入口 → Continuation 编排）
+// ============================================================
+
+describe("deliverChatMessage（chatMode 统一投递 → Continuation 派发）", () => {
+  let agentDir: string;
+  let service: SubagentService;
+  let record: ExecutionRecord;
+  let fake: FakePiEnginePort;
+  // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+  const deliverDirs: string[] = [];
+
+  beforeEach(() => {
+    agentDir = makeTmpAgentDir();
+    deliverDirs.push(agentDir);
+    clearEngines();
+    fake = registerFakePiEngine();
+    const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
+    service = new SubagentService({ cwd: agentDir, modelService });
+    service.initSession({ pi: makePi(), sessionId: "root-session" });
+    record = makeIdleRecord(); // chatMode:true, running, round=1
+    // sessionFile：续聊锚点需要
+    record.sessionFile = path.join(agentDir, "fake-session.jsonl");
+    // [U4] 锚可解析性要求文件真实在盘（isAnchorResolvable = existsSync）。
+    fs.writeFileSync(record.sessionFile, "{}\n", "utf-8");
+    // [U2a/B5] markRoundIdle 按 id 查 store 内存——record 须 register（见上 describe 注）。
+    (service as unknown as { store: { register: (r: ExecutionRecord) => void } }).store.register(record);
+    lifecycle._resetLifecycleState();
+  });
+
+  afterEach(() => {
+    service.dispose();
+    clearEngines();
+    lifecycle._resetLifecycleState();
+  });
+
+  afterAll(() => {
+    for (const d of deliverDirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  it("轮间 message → Continuation 派发新轮 + 执行态信号清除（[H1 U2] 承接原冷路径语义）", async () => {
+    record.result = "上一轮增量";
+
+    await service.chatActions.deliverChatMessage(record, "after you finish");
+
+    // [H1 U2] 每轮 = 新 run + resume 锚点（§3.4 dispatchRound）
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1), { interval: 1 });
+    const run = fake.runs[0]!;
+    expect(run.task.prompt).toBe("after you finish");
+    expect(run.ctx.resume?.recordId).toBe(record.id);
+    expect(run.ctx.resume?.resume?.sessionRef["sessionFile"]).toBe(record.sessionFile);
+    // 轮始执行态信号清除（§5.4 isStreaming 公式）+ 迁移上报
+    expect(record.status).toBe("running");
+    expect(record.result).toBeUndefined();
+  });
+});
+
+// ============================================================
+// 续聊并发检查（review round2 MF1：同 turn 批量两条 message 双 kickOff 双 spawn）
+// ============================================================
+// 复现链（reviewer 探针实证）：pi 对同一条 assistant message 的 tool calls 顺序执行，
+// tool1 的投递在续聊返回即 resolve——早于协议 run 完成（pool.acquire await 等
+// 异步点）；tool2 立即执行 → 第二次 kickOff。v4 两态收敛后的 status 检查对
+// running-resumable record 恒放行 → 两次 kickOff → 两个 pi 子进程以 --session 同一
+// JSONL 双写 + 第一个进程脱离记账成孤儿。
+describe("deliverChatMessage 并发检查（review round2 MF1）", () => {
+  let agentDir: string;
+  let service: SubagentService;
+  let record: ExecutionRecord;
+  let fake: FakePiEnginePort;
+  // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+  const mf1Dirs: string[] = [];
+
+  beforeEach(() => {
+    agentDir = makeTmpAgentDir();
+    mf1Dirs.push(agentDir);
+    clearEngines();
+    fake = registerFakePiEngine();
+    const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
+    service = new SubagentService({ cwd: agentDir, modelService });
+    service.initSession({ pi: makePi(), sessionId: "root-session" });
+    record = makeIdleRecord();
+    record.sessionFile = path.join(agentDir, "fake-session.jsonl");
+    // [U4] 锚可解析性要求文件真实在盘（isAnchorResolvable = existsSync）。
+    fs.writeFileSync(record.sessionFile, "{}\n", "utf-8");
+    // [U2a/B5] markRoundIdle 按 id 查 store 内存——record 须 register（见上 describe 注）。
+    (service as unknown as { store: { register: (r: ExecutionRecord) => void } }).store.register(record);
+    lifecycle._resetLifecycleState();
+  });
+
+  afterEach(() => {
+    service.dispose();
+    clearEngines();
+    lifecycle._resetLifecycleState();
+  });
+
+  afterAll(() => {
+    for (const d of mf1Dirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  it("同 record 轮在途连续两条 message → 第二条入队不打断单飞（构造性单写者），轮终 drain 聚合派发", async () => {
+    // 第一条：派发新轮（run 挂起不 resolve——模拟在途轮）
+    await expect(service.chatActions.deliverChatMessage(record, "first msg")).resolves.toBeUndefined();
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1), { interval: 1 });
+
+    // 第二条：run 在途 → [H1 U2 / D2 打断语义] abort 在途轮 signal + 入队（不打断单飞、
+    // 不二次派发——修复前双 kickOff 双写 session 的检查由 Continuation 单飞构造性承接）
+    await expect(service.chatActions.deliverChatMessage(record, "second msg")).resolves.toBeUndefined();
+    expect(fake.runs.length).toBe(1);
+    const continuation = (
+      // [2026-09-13 design-code-sync 接线] continuations 队列已迁 ChatRounds 聚合——
+      // 读取路径改经聚合实例（断言对象与强度不变）。
+      service as unknown as {
+        chatRounds: { continuations: Map<string, { pendingCount: number }> };
+      }
+    ).chatRounds.continuations.get(record.id);
+    expect(continuation?.pendingCount).toBe(1);
+
+    // 轮终（应答收敛）→ drain → 队列消息派发为下一轮（单写者前置满足）
+    fake.runs[0]!.settle({ content: "done" });
+    await vi.waitFor(() => expect(fake.runs.length).toBe(2), { interval: 1 });
+    expect(fake.runs[1]!.task.prompt).toBe("second msg");
+  });
+
+  it("检查是 record 级：A 在途轮不拦截 B 的 message", async () => {
+    const recordB = makeIdleRecord("sa-chat-b");
+    recordB.sessionFile = path.join(agentDir, "fake-session-b.jsonl");
+    // [U2a/B5] 同 beforeEach——recordB 须 register 进 store（markRoundIdle 内存查）。
+    (service as unknown as { store: { register: (r: ExecutionRecord) => void } }).store.register(recordB);
+
+    await service.chatActions.deliverChatMessage(record, "A msg");
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1), { interval: 1 });
+
+    // B 的续聊轮不受 A 在途影响（Continuation per-record 实例）
+    await expect(service.chatActions.deliverChatMessage(recordB, "B msg")).resolves.toBeUndefined();
+    await vi.waitFor(() => expect(fake.runs.length).toBe(2), { interval: 1 });
+    expect(fake.runs[1]!.ctx.resume?.recordId).toBe(recordB.id);
+
+    fake.runs[0]!.settle({ content: "A done" });
+    fake.runs[1]!.settle({ content: "B done" });
+    // 轮终簿记完成（Continuation 无全局在途集合——终态检查由 per-record 实例承载），
+    // 断言两轮各自 round+1 即单飞收尾的可观察结果。
+    await vi.waitFor(() => expect(record.round).toBe(2), { interval: 1 });
+    await vi.waitFor(() => expect(recordB.round).toBe(2), { interval: 1 });
+  });
+});
+
+// ══════ 来源: subagent-service-notify-gate.test.ts ══════
+
+// src/execution/__tests__/subagent-service-notify-gate.test.ts
+//
+// [u-svc / T4] 通知可靠性（subagent-service 侧措施）：
+//   - T4①/PS-2：kickOffChatRound.then notify 门按 closedReason 白名单放行——
+//     parent-new/parent-fork 不注入（可能已切换的）新 session（A-6 决策落实）；
+//   - T4②/PS-4：idleTimeoutMs 非法值（>2^31-1 / 非有限值）在 spawn 入口同步 fail-fast，
+//     错误含合法范围（不静默 clamp、不静默不挂）。
+//   - [T4④/PS-5 随波 2 账本退役] shutdown flush 复写机制已删除——port 形态下
+//     pending 在受理前已落投递日志（受理前落盘先于投递尝试），等待条目由
+//     session_start 差集重放补投，shutdown 复写无对象可补（其用例段一并退役）。
+//
+// mock 形态沿用 subagent-service-message-close.test.ts。
+
+
+
+
+// [W3 改写] 原 vi.mock(inproc pi 引擎目录/session-runner) 随删件消亡——chat 轮次走协议 seam
+//（registerFakePiEngine 替身，kickOffChatRound 的 notify 门经 engine.run 应答驱动）。
+
+interface ServiceInternals { // oe-exempt:20261027:test:测试夹具接口（合并产物内多节共用的 mock 形状契约）
+  store: RecordStore;
+}
+
+type MockPi = PiMock;
+
+function setup(initOverrides: Partial<{ isIdle: () => boolean }> = {}): {
+  agentDir: string;
+  service: SubagentService;
+  store: RecordStore;
+  pi: MockPi;
+} {
+  const agentDir = makeTmpAgentDir();
+  const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
+  const service = new SubagentService({ cwd: agentDir, modelService });
+  const pi = makePi();
+  service.initSession({ pi, sessionId: "root-session", isIdle: initOverrides.isIdle });
+  const store = (service as unknown as ServiceInternals).store;
+  return { agentDir, service, store, pi };
+}
+
+describe("T4① notify gate 二元组（[U5 / §3.2.7] 放弃轮标记阻断 + 跨世代丢弃 / 其余放行）", () => {
+  it("blocks abandoned-round hits and cross-epoch inbound; allows settled/running without marks", () => {
+    // 放弃轮标记命中（承接原 cancelled 阻断防双发）：同世代回注轮 ≤ 标记轮 → 丢弃。
+    expect(
+      notifyGateAllowsDelivery({ lastAbandonedRound: { epoch: 0, round: 2 }, round: 2 }),
+    ).toBe(false);
+    // 两步判定第一步：回注声明世代 ≠ record 当前世代 → 丢弃。
+    expect(
+      notifyGateAllowsDelivery(
+        { epoch: 1, lastAbandonedRound: { epoch: 0, round: 2 } },
+        { epoch: 0, round: 2 },
+      ),
+    ).toBe(false);
+    // 标记槽世代 ≠ 当前世代（reopen 残留）→ 标记自然失效，新世代正常轮放行。
+    expect(
+      notifyGateAllowsDelivery({ epoch: 1, round: 1, lastAbandonedRound: { epoch: 0, round: 2 } }),
+    ).toBe(true);
+    // 正常轮（round 已推进越过旧标记）放行——重复帧由 notifyId 去重兜底。
+    expect(
+      notifyGateAllowsDelivery({ round: 3, lastAbandonedRound: { epoch: 0, round: 2 } }),
+    ).toBe(true);
+    // 无标记（settle 竞态迟到回注、user-close/gc 等真实收尾）照旧回注。
+    // [u-arch] gate ①（intent=archived 静默）随收起概念删除退役——编排性关闭的
+    // 迟到回注阻断由放弃轮标记（下方 dispose 集成用例）+ 轮身份检查 + notifyId
+    // 账本承接。
+    expect(notifyGateAllowsDelivery({})).toBe(true);
+    expect(notifyGateAllowsDelivery({ round: 5 })).toBe(true);
+  });
+
+  it("kickOffChatRound 迟到应答回注不注入已编排性关闭的 record（放弃轮标记 gate 承接，[u-arch] gate ①删除后主防线）", async () => {
+    const { agentDir, service, store, pi } = setup();
+    clearEngines();
+    const fake = registerFakePiEngine();
+    const record = createRecord("sa-gate-new", {
+      agent: "general-purpose",
+      model: "test/model",
+      mode: "background",
+      slug: "t",
+      task: "test",
+      startedAt: 1000,
+      rootSessionId: "root-session",
+      controller: new AbortController(),
+    });
+    // 模拟 disposeAllRecords 先行编排性关闭后，迟到的 kickOffChatRound 应答回注。
+    // [u-arch] 关闭形态 = idle + 放弃轮标记（disposeAllRecords 置标记 → settle 持久化）
+    // ——gate ① 删除后，迟到回注由放弃轮标记 gate 阻断（同世代、回注轮 ≤ 标记轮）。
+    // [modeless 波1] 经 Continuation 统一入口驱动：message 派发轮（run 挂起）→
+    // 编排性关闭先行（markSettledOut——disposeAllRecords 的 store 原语）→ 迟到引擎
+    // 应答被 gate 阻断。
+    record.status = "idle";
+    store.register(record);
+    await service.chatActions.deliverChatMessage(record, "go");
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1), { interval: 1 });
+    record.lastAbandonedRound = { epoch: record.epoch ?? 0, round: record.round ?? 0 };
+    store.markSettledOut(record);
+    fake.runs[0]!.settle({ content: "late round text" });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(pi.sendMessage).not.toHaveBeenCalled();
+    service.dispose();
+    clearEngines();
+    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  it("[modeless 波1] 旧终态遗留形态（idle + gc 展示位）message 续聊 → 轮终通知仍送达（revive 清遗留位，gate 无阻断）", async () => {
+    const { agentDir, service, store, pi } = setup();
+    clearEngines();
+    const fake = registerFakePiEngine();
+    const record = createRecord("sa-gate-gc", {
+      agent: "general-purpose",
+      model: "test/model",
+      mode: "background",
+      slug: "t",
+      task: "test",
+      startedAt: 1000,
+      rootSessionId: "root-session",
+      controller: new AbortController(),
+    });
+    // 旧终态遗留形态（idle + gc 遗留展示位——[U2 桥接] 旧终态形态读侧兼容）+
+    // register 进 store 的完整生产形态。message → revive 翻边清遗留位（closedReason
+    // 残留会让 notifyGate 门误拦本轮通知）→ 轮终 route 送达。
+    record.status = "idle";
+    record.endedAt = Date.now();
+    record.closedReason = "gc";
+    store.register(record);
+    await service.chatActions.deliverChatMessage(record, "continue");
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1), { interval: 1 });
+    fake.runs[0]!.settle({ content: "round" });
+    await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalled(), { interval: 1 });
+    service.dispose();
+    clearEngines();
+    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+});
+
+describe("T4② idleTimeoutMs entry fail-fast", () => {
+  let agentDir: string;
+  let service: SubagentService;
+
+  beforeEach(() => {
+    ({ agentDir, service } = setup());
+  });
+
+  afterEach(() => {
+    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  it("execute rejects idleTimeoutMs above the setTimeout limit with the valid range in the message", async () => {
+    await expect(service.execute({ task: "x", slug: "test", idleTimeoutMs: MAX_TIMER_DELAY_MS + 1 })).rejects.toThrow(
+      new RegExp(`${MAX_TIMER_DELAY_MS}`),
+    );
+    await expect(service.execute({ task: "x", slug: "test", idleTimeoutMs: 3_000_000_000 })).rejects.toThrow(/2\^31-1/);
+  });
+
+  it("execute rejects non-finite idleTimeoutMs", async () => {
+    await expect(service.execute({ task: "x", slug: "test", idleTimeoutMs: Number.NaN })).rejects.toThrow(/not a finite number/);
+  });
+
+  it("rejects before any record is created (no side effects)", async () => {
+    const internals = service as unknown as ServiceInternals;
+    await expect(service.executeAndAwait({ task: "x", slug: "test", idleTimeoutMs: 3_000_000_000 })).rejects.toThrow();
+    expect(internals.store.listRunning()).toHaveLength(0);
+  });
+
+  it("accepts valid values (0 = explicit disable, positive within limit)", async () => {
+    // 校验通过后执行链继续（runSpawn 被 mock，返回 undefined result 会在后续流程抛错/
+    // 返回——但绝不能是 idleTimeoutMs 校验错误）
+    await expect(service.execute({ task: "x", slug: "test", idleTimeoutMs: 0 })).rejects.not.toThrow(/idleTimeoutMs/);
+  });
+});
+
+// ══════ 来源: subagent-service-parent-guard.test.ts ══════
+
+// src/execution/__tests__/subagent-service-parent-guard.test.ts
+//
+// [v4 A-5 / P7] getRecordForAction 直接父校验单元测试。
+//
+// 背景：递归 subagent 场景下，孙级 record（parentRecordId = 某子进程的 self recordId）
+// 的子进程句柄只存在于其直接父进程内存。SP-8 后全树 record 的 rootSessionId 贯穿真 ROOT，
+// 旧实现 getRecordForAction 仅校验 rootSessionId → 主进程可凭 rootSessionId 通过 message 孙级，
+// 但孙级 B 的子进程句柄只在 A 进程里 → 主进程走冷路径重新 spawn → 双写同一 session 文件（P7）。
+//
+// 修复：rootSessionId 校验之后增加直接父校验——record.parentRecordId 必须等于本进程
+// execCtxBaseline.recordId（主进程 baseline=null → 只能操作根层 record）。
+//
+// 本测试 mock execCtxBaseline 三种身份（undefined=主进程 / sa-A=直接父 / sa-B=兄弟进程），
+// 断言对 record B（parentRecordId=sa-A）及顶层 record 的操作权限矩阵。
+
+
+
+// mock logger（import 链需要 getLogger 存在）
+
+// [W3 改写] 原 vi.mock(inproc pi 引擎目录/session-runner) 随删件消亡——本文件只测
+// getRecordForAction 检查（纯内存判定，不触引擎链路），现存 import 无需再 mock 引擎替身。
+
+
+type Baseline = { recordId: string | undefined; depth: number } | null;
+const MAIN_PROCESS: Baseline = null;
+const PARENT_A: Baseline = { recordId: "sa-A", depth: 1 };
+const SIBLING_B: Baseline = { recordId: "sa-B", depth: 1 };
+
+/** 暴露私有字段供测试注入身份。[D3-⑤] 基线住进 execNesting（公共层
+ *  ExecutionNestingContext），注入经 setBaseline 测试入口。
+ *  [R1 深绑改写·清单③ SI 形态] sessionRootId/execNesting 随域 #2 聚合迁入
+ *  SessionBaselines——ParentGuardInternals 重定义为壳 baselines 聚合路径（store 仍为壳
+ *  #1 留壳字段，路径不变）；断言对象与强度不变，路径对齐终态结构。 */
+interface ParentGuardInternals {
+  store: RecordStore;
+  baselines: {
+    sessionRootId: string | null;
+    execNesting: { setBaseline(state: { recordId: string | undefined; depth: number } | null): void };
+  };
+}
+
+/** 构造一个 chatMode idle record（message/close action 的典型目标态）。 */
+function makeRecord(
+  id: string,
+  sessionRootId: string,
+  overrides: Partial<ExecutionRecord> = {},
+): ExecutionRecord {
+  return createRecord(id, {
+    agent: "general-purpose",
+    model: "test/model",
+    mode: "background",
+    task: "test",
+    startedAt: 1000,
+    rootSessionId: sessionRootId,
+    controller: new AbortController(),
+    ...overrides,
+    slug: overrides.slug ?? "test",
+  });
+}
+
+describe("[v4 A-5 / P7] getRecordForAction 直接父校验", () => {
+  let agentDir: string;
+  let service: SubagentService;
+  let store: RecordStore;
+  let sessionRootId: string;
+  let internals: ParentGuardInternals;
+  // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+  const guardDirs: string[] = [];
+
+  beforeEach(() => {
+    agentDir = makeTmpAgentDir();
+    guardDirs.push(agentDir);
+    const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
+    service = new SubagentService({ cwd: agentDir, modelService });
+    // initSession 建立 sessionRootId=sessionId（本 session 树的根）。execCtxBaseline 的
+    // 真实值由 initSession 从 env 读取（见 recursive-visibility-baseline.test.ts），但本测试
+    // 聚焦检查逻辑，故每例直接注入身份（mock），不依赖进程 env（测试进程可能继承 subagent env）。
+    service.initSession({ pi: makePi(), sessionId: "root-session" });
+    internals = service as unknown as ParentGuardInternals;
+    store = internals.store;
+    // [R1 深绑改写] sessionRootId 经 baselines 聚合路径读取（原 internals.sessionRootId）。
+    sessionRootId = internals.baselines.sessionRootId!;
+  });
+
+  afterEach(() => {
+    service.dispose();
+  });
+
+  afterAll(() => {
+    // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+    for (const d of guardDirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  // ---------- 身份 sa-A：直接父，放行孙级 B ----------
+
+  it("身份=sa-A（直接父）→ 放行操作孙级 record B（parentRecordId=sa-A）", () => {
+    const recordB = makeRecord("sa-B", sessionRootId, { parentRecordId: "sa-A", depth: 2, status: "running" });
+    store.register(recordB);
+    internals.baselines.execNesting.setBaseline(PARENT_A);
+
+    expect(service.chatActions.getRecordForAction("sa-B")).toBe(recordB);
+  });
+
+  // ---------- 身份 undefined（主进程）：拒绝孙级，放行根层 ----------
+
+  it("身份=undefined（主进程）拒绝孙级 record B，错误含 'direct parent' + 'parent=sa-A'", () => {
+    const recordB = makeRecord("sa-B", sessionRootId, { parentRecordId: "sa-A", depth: 2, status: "running" });
+    store.register(recordB);
+    internals.baselines.execNesting.setBaseline(MAIN_PROCESS);
+
+    expect(() => service.chatActions.getRecordForAction("sa-B")).toThrow(/direct parent/);
+    expect(() => service.chatActions.getRecordForAction("sa-B")).toThrow(/see \/subagents list, parent=sa-A/);
+  });
+
+  it("身份=undefined（主进程）放行顶层 record（parentRecordId=undefined 视为根层）", () => {
+    const topRecord = makeRecord("sa-top", sessionRootId, { parentRecordId: undefined, depth: 0, status: "running" });
+    store.register(topRecord);
+    internals.baselines.execNesting.setBaseline(MAIN_PROCESS);
+
+    expect(service.chatActions.getRecordForAction("sa-top")).toBe(topRecord);
+  });
+
+  // ---------- 身份 sa-B（兄弟进程）：拒绝孙级 ----------
+
+  it("身份=sa-B（兄弟进程）拒绝孙级 record B（parentRecordId=sa-A ≠ baseline sa-B）", () => {
+    const recordB = makeRecord("sa-B", sessionRootId, { parentRecordId: "sa-A", depth: 2, status: "running" });
+    store.register(recordB);
+    internals.baselines.execNesting.setBaseline(SIBLING_B);
+
+    expect(() => service.chatActions.getRecordForAction("sa-B")).toThrow(/direct parent/);
+    expect(() => service.chatActions.getRecordForAction("sa-B")).toThrow(/see \/subagents list, parent=sa-A/);
+  });
+
+  // ---------- 身份缺省语义 + 更深递归 ----------
+
+  it("子进程（baseline=sa-A）拒绝顶层 record（身份缺省视为根层，仅主进程可操作）", () => {
+    const topRecord = makeRecord("sa-top", sessionRootId, { parentRecordId: undefined, depth: 0, status: "running" });
+    store.register(topRecord);
+    internals.baselines.execNesting.setBaseline(PARENT_A);
+
+    expect(() => service.chatActions.getRecordForAction("sa-top")).toThrow(/direct parent/);
+  });
+
+  it("P7 场景：主进程拒绝曾孙 record C（parentRecordId=sa-B），错误含 baseline=root + parent=sa-B", () => {
+    const recordC = makeRecord("sa-C", sessionRootId, { parentRecordId: "sa-B", depth: 3, status: "running" });
+    store.register(recordC);
+    internals.baselines.execNesting.setBaseline(MAIN_PROCESS);
+
+    const fn = () => service.chatActions.getRecordForAction("sa-C");
+    expect(fn).toThrow(/direct parent/);
+    expect(fn).toThrow(/see \/subagents list, parent=sa-B/);
+    expect(fn).toThrow(/baseline=\(root\)/);
+  });
+
+  it("rootSessionId 不匹配仍优先拒绝（直接父校验在 rootSessionId 校验之后，不绕过归属检查）", () => {
+    // 跨 session 树的 record：rootSessionId 不匹配 → 走首个 throw（not found or not owned）
+    const foreignRecord = makeRecord("sa-foreign", "other-session", { parentRecordId: "sa-A", depth: 2, status: "running" });
+    store.register(foreignRecord);
+    internals.baselines.execNesting.setBaseline(PARENT_A);
+
+    expect(() => service.chatActions.getRecordForAction("sa-foreign")).toThrow(/not found or not owned/);
+  });
+});
+
+// ══════ 来源: subagent-service-model-switch.test.ts ══════
+
+// src/execution/__tests__/subagent-service-model-switch.test.ts
+//
+// [subagent-model-switch §7.2 目标 5 壳接线] SubagentService.setModel 装配段的
+// 行为测试：deps 闭包走真实通道（ModelConfigService 透传 / store.markModelOverride
+// 写入 journal 记录原语 / chatRounds.resolveEnginePortForSwitch 引擎路由转发）。编排本体
+// （model-switch.ts 纯函数）的分型处置表已由 model-switch.test.ts 全量覆盖，本文件
+// 只锚壳装配——两文件互补，不重复证明。
+//
+// 场景取舍：chat 域两态（无活进程纯记账 / 活进程 + 引擎解析转发）恰好覆盖装配段
+// 全部闭包；run 级聚合通道（runAggregate / persistRunOverride）的真实装配由
+// workflow-dispatch 侧 U4b 测试承接（workflow-dispatch-override.test.ts）。
+
+
+
+
+
+// ============================================================
+// fixtures（形态对齐 model-switch.test.ts——校验语义真实）
+// ============================================================
+
+function makeModel(over: Partial<ModelInfo> = {}): ModelInfo {
+  return {
+    id: over.id ?? "glm-5.3-flash",
+    name: over.name ?? "GLM-5.3-Flash",
+    provider: over.provider ?? "zai-coding-cn",
+    reasoning: over.reasoning ?? false,
+    thinkingLevelMap: over.thinkingLevelMap,
+    contextWindow: over.contextWindow,
+  };
+}
+
+function makeRegistry(
+  models: ModelInfo[],
+  authed: string[] = models.map((m) => `${m.provider}/${m.id}`),
+): ModelRegistryLike {
+  const authSet = new Set(authed);
+  return {
+    getAvailable: () => models,
+    find: (provider, modelId) => models.find((m) => m.provider === provider && m.id === modelId),
+    hasConfiguredAuth: (m) => {
+      if (!m || typeof m !== "object") return false;
+      const mm = m as ModelInfo;
+      return authSet.has(`${mm.provider}/${mm.id}`);
+    },
+  };
+}
+
+const TARGET_MODEL = { provider: "zai-coding-cn", modelId: "glm-5.3-flash" } as const;
+
+describe("SubagentService.setModel 壳接线（§7.2 目标 5）", () => {
+  let dir: string;
+  let service: SubagentService;
+  let store: RecordStore;
+  // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+  const shellSwitchDirs: string[] = [];
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "shell-model-switch-"));
+    shellSwitchDirs.push(dir);
+    // [session-store-layout-inversion] 生产 store 目录经
+    // getSubagentSessionDir(resolveStoreRootSessionId())（env dataDir 兜底）解析——
+    // stubEnv 把写删目标收进本 mkdtemp 目录（自建自删红线）。
+    process.env["TAIJI_AGENT_DATA_DIR"] = dir;
+    const modelService = new ModelConfigService({ agentDir: path.join(dir, "agent"), cwd: dir });
+    modelService.initModel({ modelRegistry: makeRegistry([makeModel()]), sessionId: "sess-1" });
+    service = new SubagentService({ cwd: path.join(dir, "agent"), modelService });
+    // register/markSettled 的 store 目录解析须有分区键（sid = modelService 同一 sessionId）
+    service.initSession({ pi: makePi(), sessionId: "sess-1" });
+    store = Reflect.get(service, "store") as RecordStore;
+  });
+
+  afterEach(() => {
+    _resetCoreSpawnedChildrenMirrorForTest();
+    service.dispose();
+    delete process.env["TAIJI_AGENT_DATA_DIR"];
+  });
+
+  afterAll(() => {
+    for (const d of shellSwitchDirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  function makeRecord(id: string): ReturnType<typeof createRecord> {
+    const record = createRecord(id, {
+      agent: "general-purpose",
+      model: "zai-coding-cn/glm-5.3",
+      thinkingLevel: "high",
+      mode: "background",
+      task: "shell switch demo",
+      slug: "shell-switch",
+      startedAt: 1_000,
+    });
+    store.register(record);
+    return record;
+  }
+
+  it("无活进程 → 纯记账路径：store 写入 journal 记录原语写 record.modelOverride + 已记账型应答（不携带档位）", async () => {
+    const record = makeRecord("sa-shell-switch-1");
+    const reply = await service.setModel({ domain: "chat", record }, TARGET_MODEL);
+    expect(reply).toEqual({
+      scope: "chat",
+      reply: { kind: "recorded", notice: "已记录，下次执行生效。" },
+    });
+    // 写入 journal 记录原语真实生效（内存 record 字段；盖章值 model 不变量 5 不触碰）
+    expect(record.modelOverride?.ref).toEqual({ provider: "zai-coding-cn", modelId: "glm-5.3-flash" });
+    expect(record.model).toBe("zai-coding-cn/glm-5.3");
+  });
+
+  it("活进程 + 引擎解析转发（pi 未注册 → 不可用 stub 的 native 位与方法缺席组合）→ 装配损坏检查抛出，编排写记账 + 错误应答（不虚构生效值）", async () => {
+    const record = makeRecord("sa-shell-switch-2");
+    // 宿主活进程镜像注册（hasLiveProcessHandle 判真 → 走引擎转发分支）
+    registerSpawnedChildForRecord(record.id, { pid: 424242, killed: false } as unknown as ChildProcess);
+    const reply = await service.setModel({ domain: "chat", record }, TARGET_MODEL);
+    expect(reply.scope).toBe("chat");
+    if (reply.scope !== "chat" || reply.reply.kind !== "error") {
+      throw new Error(`expected chat error reply, got: ${JSON.stringify(reply)}`);
+    }
+    expect(reply.reply.message).toMatch(/setModel=native/);
+    // 检查路径仍写记账（处置表行 3/7 形态——意图已表达，生效值未知如实报错）
+    expect(record.modelOverride?.ref).toEqual({ provider: "zai-coding-cn", modelId: "glm-5.3-flash" });
   });
 });

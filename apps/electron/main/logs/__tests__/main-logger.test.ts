@@ -14,6 +14,7 @@
  * 运行：cd apps/electron/main && npx vitest run logs/__tests__/main-logger.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../../../test-guard/integration-gate.ts'
 import { mkdtempSync, rmSync, readdirSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -23,7 +24,9 @@ const ENV_KEYS = ['TAIJI_LOG_LEVEL', 'TAIJI_LOG_MAX_BYTES', 'TAIJI_AGENT_DATA_DI
 
 const MS_PER_MINUTE = 60 * 1000
 
-describe('main-logger', () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `main-logger${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`,
+  () => {
   let tmpDir: string
   let logsDir: string
   let savedEnv: Record<string, string | undefined>

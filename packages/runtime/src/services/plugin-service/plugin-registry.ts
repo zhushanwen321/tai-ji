@@ -47,6 +47,9 @@ export class PluginRegistry {
         continue
       }
       for (const entry of entries) {
+        // 辅助目录跳过：安装暂存区（.staging）等 dot 条目不是插件（scoped 包目录名
+        // 解耦后安装目录为 scope__pkg 一级形态，扫描口径与安装目录名对齐——U4）
+        if (entry.startsWith('.')) continue
         const fullPath = join(dir, entry)
         try {
           const st = await stat(fullPath)
@@ -275,6 +278,14 @@ export class PluginRegistry {
       status: compatCompatible ? ('UNLOADED' as PluginState) : ('DEPS_MISSING' as PluginState),
       contributes: manifest.contributes ?? {} as PluginContributes,
       permissions: manifest.permissions ?? [],
+      // D3 宿主接线数据源：manifest 能力声明透传 descriptor（激活链据此登记 fork
+      // 放行清单）；scan 是 descriptor 唯一装配点，重扫即刷新（热重载/重装取新值）
+      capabilities: manifest.capabilities ?? [],
+      readPaths: manifest.readPaths,
+      // S15② 本地已装条目回退的数据源（包名与命名空间声明透传，D4——安装期已做
+      // 绑定校验，声明值即生效值）：与 capabilities 同点装配，scan 唯一装配点
+      packageName: pkg.name,
+      ...(manifest.namespace !== undefined ? { namespace: manifest.namespace } : {}),
       engines: { 'taiji': engineRange ?? '*' },
       pluginPath: entryPath,
       source,

@@ -19,12 +19,13 @@
  */
 import type { SettingsTransport, DiscoverModelsRequest, DiscoverModelsResponse } from '@taiji/core/domain/settings'
 import type { ExtensionInfo, ProviderId } from '@taiji/shared'
-import { config, model, extension, settings, quota, preset, usage, session } from '@/api'
+import { config, model, extension, settings, quota, preset, usage, session, plugin } from '@/api'
 
 /**
  * 构造 SettingsTransport 实现：逐方法转发 @/api 门面八元（VITE_MOCK 感知）。
  * 订阅函数（on*）返回取消函数；请求函数签名与 @/api 对齐。
  */
+
 export function createSettingsTransport(): SettingsTransport {
   return {
     // ══════════════════════ 读（请求-响应）══════════════════════
@@ -156,5 +157,24 @@ export function createSettingsTransport(): SettingsTransport {
     onAuthAuthUrl: (h) => config.onAuthAuthUrl(h),
     onAuthSuccess: (h) => config.onAuthSuccess(h),
     onAuthError: (h) => config.onAuthError(h),
+
+    // ── 插件 Provider 来源（provider-plugin-access U6）──
+    listAvailablePlugins: () => plugin.listAvailablePlugins(),
+    // 插件运行态（S13 崩溃恢复）：家族卡崩溃态判定（plugin.list 拉为主）+ 重启动作
+    //（plugin.toggle off/on）+ 崩溃广播增量提示
+    listPlugins: () => plugin.listPlugins(),
+    togglePlugin: (pluginId, enabled) => plugin.togglePlugin(pluginId, enabled),
+    onPluginCrashed: (h) => plugin.onPluginCrashed(h),
+    invokePlugin: (pluginId, method, params) => plugin.invokePlugin(pluginId, method, params),
+    onPluginEvent: (h) => plugin.onPluginEvent(h),
+    sendPluginUiEvent: (payload) => plugin.sendPluginUiEvent(payload),
+    executePluginCommand: (payload) => plugin.executePluginCommand(payload),
+    // 两段式安装（U4/U6 wire 通路）：plugin domain 三方法 → WS 帧 → runtime 两段式
+    // 编排（确认停点对接 Provider 页安装确认卡，S27）。
+    preparePluginInstall: (packageSpec) => plugin.preparePluginInstall(packageSpec),
+    confirmPluginInstall: (pluginId) => plugin.confirmPluginInstall(pluginId),
+    cancelPluginInstall: (pluginId) => plugin.cancelPluginInstall(pluginId),
+    // 挂载位分区清理（U2 悬置二选一裁决①：Provider 页家族切换防陈旧）
+    clearPluginMountUi: (mountId) => plugin.clearPluginMountUi(mountId),
   }
 }

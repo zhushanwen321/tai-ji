@@ -242,7 +242,7 @@ describe("退役步骤 2 接线层：kickOffChatRound 透传 mode/sink 给工厂
     registerFakePiEngine();
     const service = setupService(mode);
     await service.execute({ task: "retire test", slug: "test", ctxModel });
-    await vi.waitFor(() => expect(mockCreateStream).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(mockCreateStream).toHaveBeenCalledTimes(1), { interval: 1 });
     const [recordId, sinkArg, modeArg] = mockCreateStream.mock.calls[0]!;
     expect(typeof recordId).toBe("string");
     expect(sinkArg).toHaveProperty("setWidget");

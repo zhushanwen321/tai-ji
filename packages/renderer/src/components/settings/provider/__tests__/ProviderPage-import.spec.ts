@@ -1,50 +1,42 @@
 /**
- * ProviderPage 导入入口测试（W2 · cw-2026-07-26-migration-other-agents）。
+ * Provider 设置页导入入口测试（ProviderPage mount + 来源选择 → preview → apply 全链路）。
  *
- * 覆盖：
- * - T10：mount ProviderPage（空 providers），断言 import-providers-menu 渲染
- * - T10b：点击菜单项 → previewImportProviders 被调 + 对话框打开
- * - T10c：完整 apply 流程（选源 → 预览 → 勾选默认项 → 确认 → applyImportProviders 被调 → 对话框关闭 + success toast）
- * - T10d：preview transport reject（Promise.reject）→ importState 回 idle，菜单按钮重新可点
- * - T10e：apply transport reject（Promise.reject）→ importState 回 previewing，对话框仍开允许重试
- * - T10f：apply envelope error（{ error: {...} }）→ importState 回 previewing，对话框仍开 + error 区域显示
- * - T10g：apply 结果带 quotaAutoEnabled（单条）→ 额度自动开启 toast 含 provider name
- * - T10h：多条 quotaAutoEnabled → 聚合 count toast；未标记条目不额外提示
+ * 单文件多源合并形态：同簇用例共享一份模块图装载（vitest 按测试文件隔离模块图，
+ * 拆成两个文件要各自装载同批依赖）。
  *
- * mock 策略：
- *  - vi.mock('@/api') 把 config 门面替成可控 mock（listProviders 空 providers 结果 + previewImportProviders fixture）
- *  - createPinia + setActivePinia 让 useSettingsStore/useQuotaStore 正常初始化
- *  - useToast 是模块级单例，通过 useToast() 取 toasts.value 断言
+ * mock 面：
+ *  - `@/api` 只提供 config 域工厂（SUT 仅消费 config），订阅成员族走共享 stub
+ *  - useToast 不 mock（hooks 直接清空真实 toasts 数组）
+ *  - 顶层 hooks（pinia 重建 / transport 桩注入 / toasts 清零）幂等
  *
- * 运行：cd packages/renderer && npx vitest run src/components/settings/__tests__/ProviderPage-import.spec.ts
+ * 「羊毛旧界面退役」的静态残留检查（退役载体是否在盘上 + 全仓零引用）**不在此文件**：
+ * 那是随仓库规模增长的静态扫描、不验证运行时行为，已由 `scripts/check-wool-retirement.mjs`
+ * 承接（pre-commit / 手动 `node scripts/check-wool-retirement.mjs` 均可跑）。
+ *
+ * 运行：cd packages/renderer && npx vitest run src/components/settings/provider/__tests__/ProviderPage-import.spec.ts
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  vi,
+} from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import type { ProviderImportPreview } from '@taiji/shared'
 
-/** preview fixture（1 个正常 provider，conflict='none' → 默认勾选） */
-const PREVIEW: ProviderImportPreview = {
-  source: 'claude',
-  providers: [
-    {
-      id: 'openai', name: 'OpenAI', protocol: 'openai-completions', modelCount: 3,
-      apiKeyExtracted: true, credentialType: 'plaintext', conflict: 'none', warnings: [],
-    },
-  ],
-}
+// 工厂绑定 import 必须先于组件 import 求值：ProviderPage 模块图加载 '@/api' 时 vi.mock
+// 工厂立即执行，晚于组件 import 的工厂绑定仍在 TDZ（vi.hoisted 同族坑）。
+import { subscriptionStubs } from '@/__tests__/helpers/settings-modal-api-mock'
+import ProviderPage from '@/components/settings/provider/ProviderPage.vue'
+import { useToast } from '@/composables/useToast'
+import { provideSettingsTransport } from '@taiji/core'
+import { makeSettingsTransportStub } from '@/__tests__/helpers/settings-transport-stub'
 
-/** mock config 门面：previewImportProviders 返 fixture，applyImportProviders 返空结果 */
-const configMock = vi.hoisted(() => ({
-  // 门面签名 { providers, scopedModels }（settings-lifecycle 解构消费）；裸数组解构得 undefined
-  listProviders: vi.fn(() => Promise.resolve({ providers: [], scopedModels: undefined })),
-  // ProviderPage onMounted 按需刷新远程模型目录（缺则 unhandled rejection）
-  refreshProviderCatalogs: vi.fn(() => Promise.resolve({ refreshed: [], failed: [] })),
-  previewImportProviders: vi.fn(() => Promise.resolve({ importId: 'imp-1', preview: PREVIEW })),
-  applyImportProviders: vi.fn(() => Promise.resolve({
-    result: { source: 'claude', imported: [{ id: 'openai', name: 'OpenAI', status: 'imported' }], failedCount: 0 },
-  })),
-}))
+// ── vi.mock（config 域部分工厂）──
 
 vi.mock('@/api', () => ({
   config: {
@@ -57,16 +49,7 @@ vi.mock('@/api', () => ({
   },
 }))
 
-// 工厂绑定 import 必须先于组件 import 求值：ProviderPage 模块图加载 '@/api' 时 vi.mock
-// 工厂立即执行，晚于组件 import 的工厂绑定仍在 TDZ（vi.hoisted 同族坑）。
-import { subscriptionStubs } from '@/__tests__/helpers/settings-modal-api-mock'
-import ProviderPage from '@/components/settings/provider/ProviderPage.vue'
-import { useToast } from '@/composables/useToast'
-import { provideSettingsTransport } from '@taiji/core'
-import { makeSettingsTransportStub } from '@/__tests__/helpers/settings-transport-stub'
-
-let wrapper: ReturnType<typeof mount> | null = null
-
+// ── 公共 hooks ──
 beforeEach(() => {
   setActivePinia(createPinia())
   // [C3] config 门面调用经 SettingsTransport seam 桩注入（同名直映）
@@ -95,6 +78,32 @@ afterEach(() => {
   wrapper = null
   document.body.innerHTML = ''
 })
+
+/** preview fixture（1 个正常 provider，conflict='none' → 默认勾选） */
+const PREVIEW: ProviderImportPreview = {
+  source: 'claude',
+  providers: [
+    {
+      id: 'openai', name: 'OpenAI', protocol: 'openai-completions', modelCount: 3,
+      apiKeyExtracted: true, credentialType: 'plaintext', conflict: 'none', warnings: [],
+    },
+  ],
+}
+
+/** mock config 门面：previewImportProviders 返 fixture，applyImportProviders 返空结果 */
+const configMock = vi.hoisted(() => ({
+  // 门面签名 { providers, scopedModels }（settings-lifecycle 解构消费）；裸数组解构得 undefined
+  listProviders: vi.fn(() => Promise.resolve({ providers: [], scopedModels: undefined })),
+  // ProviderPage onMounted 按需刷新远程模型目录（缺则 unhandled rejection）
+  refreshProviderCatalogs: vi.fn(() => Promise.resolve({ refreshed: [], failed: [] })),
+  previewImportProviders: vi.fn(() => Promise.resolve({ importId: 'imp-1', preview: PREVIEW })),
+  applyImportProviders: vi.fn(() => Promise.resolve({
+    result: { source: 'claude', imported: [{ id: 'openai', name: 'OpenAI', status: 'imported' }], failedCount: 0 },
+  })),
+}))
+
+let wrapper: ReturnType<typeof mount> | null = null
+
 
 /**
  * 辅助：展开 import-providers-menu 并点击 claude 源项，触发 preview 流程。

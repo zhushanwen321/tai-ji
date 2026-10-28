@@ -40,7 +40,7 @@
     "pi-package"
   ],
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run --pool=threads"
   },
   "dependencies": {
     "@zhushanwen/pi-ext-guards": "workspace:*",

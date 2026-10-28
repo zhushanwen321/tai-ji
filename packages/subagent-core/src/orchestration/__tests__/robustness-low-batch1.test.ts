@@ -1,5 +1,10 @@
 // Low batch 1 robustness fix verification
 //
+// [round5-g 合并产物] 吸收 robustness 系列姊妹件：
+// - robustness-medium-batch4.test.ts（M4 IPC 字段校验）。其 makeRunningRun/
+//   makeDeps/makeHandlers 与本文件同名异签，改名 makeM4* 前缀消歧；logger 桩
+//   提升为文件级（本文件原用真实 logger，仅静默无断言影响）。
+//
 // L9: run.state.errorLogs 追加而非覆盖——保留重试历史的诊断日志
 //
 // 一个 run 经历多次 error → rebuild → 最终 return 的场景，中间 worker 实例的
@@ -12,6 +17,17 @@
 // - handleReturn 不是 export 的——通过 handleWorkerMessage 发 { type: "return", ... } 触发
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+const { loggerMock } = vi.hoisted(() => ({
+  loggerMock: {
+    debug: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  },
+}));
+vi.mock("../../core/logger.ts", () => ({
+  getLogger: () => loggerMock,
+}));
+
 
 import {
   handleScriptError,
@@ -24,6 +40,8 @@ import {
 } from "../terminal-actions.ts";
 import type { LifecycleDeps, WorkerHandlers } from "../models/ports.ts";
 import type { WorkflowRun } from "../models/workflow-run.ts";
+import { Trace } from "../models/trace.ts";
+import type { AgentResult } from "../../shared/agent-call-types.js";
 
 // ── helpers ──────────────────────────────────────────────────
 
@@ -260,5 +278,250 @@ describe("L9: errorLogs 截断到 MAX_ERROR_LOGS（500）", () => {
     // 截断保留最后 500 条：丢弃最前 2 条（pre-0, pre-1）
     expect(run.state.errorLogs[0]).toEqual({ level: "log", message: "pre-2" });
     expect(run.state.errorLogs[499]).toEqual({ level: "log", message: "ret-2" });
+  });
+});
+
+// ══════ 来源: robustness-medium-batch4.test.ts ══════
+
+// Medium batch 4: M4 IPC 字段校验（行为测试）
+//
+// M4: dispatchAgentCall / dispatchWorkflowCall 在函数最开头校验 IPC 消息字段
+// （callId 非数字、opts/args 非对象、prompt/name 非字符串），畸形消息仅记日志后 return，
+// 不抛 TypeError、不写 trace 节点、不 postMessage 回 worker。
+//
+// 通过 handleWorkerMessage 触发 dispatchAgentCall / dispatchWorkflowCall（内部函数不 export）。
+// Mock 构造模式参考 orchestration/__tests__/agent-call-catch-fallback.test.ts 和
+// orchestration/__tests__/worker-message-pump-workflow-call.test.ts。
+
+
+// Mock 共享 logger，让 logger.error 可被 spy（源码已从 console.error 改为 logger.error）
+
+// ── helpers ──────────────────────────────────────────────────
+
+/** 构造活体（未终局）mock WorkflowRun，含 trace/budget/calls/runtime。
+ *  与 agent-call-catch-fallback.test.ts 同构。 */
+function makeM4RunningRun(runId: string): WorkflowRun {
+  const trace = new Trace();
+  const controller = new AbortController();
+  return {
+    runId,
+    spec: { scriptName: "test-wf", scriptSource: "agent('hi')", args: {}, runId, slug: undefined },
+    state: {
+      reason: undefined,
+      trace,
+      budget: {
+        usedTokens: 0,
+        usedCost: 0,
+        totalCallCount: 0,
+        consume: vi.fn(),
+        isExceeded: vi.fn(() => false),
+        incrementCallCount: vi.fn(),
+      },
+      calls: new Map(),
+      scriptResult: undefined,
+    },
+    meta: { startedAt: new Date().toISOString(), workerErrorCount: 0, scriptErrorCount: 0 },
+    runtime: {
+      controller,
+      worker: { postMessage: vi.fn() },
+    },
+    transition: vi.fn(),
+    replaceRuntime: vi.fn(),
+  } as unknown as WorkflowRun;
+}
+
+/** LifecycleDeps mock——runner.run 默认成功。 */
+function makeM4Deps(): LifecycleDeps {
+  const runnerRun = vi.fn(async () => {
+    return { content: "OK", durationMs: 10, error: undefined, toolCalls: [] } as AgentResult;
+  });
+  return {
+    store: { save: vi.fn(async () => {}) },
+    workerHost: { start: vi.fn() },
+    runner: { run: runnerRun },
+    runs: new Map(),
+    eventBus: { emit: vi.fn() },
+    onRunDone: vi.fn(),
+    log: vi.fn(),
+  } as unknown as LifecycleDeps;
+}
+
+function makeM4Handlers(): WorkerHandlers {
+  return {
+    onMessage: vi.fn(async () => {}),
+    onError: vi.fn(async () => {}),
+    onExit: vi.fn(async () => {}),
+  } as unknown as WorkerHandlers;
+}
+
+/** 清空 logger.error 调用记录（校验失败会打印 malformed 消息日志，避免污染跨用例断言）。 */
+function silenceConsoleError(): () => void {
+  loggerMock.error.mockClear();
+  return () => {
+    loggerMock.error.mockClear();
+  };
+}
+
+// ── M4: dispatchAgentCall 字段校验 ───────────────────────────
+
+describe("M4: dispatchAgentCall validates IPC fields before dereferencing", () => {
+  it("callId 非数字 → 不抛、不写 trace 节点、不 postMessage", async () => {
+    const restore = silenceConsoleError();
+    try {
+      const run = makeM4RunningRun("wf-m4-001");
+      const deps = makeM4Deps();
+      const postMessage = run.runtime!.worker.postMessage as ReturnType<typeof vi.fn>;
+
+      // callId = "not-a-number"（字符串）
+      await handleWorkerMessage(
+        run,
+        { type: "agent-call", callId: "not-a-number", opts: { prompt: "test" } },
+        deps,
+        makeM4Handlers(),
+      );
+
+      expect(run.state.trace.toArray().length).toBe(0);
+      expect(run.state.calls.size).toBe(0);
+      expect(postMessage).not.toHaveBeenCalled();
+      expect(deps.store.save).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
+  it("opts 为 null → 不抛、不写 trace 节点", async () => {
+    const restore = silenceConsoleError();
+    try {
+      const run = makeM4RunningRun("wf-m4-002");
+      const deps = makeM4Deps();
+      const postMessage = run.runtime!.worker.postMessage as ReturnType<typeof vi.fn>;
+
+      await handleWorkerMessage(
+        run,
+        { type: "agent-call", callId: 1, opts: null },
+        deps,
+        makeM4Handlers(),
+      );
+
+      expect(run.state.trace.toArray().length).toBe(0);
+      expect(run.state.calls.size).toBe(0);
+      // 加固语义（oe-harden）：callId 合法的畸形载荷回发 error result 收敛 worker 侧
+      // pending（旧行为 = 仅日志不回发，worker 内该 callId 永久悬挂且无墙钟兜底）
+      expect(postMessage).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(postMessage.mock.calls[0])).toContain("malformed");
+    } finally {
+      restore();
+    }
+  });
+
+  it("opts.prompt 非字符串（数字）→ 不抛、不写 trace 节点", async () => {
+    const restore = silenceConsoleError();
+    try {
+      const run = makeM4RunningRun("wf-m4-003");
+      const deps = makeM4Deps();
+      const postMessage = run.runtime!.worker.postMessage as ReturnType<typeof vi.fn>;
+
+      await handleWorkerMessage(
+        run,
+        { type: "agent-call", callId: 1, opts: { prompt: 123 } },
+        deps,
+        makeM4Handlers(),
+      );
+
+      expect(run.state.trace.toArray().length).toBe(0);
+      expect(run.state.calls.size).toBe(0);
+      expect(postMessage).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(postMessage.mock.calls[0])).toContain("malformed");
+    } finally {
+      restore();
+    }
+  });
+
+  it("opts 缺失（undefined）→ 不抛、不写 trace 节点", async () => {
+    const restore = silenceConsoleError();
+    try {
+      const run = makeM4RunningRun("wf-m4-004");
+      const deps = makeM4Deps();
+      const postMessage = run.runtime!.worker.postMessage as ReturnType<typeof vi.fn>;
+
+      await handleWorkerMessage(
+        run,
+        { type: "agent-call", callId: 1, opts: undefined },
+        deps,
+        makeM4Handlers(),
+      );
+
+      expect(run.state.trace.toArray().length).toBe(0);
+      expect(run.state.calls.size).toBe(0);
+      expect(postMessage).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(postMessage.mock.calls[0])).toContain("malformed");
+    } finally {
+      restore();
+    }
+  });
+
+  it("callId 非有限数（NaN）→ 不抛、不写 trace 节点", async () => {
+    const restore = silenceConsoleError();
+    try {
+      const run = makeM4RunningRun("wf-m4-005");
+      const deps = makeM4Deps();
+      const postMessage = run.runtime!.worker.postMessage as ReturnType<typeof vi.fn>;
+
+      await handleWorkerMessage(
+        run,
+        { type: "agent-call", callId: NaN, opts: { prompt: "test" } },
+        deps,
+        makeM4Handlers(),
+      );
+
+      expect(run.state.trace.toArray().length).toBe(0);
+      expect(run.state.calls.size).toBe(0);
+      expect(postMessage).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
+  it("正常消息 → 正常派发（trace 节点创建）", async () => {
+    const run = makeM4RunningRun("wf-m4-006");
+    const deps = makeM4Deps();
+
+    await handleWorkerMessage(
+      run,
+      { type: "agent-call", callId: 1, opts: { prompt: "test", description: "test-agent" } },
+      deps,
+      makeM4Handlers(),
+    );
+
+    // 正常消息应创建 trace 节点（status=running，等待异步执行）
+    const nodes = run.state.trace.toArray();
+    expect(nodes.length).toBeGreaterThan(0);
+    expect(nodes[0]!.stepIndex).toBe(1);
+    expect(nodes[0]!.task).toBe("test");
+    expect(nodes[0]!.agent).toBe("test-agent");
+    // call 已入 run.state.calls
+    expect(run.state.calls.size).toBeGreaterThan(0);
+  });
+
+  it("校验失败打印 malformed 日志（含 callId）", async () => {
+    loggerMock.error.mockClear();
+    try {
+      const run = makeM4RunningRun("wf-m4-007");
+      const deps = makeM4Deps();
+
+      await handleWorkerMessage(
+        run,
+        { type: "agent-call", callId: "bad", opts: { prompt: "test" } },
+        deps,
+        makeM4Handlers(),
+      );
+
+      expect(loggerMock.error).toHaveBeenCalled();
+      const logged = String(loggerMock.error.mock.calls[0]![0]);
+      expect(logged).toContain("malformed agent-call");
+      expect(logged).toContain('"bad"');
+    } finally {
+      loggerMock.error.mockClear();
+    }
   });
 });

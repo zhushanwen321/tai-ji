@@ -28,7 +28,7 @@
   },
   "scripts": {
     "typecheck": "npx tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --pool=threads"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

@@ -78,6 +78,9 @@ export const usage = isMock ? mockApi.usage : realUsage
 export const tts = isMock ? mockApi.tts : realTts
 // subagent 域（subagent-model-switch §7.1 入口层）：setModel（chat 域 / run 级全切共用）。
 export const subagent = isMock ? mockApi.subagent : realSubagent
+// wool 域（wool-provider D6）：羊毛 provider 宿主编排随插件化迁移整体退役（provider-plugin-access
+// D6/U7）——管理动作在插件进程内执行，宿主通道 = providers.write/delete/credential（插件 RPC
+// 线协议，不经 renderer 门面）。本门面不再导出 wool 域。
 
 // search（⌘K 全局搜索）编排归 useSearchModalDeps（packages/renderer/src/composables/features/search/useSearchModalDeps.ts，D-026，#5）：
 // 该处判 VITE_MOCK 决定 mock 层走 mockApi.search fixture / 真实进程层走真实 3 源聚合（命令/file/session domain）。

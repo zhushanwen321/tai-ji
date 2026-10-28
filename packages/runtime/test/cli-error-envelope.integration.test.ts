@@ -12,6 +12,7 @@
  * 运行：cd packages/runtime && npx vitest run test/cli-error-envelope.integration.test.ts
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { INTEGRATION_TESTS_ENABLED } from '../../../test-guard/integration-gate.ts'
 import { spawn } from 'node:child_process'
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -85,7 +86,11 @@ afterAll(() => {
 // 显式超时登记口径）；本地实测 <1s/条
 const TEST_TIMEOUT_MS = 20_000
 
-describe('RT-8#1: CLI error envelope → 非 0 退出（写命令）', () => {
+// 文件级集成组成员（packages/runtime/vitest.config.ts INTEGRATION_TESTS，e2e-map E2E-INTEG 登记）：
+// 门控关闭时本文件不被收集（main exclude + integration include 条件化），下方 skipIf 是
+// 防配置漂移的二道防线。2026-10-27 测试范围收缩（真 WS server / 真 CLI spawn / 真 PTY 迁出无门控默认档）：
+// 单跑本文件须带 TAIJI_TEST_INTEGRATION=1（run 命令见 e2e-map 对应 E2E-INTEG 规则）。
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)('RT-8#1: CLI error envelope → 非 0 退出（写命令）', () => {
   it('delete-provider 对不存在的 provider（runtime 回 PROVIDER_NOT_FOUND）→ exit ≠ 0，stdout 无 "deleted"，stderr 含 code/消息/恢复动作', async () => {
     mode = { kind: 'error', code: 'PROVIDER_NOT_FOUND', message: 'Provider "ghost" not found' }
     const result = await runCli(['delete-provider', '--name', 'ghost'])
@@ -115,7 +120,7 @@ describe('RT-8#1: CLI error envelope → 非 0 退出（写命令）', () => {
   }, TEST_TIMEOUT_MS)
 })
 
-describe('RT-8#1: 成功路径输出不变（回归保护）', () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)('RT-8#1: 成功路径输出不变（回归保护）', () => {
   it('delete-provider 成功回包 → exit 0 + stdout "provider ghost deleted"', async () => {
     mode = { kind: 'success' }
     const result = await runCli(['delete-provider', '--name', 'ghost'])

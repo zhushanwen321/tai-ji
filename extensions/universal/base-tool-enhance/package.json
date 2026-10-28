@@ -55,7 +55,7 @@
   },
   "scripts": {
     "typecheck": "npx tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --pool=threads",
     "test:watch": "vitest"
   }
 }

@@ -1,0 +1,33 @@
+{
+  "name": "git",
+  "summary": "git 集成（runtime services/git + infra/git 与 git-executor + git-head-watcher + transport/git-message-handler + test/git-file-bundle + renderer GitPanel 源；renderer 无专属 GitPanel 测试，use-git-status 断言在 Wave3 混合 bundle）",
+  "layers": [
+    "runtime",
+    "infra",
+    "renderer"
+  ],
+  "scope": {
+    "runtime": [
+      "packages/runtime/src/services/git/**",
+      "packages/runtime/src/services/git-service.ts",
+      "packages/runtime/src/transport/git-message-handler.ts"
+    ],
+    "infra": [
+      "packages/runtime/src/infra/git/**",
+      "packages/runtime/src/infra/git-executor.ts",
+      "packages/runtime/src/infra/system/git-head-watcher.ts"
+    ],
+    "renderer": [
+      "packages/renderer/src/components/panel/GitPanel.vue"
+    ]
+  },
+  "tests": [
+    "packages/runtime/src/services/git/**",
+    "packages/runtime/src/infra/system/git-head-watcher.test.ts",
+    "packages/runtime/test/git-file-bundle.test.ts",
+    "packages/runtime/test/new-task/new-task-bundle.test.ts"
+  ],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

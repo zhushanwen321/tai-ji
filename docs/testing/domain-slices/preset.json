@@ -1,0 +1,31 @@
+{
+  "name": "preset",
+  "summary": "预设/模式（runtime preset-service + transport/preset-message-handler + shared pi-preset 契约 + renderer preset store 与 ModeDeclarationRow；preset-chip/pi-presets 页面 W2-B 冻结在 panel/settings 域）",
+  "layers": [
+    "runtime",
+    "shared",
+    "renderer"
+  ],
+  "scope": {
+    "runtime": [
+      "packages/runtime/src/services/preset-service.ts",
+      "packages/runtime/src/transport/preset-message-handler.ts"
+    ],
+    "shared": [
+      "packages/shared/src/pi-preset.ts"
+    ],
+    "renderer": [
+      "packages/renderer/src/stores/preset.ts",
+      "packages/renderer/src/components/panel/ModeDeclarationRow.vue"
+    ]
+  },
+  "tests": [
+    "packages/runtime/test/preset-sidecar-io.test.ts",
+    "packages/runtime/test/preset-pi-store-bundle.test.ts",
+    "packages/shared/src/__tests__/pi-preset.test.ts",
+    "packages/renderer/src/__tests__/panel/mode-declaration-row.test.ts"
+  ],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

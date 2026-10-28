@@ -41,7 +41,15 @@ function collectFaces(isOpen: () => boolean, current: () => unknown): ShieldsFac
   // overlay 开合/内容切换触发范围（§7.4 谓词重算触发范围同源）：读 SSOT 纳入响应式依赖
   void isOpen()
   void current()
-  const faces = openShieldingSurfaces().map((surface) => {
+  // 浮层开时浮层壳是视觉顶层（壳 z-dialog 档 > modal 族 z-modal 档，§6.7 层级序）：被壳
+  // 盖住的 unconditional 模态面与 view 已无视觉冲突（view bounds 只在壳的内容区视口内，
+  // 视口内的 DOM 本来就是壳要展示网页的位置），保留会让「从模态内发起浮层」（羊毛授权，
+  // 首个同屏场景）被自身宿主面卡死显示谓词——壳可见、原生内容区恒黑。intersecting 族
+  // （toast/banner 等高于壳的表面）保留避让不动。
+  const surfaces = isOpen()
+    ? openShieldingSurfaces().filter((surface) => surface.mode !== 'unconditional')
+    : openShieldingSurfaces()
+  const faces = surfaces.map((surface) => {
     if (surface.mode === 'unconditional') {
       return { id: surface.id, fullscreen: true }
     }

@@ -23,7 +23,7 @@
  * - 其余各文件内联的 virtua/vue 模块 mock（keepMounted/scrollRef props 与渲染循环互为变体）
  */
 import { vi } from 'vitest'
-import { defineComponent, h, type ComponentOptions } from 'vue'
+import { defineComponent, h, type ComponentOptions, type VNode } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import type { Message } from '@taiji/shared'
 import { createMockDeps } from '@taiji/ui/features/chat/__tests__/helpers'
@@ -154,7 +154,7 @@ export function virtuaVueMockModule() {
         return h(
           'div',
           { class: 'mock-virtualizer' },
-          ctx.data.map((item, index) => ctx.$slots.default?.({ item, index }) ?? []),
+          ctx.data.map((item, index) => (ctx.$slots.default?.({ item, index }) ?? []) as VNode[]),
         )
       },
     }),

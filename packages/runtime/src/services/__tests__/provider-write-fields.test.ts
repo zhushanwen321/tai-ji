@@ -1,36 +1,32 @@
-/**
- * B-4a/B-4b setProvider 写入字段测试（provider-config-quota-architecture design §5 Phase B-4）。
- *
- * B-4a：headers/authHeader（pi ProviderConfigSchema 内字段）写入 models.json provider 条目
- * ——修复 design §2.1 场景 D 的写入断链（前端已发送、runtime 不写）。
- * B-4b：模型写入白名单补 reasoning/maxTokens/cost/headers（pi ModelDefinitionSchema 内字段），
- * 非法值 throw 不静默丢弃。
- *
- * 测试框架：vitest（从 vitest 导入 describe/it/expect，禁 node:test）。
- * 运行命令：cd packages/runtime && npx vitest run src/services/__tests__/provider-write-fields.test.ts
- *
- * 策略：真实文件系统（临时目录 + setModelsPath/setSettingsPath + TAIJI_AGENT_DATA_DIR env），
- * 与 provider-read-source-switch.test.ts 同模式——落盘断言读回真实 models.json（而非 mock
- * upsertProvider 入参），「不落盘」断言比较校验失败后文件内容与写入前逐字一致。
- * 用 custom provider（my-proxy）隔离 catalog apiKey 剥离分支的干扰。
- */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { ConfigService } from '../config-service.js'
-import { setModelsPath } from '../../infra/pi/pi-provider-store.js'
-import { setSettingsPath, invalidateSettingsCache } from '../../infra/pi/pi-settings-store.js'
-import { PiConfigStore } from '../../infra/pi/pi-config-store.js'
+import { PiConfigStore } from '../../infra/pi/pi-config-store.js';
+import { setModelsPath } from '../../infra/pi/pi-provider-store.js';
+import { invalidateSettingsCache, setSettingsPath } from '../../infra/pi/pi-settings-store.js';
+import { ConfigService } from '../config-service.js';
+import type { IProviderCredentialResolver } from '../ports/provider-credential-resolver.js';
+import type { SetProviderInput } from '../provider-config-helper.js';
+import { TaijiProviderStore } from '../provider-extras-store.js';
+import { QuotaService } from '../quota-service.js';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+// 机械合并产物（同目录合并，vi.mock 相对路径不变）；源文件见各节横幅。重名顶层标识符已加 _mN 后缀。
+
 
 let dir: string
+
 let agentDir: string
+
 let configStore: PiConfigStore
+
 let svc: ConfigService
+
 
 function writeModelsJson(providers: Record<string, unknown>): void {
   writeFileSync(join(agentDir, 'models.json'), JSON.stringify({ providers }, null, 2))
 }
+
 
 /**
  * models.json 落盘形态的最小断言窄化（JSON.parse 边界不裸 any，下游字段保持类型检查；
@@ -47,6 +43,7 @@ interface WrittenModel {
   thinkingLevelMap?: Record<string, unknown>
 }
 
+
 interface WrittenProvider {
   name?: string
   baseUrl?: string
@@ -56,13 +53,16 @@ interface WrittenProvider {
   models?: WrittenModel[]
 }
 
+
 interface WrittenModelsJson {
   providers: Record<string, WrittenProvider>
 }
 
+
 function readModelsJson(): WrittenModelsJson {
   return JSON.parse(readFileSync(join(agentDir, 'models.json'), 'utf-8')) as WrittenModelsJson
 }
+
 
 /** 读回指定 provider 的首个模型条目（本测试写入路径保证存在，缺失即断言前置失败） */
 function readModel(providerId: string): WrittenModel {
@@ -71,10 +71,13 @@ function readModel(providerId: string): WrittenModel {
   return model
 }
 
+
 function modelsJsonRaw(): string {
   return readFileSync(join(agentDir, 'models.json'), 'utf-8')
 }
 
+// wave3 包装：本段原文件顶层语句收进 describe 作用域（顶层 hook 不再外溢到同文件其他来源的用例）
+describe('provider-write-fields', () => {
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'provider-write-fields-'))
   agentDir = join(dir, 'agent')
@@ -86,12 +89,10 @@ beforeEach(() => {
   configStore = new PiConfigStore()
   svc = new ConfigService('/tmp/project', configStore)
 })
-
 afterEach(() => {
   delete process.env.TAIJI_AGENT_DATA_DIR
   rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 })
-
 describe('B-4a：headers/authHeader 写入 models.json provider 条目（断链修复）', () => {
   it('传 headers + authHeader → 落盘且值正确', async () => {
     await svc.setProvider('my-proxy', {
@@ -167,7 +168,6 @@ describe('B-4a：headers/authHeader 写入 models.json provider 条目（断链�
     expect(({} as Record<string, unknown>).polluted).toBeUndefined()
   })
 })
-
 describe('B-4b：模型写入白名单 reasoning/maxTokens/cost/headers', () => {
   it('四字段落盘且值正确（cost 含 tiers 可选透传）', async () => {
     await svc.setProvider('my-proxy', {
@@ -254,7 +254,6 @@ describe('B-4b：模型写入白名单 reasoning/maxTokens/cost/headers', () => 
     expect(modelsJsonRaw()).toBe(before)
   })
 })
-
 // ── W2 重构特征锚定补充（模型合并提取 helper 后的分支缺口）──
 
 describe('模型合并分支缺口（input 过滤 / thinkingLevelMap 删除 / compat 删除与清洗）', () => {
@@ -321,7 +320,6 @@ describe('模型合并分支缺口（input 过滤 / thinkingLevelMap 删除 / co
     expect(models.some(m => (m as Record<string, unknown>).id === '')).toBe(false)
   })
 })
-
 /**
  * M1b：写侧防线②③ 端到端（设计 §4 验收场景 1 的单元级形态——P0 毒化链拆除）。
  * 真实 models.json + 真实 PiConfigStore：断言「一次 catalog 保存不会把空串写进文件、
@@ -347,3 +345,330 @@ describe('M1b：写侧防线②③ 端到端（P0 毒化链拆除）', () => {
     expect(providers['my-proxy']?.apiKey).toBe('sk-keep')
   })
 })
+});
+
+// ======================================================================
+// ← provider-write-side-switch.test.ts
+// ======================================================================
+
+/** 恒注入形态的 resolver 替身（M2fg：QuotaService 构造必需；configure 路径不消费凭据）。 */
+const stubResolver: IProviderCredentialResolver = {
+  hasProviderCredential: () => false,
+  listCredentialBackedProviderIds: () => new Set<string>(),
+  resolveProviderCredential: async () => undefined,
+  resolveProviderApiKeyRaw: async () => undefined,
+  resolveProviderBaseUrl: () => undefined,
+}
+
+
+let dir_m2: string
+
+let agentDir_m2: string
+
+let extrasPath: string
+
+let extrasStore: TaijiProviderStore
+
+let configStore_m2: PiConfigStore
+
+
+function writeModelsJson_m2(providers: Record<string, unknown>): void {
+  writeFileSync(join(agentDir_m2, 'models.json'), JSON.stringify({ providers }, null, 2))
+}
+
+
+function readModelsRaw(): Record<string, Record<string, unknown>> {
+  return JSON.parse(readFileSync(join(agentDir_m2, 'models.json'), 'utf-8')).providers
+}
+
+
+function readExtrasRaw(): Record<string, unknown> {
+  // 文件不存在 = 空扩展数据（TaijiProviderStore 读路径不物化文件）
+  if (!existsSync(extrasPath)) return {}
+  return JSON.parse(readFileSync(extrasPath, 'utf-8')).providers
+}
+
+
+function makeQuotaService(providerExists: (id: string) => boolean): QuotaService {
+  return new QuotaService({ dataDir: dir_m2, providerExtrasStore: extrasStore, providerExists, providerCredentialResolver: stubResolver })
+}
+
+// wave3 包装：本段原文件顶层语句收进 describe 作用域（顶层 hook 不再外溢到同文件其他来源的用例）
+describe('provider-write-side-switch', () => {
+beforeEach(() => {
+  dir_m2 = mkdtempSync(join(tmpdir(), 'provider-write-side-switch-'))
+  agentDir_m2 = join(dir_m2, 'agent')
+  mkdirSync(join(agentDir_m2, 'config'), { recursive: true })
+  process.env.TAIJI_AGENT_DATA_DIR = dir_m2
+  setModelsPath(join(agentDir_m2, 'models.json'))
+  setSettingsPath(join(agentDir_m2, 'settings.json'))
+  invalidateSettingsCache()
+  extrasPath = join(agentDir_m2, 'config', 'providers.json')
+  extrasStore = new TaijiProviderStore(extrasPath)
+  configStore_m2 = new PiConfigStore()
+})
+afterEach(() => {
+  delete process.env.TAIJI_AGENT_DATA_DIR
+  rmSync(dir_m2, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+})
+describe('QuotaService.configure 写侧切换（A1-5 路径 1）', () => {
+  it('configure 成功：providers.json 更新 quota（enabled/fetcher），models.json 无 quota 字段', async () => {
+    writeModelsJson_m2({
+      'zai-coding-cn': { baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4', apiKey: 'sk-x' },
+    })
+    const svc = makeQuotaService(() => true)
+
+    const result = await svc.configure({ providerId: 'zai-coding-cn', enabled: true, fetcher: 'zhipu' })
+
+    expect(result).toEqual({ ok: true })
+    expect(readExtrasRaw()['zai-coding-cn']).toEqual({
+      quota: { fetcher: 'zhipu', enabled: true },
+    })
+    // models.json 不落 quota（寄生字段禁复活）
+    expect(readModelsRaw()['zai-coding-cn']?.quota).toBeUndefined()
+    expect(existsSync(extrasPath)).toBe(true)
+  })
+
+  it('场景 E：models.json 无条目但聚合层存在（oauth-only catalog provider）→ configure 成功', async () => {
+    writeModelsJson_m2({}) // models.json 完全无该 provider
+    const svc = makeQuotaService(id => id === 'kimi-coding')
+
+    const result = await svc.configure({ providerId: 'kimi-coding', enabled: true })
+
+    expect(result).toEqual({ ok: true })
+    expect(readExtrasRaw()['kimi-coding']).toEqual({ quota: { enabled: true } })
+  })
+
+  it('聚合层不存在的 provider → 拒绝（ok:false，不落盘）', async () => {
+    const svc = makeQuotaService(() => false)
+    const result = await svc.configure({ providerId: 'nonexistent', enabled: true })
+    expect(result.ok).toBe(false)
+    // §7.3 改动 2：存在性检查移进 modify 回调后，modify 的锁前 ensureFileExists 会物化
+    // 空的 providers.json（原检查在 modify 之前完全不触文件）——文件被物化但**无该
+    // provider 条目**（回调抛 ProviderGoneError → 写入被跳过，僵尸条目未产生）
+    expect(existsSync(extrasPath)).toBe(true)
+    expect(readExtrasRaw()['nonexistent']).toBeUndefined()
+  })
+
+  it('fetcher 未传时继承既有值：providers.json 已有 fetcher 优先', async () => {
+    writeModelsJson_m2({
+      p1: { baseUrl: 'https://x.example.com', quota: { fetcher: 'legacy-kimi', enabled: false } },
+    })
+    await extrasStore.modify('p1', () => ({ quota: { fetcher: 'zhipu', enabled: false } }))
+    const svc = makeQuotaService(() => true)
+
+    await svc.configure({ providerId: 'p1', enabled: true }) // fetcher 未传
+
+    // providers.json 的 zhipu 优先，models.json 旧值 legacy-kimi 不复活
+    expect(readExtrasRaw()['p1']).toEqual({ quota: { fetcher: 'zhipu', enabled: true } })
+  })
+
+  it('fetcher 未传时继承既有值：providers.json 无条目回退 models.json 旧 quota（迁移失败窗口）', async () => {
+    writeModelsJson_m2({
+      p1: {
+        baseUrl: 'https://x.example.com',
+        quota: { fetcher: 'legacy-kimi', enabled: false, cookieSet: true },
+      },
+    })
+    const svc = makeQuotaService(() => true)
+
+    await svc.configure({ providerId: 'p1', enabled: true }) // fetcher 未传
+
+    expect(readExtrasRaw()['p1']).toEqual({
+      quota: { fetcher: 'legacy-kimi', enabled: true, cookieSet: true },
+    })
+  })
+
+  it('注入 getProviderConfig 通道（arch-boundary S2 port 化）时 legacy quota 兜底经注入读，不碰 infra 模块函数', async () => {
+    // models.json 物理写入一个 legacy quota；注入通道返回哨兵 fetcher——若兜底读的是
+    // 注入通道，继承 from-injection；若仍直读 infra（getProviderConfig 模块函数，
+    // 读真实 models.json），继承 from-models-json。断言锁定生产装配路径走注入。
+    writeModelsJson_m2({
+      p1: { baseUrl: 'https://x.example.com', quota: { fetcher: 'from-models-json', enabled: false } },
+    })
+    const svc = new QuotaService({
+      dataDir: dir_m2,
+      providerExtrasStore: extrasStore,
+      providerExists: () => true,
+      getProviderConfig: (id) =>
+        id === 'p1' ? { quota: { fetcher: 'from-injection', enabled: false } } : undefined,
+      providerCredentialResolver: stubResolver,
+    })
+
+    await svc.configure({ providerId: 'p1', enabled: true }) // fetcher 未传 → readQuotaFallback 兜底
+
+    expect(readExtrasRaw()['p1']).toEqual({
+      quota: { fetcher: 'from-injection', enabled: true },
+    })
+  })
+
+  it('未注入 providerExtrasStore → 持久化失败返回（宁失败不写错位）', async () => {
+    writeModelsJson_m2({ p1: { baseUrl: 'https://x.example.com' } })
+    const svc = new QuotaService({ dataDir: dir_m2, providerExists: () => true, providerCredentialResolver: stubResolver })
+
+    const result = await svc.configure({ providerId: 'p1', enabled: true })
+
+    expect(result.ok).toBe(false)
+    expect(existsSync(extrasPath)).toBe(false)
+  })
+})
+describe('setProvider 写侧切换（A1-5 路径 2/3）', () => {
+  function makeSvc(): ConfigService {
+    return new ConfigService('/tmp/project', configStore_m2, undefined, extrasStore)
+  }
+
+  it('authMethod 写 providers.json，models.json 不落 authMethod（路径 2）', async () => {
+    writeModelsJson_m2({})
+    const svc = makeSvc()
+
+    await svc.setProvider('my-custom', {
+      apiKey: 'sk-x',
+      authMethod: 'api_key',
+      baseUrl: 'https://x.example.com',
+      models: [{ id: 'm1', name: 'M1' }],
+    })
+
+    const providers = readModelsRaw()
+    expect(providers['my-custom']?.authMethod).toBeUndefined()
+    // 其余写入（apiKey/baseUrl/models）不变——models.json 保留 pi 原生语义字段
+    expect(providers['my-custom']).toEqual({
+      apiKey: 'sk-x',
+      baseUrl: 'https://x.example.com',
+      models: [{ id: 'm1', name: 'M1' }],
+    })
+    expect(readExtrasRaw()['my-custom']).toEqual({ authMethod: 'api_key' })
+  })
+
+  it('二次保存更新 authMethod：providers.json 覆写、models.json 始终干净', async () => {
+    writeModelsJson_m2({})
+    const svc = makeSvc()
+
+    await svc.setProvider('my-custom', { apiKey: 'sk-x', authMethod: 'api_key', baseUrl: 'https://x.example.com' })
+    await svc.setProvider('my-custom', { authMethod: 'oauth' })
+
+    expect(readExtrasRaw()['my-custom']).toEqual({ authMethod: 'oauth' })
+    expect(readModelsRaw()['my-custom']?.authMethod).toBeUndefined()
+  })
+
+  it('setProvider 不传 authMethod → providers.json 既有 authMethod 保留（modify 只覆写该字段）', async () => {
+    writeModelsJson_m2({ p1: { baseUrl: 'https://x.example.com' } })
+    await extrasStore.modify('p1', () => ({ authMethod: 'api_key' }))
+    const svc = makeSvc()
+
+    await svc.setProvider('p1', { name: 'Renamed' })
+
+    expect(readExtrasRaw()['p1']).toEqual({ authMethod: 'api_key' })
+  })
+
+  it('防复活（路径 3）：调用方恶意传 quota → models.json 与 providers.json 均不落 quota', async () => {
+    writeModelsJson_m2({})
+    const svc = makeSvc()
+
+    // quota 字段已从 SetProviderInput 类型删除——cast 模拟绕过类型的恶意调用方
+    const malicious = {
+      apiKey: 'sk-x',
+      baseUrl: 'https://x.example.com',
+      quota: { fetcher: 'zhipu', enabled: true },
+    } as unknown as SetProviderInput
+    await svc.setProvider('evil', malicious)
+
+    expect(readModelsRaw()['evil']?.quota).toBeUndefined()
+    expect(readExtrasRaw()['evil']).toBeUndefined()
+  })
+
+  it('未注入 extrasStore 时 authMethod 丢弃 + 不抛错（宁丢不写错位）', async () => {
+    writeModelsJson_m2({})
+    const svc = new ConfigService('/tmp/project', configStore_m2, undefined, undefined)
+
+    await svc.setProvider('my-custom', {
+      apiKey: 'sk-x',
+      authMethod: 'api_key',
+      baseUrl: 'https://x.example.com',
+    })
+
+    expect(readModelsRaw()['my-custom']?.authMethod).toBeUndefined()
+    expect(existsSync(extrasPath)).toBe(false)
+  })
+})
+describe('setProvider 写侧切换（G3 残留：models[].enabled → providers.json modelStates）', () => {
+  function makeSvc(): ConfigService {
+    return new ConfigService('/tmp/project', configStore_m2, undefined, extrasStore)
+  }
+
+  it('model enabled 写 providers.json modelStates，models.json 不再落 enabled 字段', async () => {
+    writeModelsJson_m2({
+      'my-custom': { apiKey: 'sk-x', baseUrl: 'https://x.example.com' },
+    })
+    const svc = makeSvc()
+
+    await svc.setProvider('my-custom', {
+      models: [
+        { id: 'm1', name: 'M1', enabled: false },
+        { id: 'm2', name: 'M2' }, // 未传 enabled：不产生 modelStates 条目
+      ],
+    })
+
+    // models.json：models[].enabled 不再序列化（pi schema 外寄生字段）
+    const models = readModelsRaw()['my-custom']?.models as Array<Record<string, unknown>>
+    expect(models).toHaveLength(2)
+    expect(models[0]).toEqual({ id: 'm1', name: 'M1' })
+    expect(models[1]).toEqual({ id: 'm2', name: 'M2' })
+    // providers.json：modelStates 记录启停（仅含显式传 enabled 的条目）
+    expect(readExtrasRaw()['my-custom']).toEqual({
+      modelStates: { m1: { enabled: false } },
+    })
+  })
+
+  it('base 残留的旧 enabled（迁移失败窗口数据）写入时一并剥除', async () => {
+    writeModelsJson_m2({
+      p1: {
+        baseUrl: 'https://x.example.com',
+        models: [{ id: 'm1', name: 'M1', enabled: true }], // 旧寄生数据
+      },
+    })
+    const svc = makeSvc()
+
+    // 回传不带 enabled：base spread 会把旧 enabled 带进 model 对象——G3 修复后 delete 剥除
+    await svc.setProvider('p1', { models: [{ id: 'm1', name: 'M1' }] })
+
+    const models = readModelsRaw().p1?.models as Array<Record<string, unknown>>
+    expect(models[0]).toEqual({ id: 'm1', name: 'M1' })
+    // 未显式传 enabled → 不写 modelStates（旧值也不搬运——读侧双读兜底仍能读到旧数据）
+    expect(readExtrasRaw().p1).toBeUndefined()
+  })
+
+  it('modelStates RMW 合并（S2 语义）：authMethod 等其他字段保留；custom provider 的 payload 即全集，未回传的 model 条目剔除', async () => {
+    writeModelsJson_m2({ p1: { baseUrl: 'https://x.example.com' } })
+    await extrasStore.modify('p1', () => ({
+      authMethod: 'api_key',
+      modelStates: { 'deleted-model': { enabled: false }, m1: { enabled: true } },
+    }))
+    const svc = makeSvc()
+
+    // 回传不含 deleted-model（编辑体已删该模型）→ 其 modelStates 残留须剔除（S2 修复，
+    // 旧实现 {...current, ...updates} 合并导致残留、同 id 重加旧 disabled 复活）
+    await svc.setProvider('p1', { models: [{ id: 'm1', name: 'M1', enabled: false }] })
+
+    expect(readExtrasRaw().p1).toEqual({
+      authMethod: 'api_key',
+      modelStates: { m1: { enabled: false } },
+    })
+    expect(readModelsRaw().p1?.authMethod).toBeUndefined()
+  })
+
+  it('未注入 extrasStore 时 model enabled 丢弃 + 不抛错（宁丢不写错位，与 authMethod 对称）', async () => {
+    writeModelsJson_m2({})
+    const svc = new ConfigService('/tmp/project', configStore_m2, undefined, undefined)
+
+    await svc.setProvider('my-custom', {
+      apiKey: 'sk-x',
+      baseUrl: 'https://x.example.com',
+      models: [{ id: 'm1', name: 'M1', enabled: false }],
+    })
+
+    const models = readModelsRaw()['my-custom']?.models as Array<Record<string, unknown>>
+    expect(models[0]).toEqual({ id: 'm1', name: 'M1' })
+    expect(existsSync(extrasPath)).toBe(false)
+  })
+})
+});

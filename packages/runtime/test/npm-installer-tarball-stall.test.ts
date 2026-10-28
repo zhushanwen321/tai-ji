@@ -14,7 +14,7 @@
  * 旋钮连通用真实短定时器（经 options.timeout 传入小值，D3-2 单旋钮语义）。
  *
  * 集成门控（2026-10-22 单测层极端测试整治）：「不误杀与旋钮」组的 3 条依赖真实
- * TCP/TLS 传输完成（trickle 限速 ~1s 真实传输 / 真实短定时器触发），传输墙钟在满载下
+ * TCP/TLS 传输完成（trickle 限速 ~0.5s 真实传输 / 真实短定时器触发），传输墙钟在满载下
  * 无确定性完成信号可等（判据第三档）——经 TAIJI_TEST_INTEGRATION 门控（SSOT =
  * test-guard/integration-gate.ts）本地默认跳过；stall 窗口触发语义（fake timers 推进
  * 60s 窗口）与完整成功路径回归保留本地默认组。
@@ -311,7 +311,8 @@ describe.skipIf(
     behavior = 'trickle'
     withIntegrity = false
 
-    // gzip 后 ~50KB / 2KB 每 40ms ≈ 1s 总时长 > 300ms 窗口——
+    // gzip 后 ~26KB（24KB 随机 hex 压缩后实测 26265-26300B，20 次分布 ±0.13%）/
+    // 2KB 块 × 13 chunks 每 40ms ≈ 480ms 总时长 > 300ms 窗口——
     // 成功即证明 stall timer 被每个 data chunk 持续刷新（非总墙钟语义）
     await expect(installPackage('fake-pkg', nodeModulesDir, { timeout: 300 })).resolves.toBeUndefined()
 

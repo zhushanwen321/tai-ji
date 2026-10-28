@@ -1,0 +1,402 @@
+/**
+ * PluginProviderSource —— Provider 插件来源数据源（provider-plugin-access 设计 U6）。
+ *
+ * 职责（D1/D5/D9 消费侧）：
+ *  - 拉清单：plugin.listAvailable（家族卡数据源 + 本地安装状态 + 更新可用标记）；
+ *  - 插件运行态：plugin.list（S13 家族卡崩溃态判定源，进入 family 段拉取为主；
+ *    plugin:crashed 广播作增量标记，丢失由下次拉取收敛）+ 重启动作（plugin.toggle
+ *    off 再 on——不自动重激活，ADR-0122）；
+ *  - 凭据状态：条目展开 / 页进入经 plugin.invoke 的 getStatus 拉已知状态（拉为主，
+ *    ADR-0097/D5），plugin:event 的凭据状态上报作增量提示（推补充——丢失由下一次
+ *    展开拉取收敛，不建推送补偿）；宿主只做展示映射，不推断状态（D5）。
+ *
+ * 状态形态判定：插件来源是**设置域全局状态**（无 sessionId 归属），非 per-session
+ * 状态——模块级单例 + refCount 物理订阅（ADR-0049 例外清单形态，判定见本注释）。
+ * 多组件共享单条 plugin:event 订阅与同一快照。
+ *
+ * 通道约定（与插件侧的共同契约，首个使用方 = wool 系插件包）：
+ *  - 状态上报 channel = 'provider.credentialStatus'，payload = CredentialStatusPayload
+ *    （含归属 providerId）；
+ *  - 业务方法名 = 'getStatus'，params = { providerId }，返回 CredentialStatusPayload
+ *    或 null（插件明确「未上报/无状态」）。
+ * 插件未上报时 statusOf 返回 undefined，宿主不显示任何失效标记（D5/S5——不猜测）。
+ */
+import { onScopeDispose, ref, type Ref } from 'vue'
+import type { PluginListAvailableReply, PluginInfo } from '@taiji/shared'
+import type { ActionExecutor, UiEventSender } from '@taiji/ui/rendering-protocol'
+// [C3] settings 域的 WS 读写一律经 SettingsTransport seam（禁直连 @/api 门面 /
+// 禁深 import transport 域）；插件来源的四条通道 + 可选安装成员由 seam 承载
+import { getSettingsTransport } from '@taiji/core'
+import type { PluginInstallResult, PluginInstallPreview } from '@taiji/core'
+
+/** 凭据状态上报 channel（插件自命 channel 的消费约定，见文件头）。 */
+export const CREDENTIAL_STATUS_CHANNEL = 'provider.credentialStatus'
+
+/** getStatus 业务方法名（插件经 commands-executor 注册的 method 路由键）。 */
+export const GET_STATUS_METHOD = 'getStatus'
+
+/**
+ * getAuthorizeView 业务方法名（进入授权挂载位容器时 invoke——插件初始树的唯一生产者：
+ * 快照 store 只存插件 views.update 推送的内容，无此驱动容器恒占位空态）。
+ */
+export const GET_AUTHORIZE_VIEW_METHOD = 'getAuthorizeView'
+
+/** getDetail 业务方法名（条目展开时 invoke——detail-extra 扩展区树的初生产者，同上）。 */
+export const GET_DETAIL_METHOD = 'getDetail'
+
+/** 凭据状态载荷（宿主展示映射的最小契约：状态 + 可选一行文案）。 */
+export interface CredentialStatusPayload { // oe-exempt:20261024:framework:ports/SDK 契约类型——接口先立、单实现常态（映射表/端口单一数据源）
+  /** 凭据状态两值：valid = 插件判定可用；invalid = 插件判定失效（S17 展示驱动） */
+  state: 'valid' | 'invalid'
+  /** 一行文案（如「登录态已过期」；缺省用宿主默认文案） */
+  message?: string
+}
+
+/** getStatus 返回值窄化：状态字段形态（providerId 已在 params，返回值不带归属）。 */
+function parseStatusFields(raw: unknown): CredentialStatusPayload | null {
+  if (raw === null || raw === undefined) return null
+  if (typeof raw !== 'object') return null
+  const candidate = raw as Record<string, unknown>
+  if (candidate.state !== 'valid' && candidate.state !== 'invalid') return null
+  if (candidate.message !== undefined && typeof candidate.message !== 'string') return null
+  return {
+    state: candidate.state,
+    ...(candidate.message !== undefined ? { message: candidate.message } : {}),
+  }
+}
+
+/**
+ * unknown → CredentialStatusPayload 的运行时窄化（上报载荷形态，providerId 必带）：
+ * = getStatus 状态字段校验（parseStatusFields）+ providerId 归属前置提取（缺归属
+ * 的载荷不落分区——防「归属与状态错位」的插件侧 bug 静默写错分区）。
+ */
+export function parseCredentialStatus(raw: unknown): CredentialStatusPayload | null {
+  if (extractProviderId(raw) === undefined) return null
+  return parseStatusFields(raw)
+}
+
+/** 清单条目（附安装状态比对结果，PluginListAvailableReply.plugins 元素别名）。 */
+export type PluginCatalogItem = PluginListAvailableReply['plugins'][number]
+
+/** providerId → 插件命名空间的前缀判定（D4：providerId === ns || startsWith(ns + '-')）。 */
+export function providerMatchesNamespace(providerId: string, namespace: string): boolean {
+  return providerId === namespace || providerId.startsWith(`${namespace}-`)
+}
+
+/** 条目进入接入流程的焦点（重新授权 / 更新插件——跳过家族选择直达目标段）。 */
+export interface PluginFlowFocus { // oe-exempt:20261024:framework:ports/SDK 契约类型——接口先立、单实现常态（映射表/端口单一数据源）
+  pluginId: string
+  intent: 'authorize' | 'update'
+}
+
+/** 插件来源条目的下发信息（ProviderPage 按清单 family 前缀判定后下发行卡）。 */
+export interface PluginEntryInfo { // oe-exempt:20261024:framework:ports/SDK 契约类型——接口先立、单实现常态（映射表/端口单一数据源）
+  /** 提供该来源的插件 id（挂载位 scope 的插件维度 + 重新授权/更新的 invoke 对象） */
+  pluginId: string
+  /** 清单版本 > 已装版本（「更新插件」动作显示判据，S26） */
+  updateAvailable?: boolean
+}
+
+/** 安装确认卡知情面（S27；权威定义 = core seam，与 runtime IPluginService 结构对齐）。 */
+export type { PluginInstallPreview }
+
+/** 两段式安装端口（seam 三可选成员收窄成可调用端口）。 */
+export interface PluginInstallPort { // oe-exempt:20261024:framework:ports/SDK 契约类型——接口先立、单实现常态（映射表/端口单一数据源）
+  preparePluginInstall(packageSpec: string): Promise<PluginInstallPreview>
+  confirmPluginInstall(pluginId: string): Promise<PluginInstallResult>
+  cancelPluginInstall(pluginId: string): Promise<void>
+}
+
+/**
+ * 运行时窄化：SettingsTransport 的安装三成员为 optional（接口契约形态），齐备时
+ * 收窄成可调用端口返回（两段式安装 wire 通路：adapter → plugin domain → WS 帧 →
+ * runtime 两段式编排，S27 确认停点）。缺失返回 null → 调用点呈「通道未就绪」
+ * 可见降级，不崩溃。
+ */
+export function resolvePluginInstallPort(): PluginInstallPort | null {
+  const transport = getSettingsTransport()
+  if (typeof transport.preparePluginInstall !== 'function') return null
+  if (typeof transport.confirmPluginInstall !== 'function') return null
+  if (typeof transport.cancelPluginInstall !== 'function') return null
+  return {
+    preparePluginInstall: (spec) => transport.preparePluginInstall!(spec),
+    confirmPluginInstall: (pluginId) => transport.confirmPluginInstall!(pluginId),
+    cancelPluginInstall: (pluginId) => transport.cancelPluginInstall!(pluginId),
+  }
+}
+
+/**
+ * 构造挂载位作用域的 uiEvent 出口（D8 值回传）：只有挂载位容器同时知道
+ * (pluginId, viewId)，故 provide 由容器组件做（授权容器 / 条目扩展区），原语只报
+ * (componentId, event, value)。pluginId 取 getter——家族卡切换后跟随当前选中项。
+ */
+export function createPluginUiEventSender(pluginId: () => string | null, viewId: string): UiEventSender {
+  return {
+    send(componentId, event, value) {
+      const id = pluginId()
+      if (id === null) return
+      getSettingsTransport().sendPluginUiEvent({ pluginId: id, viewId, componentId, event, value }).catch((e: unknown) => {
+        // 辅助通道降级：回传失败不阻断输入（插件侧持有次优值，下次输入覆盖），warn 可见
+        console.warn(`[plugin-provider-source] uiEvent (${id}/${viewId}/${componentId}) failed:`, e)
+      })
+    },
+  }
+}
+
+/**
+ * 构造挂载位作用域的 action-bar 执行器（D7/S7 命令执行）：action-bar 的 commandId
+ * 是插件 fork 内注册的命令，不在宿主 CommandRegistry 表（那张表只收 pi 扩展
+ * contribution）——容器 provide 局部执行器直发 plugin.executeCommand，pluginId 取
+ * getter 跟随当前选中插件。app 级 ACTION_EXECUTOR_KEY（pi 扩展命令链）被此覆盖。
+ */
+export function createPluginActionExecutor(pluginId: () => string | null): ActionExecutor {
+  return {
+    execute(commandId, args) {
+      const id = pluginId()
+      if (id === null) return
+      getSettingsTransport().executePluginCommand({ pluginId: id, commandId, args }).catch((e: unknown) => {
+        // 辅助通道降级：命令失败不阻断页面（插件侧树不变，可重试），warn 可见
+        console.warn(`[plugin-provider-source] executeCommand (${id}/${commandId}) failed:`, e)
+      })
+    },
+  }
+}
+
+/** usePluginProviderSource 返回形态（类型别名：多行字面量签名触发 indent lint）。 */
+export type PluginProviderSourceReturn = {
+  /** 清单可安装视图（家族卡 + 安装/更新状态；未拉取/失败为空数组） */
+  catalog: Ref<PluginCatalogItem[]>
+  /** 清单是否已成功拉取至少一次（空态 vs 加载态判定） */
+  catalogLoaded: Ref<boolean>
+  /** S15①：缓存兜底生效且本次非确认新鲜（「清单可能不是最新」提示判据，R-2 wire 字段） */
+  catalogStale: Ref<boolean>
+  /** S15②：无缓存且拉取失败（整页报错态判据——与「缓存清单为空」区分，R-2 wire 字段） */
+  catalogUnavailable: Ref<boolean>
+  /** 拉取清单（fail-safe 链在 runtime，本层失败保持现状 + warn） */
+  refreshCatalog: () => Promise<void>
+  /**
+   * 拉取插件运行态列表（plugin.list，S13 家族卡崩溃态判定源——status='crashed' 的
+   * 已装条目呈「插件已停止」+ 重启按钮）。失败保持现状 + warn（拉为主：进入 family
+   * 段的本次拉取是权威态，plugin:crashed 增量提示丢失由它收敛）。
+   */
+  refreshPlugins: () => Promise<void>
+  /**
+   * 重启崩溃插件（S13 失败路径表：plugin.toggle off 再 on——不自动重激活，用户显式
+   * 触发，ADR-0122）。成功后以 toggle reply 的最新列表更新运行态缓存并返回；
+   * 失败向调用方抛出（UI 层呈现，不静默）。
+   */
+  restartPlugin: (pluginId: string) => Promise<void>
+  /** 已知插件运行态（undefined = 未拉取/不在列表——无崩溃标记，不猜测） */
+  pluginInfoOf: (pluginId: string) => PluginInfo | undefined
+  /** 已知凭据状态（undefined = 未上报/未拉取——宿主不显示任何标记，D5/S5） */
+  statusOf: (providerId: string) => CredentialStatusPayload | undefined
+  /**
+   * 条目展开 / 页进入时拉取凭据状态（D5：getStatus 同步返回插件本地最近已知状态，
+   * 上游校验由插件异步执行后经 plugin:event 增量上报）。插件侧失败降级 warn，
+   * 不阻断条目展开。
+   */
+  pullStatus: (pluginId: string, providerId: string) => Promise<void>
+  /**
+   * 进入授权挂载位容器时拉取插件授权视图（invoke getAuthorizeView 触发插件推初始树
+   * ——快照 store 只存插件推送内容，无此驱动容器恒占位空态）。失败降级 warn。
+   */
+  pullAuthorizeView: (pluginId: string) => Promise<void>
+  /** 条目展开时拉取插件扩展区视图（invoke getDetail 触发插件推 detail-extra 树）。失败降级 warn。 */
+  pullDetailView: (pluginId: string) => Promise<void>
+  /**
+   * providerId → 插件来源条目（识别两源，S15②/D4）：① 清单家族前缀（family.id）；
+   * ② 清单外兜底 = 本地已装条目的 manifest namespace 前缀（清单不可达时管理入口
+   * 不断，R-2 本地回退条目携带 namespace）。两源都未命中返回 undefined。
+   */
+  entryOfProvider: (providerId: string) => PluginCatalogItem | undefined
+}
+
+// taste:allow-no-data-owner W24-EX-B（模块级单例，设置域全局态非 per-session——ADR-0049
+// 例外清单形态，判定见文件头）：凭据状态 map（providerId → 插件上报的已知状态）。
+const statusMap = ref(new Map<string, CredentialStatusPayload>())
+// taste:allow-no-data-owner W24-EX-B（同上）：清单可安装视图缓存（家族卡 + 安装/更新状态）。
+const catalog = ref<PluginCatalogItem[]>([])
+// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构）：清单首次拉取完成标记（空态判定）。
+const catalogLoaded = ref(false)
+// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构）：S15 两态元数据（R-2 wire 字段）。
+const catalogStale = ref(false)
+// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构）：S15 两态元数据（R-2 wire 字段）。
+const catalogUnavailable = ref(false)
+// taste:allow-no-data-owner W24-EX-B（模块级单例，设置域全局态非 per-session——ADR-0049
+// 例外清单形态，判定见文件头）：插件运行态 map（pluginId → PluginInfo，S13 崩溃态判定源）。
+const pluginInfoMap = ref(new Map<string, PluginInfo>())
+
+let refCount = 0
+let unsubscribeEvent: (() => void) | null = null
+let unsubscribeCrashed: (() => void) | null = null
+
+/**
+ * plugin:event 增量提示订阅（D5：推补充——丢失由下次 pullStatus 收敛，无补偿机制）
+ * + plugin:crashed 崩溃增量提示（S13：拉为主，进入 family 段的 plugin.list 是权威态，
+ * 崩溃帧丢失由下次拉取收敛）。
+ */
+function ensureSubscribed(): void {
+  if (unsubscribeEvent === null) {
+    unsubscribeEvent = getSettingsTransport().onPluginEvent((event) => {
+      if (event.channel !== CREDENTIAL_STATUS_CHANNEL) return
+      // parseCredentialStatus 的契约含 providerId（归属必带）；仍显式提取并校验，
+      // 防御「payload providerId 与窄化结果错位」的插件侧 bug 静默写错分区。
+      const providerId = extractProviderId(event.payload)
+      const status = providerId !== undefined ? parseCredentialStatus(event.payload) : null
+      if (!status) return
+      const next = new Map(statusMap.value)
+      next.set(providerId!, { state: status.state, ...(status.message !== undefined ? { message: status.message } : {}) })
+      statusMap.value = next
+    })
+  }
+  if (unsubscribeCrashed === null) {
+    unsubscribeCrashed = getSettingsTransport().onPluginCrashed((payload) => {
+      // 增量标记崩溃（字段原样保留 wire 真值；status 语义 = runtime 崩溃回调已落
+      // registry 的 crashed，此处只同步展示缓存，不重算其他字段）
+      const previous = pluginInfoMap.value.get(payload.pluginId)
+      if (previous === undefined || previous.status === 'crashed') return
+      const next = new Map(pluginInfoMap.value)
+      next.set(payload.pluginId, { ...previous, status: 'crashed', enabled: false })
+      pluginInfoMap.value = next
+    })
+  }
+}
+
+/** 上报载荷里的归属 providerId（parseCredentialStatus 契约字段的前置提取）。 */
+function extractProviderId(payload: unknown): string | undefined {
+  if (typeof payload !== 'object' || payload === null) return undefined
+  const providerId = (payload as Record<string, unknown>).providerId
+  return typeof providerId === 'string' && providerId !== '' ? providerId : undefined
+}
+
+function releaseSubscription(): void {
+  unsubscribeEvent?.()
+  unsubscribeEvent = null
+  unsubscribeCrashed?.()
+  unsubscribeCrashed = null
+}
+
+/**
+ * 消费 Provider 插件来源域状态（设置页全局态单例 + refCount 订阅；消费点须在组件
+ * setup 上下文内——onScopeDispose 挂当前 scope）。
+ */
+export function usePluginProviderSource(): PluginProviderSourceReturn {
+  refCount++
+  ensureSubscribed()
+  onScopeDispose(() => {
+    refCount--
+    if (refCount <= 0) {
+      refCount = 0
+      releaseSubscription()
+    }
+  })
+  return {
+    catalog,
+    catalogLoaded,
+    catalogStale,
+    catalogUnavailable,
+    refreshCatalog,
+    refreshPlugins,
+    restartPlugin,
+    pluginInfoOf: (pluginId) => pluginInfoMap.value.get(pluginId),
+    statusOf: (providerId) => statusMap.value.get(providerId),
+    pullStatus,
+    pullAuthorizeView,
+    pullDetailView,
+    entryOfProvider: (providerId) =>
+      // 识别源①：清单家族前缀（D1，含家族元数据与 updateAvailable 增强）
+      catalog.value.find((entry) => entry.family !== undefined && providerMatchesNamespace(providerId, entry.family.id)) ??
+      // 识别源②（S15② 清单外兜底，D4）：已装条目按 manifest namespace 前缀识别——
+      // 清单不可达时「重新授权 / 更新插件」入口不断（无家族元数据，updateAvailable 缺省）
+      catalog.value.find((entry) => entry.namespace !== undefined && providerMatchesNamespace(providerId, entry.namespace)),
+  }
+}
+
+/** 拉取清单（listAvailable；失败保持现状 + warn，UI 层按两态元数据/重试呈现，S15）。 */
+async function refreshCatalog(): Promise<void> {
+  try {
+    const reply = await getSettingsTransport().listAvailablePlugins()
+    catalog.value = reply.plugins
+    catalogLoaded.value = true
+    // S15 两态元数据（R-2 wire 字段）：stale =「清单可能不是最新」提示判据；
+    // available=false = 无缓存且拉取失败（整页报错态，与「缓存清单为空」区分）
+    catalogStale.value = reply.stale === true
+    catalogUnavailable.value = reply.available === false
+  } catch (e) {
+    // 辅助域降级：失败保持现状（首拉失败 = 空清单空态），不向上抛。
+    console.warn('[plugin-provider-source] listAvailable failed (kept current catalog):', e)
+  }
+}
+
+/** 拉取插件运行态列表（plugin.list；失败保持现状 + warn，S13 拉为主）。 */
+async function refreshPlugins(): Promise<void> {
+  try {
+    const plugins = await getSettingsTransport().listPlugins()
+    pluginInfoMap.value = new Map(plugins.map((p) => [p.pluginId, p]))
+  } catch (e) {
+    // 辅助域降级：失败保持现状（无崩溃标记——不猜测），不向上抛。
+    console.warn('[plugin-provider-source] plugin.list failed (kept current plugin states):', e)
+  }
+}
+
+/**
+ * 重启崩溃插件（S13：toggle off 再 on）。两步 reply 均携带最新插件列表快照，末次
+ * 结果直接更新运行态缓存；off/on 任一步失败都中断并向调用方抛出（UI 呈现，不静默）。
+ */
+async function restartPlugin(pluginId: string): Promise<void> {
+  const transport = getSettingsTransport()
+  await transport.togglePlugin(pluginId, false)
+  const plugins = await transport.togglePlugin(pluginId, true)
+  pluginInfoMap.value = new Map(plugins.map((p) => [p.pluginId, p]))
+}
+
+/** 条目展开 / 页进入的凭据状态拉取（invoke getStatus；失败 warn 降级，D5）。 */
+async function pullStatus(pluginId: string, providerId: string): Promise<void> {
+  try {
+    const raw = await getSettingsTransport().invokePlugin(pluginId, GET_STATUS_METHOD, { providerId })
+    const status = parseStatusFields(raw)
+    const next = new Map(statusMap.value)
+    if (status) next.set(providerId, status)
+    else next.delete(providerId) // 显式 null = 插件明确「未上报」→ 不显示标记
+    statusMap.value = next
+  } catch (e) {
+    // 插件崩溃 / 方法未注册：辅助域降级 warn，保持现状（无标记——不猜测，S5）
+    console.warn(`[plugin-provider-source] getStatus(${pluginId}, ${providerId}) failed:`, e)
+  }
+}
+
+/**
+ * 进入授权挂载位容器时拉取插件授权视图（invoke getAuthorizeView → 插件推初始树经
+ * 实时帧进快照 store → ViewHost 渲染）。失败 warn 降级（容器保持占位空态，树到达
+ * 通道本身由重进授权段重试收敛），不阻断进入。
+ */
+async function pullAuthorizeView(pluginId: string): Promise<void> {
+  try {
+    await getSettingsTransport().invokePlugin(pluginId, GET_AUTHORIZE_VIEW_METHOD, {})
+  } catch (e) {
+    // 插件崩溃 / 方法未注册：辅助域降级 warn，容器保持占位空态（树到达通道由重进授权段重试收敛）
+    console.warn(`[plugin-provider-source] getAuthorizeView(${pluginId}) failed:`, e)
+  }
+}
+
+/** 条目展开时拉取插件扩展区视图（invoke getDetail → 插件推 detail-extra 树；降级同上）。 */
+async function pullDetailView(pluginId: string): Promise<void> {
+  try {
+    await getSettingsTransport().invokePlugin(pluginId, GET_DETAIL_METHOD, {})
+  } catch (e) {
+    // 插件崩溃 / 方法未注册：辅助域降级 warn，扩展区保持空态（推送/下次展开收敛），不阻断展开
+    console.warn(`[plugin-provider-source] getDetail(${pluginId}) failed:`, e)
+  }
+}
+
+/** 测试钩子：复位模块级状态 + 强制退订（对齐 _resetXxxForTest 模式）。 */
+export function _resetPluginProviderSourceForTest(): void {
+  refCount = 0
+  releaseSubscription()
+  statusMap.value = new Map()
+  pluginInfoMap.value = new Map()
+  catalog.value = []
+  catalogLoaded.value = false
+  catalogStale.value = false
+  catalogUnavailable.value = false
+}

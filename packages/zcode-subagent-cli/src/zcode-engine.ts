@@ -71,6 +71,7 @@ import {
   ZCODE_APPSERVER_ABORT_GRACE_MS,
   ZCODE_APPSERVER_ERR_BUSY_SESSION,
   ZCODE_APPSERVER_ERR_MODEL_CONFIG_MISSING,
+  ZCODE_APPSERVER_HARVEST_GRACE_ENV,
   ZCODE_APPSERVER_HARVEST_GRACE_MS,
   ZCODE_APPSERVER_STOP_TIMEOUT_ENV,
   ZCODE_APPSERVER_STOP_TIMEOUT_MS,
@@ -565,7 +566,7 @@ export class ZcodeEngine implements EnginePort {
   private async awaitConnFinalized(rt: AppServerRuntime): Promise<void> {
     if (!rt.conn.alive) return;
     await new Promise<void>((resolve) => {
-      const timer = setTimeout(() => finish(), ZCODE_APPSERVER_HARVEST_GRACE_MS);
+      const timer = setTimeout(() => finish(), harvestGraceMs());
       if (typeof timer.unref === "function") timer.unref();
       const off = rt.conn.onClose(() => finish());
       function finish(): void {
@@ -727,7 +728,7 @@ export class ZcodeEngine implements EnginePort {
     });
     await rt.conn.shutdown({ graceMs: ZCODE_KILL_GRACE_MS });
     // close 未在 grace 内到达 → 输掉 race → channel.dispose() 的内置收割兜底
-    await Promise.race([harvested, delayResolved(ZCODE_APPSERVER_HARVEST_GRACE_MS, undefined)]);
+    await Promise.race([harvested, delayResolved(harvestGraceMs(), undefined)]);
     rt.channel.dispose();
   }
 
@@ -1268,6 +1269,15 @@ function abortGraceMs(): number {
     ZCODE_APPSERVER_ABORT_GRACE_ENV,
     ZCODE_APPSERVER_ABORT_GRACE_MS,
     "abort grace 窗口",
+  );
+}
+
+/** [测试注入缝] 崩溃收割确认兜底窗口实际值（env 覆盖 > 默认 1s；同上）。 */
+function harvestGraceMs(): number {
+  return resolveAppserverTimingMs(
+    ZCODE_APPSERVER_HARVEST_GRACE_ENV,
+    ZCODE_APPSERVER_HARVEST_GRACE_MS,
+    "崩溃收割确认窗口",
   );
 }
 

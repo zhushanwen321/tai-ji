@@ -10,8 +10,8 @@
  * - 排除：测试文件（*.test.* / *.spec.* / __tests__）、node_modules/dist 等产物目录、
  *   登记表模块自身（manifest 字面量是数据不是表面）。
  *
- * 一次性验证脚本纪律：本文件是 z-surface-baseline.test.ts 的常驻依赖（对照基线每次跑测
- * 重扫全仓），非一次性脚本，随测试资产留存。
+ * 一次性验证脚本纪律：本文件是 `scripts/check-z-surface-baseline.mjs` 与
+ * `local-esc-two-tier.test.ts` 的常驻依赖（对照基线每次跑检查都重扫全仓），非一次性脚本。
  */
 import { readdirSync, readFileSync, existsSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
@@ -25,7 +25,7 @@ const SCAN_EXTS = new Set(['.vue', '.ts', '.tsx', '.css'])
 /** 登记表模块自身（字面量是数据不是表面，防自指误报）；esc 扫描无自指面，传 null 不排除 */
 const SELF_DIR_FRAGMENT = 'modal-surface-registry'
 
-export type ZForm = 'class-token' | 'class-raw' | 'inline-style' | 'css-decl'
+export type ZForm = 'class-token' | 'class-token-calc' | 'class-raw' | 'inline-style' | 'css-decl'
 
 export interface ZOccurrence { // oe-exempt:20261003:test:测试夹具/扫描器数据形态 // oe-exempt:20261003:test:z 基线扫描测试夹具数据形态
   /** 仓库根相对路径 */
@@ -118,6 +118,13 @@ function resolveLiteral(literal: string, tokens: Map<string, number>): number {
     if (value === undefined) throw new Error(`z-scan: 字面量 ${literal} 引用的 token 未定义——先在 style.css 定义或改用数值`)
     return value
   }
+  // calc 偏移形：calc(var(--z-x)+N) —— 基档 token 值 + 偏移（「浮在某容器之上」的 +1 模式）
+  const calc = /^calc\(var\((--z-[a-z0-9-]+)\)\s*\+\s*(\d+)\)$/.exec(literal)
+  if (calc) {
+    const value = tokens.get(calc[1])
+    if (value === undefined) throw new Error(`z-scan: 字面量 ${literal} 引用的 token 未定义——先在 style.css 定义或改用数值`)
+    return value + Number(calc[2])
+  }
   throw new Error(`z-scan: 无法解析的 z 字面量 '${literal}'`)
 }
 
@@ -145,12 +152,18 @@ export function scanZSurfaces(root: string): ZOccurrence[] {
       }
       // ① class token 形：z 方括号 var(--z-x) 形
       for (const m of line.matchAll(/z-\[var\((--z-[a-z0-9-]+)\)\]/g)) push('class-token', `var(${m[1]})`)
+      // ①' class token calc 偏移形：z-[calc(var(--z-x)+N)]（2026-10-22 盲区补正——原 ① 正则
+      //     不匹配 calc 包裹，AgentStreamDrawer 曾结构性漏网；登记侧 form='class-token-calc'）
+      for (const m of line.matchAll(/z-\[calc\(var\((--z-[a-z0-9-]+)\)\s*\+\s*(\d+)\)\]/g)) push('class-token-calc', `calc(var(${m[1]})+${m[2]})`)
       // ② 裸数字 class 形：z 方括号数字形
       for (const m of line.matchAll(/z-\[(\d{2,})\]/g)) push('class-raw', m[1])
-      // ③ inline style zIndex 形：行内 zIndex 赋值取全部 var 引用与 3-4 位裸数字
+      // ③ inline style zIndex 形：行内 zIndex 赋值取全部 var 引用与 3-4 位裸数字；
+      //    calc 偏移形先记 calc 字面量并把 calc 段从行内剥除，防内部 var/数字被裸形态重复捕获
       if (line.includes('zIndex')) {
-        for (const m of line.matchAll(/var\((--z-[a-z0-9-]+)\)/g)) push('inline-style', `var(${m[1]})`)
-        for (const m of line.matchAll(/(?<![\w-])(\d{3,4})(?![\w-])/g)) push('inline-style', m[1])
+        for (const m of line.matchAll(/calc\(var\((--z-[a-z0-9-]+)\)\s*\+\s*(\d+)\)/g)) push('inline-style', `calc(var(${m[1]})+${m[2]})`)
+        const bareLine = line.replace(/calc\(var\(--z-[a-z0-9-]+\)\s*\+\s*\d+\)/g, '')
+        for (const m of bareLine.matchAll(/var\((--z-[a-z0-9-]+)\)/g)) push('inline-style', `var(${m[1]})`)
+        for (const m of bareLine.matchAll(/(?<![\w-])(\d{3,4})(?![\w-])/g)) push('inline-style', m[1])
       }
       // ④ CSS 声明形：z-index: <值>
       if (isCss) {

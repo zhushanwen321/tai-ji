@@ -31,7 +31,7 @@
   ],
   "scripts": {
     "typecheck": "npx tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --pool=threads"
   },
   "dependencies": {
     "@zhushanwen/extension-protocol": "workspace:*",

@@ -20,13 +20,29 @@
  * mock 策略：vi.mock('@/api') + vi.mock('@taiji/core/transport/api/domains/quota') 替换 RPC，
  * mount 组件 + 手动设置 session/settings store 状态。
  *
+ * 单文件多源合并（3 源同装载簇）：context-capacity-quota（本节，最大源）+
+ * detail-selection-bubble + block-rendering-regression——vitest 按测试文件隔离模块图，
+ * 合并让全部用例共享一份组件树装载与环境初始化。未并入：thinking-md-variant.test.ts
+ * （其 `@vitest-environment jsdom` pragma 与包默认 happy-dom 环境冲突，且本文件 quota 区
+ * 用例的 portal 断言设计依赖 happy-dom 行为——环境实质冲突，保持独立）。detail 节的
+ * useDetailPane/useCopy/useChatViewDeps 等 mock 只覆盖 DetailPane 依赖面（DetailPane
+ * 不直接 import '@/api'，与 quota 节 @/api 全量 mock 无交互）；block 节经 mockChatProvide
+ * 注入，不经模块 mock。各节以裸块隔离节内 helper。
+ *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/context-capacity-quota.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import type { NormalizedQuotaRow, ProviderId, ProviderInfo } from '@taiji/shared'
+import { nextTick, reactive, ref } from 'vue'
+import type { NormalizedQuotaRow, ProviderId, ProviderInfo, Message } from '@taiji/shared'
+import { Turn } from '@taiji/ui'
 import { apiConfigDomainMock } from '../helpers/api-facade-mock'
+import { mockChatProvide } from '@/__tests__/helpers/chat-view-deps'
+import { chatViewDepsModule } from '@/__tests__/helpers/chat-stream-mount'
+import type { MessageTurn } from '@/composables/logic/messageTurns'
+import DetailPane from '@/components/panel/DetailPane.vue'
+import { composerInjectionStore } from '@/composables/panel/composer-injection-store'
 
 // ── mock ──
 
@@ -56,6 +72,40 @@ vi.mock('@/i18n', () => ({
   setLocale: vi.fn(),
   // useQuotaQuery 的 quotaFailReasonText 经 i18n.global.t 映射 reason 文案（mock 返回 key 本身）
   default: { global: { t: (key: string) => key } },
+}))
+
+// ── detail-selection-bubble 节的 mock（useDetailPane 可控 state + 选区 bubble 依赖面）──
+// 可配置的 detail state（测试切换 viewMode/content）
+const detailState = ref({
+  path: 'src/foo.ts',
+  content: 'line1\nline2\nline3\nline4',
+  viewMode: 'preview',
+  kind: 'code',
+  status: 'success',
+  hasGitChange: false,
+})
+vi.mock('@/composables/features/file-tree/useDetailPane', () => ({
+  useDetailPane: () => ({
+    state: detailState,
+    tabs: ref([]),
+    activePath: ref(null),
+    toggleView: vi.fn(),
+    activateTab: vi.fn(),
+    closeTab: vi.fn(),
+    saveScroll: vi.fn(),
+    sessionCwd: () => '/cwd',
+  }),
+}))
+vi.mock('@/composables/panel/useCopy', () => ({
+  useCopy: () => ({ copied: ref(null), copy: vi.fn() }),
+}))
+vi.mock('@/composables/logic/file-type', () => ({ extToLang: () => 'ts' }))
+vi.mock('@/lib/path-utils', () => ({ resolvePreviewPath: () => ({ absolute: '/cwd/src/foo.ts' }) }))
+
+// [w6 chat-ui-and-shell T7] DetailPane 壳 provide 真 deps（useChatViewDeps）→ mock 该装配器（原 vi.mock 旧组件路径失效，改模板按名 stub）
+vi.mock('@/composables/panel/useChatViewDeps', () => chatViewDepsModule())
+vi.mock('@/components/panel/detail-renderers/CodeBlock.vue', () => ({
+  default: { template: '<div />' },
 }))
 
 import ComposerMetricsAggregate from '@/components/panel/ComposerMetricsAggregate.vue'
@@ -664,3 +714,387 @@ describe('ComposerMetricsAggregate coding-plan 区', () => {
   // stores/quota-store.test.ts 专用单测，此处不再重复直测（2026-10-20 垃圾测试审计
   // D 类裁决：组件测试内直测 store 内部契约属重复证明）
 })
+
+// ══════════ 来源：detail-selection-bubble.test.ts ══════════
+{
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  const SIMPLE = { template: '<div />' }
+
+  function mountDetailPane() {
+    return mount(DetailPane, {
+      props: { sessionId: 's1' },
+      global: {
+        stubs: {
+          HoverCard: SIMPLE, HoverCardContent: SIMPLE, HoverCardTrigger: SIMPLE,
+          CodeBlock: SIMPLE, DiffView: SIMPLE, MarkdownRenderer: SIMPLE,
+        },
+      },
+    })
+  }
+
+  describe('W4: DetailPane 选区 bubble（FR-4）', () => {
+    it('U13: 无选区时 bubble 不存在', () => {
+      const wrapper = mountDetailPane()
+      expect(wrapper.find('[data-testid="detail-selection-bubble"]').exists()).toBe(false)
+    })
+
+    it('U13b: bubble "引用当前" 按钮注入 path+行范围 target=current（不含 text）', async () => {
+      const wrapper = mountDetailPane()
+      const store = composerInjectionStore
+      // mock window.getSelection 返回模拟选区（content 第 2-3 行）。
+      // fakeRange 必须含 startContainer/endContainer —— onContentMouseup 直接访问这俩字段，
+      // 缺失会让 findCodeLineIndex(node=undefined) 在 node.nodeType 抛 TypeError。
+      // preview 模式下内容区无 .line 节点（CodeBlock stub 成空 div），
+      // findCodeLineIndex 返回 null，自然落到文本回退分支。
+      const contentEl = wrapper.find('[data-testid="detail-content"]').element
+      const fakeRange = { commonAncestorContainer: contentEl, startContainer: contentEl, endContainer: contentEl }
+      vi.spyOn(window, 'getSelection').mockReturnValue({
+        isCollapsed: false,
+        rangeCount: 1,
+        getRangeAt: () => fakeRange,
+        toString: () => 'line2\nline3',
+        removeAllRanges: vi.fn(),
+        addRange: vi.fn(),
+      } as unknown as Selection)
+
+      await wrapper.find('[data-testid="detail-content"]').trigger('mouseup')
+      const bubble = wrapper.find('[data-testid="detail-selection-bubble"]')
+      expect(bubble.exists()).toBe(true)
+
+      await wrapper.find('[data-testid="bubble-inject-current"]').trigger('click')
+      expect(store.pendingInjection.value).not.toBeNull()
+      expect(store.pendingInjection.value?.path).toBe('src/foo.ts')
+      expect(store.pendingInjection.value?.lineStart).toBe(2)
+      expect(store.pendingInjection.value?.lineEnd).toBe(3)
+      expect(store.pendingInjection.value?.target).toBe('current')
+      // FR-8: payload 不含 text
+      expect((store.pendingInjection as unknown as Record<string, unknown>).text).toBeUndefined()
+      vi.restoreAllMocks()
+    })
+
+    it('U13c: bubble "新对话" 按钮走 target=new', async () => {
+      const wrapper = mountDetailPane()
+      const store = composerInjectionStore
+      // fakeRange 需含 startContainer/endContainer（详见 U13b 注释）
+      const contentEl = wrapper.find('[data-testid="detail-content"]').element
+      const fakeRange = { commonAncestorContainer: contentEl, startContainer: contentEl, endContainer: contentEl }
+      vi.spyOn(window, 'getSelection').mockReturnValue({
+        isCollapsed: false,
+        rangeCount: 1,
+        getRangeAt: () => fakeRange,
+        toString: () => 'line1',
+        removeAllRanges: vi.fn(),
+        addRange: vi.fn(),
+      } as unknown as Selection)
+
+      await wrapper.find('[data-testid="detail-content"]').trigger('mouseup')
+      await wrapper.find('[data-testid="bubble-inject-new"]').trigger('click')
+      expect(store.pendingInjection.value?.target).toBe('new')
+      expect(store.pendingInjection.value?.path).toBe('src/foo.ts')
+      expect(store.pendingInjection.value?.sessionId).toBeNull()
+      vi.restoreAllMocks()
+    })
+
+    it('U13d: diff 模式从选区行元素 data-line 精确反推行号（不再禁用 bubble）', async () => {
+      // 切 diff 模式：content 是 patch，DiffView 真实渲染行（带 data-line=newNo）
+      detailState.value = {
+        path: 'src/foo.ts',
+        content: '@@ -1,3 +1,4 @@\n context\n-old\n+new line\n+added\n',
+        viewMode: 'diff',
+        kind: 'code',
+        status: 'success',
+        hasGitChange: true,
+      }
+      const wrapper = mount(DetailPane, {
+        props: { sessionId: 's1' },
+        global: {
+          stubs: {
+            HoverCard: SIMPLE, HoverCardContent: SIMPLE, HoverCardTrigger: SIMPLE,
+            CodeBlock: SIMPLE, MarkdownRenderer: SIMPLE,
+            // DiffView 不 stub：真实渲染 patch 行（带 data-line）
+          },
+        },
+      })
+      await wrapper.vm.$nextTick()
+      const store = composerInjectionStore
+
+      // 找 DiffView 渲染的行 div（带 data-line）。patch 有 newNo 的行：context=1, new line=2, added=3
+      const lineEls = wrapper.findAll('[data-line]').filter((w) => w.attributes('data-line') !== '')
+      expect(lineEls.length).toBeGreaterThan(0)
+      // mock selection：startContainer 指向第一行（data-line=1），endContainer 指向最后一行
+      const firstLineEl = lineEls[0].element
+      const lastLineEl = lineEls[lineEls.length - 1].element
+      vi.spyOn(window, 'getSelection').mockReturnValue({
+        isCollapsed: false,
+        rangeCount: 1,
+        getRangeAt: () => ({
+          commonAncestorContainer: wrapper.find('[data-testid="detail-content"]').element,
+          startContainer: firstLineEl,
+          endContainer: lastLineEl,
+        }),
+        toString: () => 'some selected text',
+        removeAllRanges: vi.fn(),
+        addRange: vi.fn(),
+      } as unknown as Selection)
+
+      await wrapper.find('[data-testid="detail-content"]').trigger('mouseup')
+      // bubble 应显出（diff 模式不再禁用）
+      const bubble = wrapper.find('[data-testid="detail-selection-bubble"]')
+      expect(bubble.exists()).toBe(true)
+
+      await wrapper.find('[data-testid="bubble-inject-current"]').trigger('click')
+      expect(store.pendingInjection.value).not.toBeNull()
+      expect(store.pendingInjection.value?.path).toBe('src/foo.ts')
+      // 行号从 data-line 读取（首行 newNo 到末行 newNo）
+      expect(store.pendingInjection.value?.lineStart).toBe(Number(firstLineEl.getAttribute('data-line')))
+      expect(store.pendingInjection.value?.lineEnd).toBe(Number(lastLineEl.getAttribute('data-line')))
+      vi.restoreAllMocks()
+      // 恢复 preview 模式供后续测试
+      detailState.value = {
+        path: 'src/foo.ts',
+        content: 'line1\nline2\nline3\nline4',
+        viewMode: 'preview',
+        kind: 'code',
+        status: 'success',
+        hasGitChange: false,
+      }
+    })
+  })
+}
+
+// ══════════ 来源：block-rendering-regression.test.ts ══════════
+{
+  function msg(over: Partial<Message> = {}): Message {
+    return { id: 'a1', role: 'assistant', content: '', status: 'streaming', timestamp: Date.now(), ...over }
+  }
+
+  /** 构造 MessageTurn：默认 streaming 态（最后 assistant streaming），含可折叠块 */
+  function makeTurn(over: Partial<MessageTurn> = {}): MessageTurn {
+    return {
+      index: 1,
+      user: { id: 'u1', role: 'user', content: 'hi', status: 'complete', timestamp: Date.now() },
+      assistants: [msg()],
+      isStreaming: true,
+      hasFoldable: true,
+      ...over,
+    }
+  }
+
+  /**
+   * mount Turn 但用真实 Block（仅 stub 重依赖 ChangeSetCard + 自定义 MarkdownRenderer）。
+   * MarkdownRenderer stub 渲染 content 到 .md-stub（区别于 turn-working 的 stub=true：
+   * 本文件需要 textContent 可见来断言零跳变无丢失）。
+   * 展开/折叠经 deps 注入（isExpanded/toggleExpand 必须用 reactive Set——普通 Set 非响应式，
+   * computed 不重算）。
+   */
+  const expandedTurns = reactive(new Set<string>())
+  // isLastTurn 默认 true：单 turn 隔离挂载即末位 turn（D1 折叠作用域，streaming-trace-window design §3.3），
+  // session 进行中（streaming）时工作 trace 才展开——TC-REG-1 的 streaming 序列需要末位 turn 展开 trace。
+  function mountTurnWithRealBlock(props: { turn: MessageTurn; sessionId?: string; isLastTurn?: boolean }) {
+    return mount(Turn, {
+      props: { turn: props.turn, sessionId: props.sessionId ?? 's1', isLastTurn: props.isLastTurn ?? true },
+      global: {
+        plugins: [createPinia()],
+        provide: mockChatProvide({
+          isExpanded: (key: string) => expandedTurns.has(key),
+          toggleExpand: (key: string) => {
+            if (expandedTurns.has(key)) expandedTurns.delete(key)
+            else expandedTurns.add(key)
+          },
+        }),
+        stubs: {
+          ChangeSetCard: true,
+          MarkdownRenderer: {
+            props: ['content'],
+            template: '<div class="md-stub">{{ content }}</div>',
+          },
+        },
+      },
+    })
+  }
+
+  describe('block-rendering 回归护栏（§8.3）', () => {
+    beforeEach(() => {
+      setActivePinia(createPinia())
+      expandedTurns.clear()
+    })
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    // TC-REG-1：零跳变回归——message_start 序列下窗口内块节点全程同一 DOM 引用。
+    // T1=[a1 text streaming] → T2=[a1 text+tool running] → T3=[a1 text+tool, a2 text streaming]。
+    // [8be96c5dc 适配] 窗口语义：末位 text 全 turn 单个（不按 assistant 分组）——T3 时 a1 text
+    // （非末位）被收编出 visible，visible=[a1 tool, a2 text]；零跳变断言改为「T1→T2 a1 text 引用
+    // 稳定 + T2→T3 窗口内 a1 tool 引用稳定」（key=flatIndex keyed v-for 复用）。
+    it('TC-REG-1: 零跳变 — 窗口内块 DOM 引用在 T1→T3 全程同一节点，顺序不变，末位 text 无丢失', async () => {
+      const a1Text = (over: Partial<Message> = {}): Message =>
+        msg({
+          id: 'a1',
+          status: 'streaming',
+          content: '我先读文件',
+          contentBlocks: [{ type: 'text', refId: 'text' }],
+          ...over,
+        })
+      const runningTool = { id: 'tc1', toolName: 'grep', input: { command: 'foo' }, status: 'running' as const, startTime: 0 }
+
+      // T1：a1 text streaming（记录 a1 text 的 DOM element 引用）
+      const wrapper = mountTurnWithRealBlock({
+        turn: makeTurn({ isStreaming: true, hasFoldable: false, assistants: [a1Text()] }),
+      })
+      const a1TextEl = wrapper.find('.trace .trace-blk > div').element as HTMLElement
+      expect(a1TextEl).toBeInstanceOf(HTMLElement)
+      expect(wrapper.find('.trace .trace-blk > div').exists()).toBe(true)
+      expect(wrapper.find('.trace .trace-blk .md-stub').text()).toBe('我先读文件')
+      expect(wrapper.find('.trace').text()).toContain('我先读文件')
+
+      // T2：message_start 后 tool 插入——a1 同 text + toolCall running
+      await wrapper.setProps({
+        turn: makeTurn({
+          isStreaming: true,
+          hasFoldable: true,
+          assistants: [
+            a1Text({
+              contentBlocks: [
+                { type: 'text', refId: 'text' },
+                { type: 'toolCall', refId: 'tc1' },
+              ],
+              toolCalls: [runningTool],
+            }),
+          ],
+        }),
+      })
+      // a1 text 引用同一节点（keyed v-for 按 flatIndex=0 复用），textContent 无丢失
+      expect(wrapper.find('.trace .trace-blk > div').exists()).toBe(true)
+      expect(wrapper.find('.trace .trace-blk > div').element).toBe(a1TextEl)
+      // U2 起 text 块行尾含时刻槽（text-time-slot），textContent 含时刻文本——断言「正文无丢失」用 toContain
+      expect(a1TextEl.textContent).toContain('我先读文件')
+      // 相对顺序不变：a1 text 在 tool 前
+      // （顶层单元取子选择器：W3 起成员行直递 ToolRow 无壳根，本就不带 .trace-blk；
+      //   子选择器保证「块数 = 顶层单元数」口径与组内成员行无关）
+      const blocksT2 = wrapper.findAll('.trace > .trace-blk')
+      expect(blocksT2.length).toBe(2)
+      expect(blocksT2[0].find('.md-stub').exists()).toBe(true)
+      expect(blocksT2[0].find('.md-stub').text()).toBe('我先读文件')
+      expect(blocksT2[1].find('.trace-run-group').exists()).toBe(true)
+      // 记录 T2 的 run 组 DOM 引用（T3 窗口收编 a1 text 后组仍在窗口内）
+      const a1ToolEl = blocksT2[1].element as HTMLElement
+
+      // T3：message_start(a2)——a1 text 收编（非末位），visible=[a1 tool, a2 text]
+      await wrapper.setProps({
+        turn: makeTurn({
+          isStreaming: true,
+          hasFoldable: true,
+          assistants: [
+            a1Text({
+              contentBlocks: [
+                { type: 'text', refId: 'text' },
+                { type: 'toolCall', refId: 'tc1' },
+              ],
+              toolCalls: [runningTool],
+            }),
+            msg({ id: 'a2', status: 'streaming', content: '内容是...' }),
+          ],
+        }),
+      })
+      // a1 的 run 组引用仍同一节点（run head 锚定 key 不变，窗口内单元零跳变）
+      const blocksT3 = wrapper.findAll('.trace > .trace-blk')
+      expect(blocksT3.length).toBe(2)
+      expect(blocksT3[0].find('.trace-run-group').exists()).toBe(true)
+      expect(blocksT3[0].element).toBe(a1ToolEl)
+      // 相对顺序不变：a1 tool 在 a2 text（末位 text = 流式正文）前
+      expect(blocksT3[1].find('.md-stub').exists()).toBe(true)
+      expect(blocksT3[1].find('.md-stub').text()).toBe('内容是...')
+      // 末位 text 无丢失（a1 非末位 text 已收编，经 takeover/展开查看——8be96c5dc）
+      expect(wrapper.find('.trace').text()).toContain('内容是...')
+    })
+
+    // TC-REG-2：折叠态多 assistant 文字可见——showTrace=false 时仅全 turn 末位 text 可见
+    // （8be96c5dc：不按 assistant 分组，防 tool-loop 多 assistant visible 爆炸），thinking/tool
+    // 不存在，.trace 容器恒渲染；非末位 text 经展开（完成态全量 flatBlocks「回看就是全量」）恢复。
+    it('TC-REG-2: 折叠态多 assistant — 仅末位 text 可见，thinking/tool 隐藏；展开后全量恢复', async () => {
+      const a1 = msg({
+        id: 'a1',
+        status: 'complete',
+        content: '正文A',
+        thinking: [{ id: 'th1', content: 'thinking', collapsed: true }],
+        toolCalls: [{ id: 'tc1', toolName: 'grep', input: { command: 'foo' }, status: 'completed', startTime: 0 }],
+        contentBlocks: [
+          { type: 'thinking', refId: 'th1' },
+          { type: 'text', refId: 'text' },
+          { type: 'toolCall', refId: 'tc1' },
+        ],
+      })
+      const a2 = msg({ id: 'a2', status: 'complete', content: '正文B' })
+      // complete 态 + 不传 isSessionActive → sessionActive 回退 turn.isStreaming=false → showTrace=false
+      const wrapper = mountTurnWithRealBlock({
+        turn: makeTurn({ isStreaming: false, hasFoldable: true, assistants: [a1, a2] }),
+      })
+      // .trace 容器恒渲染（v-if 下沉 Block 级）
+      expect(wrapper.find('.trace').exists()).toBe(true)
+      // 折叠态仅全 turn 末位 text（a2「正文B」）可见；a1 非末位 text 收编
+      const blocks = wrapper.findAll('.trace .trace-blk')
+      expect(blocks.length).toBe(1)
+      expect(blocks[0].find('.md-stub').exists()).toBe(true)
+      expect(blocks[0].find('.md-stub').text()).toBe('正文B')
+      // thinking/tool 节点不存在（showTrace=false 隐藏）
+      expect(wrapper.find('.trace-think').exists()).toBe(false)
+      expect(wrapper.find('.trace-tool').exists()).toBe(false)
+      expect(wrapper.find('.trace').text()).toContain('正文B')
+
+      // 展开后（showTrace && !isWorkingTurn → 全量 flatBlocks）：a1 thinking/text/tool + a2 text 全恢复
+      expandedTurns.add('u1')
+      await nextTick()
+      const expanded = wrapper.findAll('.trace .trace-blk')
+      expect(expanded.length).toBe(4)
+      expect(wrapper.find('.trace').text()).toContain('正文A')
+      expect(wrapper.find('.trace').text()).toContain('正文B')
+      expect(wrapper.find('.trace-think').exists()).toBe(true)
+      // a1 的工具行折进 run 组（grep → 探索组，已完成 → 组默认收起，成员行不在 DOM）
+      expect(wrapper.find('.trace-run-group').exists()).toBe(true)
+    })
+
+    // TC-REG-3：样式统一——展开态多 assistant，所有 text block 含正文 token 锚点
+    // （text-[length:var(--text-md)] + leading-[1.8]，D5 正文档；行高 ui-optimize-unified 决策 7 调 1.8），
+    // 不含过程样式（text-sm / leading-relaxed）。
+    it('TC-REG-3: 展开态多 assistant — 所有 text block 统一正文样式（token 锚点）', async () => {
+      const a1 = msg({
+        id: 'a1',
+        status: 'complete',
+        content: '正文A',
+        toolCalls: [{ id: 'tc1', toolName: 'grep', input: { command: 'foo' }, status: 'completed', startTime: 0 }],
+        contentBlocks: [
+          { type: 'text', refId: 'text' },
+          { type: 'toolCall', refId: 'tc1' },
+        ],
+      })
+      const a2 = msg({ id: 'a2', status: 'complete', content: '正文B' })
+      const wrapper = mountTurnWithRealBlock({
+        turn: makeTurn({ isStreaming: false, hasFoldable: true, assistants: [a1, a2] }),
+      })
+      // 手动展开 trace（reactive Set 驱动 isExpanded → showTrace）
+      expandedTurns.add('u1')
+      await nextTick()
+      const blocks = wrapper.findAll('.trace .trace-blk')
+      expect(blocks.length).toBe(3) // a1 text + a1 tool + a2 text
+      // 每个 text block 的 class 断言（token 锚点，禁止字面 'text-base' 子串匹配）
+      const textEls = wrapper
+        .findAll('.trace .trace-blk > div')
+        .filter((d) => d.find('.md-stub').exists())
+      expect(textEls.length).toBe(2)
+      expect(textEls[0].find('.md-stub').text()).toBe('正文A')
+      expect(textEls[1].find('.md-stub').text()).toBe('正文B')
+      for (const el of textEls) {
+        expect(el.classes()).toContain('text-[length:var(--text-md)]')
+        // 行高 leading-[1.8]（决策 7：正文行高 1.7/1.75 → 1.8 双生效点同改）
+        expect(el.classes()).toContain('leading-[1.8]')
+        expect(el.classes()).not.toContain('text-[length:var(--text-sm)]')
+        expect(el.classes()).not.toContain('text-[length:var(--text-base)]')
+        expect(el.classes()).not.toContain('leading-relaxed')
+      }
+    })
+  })
+}

@@ -46,36 +46,44 @@ const STOCK = {
   'extensions/universal/base-tool-enhance/src/__tests__/pending-reconcile.test.ts': null,
   'packages/dom-core/src/__tests__/smoke.test.ts': null,
   'packages/extension-protocol/src/background-task-process.test.ts': null,
-  'packages/pi-subagent-cli/src/__tests__/spawn-event-adapter-rpc.test.ts': null,
+  'packages/pi-subagent-cli/src/__tests__/spawn-runner.test.ts': null,
   'packages/pi-subagent-cli/src/__tests__/ui-request-queue.test.ts': null,
-  'packages/runtime/src/infra/git-executor.test.ts': null,
-  'packages/runtime/src/infra/shell-runner.test.ts': null,
+  'packages/runtime/src/infra/infra-root-bundle.test.ts': null,
   'packages/runtime/src/infra/system/trash.test.ts': null,
-  'packages/runtime/src/services/worktree/worktree-service.test.ts': null,
+  'packages/runtime/src/services/session/__tests__/session-cascade-bundle.test.ts': null,
+  'packages/runtime/src/services/worktree/worktree-bundle.test.ts': null,
   'packages/runtime/test/cli-error-envelope.integration.test.ts': null,
   'packages/runtime/test/network-proxy-stats.test.ts': null,
-  'packages/runtime/test/plugin-api-extended.test.ts': null,
+  'packages/runtime/src/services/plugin-service/__tests__/plugin-rpc-server.test.ts': null,
   'packages/runtime/test/plugin-ui-timeout-authority.test.ts': null,
   'packages/runtime/test/server-extension.test.ts': null,
-  'packages/runtime/test/shell-runner.test.ts': null,
+  'packages/runtime/test/process-bundle.test.ts': null,
+  'packages/runtime/test/test-extra1.test.ts': null,
   'packages/subagent-core/src/execution/__tests__/execute-nesting.test.ts': null,
-  'packages/subagent-core/src/execution/engine/__tests__/conformance/engine-crash.test.ts': null,
+  'packages/subagent-core/src/execution/engine/__tests__/conformance/contract-suite.test.ts': null,
   'packages/subagent-core/src/execution/engine/__tests__/conformance/static-spawn-guard.test.ts': null,
   'packages/subagent-core/src/orchestration/__tests__/rebuild-sample-fixture.test.ts': null,
   'packages/subagent-engine-sdk/src/__tests__/cli-entry.test.ts': null,
-  'packages/ui/src/features/chat/__tests__/markdown-filepath.test.ts': null,
-  'packages/ui/src/features/chat/__tests__/markdown-renderer-incremental.test.ts': null,
-  'packages/zcode-subagent-cli/src/__tests__/zcode-engine-appserver.test.ts': null,
+  'packages/ui/src/features/chat/__tests__/markdown.test.ts': null,
+  
+  // zcode-engine.test.ts 拆分产物（abort/dispose 分片）：vi.waitFor 预算随迁自原文件的
+  // 存量登记（等的是真 fake app-server 子进程的 create/send 流水，非新增形态）。
+  'packages/zcode-subagent-cli/src/__tests__/zcode-engine.abort-dispose.test.ts': null,
 }
 for (const k of Object.keys(STOCK)) STOCK[k] = '存量：二波清单外文件（2026-10-22 盘点登记），信号待后续波次处置（确定性化/挂门控/豁免细分）'
 
 const EXEMPT = {
   ...STOCK,
+  // payload 字段 timeout:30000 是 extension_ui_request 的业务数据（fixture），非测试超时预算
+  'packages/pi-subagent-cli/src/__tests__/spawn-event-adapter.test.ts': 'X2 误报：30000 是 UI 请求 payload 的业务 timeout 字段（fixture 数据），非测试超时预算',
   // —— 检查器黑盒自测（spawn 检查脚本本体，亚秒级） ——
   'scripts/__tests__/check-test-extremes.test.mjs': '本检查器黑盒自测（spawn 检查器本体，单处 <300ms）',
   'scripts/__tests__/check-test-blind-wait.test.mjs': '盲等检查器黑盒自测（每处 spawn <300ms，裁决保留）',
   'scripts/__tests__/check-prompt-outposts.test.mjs': '出站调用点检查黑盒自测（fixture 由被测脚本常量生成，spawn 亚秒级）',
   'scripts/__tests__/check-domain-type-path.test.mjs': '检查器黑盒自测（spawn 检查脚本本体，亚秒级）',
+  'scripts/__tests__/check-domain-slices.test.mjs': '域切分守卫黑盒自测（spawn 检查脚本本体，亚秒级，沿检查器自测先例）',
+  'scripts/__tests__/check-test-results.test.mjs': 'junit 聚合检查黑盒自测（spawn 检查脚本本体，亚秒级）',
+  'scripts/__tests__/check-test-junit-parity.test.mjs': 'junit 守恒工具黑盒自测（spawn 工具本体，亚秒级）',
   'scripts/__tests__/check-global-slot-keys.test.mjs': '检查器黑盒自测（spawn 检查脚本本体，亚秒级）',
   'scripts/__tests__/check-guide-contract-projection.test.mjs': '检查器黑盒自测（spawn 检查脚本本体，亚秒级）',
   'scripts/__tests__/check-infra-services-import.test.mjs': '检查器黑盒自测（spawn 检查脚本本体，亚秒级）',
@@ -93,7 +101,7 @@ const EXEMPT = {
   'packages/zcode-subagent-cli/src/__tests__/session-channel.test.ts': '二波裁决形态：8 条真进程冒烟留默认组（实测单条 <300ms），其余 33 处已桩化',
   // —— 锁 / 进程语义本身是被测物 ——
   'apps/electron/main/test/update-self-healer.test.ts': 'argv 级进程识别是被测物：1 条真 bash 阳性 + 其余注入 ps 输出（二波裁决形态）',
-  'packages/subagent-core/src/__tests__/transport-local.test.ts': '谓词层留一次确定性 ps -p 探活（不可达 pid、ENOENT 立返、零时间窗；E2E-INTEG-28 登记）',
+  'packages/subagent-core/src/execution/engine/client/__tests__/engine-client.test.ts': '谓词层留一次确定性 ps -p 探活（不可达 pid、ENOENT 立返、零时间窗；E2E-INTEG-28 登记）',
   // —— performance.now 作轮询时钟（fake Date 用例下 Date.now 冻结的替代），非性能断言 ——
   'apps/electron/main/logs/__tests__/main-logger.test.ts': 'performance.now 作轮询 deadline 时钟（fake Date 下 Date.now 冻结会死循环），非时延断言',
   'apps/electron/main/logs/__tests__/stderr-sink-rotation.test.ts': 'performance.now 作轮询 deadline 时钟（同上），非时延断言',

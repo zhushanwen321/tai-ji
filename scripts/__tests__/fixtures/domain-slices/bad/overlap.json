@@ -1,0 +1,13 @@
+{
+  "name": "archive",
+  "summary": "反例：archive 域吞并 chat 的测试目录 → 与 chat 域双归属（唯一归属违规）",
+  "layers": ["core"],
+  "scope": {
+    "core": ["packages/core/src/domain/archive/**"]
+  },
+  "tests": ["packages/core/src/domain/chat/__tests__/**"],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": [],
+  "w2bMountCompat": { "mountSource": "docs/testing/domain-map.json", "status": "enforced" }
+}

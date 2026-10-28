@@ -1,0 +1,34 @@
+{
+  "name": "archive",
+  "summary": "归档（runtime services/archive 聚合 + renderer ArchiveListView 归档列表 + shared archive 契约；session-reader 簿记收集器随 session-reader 域，级联删除的存储树契约见 canvas 域 contracts）",
+  "layers": [
+    "runtime",
+    "renderer",
+    "shared"
+  ],
+  "scope": {
+    "runtime": [
+      "packages/runtime/src/services/archive/**"
+    ],
+    "renderer": [
+      "packages/renderer/src/components/sidebar/ArchiveListView.vue"
+    ],
+    "shared": [
+      "packages/shared/src/archive.ts"
+    ]
+  },
+  "tests": [
+    "packages/runtime/src/services/archive/archive-bundle.test.ts",
+    "packages/renderer/src/__tests__/density-archive-bundle.test.ts",
+    "packages/shared/src/__tests__/archive.test.ts"
+  ],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": [
+    "E2E-ARCHIVE-01"
+  ],
+  "w2bMountCompat": {
+    "mountSource": "docs/testing/domain-map.json",
+    "status": "enforced"
+  }
+}

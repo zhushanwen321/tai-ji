@@ -32,7 +32,12 @@ import {
 	tryParseJson,
 } from "./schema-guards.js";
 
-export const TOOL_NAME = "structured-output";
+// 工具名用下划线（项目工具命名规范）：连字符名在 codemode 沙箱会被 toCodemodeIdentifier
+// 转成下划线形态，同一工具对模型呈现两个名字，弱模型名字形态先验被下划线主导时
+// 会直调连字符变体失败（2026-10-27 fanout 事故：deepseek-flash 直调 structured_output
+// not found → 旁路 codemode 成功 → 父层采不到）。下划线名在 codemode 是恒等映射，
+// 三个通道（LLM 工具表 / addendum / codemode API）名字一致。
+export const TOOL_NAME = "structured_output";
 export const ENV_SCHEMA = "PI_WORKFLOW_SCHEMA";
 
 /**

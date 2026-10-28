@@ -31,7 +31,7 @@
   },
   "scripts": {
     "typecheck": "npx tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --pool=threads"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "^1.0.0",

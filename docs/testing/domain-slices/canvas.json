@@ -1,0 +1,64 @@
+{
+  "name": "canvas",
+  "summary": "问题解决画布全链（runtime services/canvas 聚合 + transport canvas-message-handler + taiji 扩展 + 协议 extensions/canvas + renderer 组件/store/composable + core domain/overlay；TrayCanvasPanel 按 E2E-CANVAS-01 先例属本域 scope）",
+  "layers": [
+    "extension",
+    "protocol",
+    "runtime",
+    "renderer",
+    "core",
+    "shared"
+  ],
+  "scope": {
+    "runtime": [
+      "packages/runtime/src/services/canvas/**",
+      "packages/runtime/src/transport/canvas-message-handler.ts"
+    ],
+    "protocol": [
+      "packages/extension-protocol/src/extensions/canvas/**"
+    ],
+    "extension": [
+      "extensions/taiji/canvas/**"
+    ],
+    "renderer": [
+      "packages/renderer/src/components/canvas/**",
+      "packages/renderer/src/stores/canvas.ts",
+      "packages/renderer/src/composables/use-canvas-sync.ts",
+      "packages/renderer/src/components/panel/tray/TrayCanvasPanel.vue"
+    ],
+    "core": [
+      "packages/core/src/domain/overlay/**"
+    ],
+    "shared": [
+      "packages/shared/src/paths.ts"
+    ]
+  },
+  "tests": [
+    "packages/runtime/src/services/canvas/__tests__/canvas-invariants.test.ts",
+    "packages/extension-protocol/src/extensions/canvas/**",
+    "extensions/taiji/canvas/src/**",
+    "packages/renderer/src/components/canvas/canvas-ops.test.ts",
+    "packages/renderer/src/components/canvas/canvas-pane.test.ts",
+    "packages/renderer/src/composables/use-canvas-sync.test.ts",
+    "packages/renderer/src/stores/canvas.test.ts",
+    "packages/core/src/domain/overlay/__tests__/coordination.test.ts",
+    "packages/core/src/domain/overlay/__tests__/types.test.ts"
+  ],
+  "sharedBy": {
+    "packages/core/src/domain/overlay/__tests__/coordination.test.ts": ["panel", "scheduler"]
+  },
+  "contracts": [
+    {
+      "carrier": "packages/shared/src/paths.ts",
+      "on": ["chat", "archive"],
+      "note": "存储树布局构造性契约（ext-sessions/<sid>/canvases/，整树软删级联，无代码调用边）：改树结构 → canvas/chat/archive 联动（E2E-CANVAS-01 删除级联承载）"
+    }
+  ],
+  "e2eRules": [
+    "E2E-CANVAS-01"
+  ],
+  "w2bMountCompat": {
+    "mountSource": "docs/testing/domain-map.json",
+    "status": "enforced"
+  }
+}

@@ -37,7 +37,7 @@ type PiAPI = ExtensionAPI;
 
 // 与 tool-definition.ts 的 TOOL_NAME 对应（本模块只监听该工具的 execution 事件；
 // 依赖图单向：workflow-hook → schema-guards / loop-gate / text-primitives，不成环）。
-const TOOL_NAME = "structured-output";
+const TOOL_NAME = "structured_output";
 const MAX_HOOK_RETRIES = 2;
 
 /** steer 发送失败告警的 appendEntry customType（session JSONL 持久化，不进 LLM 上下文）。 */
@@ -99,30 +99,33 @@ function buildSteerReminder(
 ): string {
 	if (calledButFailed) {
 		return [
-			"[MANDATORY] Your structured-output call FAILED validation:",
-			truncateText(lastSchemaError ?? "structured-output call failed", STEER_ERROR_MAX_CHARS),
+			"[MANDATORY] Your structured_output call FAILED validation:",
+			truncateText(lastSchemaError ?? "structured_output call failed", STEER_ERROR_MAX_CHARS),
 			"",
 			"The schema is enforced by the system (PI_WORKFLOW_SCHEMA) — this tool's parameter schema IS the required shape of your result.",
 			`The required schema for your result is: ${schemaJson}`,
-			"Fix your arguments to conform to this schema and call the structured-output tool AGAIN.",
+			"Fix your arguments to conform to this schema and call the structured_output tool AGAIN.",
+			"Call it directly as a top-level tool call (NOT via codemode / tools.xxx API) — only a direct tool call is recorded as your result.",
 			"Do NOT output the result as text — call the tool.",
 		].join("\n");
 	}
 	return isObjectRoot
 		? [
-				"[MANDATORY] You MUST call the structured-output tool now.",
+				"[MANDATORY] You MUST call the structured_output tool now.",
 				"Your task requires a structured output. Do NOT respond with plain text.",
-				`Your arguments ARE the data — call structured-output with your result as the tool's arguments, matching this shape: ${schemaJson}`,
+				`Your arguments ARE the data — call structured_output with your result as the tool's arguments, matching this shape: ${schemaJson}`,
 				"The schema is enforced by the system; your arguments are validated against the authoritative schema automatically.",
+				"Call it directly as a top-level tool call (NOT via codemode / tools.xxx API) — only a direct tool call is recorded as your result.",
 				"This is enforced by the workflow system. Just call the tool.",
 			].join("\n")
 		: [
-				"[MANDATORY] You MUST call the structured-output tool now.",
+				"[MANDATORY] You MUST call the structured_output tool now.",
 				"Your task requires a structured output. Do NOT respond with plain text.",
-				`Call structured-output with a single argument \`{value: <data>}\` — put the result itself in \`value\`, and it must conform to this shape: ${schemaJson}`,
+				`Call structured_output with a single argument \`{value: <data>}\` — put the result itself in \`value\`, and it must conform to this shape: ${schemaJson}`,
 				"Non-object schemas are wrapped in a `value` field because tool call arguments must be objects.",
 				"Validation errors may reference paths starting with `value.` (e.g. `value.0`, `value.name`): that prefix addresses the wrapper, not your data — strip it to locate the offending field.",
 				"The schema is enforced by the system; the `value` field is validated against the authoritative schema automatically.",
+				"Call it directly as a top-level tool call (NOT via codemode / tools.xxx API) — only a direct tool call is recorded as your result.",
 				"This is enforced by the workflow system. Just call the tool.",
 			].join("\n");
 }
@@ -181,6 +184,15 @@ export function setupWorkflowHook(pi: PiAPI, schemaJson: string): void {
 	pi.on("tool_execution_end", async (event: unknown, ctx: ExtensionContext) => {
 		if (!isToolExecutionEndEvent(event)) return;
 		if (event.toolName !== TOOL_NAME) return;
+		// 嵌套调用（codemode 沙箱 tools.xxx API 经 ctx.executeTool 执行）不算模型的
+		// 直接产出：pi 不持久化嵌套结果，workflow 引擎只从顶层 toolCalls 采集
+		// parsedOutput——若照常记账，soSucceededEver 被置位 → turn_end 不再 steer →
+		// 父层判「never called」（2026-10-27 fanout 事故形态）。判据 = toolCallId 含
+		// "/"：pi 嵌套管线 id 形态为 `${callerId}/${序号}`（nested-tool-calls.js），
+		// 顶层 id 由 provider 生成（call_xxx，无斜杠）；事件转发层剥掉 parentToolCallId，
+		// toolCallId 是唯一稳定抓手。误判方向安全：provider id 含斜杠被误判成嵌套的
+		// 后果只是少一次 steer，不产生错误行为。
+		if (typeof event.toolCallId === "string" && event.toolCallId.includes("/")) return;
 
 		// errorText 不在此处 fallback——合一状态机记账段/计数段对 undefined 同用
 		// "structured-output call failed" 通用提示（与合一前两 listener 传入形态等价）。

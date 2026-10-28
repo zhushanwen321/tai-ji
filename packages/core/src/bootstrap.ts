@@ -73,6 +73,11 @@ export async function registerMountPoints(): Promise<void> {
   mountRegistryImpl.register('sidebar.tab')
   mountRegistryImpl.register('panel.header')
   mountRegistryImpl.register('composer.toolbar')
+  // Provider 页挂载位（provider-plugin-access D2/U2）：授权流程与条目扩展内容由插件用
+  // GuiComponent 树填充（宿主只画容器），视图归属为全局域 scope（无会话归属，分区键
+  // global:<mountId>:<pluginId>）。消费方 = U6 Provider 页接入（u-provider-page）。
+  mountRegistryImpl.register('provider.authorize')
+  mountRegistryImpl.register('provider.detail-extra')
 }
 
 // 扫描 plugin manifest 注册声明式贡献（views/menus/commands/slashCommands/configuration）

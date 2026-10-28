@@ -1,0 +1,50 @@
+{
+  "name": "plan",
+  "summary": "计划模式（plan 扩展 + extension-protocol extensions/plan + runtime plan-state-extractor 提取器 + renderer plan-store/use-plan-sync/plan 组件；runtime 侧 plan 节测试经 Wave3 合并进混合 bundle 归 uncategorized 注记）",
+  "layers": [
+    "extension",
+    "protocol",
+    "runtime",
+    "renderer"
+  ],
+  "scope": {
+    "extension": [
+      "extensions/universal/plan/src/**"
+    ],
+    "protocol": [
+      "packages/extension-protocol/src/extensions/plan/**"
+    ],
+    "runtime": [
+      "packages/runtime/src/services/session/plan-state-extractor.ts"
+    ],
+    "renderer": [
+      "packages/renderer/src/stores/plan-store.ts",
+      "packages/renderer/src/composables/use-plan-sync.ts",
+      "packages/renderer/src/components/panel/plan/**"
+    ]
+  },
+  "tests": [
+    "extensions/universal/plan/src/**",
+    "packages/extension-protocol/src/extensions/plan/**",
+    "packages/renderer/src/__tests__/stores/plan-store.test.ts",
+    "packages/renderer/src/__tests__/composables/use-plan-sync.test.ts",
+    "packages/renderer/src/__tests__/components/plan-docs-panel.test.ts",
+    "packages/renderer/src/components/panel/plan/__tests__/plan-bars-bundle.test.ts",
+    "packages/shared/src/__tests__/plan-protocol.test.ts"
+  ],
+  "sharedBy": {},
+  "contracts": [
+    {
+      "carrier": "extensions/universal/plan/src/state.ts",
+      "on": ["chat"],
+      "note": "plan-state entry 派生视图链：plan ext 落 entry（customType 字面量）→ runtime event-adapter/session-records/plan-state-extractor 派生 → session.planState 广播 → renderer plan-store；改 entry 词表或 schema 时 chat 域派生通道联动"
+    }
+  ],
+  "e2eRules": [
+    "E2E-PLANMODE-01"
+  ],
+  "w2bMountCompat": {
+    "mountSource": "docs/testing/domain-map.json",
+    "status": "enforced"
+  }
+}

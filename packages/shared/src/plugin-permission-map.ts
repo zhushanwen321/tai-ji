@@ -45,6 +45,9 @@ export const PLUGIN_RPC_METHODS = [
   'plugin.hooks.unregister',
   // notify 域（api/notify-api.ts，1 个）
   'plugin.notify',
+  // event 域（plugin-rpc-setup.ts，provider-plugin-access D9——插件 → renderer 业务
+  // 事件上报的 Worker RPC；sandbox 授权走 manifest 完整方法名直申通道，无能力词）
+  'plugin.event',
   // sessionData 域（api/session-data-api.ts，4 个）
   'plugin.sessionData.get',
   'plugin.sessionData.set',
@@ -81,17 +84,20 @@ export const PLUGIN_RPC_METHODS = [
   // tools 域（tool-api.ts，2 个）
   'plugin.tools.register',
   'plugin.tools.unregister',
-  // ui 域（api/ui-api.ts，7 个——uiRequestExpired 是 Worker→host 到期取消 notification
-  // （D2），复用无 id dispatch 通路故也在注册表内；未被任何能力映射覆盖 → sandbox
-  // 不可授权（fail-closed），到期取消由 queue 防泄漏兜底收尾，trusted 不受影响。
-  // updateHeaderAction 为 headerAction 点位的命令式 API（handler 随 U5 落地）：
-  // ui 面今天无可声明能力词 → sandbox 永久 fail-closed（已知登记））
+  // ui 域（api/ui-api.ts + plugin-rpc-setup.ts，8 个——uiRequestExpired 是 Worker→host
+  // 到期取消 notification（D2），复用无 id dispatch 通路故也在注册表内；未被任何能力
+  // 映射覆盖 → sandbox 不可授权（fail-closed），到期取消由 queue 防泄漏兜底收尾，
+  // trusted 不受影响。updateHeaderAction 为 headerAction 点位的命令式 API（handler 随
+  // U5 落地）。openUrl 为 provider-plugin-access D9 的宿主服务调用（风险由 http(s)
+  // scheme 白名单收敛，D9——不经 capabilities 词表声明；sandbox 授权走 manifest 完整
+  // 方法名直申通道，无能力词）：
   'plugin.ui.showSelect',
   'plugin.ui.showConfirm',
   'plugin.ui.showInput',
   'plugin.ui.notify',
   'plugin.ui.uiRequestExpired',
   'plugin.ui.updateHeaderAction',
+  'plugin.ui.openUrl',
   // views 域（api/views-api.ts，2 个）
   'plugin.views.update',
   'plugin.views.listMountPoints',
@@ -99,6 +105,14 @@ export const PLUGIN_RPC_METHODS = [
   'plugin.workspace.rootPath',
   'plugin.workspace.name',
   'plugin.workspace.findFiles',
+  // providers 域（provider-plugin-access D4：services/provider-write-proxy.ts，3 个）——
+  // 注册点在组合根 index.ts（registerProviderWriteProxy 直注 PluginService.rpcServer，
+  // 不经 PluginService.registerRpcMethods）。sandbox 插件在 manifest permissions 声明完整
+  // 方法名即获授权；域内授权边界 = 命名空间前缀 + manifest capabilities（D4），本表只解决
+  // 「方法名可归一化 → sandbox 可被授予」这一层。
+  'providers.write',
+  'providers.delete',
+  'providers.credential',
 ] as const
 
 /** 完整 RPC 方法名类型 */

@@ -1,23 +1,28 @@
 <script setup lang="ts">
 /**
- * ViewHost（W3 · T3，C4 契约，S4 IF6 + clarify Q3 修订）——plugin view 宿主。
+ * ViewHost（W3 · T3，C4 契约，S4 IF6 + clarify Q3 修订 + U2 scope 归属）——plugin view 宿主。
  *
- * 消费 S2 ViewHostStore（经注入 ViewHostSource）的 per viewId per-session
- * GuiComponent 树缓存，交 ui/src/rendering-protocol/ GuiComponentRenderer 渲染。
+ * 消费 ViewHostStore（经注入 ViewHostSource）的 per viewId per-scope GuiComponent 树缓存，
+ * 交 ui/src/rendering-protocol/ GuiComponentRenderer 渲染。
+ *
+ * 归属 prop 为 scope 联合（provider-plugin-access U2 分区键泛化）：{ kind: 'session',
+ * sessionId } 会话域（panel.header / scheduler 卡片等会话内挂载点）/ { kind: 'global',
+ * mountId, pluginId } 全局域（Provider 页授权挂载位等无会话位置，分区键含插件维度）。
  *
  * 空态语义（IF1）：store 无 view 时按 empty prop 分流——'placeholder'（默认）渲染标题
  * + 等待提示；'hidden'（挂载点用）整组件零 DOM，不占布局空间。
  *
- * 自举补拉（ADR-0097 事件边沿拉）：挂载时分区无内容且 source.refreshView 可用 → 按当前
- * (sessionId, viewId) 过滤拉取插件 UI 快照——transient 推送帧丢失（不入 ring、无重放）
- * 后的组件级收敛通道；拉回写 store → computed view 响应式切换出 placeholder。幂等读
- * 无节流（重复挂载重复拉取无害）。
+ * 自举补拉（ADR-0097 事件边沿拉）：挂载时分区无内容且 source 可用 → 按当前 (scope,
+ * viewId) 过滤拉取插件 UI 快照——transient 推送帧丢失（不入 ring、无重放）后的组件级
+ * 收敛通道；拉回写 store → computed view 响应式切换出 placeholder。幂等读无节流
+ *（重复挂载重复拉取无害）。
  *
  * 数据源经 inject 注入（VIEW_HOST_SOURCE_KEY），壳 provide 真实实现，单测
  * global.provide mock；无注入时静默空态不崩（design-review R3）。
  */
 import { computed, inject, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import type { PluginViewScope } from '@taiji/shared'
 import { VIEW_HOST_SOURCE_KEY } from './view-host-source'
 import GuiComponentRenderer from '../rendering-protocol/GuiComponentRenderer.vue'
 
@@ -25,8 +30,8 @@ const props = withDefaults(
   defineProps<{
     /** plugin view id（挂载点路由键） */
     viewId: string
-    /** 所属 session */
-    sessionId: string
+    /** 视图归属（U2 scope 联合）：会话域 { kind:'session', sessionId } / 全局域 { kind:'global', mountId, pluginId } */
+    scope: PluginViewScope
     /** view 标题（空态占位展示）；缺省 fallback view-id */
     title?: string
     /** 空态行为：'placeholder' 渲染占位（默认）｜'hidden' 无 view 时整组件零 DOM（挂载点用） */
@@ -38,8 +43,14 @@ const props = withDefaults(
 const { t } = useI18n()
 const source = inject(VIEW_HOST_SOURCE_KEY, null)
 
-/** 当前 session + viewId 的 GuiComponent 树缓存条目（无则 undefined → 空态） */
-const view = computed(() => source?.getView(props.sessionId, props.viewId))
+/** 当前 scope + viewId 的 GuiComponent 树缓存条目（无则 undefined → 空态）。
+ *  会话域走既有三法（托盘同源读路径），全局域走 scope 联合法（壳未提供时 undefined → 空态）。 */
+const view = computed(() => {
+  if (props.scope.kind === 'session') {
+    return source?.getView(props.scope.sessionId, props.viewId)
+  }
+  return source?.getViewInScope?.(props.scope, props.viewId)
+})
 
 const emptyTitle = computed(() => props.title ?? props.viewId)
 
@@ -47,7 +58,11 @@ const emptyTitle = computed(() => props.title ?? props.viewId)
 onMounted(() => {
   if (props.empty !== 'placeholder') return
   if (view.value !== undefined) return
-  source?.refreshView?.(props.sessionId, props.viewId)
+  if (props.scope.kind === 'session') {
+    source?.refreshView?.(props.scope.sessionId, props.viewId)
+    return
+  }
+  source?.refreshViewInScope?.(props.scope, props.viewId)
 })
 </script>
 

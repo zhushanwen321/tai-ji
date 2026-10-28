@@ -1,0 +1,29 @@
+{
+  "name": "permission",
+  "summary": "工具审批权限（extensions/universal/permission 整包 + ui 审批弹窗 PermissionRequestDialog + shared plugin-permission-map；runtime 无专属放行测试）",
+  "layers": [
+    "extension",
+    "ui",
+    "shared"
+  ],
+  "scope": {
+    "extension": [
+      "extensions/universal/permission/**"
+    ],
+    "ui": [
+      "packages/ui/src/extension-host/PermissionRequestDialog.vue",
+      "packages/ui/src/extension-host/permission-request-controller.ts",
+      "packages/ui/src/extension-host/permission-transport.ts"
+    ],
+    "shared": [
+      "packages/shared/src/plugin-permission-map.ts"
+    ]
+  },
+  "tests": [
+    "extensions/universal/permission/**",
+    "packages/ui/src/extension-host/__tests__/PermissionRequestDialog.test.ts"
+  ],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

@@ -115,7 +115,7 @@ describe("check-pi-subtree-shared-imports", () => {
   it("__tests__/*.test.ts 内的越界 import → 排除（存量测试造 packaged env 场景）", () => {
     const r = run(
       makeTree({
-        "packages/subagent-core/src/execution/__tests__/store-base.packaged-env.test.ts":
+        "packages/subagent-core/src/execution/__tests__/path-encoding.test.ts":
           'import { encodeCwd } from "@taiji/shared/paths";\n',
       }),
     );

@@ -22,7 +22,7 @@
  * 写流 flush 是异步的，断言前轮询等待（对齐 test/logger.test.ts 既有形态）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { gunzipSync } from 'node:zlib'
@@ -140,6 +140,41 @@ afterEach(async () => {
   await logger?.closeLogger().catch(() => {})
   // maxRetries 对齐 test/logger.test.ts 先例：与刚 close 的真实写流在途 flush 竞争时重试删除
   rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+})
+
+describe('migratePiSessionLogTree 旧树空壳清理（D3 验收 A15a 发现）', () => {
+  it('迁移后 tempId 树整体消失（logs/ 与上级空壳目录都清，ext-sessions 无孤儿）', async () => {
+    logger = await loadLogger()
+    logger.initLogger(dataDir)
+    const tempId = '11111111-2222-4333-8444-555555555555'
+    const realId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+    // tempId 树预置 logs/pi.jsonl + 逐层目录
+    const tempLogs = join(dataDir, 'ext-sessions', tempId, 'logs')
+    mkdirSync(tempLogs, { recursive: true })
+    writeFileSync(join(tempLogs, 'pi-2026-10-22.jsonl'), '{"t":1}\n', 'utf-8')
+    logger.migratePiSessionLogTree(tempId, realId)
+    // 文件迁到 realId 树
+    expect(existsSync(join(dataDir, 'ext-sessions', realId, 'logs', 'pi-2026-10-22.jsonl'))).toBe(true)
+    // tempId 树整体消失（不含 logs/ 空壳与 <tempId>/ 空壳）
+    expect(existsSync(join(dataDir, 'ext-sessions', tempId))).toBe(false)
+  })
+
+  it('迁移有残留文件（同名冲突 skip）时旧树保留不误删', async () => {
+    logger = await loadLogger()
+    logger.initLogger(dataDir)
+    const tempId = '11111111-2222-4333-8444-555555555556'
+    const realId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeeef'
+    const tempLogs = join(dataDir, 'ext-sessions', tempId, 'logs')
+    const realLogs = join(dataDir, 'ext-sessions', realId, 'logs')
+    mkdirSync(tempLogs, { recursive: true })
+    mkdirSync(realLogs, { recursive: true })
+    writeFileSync(join(tempLogs, 'pi-2026-10-22.jsonl'), '{"t":1}\n', 'utf-8')
+    writeFileSync(join(realLogs, 'pi-2026-10-22.jsonl'), '{"t":2}\n', 'utf-8')
+    logger.migratePiSessionLogTree(tempId, realId)
+    // 同名冲突 skip → 文件留旧树 → 旧树目录必须保留（no 数据丢失语义）
+    expect(existsSync(join(tempLogs, 'pi-2026-10-22.jsonl'))).toBe(true)
+    expect(existsSync(join(dataDir, 'ext-sessions', tempId))).toBe(true)
+  })
 })
 
 describe('pi tee size 轮转（D7，.1.gz 口径）', () => {

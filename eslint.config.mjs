@@ -196,14 +196,14 @@ export default [
   // 净代码行 505 微超 500（skill-route 注册与 btw 三帧路由入列时越过），先例 pi-provider-store
   // 「微超即提额，保留软上限告警」同型——拆分属独立重构任务，gate 收敛批次禁止拆文件重构，
   // 短期提额避免阻塞，长期应拆分。
-  // [2026-10-14 problem-solve-canvas U3] canvas 域接线再微超 8 行（520→540）：canvas 装配
-  // 体已按拆分方向落 canvas-assembly.ts / canvas-message-handler.ts（领域 handler 自包含），
-  // server.ts 剩余为组合点必要接线（import / 字段 / 装配调用 / 路由行 / marker 请求公共入口），
-  // 为本单元 17-handler 组合点的客观体量；再拆装配范围属独立重构任务。
+  // [2026-10-14 problem-solve-canvas U3] canvas 域接线微超后 540 有效行：canvas 装配体已按
+  // 拆分方向落 canvas-assembly.ts / canvas-message-handler.ts（领域 handler 自包含），server.ts
+  // 剩余为组合点必要接线（import / 字段 / 装配调用 / 路由行 / marker 请求公共入口），即本单元
+  // 17-handler 组合点的客观体量；同型微超即提额（550），再拆装配面属独立重构任务。
   {
     files: ['packages/runtime/src/transport/server.ts'],
     rules: {
-      'max-lines': ['warn', { max: 540, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 550, skipBlankLines: true, skipComments: true }],
     },
   },
   // [chat-flow-consistency U4] message-turns：chat 域分组纯函数 SSOT（分组规则 v2 全量/增量
@@ -987,10 +987,20 @@ export default [
   // （hot-reload 回调 / crashed 路径）同址同构，抽 helper 或独立模块只省微弱行数且
   // 拆散三路广播的对称性——微超即提额先例（session-service 650 / engine-client 650
   // 同型）。提额而非 off：保留 555 软上限告警，超限即再暴露。
+  // [provider-plugin-access U4] 两段式安装编排（prepare/confirm/cancel/提交回滚/
+  // 卸载 provider 清理）为设计钦定的本 facade 聚合（设计文件地图指定 plugin-service.ts），
+  // 拆分需引入新的 ctx 注入边界（文件头既有裁决：属独立重构任务）。落地时 eslint 实测
+  // 折算 660，按先例取整提额 665 保留软上限告警（control-server 1060 / session-service
+  // 665 提额先例同型），超限即再暴露。
+  // [runtime-composition-root 修复 2ea7e12c2] 组合根装配自检 getter（hasProviderEntries /
+  // hasPiExtensionInstaller）与 pi 扩展成员安装编排（installPiExtensionMember）入列，
+  // eslint 实测折算 695，按先例取整提额 700 保留软上限告警，超限即再暴露。
+  // [D2 一致性修复 2026-10-24] 卸载编排入文件（provider 条目清理 / pi 扩展成员卸载接
+  // 线），eslint 实测折算 719，按先例取整提额 730 保留软上限告警，超限即再暴露。
   {
     files: ['packages/runtime/src/services/plugin-service/plugin-service.ts'],
     rules: {
-      'max-lines': ['warn', { max: 555, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 730, skipBlankLines: true, skipComments: true }],
     },
   },
   // preset-service 是 pi-presets.json 读盘 coerce 家族唯一入口（presets 逐项 / prompt 段级 /

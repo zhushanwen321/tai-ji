@@ -1,20 +1,17 @@
 /**
- * Panel inline legacy scheduler 帧 draft 直挂源测试（u4 接线版——FormOverlay 单渲染器，
- * D7 上三角「新 taiji + 旧 npm scheduler」兼容路径）。
+ * Panel inline 统一表单合并测试（单文件多源合并：2 个源文件同 SUT（Panel.vue overlay 分流）、
+ * 同款 useExtensionUI mock 工厂、同构 stubs / mountPanel / beforeEach）。
  *
- * legacy scheduleCreate 帧（SCHEDULE_CREATE_MARKER 广播）经 useExtensionUI 归一附加 form 键
- * 后命中统一判定侧，Panel 按挂载源键分流 FormOverlay 的 draft props（应答 = 扁平
- * ScheduleFormResult JSON，今日 Panel onScheduleCreateSubmit 路径等价）。锁定：
- * - legacy scheduler 帧 → FormOverlay（draft 直挂）挂载，Composer 互斥不挂
- * - form 帧与 legacy scheduler 帧互斥分流（questions / draft 两源）
- * - draft 形状非法（isScheduleDraft 检查失败）→ 不挂 overlay（正常路径不可达，
- *   runtime event-adapter 同检查预检；防御分支回落 composer）
- * - scheduler 确认等待期 store 豁免 getter 语义锁定（hasPendingBlockingOverlay 按 form 键）
- * - submit/cancel 经 respond/cancel 回传 select 通道（扁平 FormResult / null）
- * - 排队接管序列（DOM 层）：同 session 先后到达两类帧 → 先到者挂载 → respond/cancel
- *   出队 → 后到者接管挂载（两方向各一）
+ * 为什么单文件：vitest 按测试文件隔离模块图——单文件让全部用例共享一份 Panel + FormOverlay
+ * 组件树装载与环境初始化；拆文件会让每个文件各付一次装载，合并后只装一份。
  *
- * mock 策略：vi.mock useExtensionUI（范式同 ask-user-inline.test.ts），vi.hoisted 状态每用例设值。
+ * 来源文件（describe/it 块原样搬运，测试名零改动）：
+ *  - schedule-create-inline.test.ts（legacy scheduler 帧 draft 直挂源 + 排队接管序列）
+ *  - ask-user-inline-drive.test.ts（questions 源真实 DOM 驱动应答链路）
+ *
+ * 两源 mockState / stubs / mountPanel / formReq / beforeEach 逐字同构，合并为单份共享声明；
+ * 未并入同簇的 composer-btw-button / session-active-state：其与这两源在 @/stores/session、
+ * useNewTaskFlow、useChat 上 mock 形态互为相反（实质冲突），保持独立文件。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/schedule-create-inline.test.ts
  */
@@ -27,8 +24,8 @@ import { useExtensionUIStore } from '@/stores/extension-ui'
 import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 
 // ── vi.hoisted：mock 状态在 vi.mock 工厂执行前就绪，且可在 it 中改值 ──
-// overlayReq 由工厂初始化为真实 ref：排队接管序列用例在 mount 后推进队列（出队 → 后到者
-// 接管），依赖 ref 响应性驱动 Panel 重渲染（plain object 无响应性，仅 mount 前设值可行）。
+// overlayReq 由工厂初始化为真实 ref：排队接管 / guard 兜底用例在 mount 后推进队列（出队 →
+// 后到者接管 / 排空竞态），依赖 ref 响应性驱动 Panel 重渲染（plain object 无响应性）。
 const mockState = vi.hoisted(() => ({
   overlayReq: undefined as unknown as import('vue').Ref<ExtensionUIRequest | undefined>,
   respond: vi.fn(),
@@ -70,6 +67,24 @@ function mountPanel(sessionId: string | null) {
   })
 }
 
+/** form 帧 questions 源造数（legacy askUser 帧经归一后同形——formQuestions 推断产物；两源共用） */
+const formReq: ExtensionUIRequest = {
+  sessionId: 'session-A',
+  requestId: 'req-ask',
+  dialogKind: 'select',
+  form: true,
+  formQuestions: [{ type: 'choice', header: 'db', question: '选哪个数据库?', options: [{ label: 'Postgres' }] }],
+}
+
+beforeEach(() => {
+  setActivePinia(createPinia())
+  mockState.overlayReq.value = undefined
+  mockState.respond.mockClear()
+  mockState.cancel.mockClear()
+})
+
+// ══════════ 来源：schedule-create-inline.test.ts ══════════
+
 const scheduleDraft = {
   kind: 'recurring',
   schedule: '0 9 * * *',
@@ -87,22 +102,6 @@ const scheduleCreateReq: ExtensionUIRequest = {
   scheduleCreate: true,
   scheduleDraft,
 }
-
-/** form 帧造数（questions 源） */
-const formReq: ExtensionUIRequest = {
-  sessionId: 'session-A',
-  requestId: 'req-ask',
-  dialogKind: 'select',
-  form: true,
-  formQuestions: [{ type: 'choice', header: 'db', question: '选哪个数据库?', options: [{ label: 'Postgres' }] }],
-}
-
-beforeEach(() => {
-  setActivePinia(createPinia())
-  mockState.overlayReq.value = undefined
-  mockState.respond.mockClear()
-  mockState.cancel.mockClear()
-})
 
 describe('Panel overlay 挂载源分流（draft 源 ∨ questions 源互斥）', () => {
   it('legacy scheduler 帧 → FormOverlay（draft 直挂）挂载，Composer 不挂；预填草稿进面板', () => {
@@ -213,3 +212,97 @@ describe('P-INLINE 排队接管序列（DOM 层：先到先渲染 → 出队 →
 // 「cron 预览与提交解耦」组件行为用例（周域英文名 / 6 段含秒 / 非法表达式 / once 清空 /
 // once 已过拦截 + 提交复核，8e2a1b06f）已等价迁移为组件级测试
 // src/__tests__/components/extension/ScheduleForm.test.ts（u3 统一表单协议迁移）。
+
+// ══════════ 来源：ask-user-inline-drive.test.ts ══════════
+
+describe('Panel 统一表单挂载判据（questions 源）', () => {
+  it('表单请求 → FormOverlay 挂载，Composer 互斥不挂', () => {
+    mockState.overlayReq.value = formReq
+
+    const wrapper = mountPanel('session-A')
+
+    expect(wrapper.find('[data-testid="form-overlay"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(false)
+    // 未作答：提交按钮禁用（allAnswered 检查的用户可见形态）
+    expect(wrapper.find('[data-testid="form-submit"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('allowCancel:false 经 Panel 透传 → cancel 按钮不渲染（prop 接线），submit 仍在', () => {
+    mockState.overlayReq.value = { ...formReq, allowCancel: false }
+
+    const wrapper = mountPanel('session-A')
+
+    expect(wrapper.find('[data-testid="form-overlay"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="form-cancel"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="form-submit"]').exists()).toBe(true)
+  })
+})
+
+describe('Panel 统一表单双 handler 真实 DOM 驱动（respond/cancel 按 requestId 回传）', () => {
+  it('submit 驱动：选中选项 → respond(requestId, answers) 以正确 requestId 与 envelope JSON 回传', async () => {
+    mockState.overlayReq.value = formReq
+    const wrapper = mountPanel('session-A')
+
+    // 用户选中 Postgres：选项卡 aria-checked 翻转（用户可见选中态），提交按钮解禁
+    await wrapper.find('[data-testid="form-option-Postgres"]').trigger('click')
+    expect(
+      wrapper.find('[data-testid="form-option-Postgres"]').attributes('aria-checked'),
+    ).toBe('true')
+    expect(wrapper.find('[data-testid="form-submit"]').attributes('disabled')).toBeUndefined()
+
+    // 提交 → Panel handler → respond(req.requestId, answers envelope)
+    await wrapper.find('[data-testid="form-submit"]').trigger('click')
+    expect(mockState.respond).toHaveBeenCalledTimes(1)
+    expect(mockState.cancel).not.toHaveBeenCalled()
+    const [reqId, answers] = mockState.respond.mock.calls[0] as [string, string]
+    expect(reqId).toBe('req-ask')
+    // FormAnswers envelope 编码：主 key = header，值 = 选中项 label（与 extension-protocol 解码契约同形）
+    expect(JSON.parse(answers)).toEqual({ db: 'Postgres' })
+  })
+
+  it('cancel 驱动：点击取消 → cancel(requestId) 以正确 requestId 回传，respond 不调用', async () => {
+    mockState.overlayReq.value = formReq
+    const wrapper = mountPanel('session-A')
+
+    expect(wrapper.find('[data-testid="form-cancel"]').exists()).toBe(true)
+    await wrapper.find('[data-testid="form-cancel"]').trigger('click')
+
+    expect(mockState.cancel).toHaveBeenCalledTimes(1)
+    expect(mockState.cancel).toHaveBeenCalledWith('req-ask')
+    expect(mockState.respond).not.toHaveBeenCalled()
+  })
+})
+
+describe('guard 失败兜底（队列排空竞态：渲染后点击 → handler 安全 no-op）', () => {
+  it('submit 路径：请求排空后点击提交 → respond 不调用，overlay 卸载 composer 回落', async () => {
+    mockState.overlayReq.value = formReq
+    const wrapper = mountPanel('session-A')
+    // 先作答，让 submit 处于可点击态（绕开 allAnswered 禁用，直达 handler guard）
+    await wrapper.find('[data-testid="form-option-Postgres"]').trigger('click')
+
+    // 排空队列（另一实例已应答）但 nextTick flush 前元素仍在 DOM ——「渲染后点击」竞态
+    mockState.overlayReq.value = undefined
+    await wrapper.find('[data-testid="form-submit"]').trigger('click')
+
+    // guard（!req return）兜底：不向 select 通道回传幻影应答
+    expect(mockState.respond).not.toHaveBeenCalled()
+    // flush 后 overlay 卸载，composer 回落（band 恢复常态）
+    await nextTick()
+    expect(wrapper.find('[data-testid="form-overlay"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(true)
+  })
+
+  it('cancel 路径：请求排空后点击取消 → cancel 不调用，overlay 卸载 composer 回落', async () => {
+    mockState.overlayReq.value = formReq
+    const wrapper = mountPanel('session-A')
+
+    mockState.overlayReq.value = undefined
+    await wrapper.find('[data-testid="form-cancel"]').trigger('click')
+
+    expect(mockState.cancel).not.toHaveBeenCalled()
+    expect(mockState.respond).not.toHaveBeenCalled()
+    await nextTick()
+    expect(wrapper.find('[data-testid="form-overlay"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(true)
+  })
+})

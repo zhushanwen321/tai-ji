@@ -679,7 +679,7 @@ describe("[W0 / D1] binding 载荷 stepIndex（生产构造点）与折叠重建
 // C. SubagentService 集成（写入点 + 跨重启全链）
 // ============================================================
 
-interface ServiceInternals {
+interface ServiceInternals { // oe-exempt:20261027:test:测试夹具接口（合并产物内多节共用的 mock 形状契约）
   store: RecordStore;
 }
 
@@ -749,14 +749,14 @@ describe("[UF-1] SubagentService 集成：回填点绑定落盘 + 跨重启 mess
     store.register(record);
 
     await service.chatActions.deliverChatMessage(record, "second round");
-    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1), { interval: 1 });
     fake.runs[0]!.settle({ content: "second round reply", sessionFile });
 
     // 轮应答（= L2797 回填点）后绑定在盘，身份域与 record 对齐
-    await vi.waitFor(() => expect(fs.existsSync(`${sessionFile}${RECORD_BINDING_SIDECAR_EXT}`)).toBe(true));
+    await vi.waitFor(() => expect(fs.existsSync(`${sessionFile}${RECORD_BINDING_SIDECAR_EXT}`)).toBe(true), { interval: 1 });
     // 轮正常收尾（绑定写不影响派发主路径）——先等轮终 round+1 完成，再读快照
     //（[A-lite] 轮终 markRoundIdle 亦 merge binding，读取须在轮终收尾后无竞态）。
-    await vi.waitFor(() => expect(record.round).toBe(2));
+    await vi.waitFor(() => expect(record.round).toBe(2), { interval: 1 });
     const binding = readRecordBinding(sessionFile);
     expect(binding).toMatchObject({
       v: 1,
@@ -783,11 +783,11 @@ describe("[UF-1] SubagentService 集成：回填点绑定落盘 + 跨重启 mess
     store.register(record);
 
     await service.chatActions.deliverChatMessage(record, "round on read-only dir");
-    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1), { interval: 1 });
     fake.runs[0]!.settle({ content: "reply", sessionFile });
 
     // 主路径不受影响：回填推进 + 轮终收尾照常
-    await vi.waitFor(() => expect(record.round).toBe(2));
+    await vi.waitFor(() => expect(record.round).toBe(2), { interval: 1 });
     expect(record.sessionFile).toBe(sessionFile);
     // 记账侧如实留痕：绑定缺失 + warn
     expect(fs.existsSync(`${sessionFile}${RECORD_BINDING_SIDECAR_EXT}`)).toBe(false);
@@ -819,7 +819,7 @@ describe("[UF-1] SubagentService 集成：回填点绑定落盘 + 跨重启 mess
     // 可 message：续聊 run 以原 sessionFile 为 resume 锚点（续写原文件）。
     // chat 会话形态参数挂在 RunContext（协议 run.params.chat 的承载位），非 task。
     await service.chatActions.deliverChatMessage(record, "resume after restart");
-    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1), { interval: 1 });
     const chatParams = fake.runs[0]!.ctx.resume;
     expect(chatParams?.resume?.sessionRef["sessionFile"]).toBe(file);
     expect(chatParams?.recordId).toBe("sa-bind-1");

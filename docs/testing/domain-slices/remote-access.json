@@ -1,0 +1,36 @@
+{
+  "name": "remote-access",
+  "summary": "远程访问（runtime infra/remote-access token 读侧 + transport/connection-manager + electron main/remote-access 目录与四测试 + mobile 连接流 + shared remote-access 契约；renderer 远程访问页面 W2-B 冻结在 settings 域，mobile 其余装配测试归 host 池）",
+  "layers": [
+    "runtime",
+    "electron",
+    "mobile",
+    "shared"
+  ],
+  "scope": {
+    "runtime": [
+      "packages/runtime/src/infra/remote-access.ts",
+      "packages/runtime/src/transport/connection-manager.ts"
+    ],
+    "electron": [
+      "apps/electron/main/remote-access/**"
+    ],
+    "mobile": [
+      "packages/mobile-renderer/src/platform/connection-profile.ts"
+    ],
+    "shared": [
+      "packages/shared/src/remote-access.ts"
+    ]
+  },
+  "tests": [
+    "apps/electron/main/test/remote-access.test.ts",
+    "apps/electron/main/test/remote-access-handlers.test.ts",
+    "apps/electron/main/test/remote-access-lan-addresses.test.ts",
+    "apps/electron/main/test/remote-access-merged.test.ts",
+    "packages/mobile-renderer/src/__tests__/mobile-connection-flow.test.ts",
+    "packages/shared/src/__tests__/remote-access.test.ts"
+  ],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

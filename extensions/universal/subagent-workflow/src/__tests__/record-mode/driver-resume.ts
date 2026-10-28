@@ -6,9 +6,9 @@
 //
 // 角色由 env 注入：
 // - WF_DRIVER_ROLE=holder：持锁方。resumeRun 的锁段内 deps.appendEntry 同步
-//   阻塞（Atomics.wait 20s——模拟慢 IO 拉长锁持有段，覆盖竞争方 tsx 子进程冷启动，制造确定性竞争窗口），
-//   阻塞前写 marker（与主测试进程握手：marker 在场 = 锁已持有）。复活后等 run
-//   终局再退出（exit 0）。
+//   阻塞（Atomics.wait 6s——模拟慢 IO 拉长锁持有段，覆盖竞争方 tsx 子进程冷启动，制造确定性竞争窗口；
+//   窗口取值见 blockMs 调用点注释），阻塞前写 marker（与主测试进程握手：marker
+//   在场 = 锁已持有）。复活后等 run 终局再退出（exit 0）。
 // - WF_DRIVER_ROLE=contender：竞争方。直接 resumeRun，预期 [D7] ELOCKED 拒绝
 //   （ResumeRejectionError 文案含 "being resumed by another process"）——exit 1，
 //   拒绝文案打到 stderr 供主进程断言。
@@ -69,9 +69,14 @@ const deps: LifecycleDeps = {
   runs: new Map(),
   appendEntry: () => {
     if (ROLE === "holder" && MARKER_NAME !== "") {
-      // 锁段内：先握手再拉长持有段（确定性竞争窗口——竞争方到达时锁必被持有）
+      // 锁段内：先握手再拉长持有段（确定性竞争窗口——竞争方到达时锁必被持有）。
+      // 窗口只需 > 竞争方 tsx 子进程到达锁仲裁点的耗时：实测（2026-10-26 空载
+      // 探针：tsx 冷启动 + 本 driver import 链全编译 + resumeRun 前置到锁 mkdir
+      // 尝试点）为 0.17-0.31s；6s 保留约 19x 空载余量，同机满载放大（tiering
+      // 第九节实证 ±40%，取极端 5x）下仍 >3.8x。窗口与断言零数值耦合（断言只
+      // 锚序关系：竞争方在窗口内到达即 ELOCKED）。
       writeMarkerSync();
-      blockMs(20000);
+      blockMs(6000);
     }
   },
   log: () => {},

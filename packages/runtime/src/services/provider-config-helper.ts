@@ -20,6 +20,8 @@ import type { AuthStorage, CredentialWriter } from './auth/auth-storage.js'
 import type { TaijiProviderStore, ProviderExtras } from './provider-extras-store.js'
 import { readAllExtrasWithFallback, type ProviderExtrasReader } from './migration/provider-extras-migration.js'
 import { pickModelCapabilityFields } from './model-mapper.js'
+// ISSUES-2 ⑨：headers 出线脱敏（凭据词根键剔除，models.json 落盘不受影响——见该模块 JSDoc）
+import { redactSensitiveHeaders } from './provider-header-redaction.js'
 import type { IProviderCredentialResolver } from './ports/provider-credential-resolver.js'
 import { listRemoteProviderTemplates } from './remote-config/remote-provider-templates.js'
 
@@ -129,7 +131,8 @@ function toUserInfoModel(
     // model 级 headers 读侧透传（B-4b 与写路径对称）：ModelInfo 无此字段，故不走
     // pickModelCapabilityFields（双映射共用 picker，加进去会给 ModelInfo 塞未声明字段），
     // 与 compat/api/baseUrl 同款在此显式透传。undefined 消费方按缺省处理（向后兼容）。
-    headers: m.headers,
+    // 凭据词根键出线脱敏（ISSUES-2 ⑨ 同形透传点：模型级 headers 与 provider 级同帧出线）
+    headers: redactSensitiveHeaders(m.headers),
     enabled: modelStates?.[m.id]?.enabled ?? (m.enabled !== false),
     ...pickModelCapabilityFields(m),
   }
@@ -421,8 +424,9 @@ function buildCatalogProviderInfo(
     // DM3：enabled 从 enabledModels 派生，不读 models.json provider.enabled（F2）
     enabled: deriveEnabled(id, enabledModels),
     // provider 级 headers/authHeader 读侧透传（与 SetProviderData 写路径对称）：缺失会导致
-    // 编辑界面无法回显已存值，且保存「空=不动」语义使用户从界面永远删不掉（幽灵数据）
-    headers: override?.headers,
+    // 编辑界面无法回显已存值，且保存「空=不动」语义使用户从界面永远删不掉（幽灵数据）。
+    // 凭据词根键出线脱敏（ISSUES-2 ⑨）：refreshToken 类凭据不随协议帧下发，落盘不动。
+    headers: redactSensitiveHeaders(override?.headers),
     authHeader: override?.authHeader,
     kind: 'catalog' as const,
     hasOverride: !!override,
@@ -462,8 +466,9 @@ function buildCustomProviderInfo(
       : (builtinProvidersById.get(id)?.models.map(m => toProviderModel(m, extras?.modelStates)) ?? userModels),
     // DM3：enabled 从 enabledModels 派生，不读 models.json provider.enabled（F2）
     enabled: deriveEnabled(id, enabledModels),
-    // provider 级 headers/authHeader 读侧透传（与 buildCatalogProviderInfo 同批修复）
-    headers: config.headers,
+    // provider 级 headers/authHeader 读侧透传（与 buildCatalogProviderInfo 同批修复）；
+    // 凭据词根键出线脱敏（ISSUES-2 ⑨，同 catalog 侧）
+    headers: redactSensitiveHeaders(config.headers),
     authHeader: config.authHeader,
     kind: 'custom' as const,
     quota: extras?.quota,

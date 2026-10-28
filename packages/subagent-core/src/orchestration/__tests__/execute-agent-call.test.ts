@@ -315,7 +315,7 @@ describe("W4b: stale 分诊对齐 pi 真实文案", () => {
 function state2Attribution(): string {
   const soCalls: ToolCall[] = [
     {
-      toolName: "structured-output",
+      toolName: "structured_output",
       isError: true,
       result: { details: {}, content: [{ type: "text", text: "Schema validation failed: /target is required" }] },
     },
@@ -397,7 +397,7 @@ describe("MF-1: 确定性 schema 失败单次终态", () => {
   it("态③（no details，无标记）→ 同样单次终态（ADR-0122：失败显式上报）", async () => {
     // 态③真实文案（不带确定性标记）
     const msg = describeMissingParsedOutput([
-      { toolName: "structured-output", result: { content: [] } },
+      { toolName: "structured_output", result: { content: [] } },
     ])!;
     expect(isDeterministicSchemaFailureMsg(msg)).toBe(false);
 

@@ -96,11 +96,12 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
   let fixture: PiFixture | null = null
 
   beforeAll(async () => {
-    // 流控（faux 层特有）：TAIJI_FAUX_TPS=15 + r2 长文本 → r2 轮流式窗口（窗口宽度 ≈
-    // token/TPS，保持远宽于测试注入动作），保证 follow_up 落在 turn 进行中（pi 在跑 →
-    // 入队 + queue_update 事件；idle 后投递无非空队列生命周期，队列断言假失败）。
+    // 流控（faux 层特有）：TAIJI_FAUX_TPS + r2 长文本 → r2 轮流式窗口（窗口宽度 ≈
+    // token/TPS = 82/45 ≈ 1.8s，对「prompt + follow_up 两次 RPC 落地」保持 >10x 余量），
+    // 保证 follow_up 落在 turn 进行中（pi 在跑 → 入队 + queue_update 事件；idle 后投递
+    // 无非空队列生命周期，队列断言假失败）。窗口只须宽于注入动作，断言不耦合窗口时长。
     // spawn 前设置，afterAll 恢复。
-    process.env.TAIJI_FAUX_TPS = '15'
+    process.env.TAIJI_FAUX_TPS = '45'
     // faux 队列消费序：it1 三轮（r1 → r2 长轮 → followup run 内 drain）+ it2 一轮
     // bash 工具（toolCall → --approve 真实执行 echo → 下一轮总结文本）
     fixture = await spawnPiFixture({

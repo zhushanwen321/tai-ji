@@ -15,7 +15,7 @@
  * 集成门控（2026-10-22 单测层极端测试整治）：真实 fs.watch 事件到达在满并行下无确定性完成信号
  * （判据第三档，只能挂钟 deadline 观测），整组经 TAIJI_TEST_INTEGRATION 门控（SSOT =
  * test-guard/integration-gate.ts）——本地默认跳过，CI 与按改动范围触发时真跑；文件已登记在
- * packages/runtime/vitest.config.ts 的 INTEGRATION_TESTS（integration 串行尾组）。
+ * packages/runtime/vitest.config.ts 的 INTEGRATION_TESTS（integration 受控并行尾组）。
  * 「watcher 事件 → rescan / onChange 通知」的逻辑面由 test/skill-registry.test.ts 的
  * chokidar 假 watcher 桩覆盖（U3 onChange 触发通知 / W3 补挂重扫 / D8-a 批内事件合并 rescan）。
  *

@@ -56,11 +56,13 @@
       <span>{{ t('settings.usage.more') }}</span>
     </div>
 
-    <!-- tooltip -->
+    <!-- tooltip：z-dialog 档（1100）——唯一宿主是设置弹窗（z-modal 1000 不透明全屏），
+         原 z-40 恒被宿主盖死（用户从来看不见提示层）；teleport 到 body 后按 token 取档，
+         低于 toast(2000) 保持通知优先。 -->
     <Teleport to="body">
       <div
         v-if="tipVisible"
-        class="fixed z-40 pointer-events-none bg-[var(--bg-elevated)] border border-[var(--border-strong)] rounded-[var(--radius-sm)] shadow-[var(--shadow-2)] px-2.5 py-1.5 text-[length:var(--text-xs)] leading-[1.7] font-mono"
+        class="fixed z-[var(--z-dialog)] pointer-events-none bg-[var(--bg-elevated)] border border-[var(--border-strong)] rounded-[var(--radius-sm)] shadow-[var(--shadow-2)] px-2.5 py-1.5 text-[length:var(--text-xs)] leading-[1.7] font-mono"
         :style="tipPos"
       >
         <div class="text-[var(--neutral-dim)] text-[length:var(--text-3xs)]">{{ tipDate }}</div>

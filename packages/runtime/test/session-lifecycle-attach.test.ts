@@ -1,59 +1,44 @@
-/**
- * W1（restore-fork-attach-fix）附着路径修复测试：fork/restore 直附着正式文件。
- *
- * 背景（P0 数据丢失 bug）：restore/fork 曾把 pi 附着到 $TMPDIR 临时文件后立刻 unlink，
- * 而 pi 的 switch_session 是「永久重绑读写目标」（pi-mono session-manager.ts setSessionFile
- * 把传入路径存为永久 sessionFile，_persist 每轮 appendFileSync 该路径）——此后每轮对话
- * 写进按路径重建的 tmp 孤儿文件，原会话文件永不更新，重启全部丢失。
- *
- * 修复语义（对应验收条款 C1-C8，验收 SSOT =
- * .taiji-harness/2026-08-19-restore-fork-attach-fix/acceptance/w1-acceptance.md）：
- * - C1 fork 直附着：switchSession 收到的路径 === forkedFilePath（sessions 目录内正式文件）
- * - C2 F2 直附着零改写：cwd 活 + 无 session_end → 附着 target.filePath，文件内容与 mtime 不变
- * - C3 F3 归一化（session_end，cwd 活）：strip 后落回同一路径，无 .tmp-migrate- 残留，
- *   header cwd 不动，其余行逐字节保留
- * - C4 F3 归一化（cwd 死，无 session_end）：仅 header 首行 cwd 变 homedir，其余行原样
- * - C5 双条件（session_end + cwd 死）：两种变换都发生
- * - C6 幂等收敛：归一化产物再次 restore → 走 F2（文件零写）
- * - C7 fork cwd 兜底：源 header cwd 死路径 → fork 产物 header cwd 为 homedir
- *   （createForkedSessionFile 单元级用例另见 test/session-fork.test.ts）
- * - C8 语义保留：sidecar unlink 顺序（switchSession 成功后才删 .meta.json）+ catch
- *   safeDestroy + cwdFellBack 时 spawn cwd = homedir
- *
- * 文件系统操作全部真实执行于 mkdtemp tmp 目录（不 mock fs）；svc/pm/client 为 vi.fn
- * mock（不 spawn 真 pi）。target 经真实 parseSessionHeader 从文件派生（C6 第二次 restore
- * 自动看到归一化后的 header，与 scanner 重扫语义一致）。
- *
- * 运行：cd packages/runtime && npx vitest run test/session-lifecycle-attach.test.ts
- */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync, statSync, existsSync } from 'node:fs'
-import { join } from 'node:path'
-import { tmpdir, homedir } from 'node:os'
+import { PiConfigStore } from '../src/infra/pi/pi-config-store.js';
+import { readModels, refreshModels, setModelsPath } from '../src/infra/pi/pi-provider-store.js';
+import { readSettings, setSettingsPath } from '../src/infra/pi/pi-settings-store.js';
+import { ProcessManager } from '../src/infra/pi/process-manager.js';
+import { parseSessionHeader } from '../src/infra/pi/session-file-utils.js';
+import type { IEventAdapter } from '../src/interfaces.js';
+import { AuthStorage } from '../src/services/auth/auth-storage.js';
+import { ProviderCredentialResolver } from '../src/services/auth/provider-credential-resolver.js';
+import { ConfigService } from '../src/services/config-service.js';
+import type { IMessageBus } from '../src/services/message-bus/message-bus.js';
+import type { IConfigStore } from '../src/services/ports/config.js';
+import type { IProcessManager, IPiEngine } from '../src/services/ports/pi-engine.js';
+import type { ISessionStore } from '../src/services/ports/session.js';
+import { reapOrphanPiProcesses, type ReapOrphanOptions } from '../src/services/reap-orphan-pi.js';
+import { userStoppedGate } from '../src/services/session/event-interpreter.js';
+import { MessageDispatcher } from '../src/services/session/message-dispatcher.js';
+import { type ILifecycleSessionOps, ISessionRegisterDeps, type IDispatcherSessionOps } from '../src/services/session/session-internal.js';
+import { SessionLifecycle, setMigrationGate } from '../src/services/session/session-lifecycle.js';
+import { ScannedSession, type IManagedSessionView } from '../src/services/session/types.js';
+import type { WorkspaceService } from '../src/services/workspace/workspace-service.js';
+import { ServerMessage, type SessionSummary, type ProviderId } from '@taiji/shared';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// 机械合并产物（同目录合并，vi.mock 相对路径不变）；源文件见各节横幅。重名顶层标识符已加 _mN 后缀。
+
 
 // fork 目标目录指向测试 tmp（createForkedSessionFile 真实写入，不碰真实数据目录）
 vi.mock('../src/infra/pi/pi-paths.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/infra/pi/pi-paths.js')>()
   return { ...actual, getSessionsDir: () => sessionsDirMock.value }
 })
-
-import { SessionLifecycle, setMigrationGate } from '../src/services/session/session-lifecycle.js'
-import { userStoppedGate } from '../src/services/session/event-interpreter.js'
-import { parseSessionHeader } from '../src/infra/pi/session-file-utils.js'
-import type { ILifecycleSessionOps, ISessionRegisterDeps } from '../src/services/session/session-internal.js'
-import type { IEventAdapter } from '../src/interfaces.js'
-import type { IProcessManager } from '../src/services/ports/pi-engine.js'
-import type { IConfigStore } from '../src/services/ports/config.js'
-import type { ISessionStore } from '../src/services/ports/session.js'
-import type { WorkspaceService } from '../src/services/workspace/workspace-service.js'
-import type { IManagedSessionView, ScannedSession } from '../src/services/session/types.js'
-import type { SessionSummary } from '@taiji/shared'
-
 const sessionsDirMock = vi.hoisted(() => ({ value: '/mock/not-yet-initialized' }))
+
 
 function makeSummary(id: string): SessionSummary {
   return { id, label: 'test', cwd: '/tmp', status: 'idle', lastActiveAt: Date.now() }
 }
+
 
 /**
  * 测试环境：mock svc/pm/configStore/sessionStore，client 记录 switchSession 收到的路径。
@@ -135,8 +120,10 @@ function makeEnv(opts: {
   return { lifecycle, svc, pm, client, switchCalls, sessionStore }
 }
 
+
 /** 当前作为 findScannedSession 数据源的 session 文件（beforeEach 重置）。 */
 const currentSourceFile = vi.hoisted(() => ({ value: '' }))
+
 
 /** 会话文件固定行集：header + u1 + a1（+ 可选 session_end）。 */
 function makeLines(cwd: string, opts: { sessionEnd?: boolean } = {}): string[] {
@@ -151,6 +138,8 @@ function makeLines(cwd: string, opts: { sessionEnd?: boolean } = {}): string[] {
   return lines
 }
 
+// wave3 包装：本段原文件顶层语句收进 describe 作用域（顶层 hook 不再外溢到同文件其他来源的用例）
+describe('session-lifecycle-attach', () => {
 describe('W1 restore/fork 直附着正式文件（F1/F2/F3）', () => {
   let dir: string
   let env: ReturnType<typeof makeEnv>
@@ -349,7 +338,6 @@ describe('W1 restore/fork 直附着正式文件（F1/F2/F3）', () => {
     expect(forkedHeader.cwd).not.toBe(deadCwd)
   })
 })
-
 describe('S6 归一化残留清理（差距复审 suggestion 6）', () => {
   let dir: string
   let env: ReturnType<typeof makeEnv>
@@ -430,7 +418,6 @@ describe('S6 归一化残留清理（差距复审 suggestion 6）', () => {
     expect(readdirSync(dir)).toContain('2026-08-19T00-00-00-000Z_sess-other.jsonl.tmp-migrate-3333333333333.jsonl')
   })
 })
-
 // ── D4 restore-abort 失败链（R3 S-3 补测：forceQuitFallback 也失败 → 吞错 + 标记保留 + 环不启动）──
 //
 // applyRestoreAbortConvergence 的 fallbackErr catch 此前零覆盖：abort RPC 超时 → fallback
@@ -496,3 +483,515 @@ describe('D4 restore-abort 失败链：fallback 也失败吞错（R3 S-3）', ()
     expect(userStoppedGate.hasUserStoppedMark('sess-w1')).toBe(true)
   })
 })
+});
+
+// ======================================================================
+// ← test-extra7.test.ts
+// ======================================================================
+
+// 机械合并产物（同目录合并，vi.mock 相对路径不变）；源文件见各节横幅。重名顶层标识符已加 _mN 后缀。
+
+// ======================================================================
+// ← test/kill-path-logging.test.ts
+// ======================================================================
+
+// ── process-manager 部分的模块级 mock（rpc-client fake + 阻断 execSync/探针 spawn）──
+
+/** 捕获 createSession 注册的 client.onExit 回调（K8 触发入口）。 */
+const exitCallbacksRegistry = vi.hoisted(() => ({
+  callbacks: [] as Array<(code: number | null, stderr: string) => void>,
+}))
+
+
+vi.mock('../src/infra/pi/rpc-client.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/infra/pi/rpc-client.js')>()
+  class FakeRpcClient {
+    exited = false
+    constructor(_opts: unknown) {}
+    async start(): Promise<void> {}
+    onExit(cb: (code: number | null, stderr: string) => void): void {
+      exitCallbacksRegistry.callbacks.push(cb)
+    }
+    async kill(): Promise<void> {}
+    async switchSession(_path: string): Promise<void> {}
+  }
+  // 保留 actual：测试本体 import 的 RpcTimeoutError 等符号须来自真实模块
+  return { ...actual, RpcClient: FakeRpcClient }
+})
+
+
+vi.mock('../src/infra/pi/find-pi-executable.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/infra/pi/find-pi-executable.js')>()
+  return { ...actual, findPiExecutable: vi.fn(() => '/fake/path/pi'), }
+})
+
+
+// ── session-lifecycle 部分原自带同形 pi-paths mock：与文件头部 attach 节的同模块 mock
+// 双注册 last-wins（后注册者胜、前节变量不被读取 → C1/C7 fork 写入 not-yet-initialized 路径
+// 被 fs-guard 拦截）。此处删除重复注册，两节共用文件头部的 sessionsDirMock（各节 hook
+// 先赋值自己节再跑本节用例，顺序执行无竞争）。──
+
+
+// 模块 mock 声明完毕后再 import 被测对象
+type WarnSpy = ReturnType<typeof vi.spyOn>
+
+
+/** 断言辅助：warn 序列中存在含指定 kill_source 的日志行，返回该行。 */
+function findKillLog(spy: WarnSpy, source: string): string | undefined {
+  return spy.mock.calls
+    .map((c: unknown[]) => (typeof c[0] === 'string' ? c[0] : ''))
+    .find((line: string) => line.includes(`kill_source=${source}`))
+}
+
+
+// ── K1 / K2：message-dispatcher（harness 同 silent-abort-destroy.test.ts）──
+
+function makeMockSession(): IManagedSessionView {
+  return {
+    id: 's1',
+    cwd: '/test',
+    label: 'test',
+    modelId: 'm1',
+    createdAt: 1,
+    lastActiveAt: 1,
+    tokenCount: 0,
+    inputTokens: 0,
+        bashRunToken: undefined,
+  }
+}
+
+
+function makeDispatcherMocks(_opts: { abortError?: Error } = {}) {
+  const session = makeMockSession()
+  const client = {
+    abort: vi.fn(async () => {
+      if (_opts.abortError) throw _opts.abortError
+    }),
+  } as unknown as IPiEngine
+
+  const bus = {
+    publish: vi.fn((_sid: string, _m: ServerMessage) => {}),
+  } as unknown as IMessageBus
+
+  const svc: IDispatcherSessionOps = {
+    getSessionByClient: vi.fn(() => session),
+    detachSession: vi.fn(),
+    persistSessionOutcome: vi.fn(),
+    clearSessionOutcome: vi.fn(),
+    removeSessionEntry: vi.fn(),
+    ensureActive: vi.fn(),
+    getSession: vi.fn(() => undefined),
+  }
+
+  const pm = {
+    getClient: vi.fn(() => client),
+    destroySession: vi.fn(async () => {}),
+  } as unknown as IProcessManager
+
+  const workspace = { record: vi.fn() } as unknown as WorkspaceService
+  const dispatcher = new MessageDispatcher(svc, pm, workspace, bus)
+  return { dispatcher, svc, pm }
+}
+
+
+// ── K3 / K5：session-lifecycle（harness 同 session-lifecycle-attach.test.ts）──
+
+const currentSourceFile_m2 = vi.hoisted(() => ({ value: '' }))
+
+
+/** 与 attach 测试同款：target 经真实 parseSessionHeader 从 tmp 文件派生。 */
+function makeLifecycleEnv() {
+  const client = {
+    getState: vi.fn(async () => ({ sessionId: 's-1' })),
+    switchSession: vi.fn(async (_sessionPath: string) => {}),
+    setSessionName: vi.fn(async () => undefined),
+  }
+  const svc: ILifecycleSessionOps = {
+    getExtensionPaths: vi.fn(async () => [] as string[]),
+    getSkillPaths: vi.fn(() => [] as string[]),
+    getReplaceSystemPrompt: vi.fn(() => undefined),
+    getLaunchPresetOptions: vi.fn(async () => undefined),
+    toSummary: vi.fn((s: IManagedSessionView): SessionSummary => ({
+      id: s.id, label: s.label, cwd: s.cwd, status: 'active',
+      lastActiveAt: 1,
+    })),
+    findScannedSession: vi.fn((id: string): ScannedSession | undefined => {
+      const filePath = currentSourceFile_m2.value
+      const header = parseSessionHeader(filePath)
+      if (!header || header.id !== id) return undefined
+      return {
+        id, filePath, cwd: header.cwd, name: 'target',
+        lastModified: Date.now(), timestamp: header.timestamp, size: 0,
+      } as ScannedSession
+    }),
+    removeSessionEntry: vi.fn(),
+    fetchAndBroadcastContext: vi.fn(async () => undefined),
+    notifySessionCreated: vi.fn(),
+    getActiveSummaries: vi.fn(() => []),
+  }
+  const pm = {
+    createSession: vi.fn(async () => client),
+    destroySession: vi.fn(async () => undefined),
+    // D5② 短路预检读点（session-dead-structural-fixes）：restoreSession 开头查活跃 client；
+    // undefined = 无 client → 不短路 → 走全流程 K3 清场（本组用例的目标路径）。
+    getClient: vi.fn(() => undefined),
+  } as unknown as IProcessManager
+  const configStore = {
+    getDefaultModel: vi.fn(() => ({ provider: 'p', modelId: 'm' })),
+  } as unknown as IConfigStore
+  const sessionStore = {
+    refreshAll: vi.fn(),
+    invalidateScanCache: vi.fn(),
+    persistPresetBinding: vi.fn(),
+    persistProjectBinding: vi.fn(),
+    trash: vi.fn(async () => undefined),
+    invalidateMetaCache: vi.fn(),
+  } as unknown as ISessionStore
+  const workspaceService = { record: vi.fn() } as unknown as WorkspaceService
+
+  const registerDeps: ISessionRegisterDeps = {
+    adapterFactory: () => ({ attach: vi.fn(), detach: vi.fn() }) as unknown as IEventAdapter,
+    getMessageBus: () => null,
+    broadcastGlobal: () => {},
+  }
+
+  const lifecycle = new SessionLifecycle(svc, pm, configStore, sessionStore, workspaceService, registerDeps)
+  return { lifecycle, pm }
+}
+
+
+// ── K7：reap-orphan-pi（全依赖注入，零真实进程/等待）──
+
+const REAP_SESSIONS_DIR = '/data/sessions-kill-log-test'
+
+
+// 判据 v2（四条合取）的清单值 fixture：孤儿 argv 的 --extension 值须 ∈ 注入清单
+const MARKER = '/data/staged-pi-spawn-marker'
+
+
+function orphanRow(pid: number): string {
+  // ps 单行：ppid=1（reparent 证据）+ 判据 v2 同形 argv（rpc + no-extensions + 清单值 --extension）
+  return `  ${pid}     1 /usr/bin/node /pi/cli.js --mode rpc --no-extensions --approve --extension ${MARKER}`
+}
+
+
+// ======================================================================
+// ← test/e1-e3-real-verify.test.ts
+// ======================================================================
+
+let fixtureDir: string
+
+
+let fixtureConfigService: ConfigService
+
+
+/** E1 的「反向 api」构造：保证新值与当前展示值必不相同（否则断言可能恒真）。 */
+function oppositeApi(current: string | undefined): string {
+  return current === 'anthropic-messages' ? 'openai-completions' : 'anthropic-messages'
+}
+
+
+/**
+ * E1 分体系断言单点（设计 D1③）——始终做真实落盘读取（readModels，绕过缓存）：
+ * - custom：provider 级 api 是 custom 的定义权威 → 新值落到 listProviders 与 models.json；
+ * - catalog：provider 级 `type` 被忽略（协议是模型级属性）→ 盘上 api 键保持原状（无键仍无键 /
+ *   有旧值仍为旧值），派生展示（listProviders().api）保持原状且不等于新传入值。
+ */
+function assertApiTypeByKind(service: ConfigService, kind: 'custom' | 'catalog', providerId: string): void {
+  const before = service.listProviders().find(p => p.id === providerId)
+  if (!before) throw new Error(`被测 ${kind} provider 不在 listProviders() 结果中：${providerId}`)
+  const newApi = oppositeApi(before.api)
+  const rawBefore = readModels().providers[providerId]?.api
+
+  // 无 await 分支（本用例不传 apiKey/models/authMethod）时 setProvider 同步执行到底，
+  // 调用后即可读到落盘结果——依赖 setProvider 的同步前缀时序契约（见其实现注释）。
+  service.setProvider(providerId, { type: newApi })
+
+  const after = service.listProviders().find(p => p.id === providerId)!
+  const rawAfter = readModels().providers[providerId]?.api
+
+  if (kind === 'custom') {
+    expect(after.api).toBe(newApi)
+    expect(rawAfter).toBe(newApi)
+  } else {
+    expect(after.api).toBe(before.api)
+    expect(after.api).not.toBe(newApi)
+    expect(rawAfter).toBe(rawBefore)
+    expect(rawAfter).not.toBe(newApi)
+  }
+}
+
+// wave3 包装：本段原文件顶层语句收进 describe 作用域（顶层 hook 不再外溢到同文件其他来源的用例）
+describe('test-extra7', () => {
+// wave3 包装：本段原文件顶层语句收进 describe 作用域（顶层 hook 不再外溢到同文件其他来源的用例）
+describe('kill-path-logging', () => {
+describe('D5① K1/K2：message-dispatcher kill 日志（kill_source 结构化字段）', () => {
+  let warnSpy: WarnSpy
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    warnSpy.mockRestore()
+  })
+
+  it('K1: forceQuit（用户强制退出）→ warn 含 kill_source=user_force_quit 与信号链', async () => {
+    const { dispatcher } = makeDispatcherMocks()
+
+    await dispatcher.forceQuit('s1')
+
+    const line = findKillLog(warnSpy, 'user_force_quit')
+    expect(line).toBeDefined()
+    // 信号链要素：谁发起（用户经 session.forceQuit RPC）+ 收敛链
+    expect(line).toContain('session s1')
+    expect(line).toContain('forceQuit')
+  })
+
+})
+describe('D5① K3/K5：session-lifecycle kill 日志（kill_source 结构化字段）', () => {
+  let warnSpy: WarnSpy
+  let dir: string
+  let filePath: string
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setMigrationGate(Promise.resolve())
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    dir = mkdtempSync(join(tmpdir(), 'kill-path-logging-'))
+    filePath = join(dir, '2026-08-19T00-00-00-000Z_sess-kill-log.jsonl')
+    currentSourceFile_m2.value = filePath
+    sessionsDirMock.value = dir
+    writeFileSync(
+      filePath,
+      [
+        JSON.stringify({ type: 'session', version: 3, id: 'sess-kill-log', timestamp: '2026-08-19T00:00:00.000Z', cwd: dir }),
+        JSON.stringify({ type: 'message', id: 'u1', parentId: null, timestamp: '2026-08-19T00:00:01.000Z', message: { role: 'user', content: [{ type: 'text', text: 'hi' }] } }),
+      ].join('\n') + '\n',
+      'utf-8',
+    )
+  })
+
+  afterEach(() => {
+    warnSpy.mockRestore()
+    setMigrationGate(Promise.resolve())
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  it('K3: restoreSession 清场杀活跃旧 pi → warn 含 kill_source=restore_clear 与信号链', async () => {
+    const { lifecycle, pm } = makeLifecycleEnv()
+
+    // 第一次 restore 注册 session 进 Map；第二次 restore 命中 existing → 清场杀旧 pi 分支
+    await lifecycle.restoreSession('sess-kill-log')
+    await lifecycle.restoreSession('sess-kill-log')
+
+    const line = findKillLog(warnSpy, 'restore_clear')
+    expect(line).toBeDefined()
+    expect(line).toContain('sess-kill-log')
+    // 信号链要素：清场 → 重开
+    expect(line).toContain('safeDestroy')
+    // 物理销毁被调：旧 pi 确实被销毁
+    expect(pm.destroySession).toHaveBeenCalled()
+  })
+
+  it('K5: delete 活跃 session → warn 含 kill_source=delete 与信号链', async () => {
+    const { lifecycle, pm } = makeLifecycleEnv()
+
+    // 先 restore 使 session 进 Map（active 分支才有 kill 对象）
+    await lifecycle.restoreSession('sess-kill-log')
+    warnSpy.mockClear()
+
+    await lifecycle.delete('sess-kill-log')
+
+    const line = findKillLog(warnSpy, 'delete')
+    expect(line).toBeDefined()
+    expect(line).toContain('sess-kill-log')
+    // 物理销毁被调：活跃 pi 确实被销毁
+    expect(pm.destroySession).toHaveBeenCalledWith('sess-kill-log')
+  })
+})
+// ── K6 / K8：process-manager（rpc-client 模块已文件级 mock）──
+
+describe('D5① K6/K8：process-manager kill 日志（kill_source 结构化字段）', () => {
+  let warnSpy: WarnSpy
+  let pm: ProcessManager
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    exitCallbacksRegistry.callbacks.length = 0
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    pm = new ProcessManager('/fake-project-root')
+  })
+
+  afterEach(() => {
+    warnSpy.mockRestore()
+  })
+
+  it('K6: destroyAll 批量销毁 → warn 含 kill_source=destroy_all 与会话清单', async () => {
+    // cwd 仅被存入 ManagedProcess（fake rpc-client 不 spawn），无存在性要求
+    await pm.createSession('sess-a', '/tmp/kill-path-logging-fake-cwd')
+    await pm.createSession('sess-b', '/tmp/kill-path-logging-fake-cwd')
+
+    await pm.destroyAll()
+
+    const line = findKillLog(warnSpy, 'destroy_all')
+    expect(line).toBeDefined()
+    // 信号链要素：批量扇出 + 会话清单可追溯
+    expect(line).toContain('sess-a')
+    expect(line).toContain('sess-b')
+    expect(pm.size).toBe(0)
+  })
+
+  it('K6 空表：无进程时 destroyAll 不打 kill 日志（零 kill 零日志）', async () => {
+    await pm.destroyAll()
+    expect(findKillLog(warnSpy, 'destroy_all')).toBeUndefined()
+  })
+
+  it('K8: client 异常退出回调（非 intentional destroy）→ warn 含 kill_source=exit_converge', async () => {
+    await pm.createSession('sess-crash', '/tmp/kill-path-logging-fake-cwd')
+    expect(exitCallbacksRegistry.callbacks.length).toBe(1)
+
+    // 模拟 pi 进程自发退出（crash / 外部 kill，exit 143 形态）
+    exitCallbacksRegistry.callbacks[0]!(143, 'terminated')
+
+    const line = findKillLog(warnSpy, 'exit_converge')
+    expect(line).toBeDefined()
+    expect(line).toContain('sess-crash')
+    expect(line).toContain('143')
+  })
+})
+describe('D5① K7：reap-orphan-pi 收殓日志（kill_source 结构化字段）', () => {
+  let warnSpy: WarnSpy
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    warnSpy.mockRestore()
+  })
+
+  it('K7: 启动孤儿收殓命中孤儿 → warn 含 kill_source=reap_orphan 与信号链', async () => {
+    const signalCalls: Array<{ pid: number; signal: 'SIGKILL' }> = []
+    const options: ReapOrphanOptions = {
+      dataDir: REAP_SESSIONS_DIR,
+      ownPid: 999,
+      listProcesses: () => Promise.resolve(orphanRow(4242)),
+      readSpawnMarkers: () => [MARKER],
+      signal: (pid, signal) => {
+        signalCalls.push({ pid, signal })
+      },
+    }
+
+    const result = await reapOrphanPiProcesses(options)
+
+    expect(result.reaped).toEqual([4242])
+    const line = findKillLog(warnSpy, 'reap_orphan')
+    expect(line).toBeDefined()
+    // 信号链要素：孤儿判定 + SIGKILL 直杀
+    expect(line).toContain('SIGKILL')
+    expect(signalCalls[0]).toEqual({ pid: 4242, signal: 'SIGKILL' })
+  })
+
+  it('K7 无孤儿：零收殓不打 kill 日志', async () => {
+    const options: ReapOrphanOptions = {
+      dataDir: REAP_SESSIONS_DIR,
+      ownPid: 999,
+      listProcesses: () => Promise.resolve(''),
+      readSpawnMarkers: () => [MARKER],
+      signal: () => {},
+    }
+    const result = await reapOrphanPiProcesses(options)
+    expect(result.reaped).toEqual([])
+    expect(findKillLog(warnSpy, 'reap_orphan')).toBeUndefined()
+  })
+})
+});
+// wave3 包装：本段原文件顶层语句收进 describe 作用域（顶层 hook 不再外溢到同文件其他来源的用例）
+describe('e1-e3-real-verify', () => {
+/**
+ * 自建 fixture（不依赖真实数据目录）：覆盖 E1 的 custom + catalog 两分支与 E3 的默认模型落盘。
+ *
+ * mkdtemp 自建 models.json（custom 1 个 + catalog 2 个变体）保证两分支可执行证据完整：
+ * catalog「无 api 键」与「有旧 api 键」两种落盘形态都断言。写删全部落在 mkdtemp
+ * 临时目录内（fs-guard 白名单），不碰真实数据目录。
+ */
+describe('E1/E3 分体系 real 层持久化（自建 fixture）', () => {
+  beforeAll(() => {
+    fixtureDir = mkdtempSync(join(tmpdir(), 'e1-kind-fixture-'))
+    const piAgentDir = join(fixtureDir, 'agent')
+    mkdirSync(piAgentDir, { recursive: true })
+    const providers = {
+      // catalog（id 命中内置快照），override 无 provider 级 api 键
+      anthropic: { name: 'Anthropic', baseUrl: 'https://api.anthropic.com', models: [] },
+      // catalog + 既有 provider 级 api 键（历史冻结值形态）
+      openai: { name: 'OpenAI', api: 'openai-completions', baseUrl: 'https://api.openai.com/v1', models: [] },
+      // custom（id 不在内置快照）：provider 级 api 是定义权威
+      'fixture-custom': {
+        name: 'Fixture Custom',
+        api: 'openai-completions',
+        baseUrl: 'https://example.invalid/v1',
+        apiKey: 'sk-fixture',
+        models: [{ id: 'fixture-model', name: 'Fixture Model' }],
+      },
+    }
+    writeFileSync(join(piAgentDir, 'models.json'), JSON.stringify({ providers }, null, 2))
+    writeFileSync(join(piAgentDir, 'settings.json'), '{}')
+
+    setModelsPath(join(piAgentDir, 'models.json'))
+    setSettingsPath(join(piAgentDir, 'settings.json'))
+    refreshModels()
+    const fixtureStore = new PiConfigStore()
+    fixtureConfigService = new ConfigService(
+      fixtureDir,
+      fixtureStore,
+      undefined,
+      undefined,
+      undefined,
+      // M2fg 恒注入形态：凭据判定经 resolver 批量 sync 版（auth.json 路径指向临时目录，
+      // 恒 miss；models.json 路径经真 PiConfigStore 读 fixture）
+      new ProviderCredentialResolver({
+        authService: { getCredential: async () => undefined },
+        authStorage: new AuthStorage(join(piAgentDir, 'auth.json')),
+        configStore: fixtureStore,
+      }),
+    )
+
+    // fixture 前提自检：kind 判定符合构造意图，否则下面的分体系断言无意义
+    const kinds = new Map(fixtureConfigService.listProviders().map(p => [p.id as string, p.kind]))
+    expect(kinds.get('anthropic')).toBe('catalog')
+    expect(kinds.get('openai')).toBe('catalog')
+    expect(kinds.get('fixture-custom')).toBe('custom')
+  })
+
+  afterAll(() => {
+    if (fixtureDir && existsSync(fixtureDir)) rmSync(fixtureDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  it('E1-fixture/custom: provider 级 api 是 custom 的定义权威 → models.json 落盘新值', () => {
+    assertApiTypeByKind(fixtureConfigService, 'custom', 'fixture-custom')
+  })
+
+  it('E1-fixture/catalog: provider 级 type 被忽略 → 盘上 api 键保持原状（无键仍无键 / 旧值仍旧值）', () => {
+    // 变体一：无 api 键 → 落盘后仍无该键
+    assertApiTypeByKind(fixtureConfigService, 'catalog', 'anthropic')
+    expect((readModels().providers.anthropic ?? {}) as Record<string, unknown>).not.toHaveProperty('api')
+
+    // 变体二：既有 api 键 → 保持旧值，不被新传入的 type 覆盖
+    assertApiTypeByKind(fixtureConfigService, 'catalog', 'openai')
+    expect(readModels().providers.openai?.api).toBe('openai-completions')
+  })
+
+  it('E3-fixture: setDefaultModel → settings.json 落盘 defaultProvider/defaultModel', () => {
+    fixtureConfigService.setDefaultModel('fixture-custom' as ProviderId, 'fixture-model')
+
+    // 直接读盘验证（绕过缓存）：defaultProvider/defaultModel 双键落盘
+    const settings = readSettings()
+    expect(settings.defaultProvider).toBe('fixture-custom')
+    expect(settings.defaultModel).toBe('fixture-model')
+  })
+})
+});
+});

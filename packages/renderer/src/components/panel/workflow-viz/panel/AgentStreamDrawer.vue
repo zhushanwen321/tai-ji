@@ -20,7 +20,8 @@
 <template>
   <aside
     v-if="run !== null"
-    class="fixed bottom-0 right-0 top-0 z-[calc(var(--z-modal)+1)] flex w-[452px] max-w-[92vw] flex-col border-l border-hairline bg-surface shadow-drawer-left transition-transform duration-[250ms] ease-[var(--ease-out)]"
+    ref="drawerEl"
+    class="fixed bottom-0 right-0 top-0 z-[calc(var(--z-dialog)+1)] flex w-[452px] max-w-[92vw] flex-col border-l border-hairline bg-surface shadow-drawer-left transition-transform duration-[250ms] ease-[var(--ease-out)]"
     :class="open ? 'translate-x-0' : 'translate-x-full'"
     :inert="!open"
     :aria-hidden="!open"
@@ -99,12 +100,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Workflow, X } from '@lucide/vue'
 import { Button } from '@taiji/ui'
 import AgentTabContent from './AgentTabContent.vue'
 import type { WorkflowAgentCall, WorkflowRunRecord } from '@taiji/shared'
+import { registerModalSurface } from '@/composables/features/app/modal-surface-registry'
 
 const props = defineProps<{
   /** 发起 session（AgentTabContent 的 agentcall 快照归属，D11⑤ 透传）。 */
@@ -121,6 +123,24 @@ const open = ref(false)
 /** 打开的 call tab（callId = WorkflowAgentCall.id，trace step 序号；打开序排列）。 */
 const openTabs = ref<number[]>([])
 const activeCallId = ref<number | null>(null)
+
+// 模态表面聚合注册（§6.7 agent-stream-drawer 族）：非阻塞子交互层——不入让位族（Esc 归
+// 编排器关浮层整体），只入 view 遮蔽族（shieldsView intersecting）。开合态绑抽屉 open 本体
+// （收起 = 表面关）；rect 读抽屉根元素实测。旗标组由登记表按 id 读取。
+const drawerEl = ref<HTMLElement | null>(null)
+const drawerRect = () => {
+  const el = drawerEl.value
+  if (el === null) return null
+  const r = el.getBoundingClientRect()
+  return { x: r.x, y: r.y, width: r.width, height: r.height }
+}
+const disposeSurfaceRegistration = registerModalSurface({
+  surface: 'agent-stream-drawer',
+  key: 'agent-stream-drawer',
+  isOpen: () => open.value,
+  rect: drawerRect,
+})
+onBeforeUnmount(disposeSurfaceRegistration)
 
 const activeCall = computed<WorkflowAgentCall | undefined>(() => {
   if (activeCallId.value === null) return undefined

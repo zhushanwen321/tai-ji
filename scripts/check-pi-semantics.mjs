@@ -146,7 +146,7 @@ for (const entry of entries) {
     const testPath = entry.guard.test
     if (isNonEmptyStr(testPath)) {
       if (!existsSync(join(ROOT, testPath))) {
-        fail(`条目 ${entry.id} 的探针测试不存在: ${testPath}——恢复动作：补建该探针文件，或修正 guard.test 指向真实路径（探针范式见 packages/runtime/src/infra/pi/__tests__/pi-paths-config-dir-contract.test.ts）`)
+        fail(`条目 ${entry.id} 的探针测试不存在: ${testPath}——恢复动作：补建该探针文件，或修正 guard.test 指向真实路径（探针范式见 packages/runtime/src/infra/pi/__tests__/pi-store-bundle.test.ts）`)
       }
     }
   }

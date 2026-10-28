@@ -57,10 +57,11 @@ const ACK_MARK = 'SD1-ACK'
 /** PROBE 的 clientUuid（真 uuid 形态：出站裸标记身份判据只认 uuid 段，registry 侧
  * message_end 回执命中通道依赖它；compaction e2e 同款约束） */
 const PROBE_UUID = 'u-2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e'
-/** 长任务的 faux 节流（tokens/s）：1..40 数字串 ≈ 37 tokens → ~3s 流式窗口（窗口宽度 ≈
- *  token/TPS，保持远宽于测试注入动作），足够覆盖 get_state 结构化断言 + submit +
- *  队列快照观察的测试侧耗时 */
-const FAUX_TPS = '12'
+/** 长任务的 faux 节流（tokens/s）：1..40 数字串 ≈ 28 tokens → 28/20 ≈ 1.4s 流式窗口（窗口
+ *  宽度 ≈ token/TPS，对「get_state 结构化断言 + submit + pendingMessageCount 复查 + 队列快照
+ *  观察」的测试侧动作保持 >10x 余量）——busy 前提（isStreaming）与 steer 入队断言要求这些
+ *  动作全部落在窗口内，窗口须远宽于注入动作 */
+const FAUX_TPS = '20'
 /** 长任务的 faux 回复文本（计数序列——断言只锚 user entry 与 PROBE/ACK，回复内容不参与） */
 const LONG_TASK_TEXT = Array.from({ length: 40 }, (_, i) => String(i + 1)).join('\n')
 

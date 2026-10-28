@@ -1,6 +1,10 @@
 /**
  * useAppUpdate 单测（自动升级单例 composable · w4 update-frontend · w2 两阶段改造）。
  *
+ * 合并文件（波次 2a 簇 3-12）：useAppUpdate.test.ts（主文件，本文件）+
+ * useAppUpdate.check-timeout.test.ts + useAppUpdate.visibility.test.ts。
+ * 簇内 use-chat-dispose.test.ts 为 chat WS 域（node 环境专属指令），语义不同域剔除未并入。
+ *
  * 覆盖：
  * - checkForUpdate 有/无新版 → available/idle
  * - performDownload 经 onUpdateProgress 做 stage 转换，downloaded:true → state='downloaded'
@@ -9,14 +13,21 @@
  * - restorePreloadedUpdate 有效产物 → downloaded / 无效 no-op
  * - 状态检查 ES4（downloaded 同版本不覆盖）/ ES5（downloaded 追新版退回 available）
  * - performDownload catch 兜底 / 传给 ipc 的是 version 字符串（批次 3 契约）
+ * - ipc check 超时兜底（check-timeout 节，fake timers）
+ * - 可见性检查（visibility 节，fake timers）
  *
  * w2 改造：旧一键 performUpdate 拆为 performDownload（downloaded 态）+ performInstall（restarting 态）。
  *
  * Mock 策略：族级共享 harness（../helpers/app-update-mount.ts）——ipc 七键默认值 +
- * __APP_VERSION__ stub + markdown 桩 '<h2>新特性</h2>'（renderMarkdown 断言经
- * renderMarkdownMock）；场景前置收敛为文件内装置函数：enterAvailable（进入 available 态）、
- * makeDownloadStale（STALE 交错）、primePreloaded（预下载检查）、launchWithResult（W4 toast）。
- * markdown 桩挂 '@taiji/ui/features/chat/markdown'（渲染链下沉后 SUT 实际 import 的模块）。
+ * __APP_VERSION__ stub + markdown 桩（主文件 '<h2>新特性</h2>'，check-timeout/visibility 节
+ * '<h2>notes</h2>'，renderMarkdown 断言经 renderMarkdownMock）；场景前置收敛为文件内装置函数：
+ * enterAvailable（进入 available 态）、makeDownloadStale（STALE 交错）、primePreloaded（预下载检查）、
+ * launchWithResult（W4 toast）。markdown 桩挂 '@taiji/ui/features/chat/markdown'（渲染链下沉后
+ * SUT 实际 import 的模块）。
+ *
+ * fake timers 边界（P3 教训）：主文件 lifecycle（无 fakeTimers）保持文件级；
+ * check-timeout / visibility 两节的 setupAppUpdateLifecycle({fakeTimers}) 调用下沉到本节
+ * describe 内——beforeEach useFakeTimers / afterEach restore+useRealTimers 只作用于本节，不外泄。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/useAppUpdate.test.ts
  */
@@ -29,9 +40,14 @@ import {
   ipc,
   controller,
   makeUpdateRelease,
+  makeCheckHang,
+  setHidden,
+  reinitAutoCheckInActiveScope,
   setupAppUpdate,
   setupAppUpdateLifecycle,
+  startAutoCheckChain,
   type AppUpdateHandle,
+  type AppUpdateControllerInternal,
 } from '../helpers/app-update-mount'
 
 // W4: useToast mock（launch result toast 测试用）
@@ -97,7 +113,7 @@ describe('useAppUpdate', () => {
     // renderMarkdown 异步，waitFor 等 html 填充
     await vi.waitFor(() => {
       expect(result.state.releaseNotesHtml).toBe('<h2>新特性</h2>')
-    })
+    }, { interval: 1 })
 
     expect(result.state.state).toBe('available')
     expect(result.state.latestRelease?.version).toBe('0.9.0')
@@ -162,7 +178,7 @@ describe('useAppUpdate', () => {
     // 不进 error 态；自动重查后 available(v0.9.1)，用户再点下载即拿新版本
     await vi.waitFor(() => {
       expect(result.state.state).toBe('available')
-    })
+    }, { interval: 1 })
     expect(result.state.latestRelease?.version).toBe('0.9.1')
     // 信息性提示而非错误 toast
     expect(toastFns.info).toHaveBeenCalledWith('检测到更新的版本，已为你刷新更新信息')
@@ -187,7 +203,7 @@ describe('useAppUpdate', () => {
     // 修复后：STALE 分支在重查前显式置 available，rateLimited 恢复 available（稳定态有出路）。
     await vi.waitFor(() => {
       expect(result.state.state).toBe('available')
-    })
+    }, { interval: 1 })
     expect(result.state.state).not.toBe('downloading')
     expect(result.state.state).not.toBe('checking')
     stop()
@@ -685,7 +701,7 @@ describe('W4: launch result toast', () => {
     // 断言真实 i18n（@/i18n 默认 zh-CN）解析插值后的完整文案，同时锁住 {version} 占位传参
     await vi.waitFor(() => {
       expect(toastFns.info).toHaveBeenCalledWith('已升级到 v0.9.9')
-    })
+    }, { interval: 1 })
     expect(toastFns.warning).not.toHaveBeenCalled()
     stop()
   })
@@ -695,7 +711,7 @@ describe('W4: launch result toast', () => {
     // 精确断言 {version} 插值位置在句尾旧版本处
     await vi.waitFor(() => {
       expect(toastFns.warning).toHaveBeenCalledWith('上次升级未完成，已恢复到 v0.9.7')
-    })
+    }, { interval: 1 })
     stop()
   })
 
@@ -704,7 +720,7 @@ describe('W4: launch result toast', () => {
     // upgradeFailed 键不含 {version} 占位：精确断言完整文案 + 仅此一次调用（排除混入带版本的键）
     await vi.waitFor(() => {
       expect(toastFns.warning).toHaveBeenCalledWith('上次升级未完成')
-    })
+    }, { interval: 1 })
     expect(toastFns.warning).toHaveBeenCalledTimes(1)
     stop()
   })
@@ -713,7 +729,7 @@ describe('W4: launch result toast', () => {
     const stop = launchWithResult({ status: 'failed', version: '0.9.9', error: 'extract failed' })
     await vi.waitFor(() => {
       expect(toastFns.warning).toHaveBeenCalledWith('解压新版本失败，请检查磁盘空间后重试')
-    })
+    }, { interval: 1 })
     expect(toastFns.warning).toHaveBeenCalledTimes(1)
     stop()
   })
@@ -722,7 +738,7 @@ describe('W4: launch result toast', () => {
     const stop = launchWithResult({ status: 'failed', version: '0.9.9', error: 'future-code' })
     await vi.waitFor(() => {
       expect(toastFns.warning).toHaveBeenCalledWith('上次升级未完成')
-    })
+    }, { interval: 1 })
     stop()
   })
 
@@ -730,7 +746,7 @@ describe('W4: launch result toast', () => {
     const stop = launchWithResult({ status: 'failed', version: '0.9.9', error: 'installer exited 1626' })
     await vi.waitFor(() => {
       expect(toastFns.warning).toHaveBeenCalledWith('安装程序执行失败，请重新下载更新')
-    })
+    }, { interval: 1 })
     stop()
   })
 
@@ -744,5 +760,256 @@ describe('W4: launch result toast', () => {
     expect(toastFns.info).not.toHaveBeenCalled()
     expect(toastFns.warning).not.toHaveBeenCalled()
     stop()
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════
+// 源: useAppUpdate.check-timeout.test.ts（ipc check 超时兜底，fake timers 节）
+//
+// 背景缺陷（2026-09-30 排障）：Electron invoke 无内置超时，ipc.checkForUpdate 一旦
+// 永不返回会连锁杀死两条通路——自动调度链（runAutoCheck 在 await 之后才排下一周期，
+// 单次挂死 = 递归 setTimeout 链永久断裂）与 state（固化 checking，canCheck 检查此后
+// 跳过一切自动检查）。修复 = check 轴内 withIpcTimeout 60s 兜底，超时按失败收尾。
+//
+// 覆盖：auto 链挂死自愈 / manual 挂死超时显形 / 迟到 resolve 丢弃。
+// 假时钟轴：setupAppUpdateLifecycle({fakeTimers}) 在本节 describe 内调用，
+// useFakeTimers/restore 只作用于本节用例。
+// ═══════════════════════════════════════════════════════════════════
+describe('useAppUpdate ipc check 超时兜底', () => {
+  setupAppUpdateLifecycle({
+    fakeTimers: true,
+    primeIpc: true,
+    stubAppVersion: true,
+    markdownHtml: '<h2>notes</h2>',
+  })
+
+  it('auto 链挂死自愈：60s 超时静默回 idle，15min 周期照常排上（链不断）', async () => {
+    makeCheckHang()
+    const { result, stop } = await startAutoCheckChain()
+
+    // 30s 首查发起，invoke 挂起中（state=checking）
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1)
+    expect(result.state.state).toBe('checking')
+
+    // 60s 墙钟到点：超时按 auto 失败收尾 → state 回 idle（不固化 checking）
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(result.state.state).toBe('idle')
+
+    // 下一周期定时器已排上：15min 后第二次检查照常发起（递归链未断）
+    await vi.advanceTimersByTimeAsync(15 * 60 * 1000)
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(2)
+    stop()
+  })
+
+  it('manual 挂死超时显形：state="error"（用户可见失败，不再无限等待）', async () => {
+    makeCheckHang()
+    const { result, stop } = await startAutoCheckChain()
+
+    // 用户点击「检查更新」（manual，force=true）→ invoke 挂起
+    const pending = result.checkForUpdate(true, 'manual')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(result.state.state).toBe('checking')
+
+    // 60s 墙钟到点：超时按 manual 失败收尾 → error 态显形
+    await vi.advanceTimersByTimeAsync(60_000)
+    await pending
+    expect(result.state.state).toBe('error')
+    expect(result.state.errorMessage).toBeTruthy()
+    stop()
+  })
+
+  it('迟到 resolve 丢弃：超时收尾后原 promise 才返回，state 不被迟到结果改写', async () => {
+    const resolveLate = makeCheckHang()
+    const { result, stop } = await startAutoCheckChain()
+
+    // 30s 首查挂起 → 60s 超时 → auto 静默回 idle
+    await vi.advanceTimersByTimeAsync(30_000)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(result.state.state).toBe('idle')
+
+    // 原.invoke 此刻才 resolve 出新版信息——迟到结果不可信，不得改写 state
+    resolveLate({
+      info: {
+        version: '9.9.9',
+        tagName: 'v9.9.9',
+        releaseNotes: '',
+        publishedAt: '',
+        htmlUrl: '',
+        assets: {},
+      },
+      rateLimited: false,
+    })
+    await vi.advanceTimersByTimeAsync(0) // flush microtasks
+    expect(result.state.state).toBe('idle')
+    expect(result.state.latestRelease?.version).toBeUndefined()
+    stop()
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════
+// 源: useAppUpdate.visibility.test.ts（可见性检查，perf W05 Q1-6 + 补查时间阈值化，fake timers 节）
+//
+// 覆盖：hidden 不联网 / 恢复可见补查（7.5min 阈值）/ 补查后周期继续 / 状态检查优先 /
+// onScopeDispose 卸载 listener / 补查 await 窗口 dispose。
+// 假时钟轴：setupAppUpdateLifecycle({fakeTimers, resetVisibility}) 在本节 describe 内
+// 调用，useFakeTimers/restore 只作用于本节用例。
+// ═══════════════════════════════════════════════════════════════════
+
+/** 模拟浏览器可见性变化事件 */
+function fireVisibilityChange(): void {
+  document.dispatchEvent(new Event('visibilitychange'))
+}
+
+/** hidden 启动装置：hidden 态挂 auto-check 链并推进过 30s 首查（hidden 检查跳过联网，lastNetworkCheckAt 保持 0） */
+async function startHiddenAndSkipFirst(): Promise<{ result: AppUpdateControllerInternal; stop: () => void }> {
+  setHidden(true)
+  const handle = await startAutoCheckChain()
+  await vi.advanceTimersByTimeAsync(30_000)
+  return handle
+}
+
+describe('useAppUpdate 可见性检查（Q1-6）', () => {
+  setupAppUpdateLifecycle({
+    fakeTimers: true,
+    primeIpc: true,
+    stubAppVersion: true,
+    markdownHtml: '<h2>notes</h2>',
+    resetVisibility: true,
+  })
+
+  it('hidden 期间周期触发不联网检测：30s 首次 + 15min 周期均跳过 checkForUpdate', async () => {
+    const { stop } = await startHiddenAndSkipFirst()
+    expect(ipc.checkForUpdate).not.toHaveBeenCalled()
+
+    // 连 hidden 多个 15min 周期均不发联网请求
+    await vi.advanceTimersByTimeAsync(15 * 60 * 1000)
+    await vi.advanceTimersByTimeAsync(15 * 60 * 1000)
+    expect(ipc.checkForUpdate).not.toHaveBeenCalled()
+    stop()
+  })
+
+  it('恢复可见立即补查（force=false 走缓存），不等下一个 15min 周期', async () => {
+    const { stop } = await startHiddenAndSkipFirst()
+    expect(ipc.checkForUpdate).not.toHaveBeenCalled()
+
+    setHidden(false)
+    fireVisibilityChange()
+    // 补查同步发起，立即断言可见（距上次联网 = ∞ ≥ 7.5min 阈值）
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1)
+    expect(ipc.checkForUpdate).toHaveBeenLastCalledWith({ force: false })
+    stop()
+  })
+
+  it('补查后周期检测继续（下一个 15min 周期正常触发）', async () => {
+    const { stop } = await startHiddenAndSkipFirst()
+    setHidden(false)
+    fireVisibilityChange()
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1)
+
+    // 补查的 runAutoCheck 重排了周期定时器：15min 后再次检测
+    await vi.advanceTimersByTimeAsync(15 * 60 * 1000)
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(2)
+    stop()
+  })
+
+  it('补查阈值：距上次联网检查 7.5min 内的恢复可见不补查（不重复联网）', async () => {
+    // hidden 30s 首查跳过 → 恢复可见补查#1（lastNetworkCheckAt = t+30s）
+    const { stop } = await startHiddenAndSkipFirst()
+    setHidden(false)
+    fireVisibilityChange()
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1)
+
+    // 多消费者再次 initAutoCheck（幂等重排）：清补查#1 的 15min 周期 timer，重排 30s 首查
+    reinitAutoCheckInActiveScope()
+    setHidden(true)
+    await vi.advanceTimersByTimeAsync(30_000) // t+60s：hidden 触发 → 仍未联网
+    setHidden(false)
+    fireVisibilityChange() // 距补查#1 仅 30s < 7.5min 阈值 → 不补查，不联网
+
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1)
+    stop()
+  })
+
+  it('距上次联网 ≥7.5min 的恢复可见补查：提前于 15min 周期拉起检查（时间阈值自愈通路）', async () => {
+    const { stop } = await startAutoCheckChain()
+
+    // 可见期间正常 30s 首查联网（lastNetworkCheckAt = t+30s）
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1)
+
+    // 推进 10min：距上次联网已超 7.5min 阈值，但 15min 周期 timer 还未到（剩 ~5min）
+    await vi.advanceTimersByTimeAsync(10 * 60 * 1000)
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1) // 周期未到，无新联网
+
+    // 失焦又恢复 → 距上次联网 10min ≥ 7.5min → 补查（不等 15min 周期）
+    setHidden(true)
+    fireVisibilityChange()
+    setHidden(false)
+    fireVisibilityChange()
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(2)
+    expect(ipc.checkForUpdate).toHaveBeenLastCalledWith({ force: false })
+    stop()
+  })
+
+  it('距上次联网 <30min 的恢复可见不补查（正常周期内的 visibilitychange 是 no-op）', async () => {
+    const { stop } = await startAutoCheckChain()
+
+    // 可见期间正常 30s 首次检测（lastNetworkCheckAt = t+30s）
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1)
+
+    // 失焦又恢复（距上次联网仅数秒 < 30min 阈值）
+    setHidden(true)
+    fireVisibilityChange()
+    setHidden(false)
+    fireVisibilityChange()
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1) // 不补查
+    stop()
+  })
+
+  it('状态检查优先：downloaded 态恢复可见不补查（升级流程不被打断）', async () => {
+    setHidden(true)
+    const { result, stop } = setupAppUpdate({ initAutoCheck: true })
+    // 置为升级流程态：canAutoCheck=false，visibility 补查不发起
+    result.state.state = 'downloaded'
+
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(ipc.checkForUpdate).not.toHaveBeenCalled()
+
+    setHidden(false)
+    fireVisibilityChange()
+    expect(ipc.checkForUpdate).not.toHaveBeenCalled() // 不补查（升级流程不被打断）
+    stop()
+  })
+
+  it('onScopeDispose 卸载 listener：dispose 后 visibilitychange 不再触发检测', async () => {
+    const { stop } = await startHiddenAndSkipFirst()
+    stop() // 触发 onScopeDispose → 清 timer + 移除 listener
+
+    setHidden(false)
+    fireVisibilityChange()
+    expect(ipc.checkForUpdate).not.toHaveBeenCalled()
+  })
+
+  it('补查 await 期间 dispose：await 恢复后不排新周期 timer（卸载后 60min 内不联网，W05 review）', async () => {
+    // 让 checkForUpdate 挂起，制造 runAutoCheck 的 await 窗口（此窗口无 pending timer）
+    const resolveCheck = makeCheckHang()
+
+    const { stop } = await startHiddenAndSkipFirst()
+    expect(ipc.checkForUpdate).not.toHaveBeenCalled()
+
+    setHidden(false)
+    fireVisibilityChange() // 补查发起：runAutoCheck 进入 await checkForUpdate（挂起中）
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1)
+
+    stop() // await 挂起期间 dispose（clearAutoCheckTimer 无 pending timer 可清）
+    resolveCheck({ info: null, rateLimited: false }) // await 恢复：disposed 已置位 → 不排下一周期 timer
+    await vi.advanceTimersByTimeAsync(0) // flush microtasks
+
+    // 无新周期 timer 排上：推进 20min 不再联网
+    expect(vi.getTimerCount()).toBe(0)
+    await vi.advanceTimersByTimeAsync(20 * 60 * 1000)
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1) // 仍只有补查那一次
   })
 })

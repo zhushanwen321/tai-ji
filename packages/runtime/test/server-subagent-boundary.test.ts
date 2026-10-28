@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { INTEGRATION_TESTS_ENABLED } from '../../../test-guard/integration-gate.ts'
 import { WebSocket } from 'ws'
 import {
   createMockSessionServiceInstance,
@@ -100,7 +101,11 @@ import { ModelService } from '../src/services/model-service.js'
 /** S1-W1：真实 WS 测试统一 token（ConnectionManager auth 握手，见 ws-listen-hardening.test.ts） */
 const TEST_WS_TOKEN = 'test-ws-token-subagent-boundary'
 
-describe('RuntimeServer message.send marker 通道废弃 — boundary & hostile payloads', () => {
+// 文件级集成组成员（packages/runtime/vitest.config.ts INTEGRATION_TESTS，e2e-map E2E-INTEG 登记）：
+// 门控关闭时本文件不被收集（main exclude + integration include 条件化），下方 skipIf 是
+// 防配置漂移的二道防线。2026-10-27 测试范围收缩（真 WS server / 真 CLI spawn / 真 PTY 迁出无门控默认档）：
+// 单跑本文件须带 TAIJI_TEST_INTEGRATION=1（run 命令见 e2e-map 对应 E2E-INTEG 规则）。
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)('RuntimeServer message.send marker 通道废弃 — boundary & hostile payloads', () => {
   let server: RuntimeServer
   let port: number
   let ws: WebSocket

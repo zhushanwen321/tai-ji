@@ -1,0 +1,549 @@
+{
+  "name": "uncategorized",
+  "summary": "池：孤儿与在途混合（跨域混合 bundle 按精确路径登记 + sharedBy 注记内含域；equivalence 混沌组；主题/i18n 横切；11 个未入词表扩展包整包清单与 background-task/retry-rules/network-proxy/migration 聚簇见 pendingDomains 注记——立新城时整簇迁出；棘轮只降不升，基线 = _meta.uncategorizedBaseline）",
+  "layers": [],
+  "scope": {},
+  "tests": [
+    "extensions/taiji/agent-ext/src/__tests__/agent-ext.test.ts",
+    "extensions/taiji/msg-id-mapper/src/__tests__/msg-id-mapper.test.ts",
+    "extensions/taiji/system-prompt-trace/src/__tests__/baseline.a12.test.ts",
+    "extensions/taiji/system-prompt-trace/src/__tests__/diff.test.ts",
+    "extensions/taiji/system-prompt-trace/src/__tests__/index-wiring.test.ts",
+    "extensions/taiji/system-prompt-trace/src/__tests__/trace.a11.test.ts",
+    "extensions/taiji/system-prompt/src/__tests__/system-prompt.test.ts",
+    "extensions/universal/base-tool-enhance/src/__tests__/background-lifecycle.test.ts",
+    "extensions/universal/base-tool-enhance/src/__tests__/bash-tool.test.ts",
+    "extensions/universal/base-tool-enhance/src/__tests__/command-display.test.ts",
+    "extensions/universal/base-tool-enhance/src/__tests__/config.test.ts",
+    "extensions/universal/base-tool-enhance/src/__tests__/delivery-port-assembly.test.ts",
+    "extensions/universal/base-tool-enhance/src/__tests__/force-patterns.test.ts",
+    "extensions/universal/base-tool-enhance/src/__tests__/index.test.ts",
+    "extensions/universal/base-tool-enhance/src/__tests__/maintenance-once.test.ts",
+    "extensions/universal/base-tool-enhance/src/__tests__/notify-reconcile-judgement.test.ts",
+    "extensions/universal/base-tool-enhance/src/__tests__/notify.test.ts",
+    "extensions/universal/base-tool-enhance/src/__tests__/pending-reconcile.test.ts",
+    "extensions/universal/base-tool-enhance/src/__tests__/registry.test.ts",
+    "extensions/universal/base-tool-enhance/src/__tests__/render-result.test.ts",
+    "extensions/universal/base-tool-enhance/src/__tests__/subagent-guard.test.ts",
+    "extensions/universal/base-tool-enhance/src/__tests__/task-store.test.ts",
+    "extensions/universal/base-tool-enhance/src/__tests__/tool-error-audit.test.ts",
+    "extensions/universal/cache-probe/src/__tests__/fingerprint.test.ts",
+    "extensions/universal/cache-probe/src/__tests__/state-machine.test.ts",
+    "extensions/universal/network-proxy/src/__tests__/config.test.ts",
+    "extensions/universal/network-proxy/src/__tests__/dispatcher-construction.test.ts",
+    "extensions/universal/network-proxy/src/__tests__/dispatcher.test.ts",
+    "extensions/universal/network-proxy/src/__tests__/fetch-wrapper.test.ts",
+    "extensions/universal/network-proxy/src/__tests__/index.test.ts",
+    "extensions/universal/network-proxy/src/__tests__/ipv4-live.test.ts",
+    "extensions/universal/network-proxy/src/__tests__/ipv4.test.ts",
+    "extensions/universal/network-proxy/src/__tests__/match.test.ts",
+    "extensions/universal/network-proxy/src/__tests__/socks5-guard.test.ts",
+    "extensions/universal/network-proxy/src/__tests__/startup-config-declaration.test.ts",
+    "extensions/universal/network-proxy/src/__tests__/stats.test.ts",
+    "extensions/universal/rename-session/src/__tests__/commands.test.ts",
+    "extensions/universal/rename-session/src/__tests__/index.test.ts",
+    "extensions/universal/rename-session/src/__tests__/llm.test.ts",
+    "extensions/universal/rename-session/src/__tests__/pure.test.ts",
+    "extensions/universal/rename-session/src/__tests__/render.test.ts",
+    "extensions/universal/rename-session/src/__tests__/startup-config-declaration.test.ts",
+    "extensions/universal/retry-rules/src/__tests__/config.test.ts",
+    "extensions/universal/retry-rules/src/__tests__/index-message-end.test.ts",
+    "extensions/universal/retry-rules/src/__tests__/retry-rules-validation-parity.test.ts",
+    "extensions/universal/retry-rules/src/__tests__/rules.test.ts",
+    "extensions/universal/retry-rules/src/__tests__/startup-config-declaration.test.ts",
+    "extensions/universal/smart-context/src/__tests__/compact-handler.test.ts",
+    "extensions/universal/smart-context/src/__tests__/index-generation.test.ts",
+    "extensions/universal/smart-context/src/__tests__/index-reminder-delivery.test.ts",
+    "extensions/universal/smart-context/src/__tests__/pure.test.ts",
+    "extensions/universal/smart-context/src/__tests__/reminder.test.ts",
+    "extensions/universal/smart-context/src/__tests__/sdk-contract.test.ts",
+    "extensions/universal/smart-context/src/__tests__/startup-config-declaration.test.ts",
+    "extensions/universal/smart-context/src/__tests__/summary.test.ts",
+    "extensions/universal/smart-context/src/__tests__/tool.test.ts",
+    "extensions/universal/structured-output/src/__tests__/cross-package-contract.test.ts",
+    "extensions/universal/structured-output/src/__tests__/render-result.test.ts",
+    "packages/core/src/transport/api/__tests__/background-task-domain.test.ts",
+    "packages/extension-protocol/src/background-task-process.test.ts",
+    "packages/extension-protocol/src/background-task-registry-file.test.ts",
+    "packages/extension-protocol/src/background-task.test.ts",
+    "packages/renderer/src/__tests__/composables/composable-logic-bundle.test.ts",
+    "packages/renderer/src/__tests__/composables/rd5-hardening.test.ts",
+    "packages/renderer/src/__tests__/composables/use-composables-bundle.test.ts",
+    "packages/renderer/src/__tests__/root-node.test.ts",
+    "packages/renderer/src/__tests__/stores/stores-mock-bundle.test.ts",
+    "packages/renderer/src/__tests__/stores/stores-pure-bundle.test.ts",
+    "packages/renderer/src/__tests__/v6-visual/tokens.test.ts",
+    "packages/renderer/src/__tests__/wave3/happy-dom-04-use-background-tasks-usesubagentmodel.test.ts",
+    "packages/renderer/src/__tests__/wave3/happy-dom-06-extension-ui-bundle-logic-bundle.test.ts",
+    "packages/renderer/src/__tests__/wave3/happy-dom-08-find-surface-shortcut-markdown-renderer-use-git-status.test.ts",
+    "packages/renderer/src/__tests__/wave3/happy-dom-09-launch-config-shell-wiring-settings-composables-browser.test.ts",
+    "packages/renderer/src/__tests__/wave3/happy-dom-10-composables-panel-pure-bundle-usesidebar-bootstrap.test.ts",
+    "packages/renderer/src/__tests__/wave3/happy-dom-12-detailpane-html-preview-usesidebar-deletefolder.test.ts",
+    "packages/renderer/src/__tests__/wave3/happy-dom-13-submit-firstmessage-createflow-useappupdate-manual-channel.test.ts",
+    "packages/renderer/src/__tests__/wave3/happy-dom-14-collapsible-transition-useimageattachment.test.ts",
+    "packages/renderer/src/__tests__/wave3/happy-dom-21-composer-landing-skill-reload-stream-view-items.test.ts",
+    "packages/renderer/src/__tests__/wave3/happy-dom-23-session-status-icons-user-bubble-edit-composer.test.ts",
+    "packages/renderer/src/__tests__/wave3/happy-dom-24-composer-draft-segments-modelpickerpanel-default-tag.test.ts",
+    "packages/renderer/src/__tests__/wave3/happy-dom-26-drawer-injection-entries-modelselectpopover-tooldetailrenderer.test.ts",
+    "packages/renderer/src/__tests__/wave3/happy-dom-28-focused-session-id-retry-indicator-system-diagnostics-section.test.ts",
+    "packages/renderer/src/__tests__/wave3/happy-dom-34-fork-unread-clear-wiring-sidebar-micro-components.test.ts",
+    "packages/renderer/src/__tests__/wave3/jsdom-37-command-doc-panel-markdown-renderer-fallback-usesessionevents.test.ts",
+    "packages/renderer/src/__tests__/wave3/jsdom-38-thinking-md-variant-use-new-task-deps.test.ts",
+    "packages/renderer/src/__tests__/wave3/node-40-load-more-history-transport-node-bundle.test.ts",
+    "packages/renderer/src/__tests__/wave3/node-41-chat-send-client-uuid-session-api-port-settings-composables-node.test.ts",
+    "packages/renderer/src/__tests__/wave3/node-43-extension-ui-permission-usedetailpane-html.test.ts",
+    "packages/renderer/src/__tests__/wave3/node-44-use-api-key-auto-enable-use-model.test.ts",
+    "packages/renderer/src/__tests__/wave3/node-45-turn-expansion-usechat-bash-ws-client-send-boolean.test.ts",
+    "packages/renderer/src/__tests__/wave3/node-47-lib-use-chat-dispose.test.ts",
+    "packages/renderer/src/__tests__/wave3/node-49-composer-density-use-fork-branch-notify.test.ts",
+    "packages/renderer/src/composables/__tests__/composables-host-bundle.test.ts",
+    "packages/renderer/src/composables/shell/__tests__/shell-host-bundle.test.ts",
+    "packages/renderer/src/i18n/__tests__/i18n.test.ts",
+    "packages/runtime/src/__tests__/crash-journal-session-lifecycle-events.test.ts",
+    "packages/runtime/src/__tests__/equivalence/attach-lifecycle.test.ts",
+    "packages/runtime/src/__tests__/equivalence/broadcast-getstate.test.ts",
+    "packages/runtime/src/__tests__/equivalence/chaos.test.ts",
+    "packages/runtime/src/__tests__/equivalence/completion-backflow-e2e.test.ts",
+    "packages/runtime/src/__tests__/equivalence/d1-usage-protocol-invariants.test.ts",
+    "packages/runtime/src/__tests__/equivalence/delivery-compaction-window-e2e.test.ts",
+    "packages/runtime/src/__tests__/equivalence/equivalence-bundle.test.ts",
+    "packages/runtime/src/__tests__/equivalence/scalar-state-invalidation.test.ts",
+    "packages/runtime/src/__tests__/equivalence/send-queue-e2e.test.ts",
+    "packages/runtime/src/__tests__/equivalence/thinking-level-effective-e2e.test.ts",
+    "packages/runtime/src/__tests__/equivalence/usage-queue-commands-invalidation.test.ts",
+    "packages/runtime/src/__tests__/equivalence/w10-usage-switchmodel-race.test.ts",
+    "packages/runtime/src/__tests__/equivalence/w12-owner-snapshot-publish.test.ts",
+    "packages/runtime/src/__tests__/equivalence/w18-record-entry-chaos.test.ts",
+    "packages/runtime/src/__tests__/services/services-bundle.test.ts",
+    "packages/runtime/src/__tests__/src-__tests__-extra1.test.ts",
+    "packages/runtime/src/__tests__/wiring-bundle.test.ts",
+    "packages/runtime/src/services/__tests__/config-service.test.ts",
+    "packages/runtime/src/services/__tests__/provider-config-bundle.test.ts",
+    "packages/runtime/src/services/background-task/background-task-bundle.test.ts",
+    "packages/runtime/src/services/background-task/background-task-service.test.ts",
+    "packages/runtime/src/services/migration/__tests__/migration-bundle.test.ts",
+    "packages/runtime/src/services/migration/__tests__/preview-cache.test.ts",
+    "packages/runtime/src/services/migration/__tests__/src-services-migration-__tests__-extra1.test.ts",
+    "packages/runtime/src/services/migration/parsers/__tests__/parsers-bundle.test.ts",
+    "packages/runtime/src/services/remote-config/__tests__/remote-config-fetch.test.ts",
+    "packages/runtime/src/services/remote-config/__tests__/remote-retry-rules.test.ts",
+    "packages/runtime/src/services/session/__tests__/background-task-reaper.test.ts",
+    "packages/runtime/src/services/session/__tests__/session-cascade-bundle.test.ts",
+    "packages/runtime/src/services/session/__tests__/session-projection-bundle.test.ts",
+    "packages/runtime/src/services/session/__tests__/session-records-projection.test.ts",
+    "packages/runtime/src/services/session/__tests__/session-records.test.ts",
+    "packages/runtime/src/services/session/__tests__/session-service-background-task.test.ts",
+    "packages/runtime/src/services/session/__tests__/session-service2-bundle.test.ts",
+    "packages/runtime/src/services/session/__tests__/workflow-skill-bundle.test.ts",
+    "packages/runtime/src/services/session/session-root-bundle.test.ts",
+    "packages/runtime/src/transport/__tests__/transport-bundle-1.test.ts",
+    "packages/runtime/src/transport/__tests__/transport-bundle-2.test.ts",
+    "packages/runtime/src/transport/handler-misc-bundle.test.ts",
+    "packages/runtime/src/transport/handler-settings-bundle.test.ts",
+    "packages/runtime/test/acceptance/acceptance-bundle.test.ts",
+    "packages/runtime/test/acceptance/item9-key-containers.test.ts",
+    "packages/runtime/test/background-task-reaper.test.ts",
+    "packages/runtime/test/contract-hardening.test.ts",
+    "packages/runtime/test/data-flow-integration.test.ts",
+    "packages/runtime/test/domains-bundle.test.ts",
+    "packages/runtime/test/lifecycle-races.test.ts",
+    "packages/runtime/test/mcp-codemode-bundle.test.ts",
+    "packages/runtime/test/network-proxy-stats.test.ts",
+    "packages/runtime/test/quota-model-bundle.test.ts",
+    "packages/runtime/test/rpc-client-preset-args.test.ts",
+    "packages/runtime/test/test-extra1.test.ts",
+    "packages/runtime/test/test-extra3.test.ts",
+    "packages/runtime/test/test-extra4.test.ts",
+    "packages/shared/src/__tests__/discovery-migrate.test.ts",
+    "packages/shared/src/__tests__/llm-retry.test.ts",
+    "packages/shared/src/__tests__/message.test.ts",
+    "packages/shared/src/__tests__/network-proxy.test.ts",
+    "packages/shared/src/__tests__/retry-rules.test.ts",
+    "packages/ui/src/__tests__/wave3/happy-dom-52-composerinput-dialog-request-queue-form-permission.test.ts",
+    "packages/ui/src/__tests__/wave3/happy-dom-53-blockscrollbox-composer-suite-shell-adapters.test.ts",
+    "packages/ui/src/__tests__/wave3/happy-dom-54-blockworkflow-turnsummary-usecomposerdragdrop.test.ts",
+    "packages/ui/src/__tests__/wave3/happy-dom-57-respawnnoticebar-sourceimportsection.test.ts",
+    "packages/ui/src/__tests__/wave3/happy-dom-58-format-time-ago-truncatedhistorybar.test.ts",
+    "packages/ui/src/locale/__tests__/locale.test.ts"
+  ],
+  "sharedBy": {
+    "packages/renderer/src/__tests__/wave3/happy-dom-04-use-background-tasks-usesubagentmodel.test.ts": [
+      "chat",
+      "subagent",
+      "app-shell"
+    ],
+    "packages/renderer/src/__tests__/wave3/happy-dom-06-extension-ui-bundle-logic-bundle.test.ts": [
+      "btw",
+      "extension-host"
+    ],
+    "packages/renderer/src/__tests__/wave3/happy-dom-08-find-surface-shortcut-markdown-renderer-use-git-status.test.ts": [
+      "git",
+      "chat",
+      "app-shell"
+    ],
+    "packages/renderer/src/__tests__/wave3/happy-dom-09-launch-config-shell-wiring-settings-composables-browser.test.ts": [
+      "new-task",
+      "panel",
+      "settings"
+    ],
+    "packages/renderer/src/__tests__/wave3/happy-dom-10-composables-panel-pure-bundle-usesidebar-bootstrap.test.ts": [
+      "app-shell",
+      "sidebar",
+      "chat"
+    ],
+    "packages/renderer/src/__tests__/wave3/happy-dom-12-detailpane-html-preview-usesidebar-deletefolder.test.ts": [
+      "sidebar",
+      "panel"
+    ],
+    "packages/renderer/src/__tests__/wave3/happy-dom-13-submit-firstmessage-createflow-useappupdate-manual-channel.test.ts": [
+      "new-task",
+      "chat",
+      "host"
+    ],
+    "packages/renderer/src/__tests__/wave3/happy-dom-14-collapsible-transition-useimageattachment.test.ts": [
+      "panel",
+      "foundation"
+    ],
+    "packages/renderer/src/__tests__/wave3/happy-dom-21-composer-landing-skill-reload-stream-view-items.test.ts": [
+      "panel",
+      "chat"
+    ],
+    "packages/renderer/src/__tests__/wave3/happy-dom-23-session-status-icons-user-bubble-edit-composer.test.ts": [
+      "sidebar",
+      "chat"
+    ],
+    "packages/renderer/src/__tests__/wave3/happy-dom-24-composer-draft-segments-modelpickerpanel-default-tag.test.ts": [
+      "panel",
+      "provider"
+    ],
+    "packages/renderer/src/__tests__/wave3/happy-dom-26-drawer-injection-entries-modelselectpopover-tooldetailrenderer.test.ts": [
+      "shell",
+      "panel",
+      "provider"
+    ],
+    "packages/renderer/src/__tests__/wave3/happy-dom-28-focused-session-id-retry-indicator-system-diagnostics-section.test.ts": [
+      "terminal",
+      "host",
+      "panel"
+    ],
+    "packages/renderer/src/__tests__/wave3/happy-dom-34-fork-unread-clear-wiring-sidebar-micro-components.test.ts": [
+      "sidebar",
+      "foundation"
+    ],
+    "packages/renderer/src/__tests__/wave3/jsdom-37-command-doc-panel-markdown-renderer-fallback-usesessionevents.test.ts": [
+      "panel",
+      "chat"
+    ],
+    "packages/renderer/src/__tests__/wave3/jsdom-38-thinking-md-variant-use-new-task-deps.test.ts": [
+      "chat",
+      "new-task"
+    ],
+    "packages/renderer/src/__tests__/wave3/node-40-load-more-history-transport-node-bundle.test.ts": [
+      "foundation",
+      "preset",
+      "panel"
+    ],
+    "packages/renderer/src/__tests__/wave3/node-41-chat-send-client-uuid-session-api-port-settings-composables-node.test.ts": [
+      "chat",
+      "provider",
+      "host"
+    ],
+    "packages/renderer/src/__tests__/wave3/node-43-extension-ui-permission-usedetailpane-html.test.ts": [
+      "panel",
+      "extension-host",
+      "permission"
+    ],
+    "packages/renderer/src/__tests__/wave3/node-44-use-api-key-auto-enable-use-model.test.ts": [
+      "chat",
+      "provider"
+    ],
+    "packages/renderer/src/__tests__/wave3/node-45-turn-expansion-usechat-bash-ws-client-send-boolean.test.ts": [
+      "chat",
+      "foundation"
+    ],
+    "packages/renderer/src/__tests__/wave3/node-47-lib-use-chat-dispose.test.ts": [
+      "chat",
+      "foundation"
+    ],
+    "packages/renderer/src/__tests__/wave3/node-49-composer-density-use-fork-branch-notify.test.ts": [
+      "panel",
+      "chat",
+      "btw"
+    ],
+    "packages/ui/src/__tests__/wave3/happy-dom-52-composerinput-dialog-request-queue-form-permission.test.ts": [
+      "ask-user",
+      "scheduler"
+    ],
+    "packages/ui/src/__tests__/wave3/happy-dom-53-blockscrollbox-composer-suite-shell-adapters.test.ts": [
+      "host"
+    ],
+    "packages/ui/src/__tests__/wave3/happy-dom-54-blockworkflow-turnsummary-usecomposerdragdrop.test.ts": [
+      "subagent",
+      "chat",
+      "panel"
+    ],
+    "packages/ui/src/__tests__/wave3/happy-dom-57-respawnnoticebar-sourceimportsection.test.ts": [
+      "chat",
+      "import"
+    ],
+    "packages/ui/src/__tests__/wave3/happy-dom-58-format-time-ago-truncatedhistorybar.test.ts": [
+      "chat",
+      "usage"
+    ],
+    "packages/renderer/src/__tests__/composables/composable-logic-bundle.test.ts": [
+      "settings",
+      "chat",
+      "app-shell"
+    ],
+    "packages/renderer/src/__tests__/composables/use-composables-bundle.test.ts": [
+      "panel",
+      "chat",
+      "host",
+      "plan"
+    ],
+    "packages/renderer/src/__tests__/composables/rd5-hardening.test.ts": [
+      "handoff",
+      "chat"
+    ],
+    "packages/renderer/src/composables/__tests__/composables-host-bundle.test.ts": [
+      "subagent",
+      "chat"
+    ],
+    "packages/renderer/src/composables/shell/__tests__/shell-host-bundle.test.ts": [
+      "settings",
+      "chat",
+      "permission",
+      "extension-host"
+    ],
+    "packages/renderer/src/__tests__/stores/stores-mock-bundle.test.ts": [
+      "chat",
+      "subagent",
+      "usage",
+      "file-tree",
+      "sidebar"
+    ],
+    "packages/renderer/src/__tests__/stores/stores-pure-bundle.test.ts": [
+      "sidebar",
+      "extension-host",
+      "plan",
+      "chat",
+      "preset",
+      "scheduler",
+      "file-tree"
+    ],
+    "packages/renderer/src/__tests__/root-node.test.ts": [
+      "subagent",
+      "tray",
+      "chat",
+      "workspace"
+    ],
+    "packages/shared/src/__tests__/message.test.ts": [
+      "chat",
+      "subagent"
+    ],
+    "packages/runtime/src/transport/__tests__/transport-bundle-1.test.ts": [
+      "canvas",
+      "btw",
+      "remote-access",
+      "extension-host",
+      "archive",
+      "host"
+    ],
+    "packages/runtime/src/transport/__tests__/transport-bundle-2.test.ts": [
+      "archive",
+      "plan",
+      "subagent",
+      "chat",
+      "import"
+    ],
+    "packages/runtime/src/transport/handler-misc-bundle.test.ts": [
+      "canvas",
+      "settings",
+      "provider",
+      "usage",
+      "workspace"
+    ],
+    "packages/runtime/src/transport/handler-settings-bundle.test.ts": [
+      "terminal",
+      "settings",
+      "provider",
+      "usage",
+      "workspace",
+      "worktree"
+    ],
+    "packages/runtime/src/services/session/__tests__/session-projection-bundle.test.ts": [
+      "chat",
+      "subagent",
+      "btw"
+    ],
+    "packages/runtime/src/services/session/__tests__/session-records.test.ts": [
+      "chat",
+      "subagent",
+      "plan"
+    ],
+    "packages/runtime/src/services/session/__tests__/session-records-projection.test.ts": [
+      "chat",
+      "plan"
+    ],
+    "packages/runtime/src/services/session/__tests__/session-service2-bundle.test.ts": [
+      "chat",
+      "plan"
+    ],
+    "packages/runtime/src/services/session/__tests__/workflow-skill-bundle.test.ts": [
+      "subagent",
+      "plan",
+      "usage"
+    ],
+    "packages/runtime/src/services/session/__tests__/session-cascade-bundle.test.ts": [
+      "chat",
+      "terminal"
+    ],
+    "packages/runtime/src/services/session/session-root-bundle.test.ts": [
+      "session-manager",
+      "chat"
+    ],
+    "packages/runtime/src/services/__tests__/config-service.test.ts": [
+      "provider",
+      "terminal",
+      "settings",
+      "usage"
+    ],
+    "packages/runtime/src/services/__tests__/provider-config-bundle.test.ts": [
+      "tts",
+      "provider",
+      "settings"
+    ],
+    "packages/runtime/src/__tests__/services/services-bundle.test.ts": [
+      "chat",
+      "provider"
+    ],
+    "packages/runtime/src/__tests__/src-__tests__-extra1.test.ts": [
+      "chat"
+    ],
+    "packages/runtime/src/__tests__/wiring-bundle.test.ts": [
+      "import",
+      "chat"
+    ],
+    "packages/runtime/src/__tests__/crash-journal-session-lifecycle-events.test.ts": [
+      "chat"
+    ],
+    "packages/runtime/test/test-extra1.test.ts": [
+      "plugin",
+      "chat"
+    ],
+    "packages/runtime/test/test-extra3.test.ts": [
+      "extension-host",
+      "preset",
+      "provider",
+      "chat"
+    ],
+    "packages/runtime/test/test-extra4.test.ts": [
+      "settings",
+      "chat",
+      "subagent"
+    ],
+    "packages/runtime/test/domains-bundle.test.ts": [
+      "plugin"
+    ],
+    "packages/runtime/test/mcp-codemode-bundle.test.ts": [
+      "settings",
+      "plugin"
+    ],
+    "packages/runtime/test/quota-model-bundle.test.ts": [
+      "usage",
+      "provider"
+    ],
+    "packages/runtime/test/rpc-client-preset-args.test.ts": [
+      "preset",
+      "settings"
+    ],
+    "packages/runtime/test/contract-hardening.test.ts": [
+      "plugin",
+      "chat"
+    ],
+    "packages/runtime/test/data-flow-integration.test.ts": [
+      "extension-host",
+      "plugin"
+    ],
+    "packages/runtime/test/lifecycle-races.test.ts": [
+      "plugin"
+    ],
+    "packages/runtime/src/services/migration/__tests__/migration-bundle.test.ts": [
+      "settings",
+      "provider"
+    ],
+    "packages/runtime/src/services/migration/__tests__/preview-cache.test.ts": [
+      "settings",
+      "provider"
+    ],
+    "packages/runtime/src/services/migration/__tests__/src-services-migration-__tests__-extra1.test.ts": [
+      "settings",
+      "provider"
+    ],
+    "packages/runtime/src/services/migration/parsers/__tests__/parsers-bundle.test.ts": [
+      "settings",
+      "provider"
+    ],
+    "packages/shared/src/__tests__/discovery-migrate.test.ts": [
+      "provider"
+    ],
+    "packages/runtime/src/__tests__/equivalence/d1-usage-protocol-invariants.test.ts": [
+      "usage"
+    ],
+    "packages/runtime/src/__tests__/equivalence/usage-queue-commands-invalidation.test.ts": [
+      "usage",
+      "chat"
+    ],
+    "packages/runtime/src/__tests__/equivalence/w10-usage-switchmodel-race.test.ts": [
+      "usage",
+      "chat",
+      "provider"
+    ],
+    "packages/runtime/src/__tests__/equivalence/w12-owner-snapshot-publish.test.ts": [
+      "usage",
+      "subagent"
+    ],
+    "packages/runtime/src/__tests__/equivalence/equivalence-bundle.test.ts": [
+      "plan",
+      "session-manager"
+    ],
+    "packages/runtime/src/__tests__/equivalence/thinking-level-effective-e2e.test.ts": [
+      "chat",
+      "provider"
+    ],
+    "packages/runtime/src/__tests__/equivalence/attach-lifecycle.test.ts": [
+      "chat"
+    ],
+    "packages/runtime/src/__tests__/equivalence/broadcast-getstate.test.ts": [
+      "chat"
+    ],
+    "packages/runtime/src/__tests__/equivalence/completion-backflow-e2e.test.ts": [
+      "chat"
+    ],
+    "packages/runtime/src/__tests__/equivalence/delivery-compaction-window-e2e.test.ts": [
+      "chat"
+    ],
+    "packages/runtime/src/__tests__/equivalence/scalar-state-invalidation.test.ts": [
+      "chat"
+    ],
+    "packages/runtime/src/__tests__/equivalence/send-queue-e2e.test.ts": [
+      "chat"
+    ]
+  },
+  "contracts": [],
+  "e2eRules": [],
+  "pendingDomains": {
+    "base-tool-enhance+background-task": "后台任务全链聚簇（base-tool-enhance 写侧 ext 16 件 + runtime 收殓读侧 reaper/service + extension-protocol 契约 3 件 + core transport api 1 件；消费方证据 = packages/extension-protocol/src/index.ts 头注释「写侧实现在 base-tool-enhance，收殓读侧在 runtime」；renderer 详情面板按 W2-B 冻结在 tray 域）——立新城候选",
+    "network-proxy": "ext 11 件 + runtime network-proxy-config/network-proxy-stats + shared network-proxy 契约——代理功能域候选",
+    "retry-rules": "ext 5 件 + runtime remote-config/remote-retry-rules + shared retry-rules/llm-retry——LLM 重试规则功能域候选",
+    "smart-context": "ext 9 件（compact/index-generation/reminder/summary）——上下文压缩功能域候选",
+    "rename-session": "ext 6 件——会话重命名功能域候选",
+    "structured-output": "ext 2 件",
+    "cache-probe": "ext 2 件",
+    "system-prompt-trace": "ext 4 件",
+    "system-prompt": "ext 1 件",
+    "msg-id-mapper": "ext 1 件",
+    "agent-ext": "ext 1 件",
+    "migration": "runtime services/migration 4 件 + shared discovery-migrate（settings/provider 旧配置导入器横切，sharedBy 注记对侧域）"
+  }
+}

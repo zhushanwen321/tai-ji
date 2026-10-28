@@ -1,32 +1,28 @@
 // @vitest-environment node
-
 /**
- * plan store 单测 —— plan 模式状态机显式化（D1/D2/D4）：状态、推导与审批窗口机件。
+ * plan store + contentBlocks 填充 单文件合并（round5-d 分区 4 簇 4-20，node 环境全簇合并）。
  *
- * 覆盖（impl-plan U4b 验收条款 + S15 renderer 断言族）：
- * - derivePlanStage 重写（derivePhase 单点接线）：① exploring / ② writing（含 revising 归
- *   规划中档）/ ③ reviewing / ③✓ approved（D5 阶段不倒退，F5）
- * - state 读侧解析（resolvePlanLifecycleState：归一 View 的 state 直读 + 值域检查，缺失/
- *   垃圾落 idle——批次 3 条目 1 删除混装兜底后的声明例外锚；resolveResumeHint：直读）
- * - D4 分支公式单源（derivePlanReviewBarMode）：presence 语义 / 抑制标记 / degraded 组合输入范围
- * - 审批窗口机件：已应答标记两路事件驱动解除（预期后态帧值判定 / 新 pending）、迟到旧帧
- *   不解标记、degraded 组合即时评估（[ADR-0122] 时间窗已删）、双源主动拉取对账（显式拉取：
- *   失败 → 标记悬挂 + loadError（R7）；成功 → 真值解除 + sink 再入店）
- * - D8 检测窗相位机（dmg-r1-2）：send resolve 只进 armed（前置在途 turn 终态不判定）、
- *   nudge 轮 message_start 才开 watching、send.rejected 不受起点标记门
- * - 辅助表迟到写拦截（D-B2-1 口径延伸，dmg-r1-3）：cleanup 后迟到 applyFrame /
- *   活动信号不复活 frameRevs / edgeFrameRevs 条目
- * - 首次拉取成功/置空/失败、陈旧首次拉取检查、applyFrame 分区写、评论草稿、enter 翻转清、
- *   草稿回看（历史族，行为不变）
+ * 为什么单文件：vitest 按测试文件隔离模块图——两文件共同装载 vue / pinia /
+ * shared / extension-protocol / core chat 域 等重模块，单文件共享一份装载。
  *
- * 范式照抄 subagent.test.ts（pinia setActivePinia 每 case 重建）+ gen-stats-composable.test.ts
- * 的 mock 边界（spread actual 保真实 events 通道，只换 command）。
- * 断言经 storeToRefs（pinia setup store 的 computed 经 store 实例访问已解包，.value 是 undefined）。
+ * 来源文件（describe/it 块原样搬运，测试名零改动）：
+ *  - plan-store.test.ts（plan 模式状态机 + 审批窗口机件 + 草稿族，主体）
+ *  - chat-chunk-content-blocks.test.ts（dispatchMessageEvent contentBlocks 流式填充）
+ *
+ * 冲突处理（试点模式）：
+ *  - 主体的 transport/api mock（spread actual 只换 command）与 extension 域窄 mock
+ *    为文件级——chat-chunk 节纯 core domain 测试（dispatchMessageEvent + 自建 ctx），
+ *    不消费 command RPC 与 extension 域，零泄漏
+ *  - chat-chunk 节零顶层 hook（每用例自建 ctx），主体顶层 beforeEach/afterEach
+ *    原样文件级（对 chat-chunk 节多做的 pinia 重建/mock 重置为幂等无害）
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/stores/plan-store.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { ref, shallowRef } from 'vue'
+import { dispatchMessageEvent } from '@taiji/core'
+import type { MessageEffectContext } from '@taiji/core'
 import { storeToRefs } from 'pinia'
 import {
   triggerSessionCleanups,
@@ -837,5 +833,191 @@ describe('草稿回看请求（requestDraftsReveal / markDraftsRevealConsumed）
     store.syncFocus('B')
     expect(store.draftsRevealSeq).toBe(0)
     expect(store.draftsRevealPending).toBe(false)
+  })
+})
+
+
+// ══════════ 来源：chat-chunk-content-blocks.test.ts（dispatchMessageEvent contentBlocks
+//             流式填充；零 mock 零顶层 hook，主体公共 hook 对本节幂等无害） ══════════
+
+const SID = 's-test'
+
+/** 构造 MessageEffectContext：真实 vue ref + 回调 mock（流式 contentBlocks 不走 file_changes） */
+function makeCtx(initial: Message[] = []): MessageEffectContext {
+  return {
+    messages: ref(new Map([[SID, shallowRef(initial)]])),
+    retryStates: ref(new Map()),
+    applyFileChanges: vi.fn(),
+    markChangeSetsSuperseded: vi.fn(),
+    finalizeSession: vi.fn(),
+    clearPendingSend: vi.fn(),
+    appendUser: vi.fn(),
+    // steer-bubble u1/D2：inflight 确认计数读取（message_start/abort 分支消费，store 注入；
+    // 本套用例无计数断言，getInflight 恒 0 + 其余 no-op）
+    getInflight: vi.fn(() => 0),
+    decrementInflight: vi.fn(),
+    clearInflight: vi.fn(),
+    // w21：entry 载体帧喂 reducer 的接入点
+    applyEntryFrame: vi.fn(),
+  }
+}
+
+function msg(type: string, payload: Record<string, unknown> = {}): ServerMessage {
+  return { type, payload: { sessionId: SID, ...payload } } as ServerMessage
+}
+
+function getMsgs(ctx: MessageEffectContext): Message[] {
+  return ctx.messages.value.get(SID)?.value ?? []
+}
+
+/** 取最后一条 assistant message */
+function lastAssistant(ctx: MessageEffectContext): Message {
+  const list = getMsgs(ctx)
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    if (list[i].role === 'assistant') return list[i]
+  }
+  throw new Error('no assistant message')
+}
+
+describe('dispatchMessageEvent contentBlocks 填充（流式路径）', () => {
+  // U1：message_start 初始化 contentBlocks: []
+  it('U1: message_start（prev 空）→ 新 message 含 contentBlocks: []（空数组）', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
+    const a = lastAssistant(ctx)
+    expect(a.contentBlocks).toEqual([])
+  })
+
+  // U2：首个 text_delta push text 块
+  it('U2: content="" + contentBlocks=[]，收首个 text_delta "h" → content="h" 且 contentBlocks=[{type:text,refId:text}]', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
+    dispatchMessageEvent(ctx, SID, msg('message.text_delta', { delta: 'h' }))
+    const a = lastAssistant(ctx)
+    expect(a.content).toBe('h')
+    expect(a.contentBlocks).toEqual([{ type: 'text', refId: 'text' }])
+  })
+
+  // U3：已含 text 块，再收 text_delta 不重复 push
+  it('U3: contentBlocks 已含 text 块，再收 text_delta "i" → content="hi"，contentBlocks 仍仅 1 个 text 块', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
+    dispatchMessageEvent(ctx, SID, msg('message.text_delta', { delta: 'h' }))
+    dispatchMessageEvent(ctx, SID, msg('message.text_delta', { delta: 'i' }))
+    const a = lastAssistant(ctx)
+    expect(a.content).toBe('hi')
+    expect(a.contentBlocks).toEqual([{ type: 'text', refId: 'text' }])
+  })
+
+  // U4：thinking_start push thinking 块
+  it('U4: 收 thinking_start(thinkingId="th1") → thinking 含 th1 且 contentBlocks 尾部 push {type:thinking,refId:th1}', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
+    dispatchMessageEvent(ctx, SID, msg('message.thinking_start', { thinkingId: 'th1' }))
+    const a = lastAssistant(ctx)
+    expect(a.thinking?.[0].id).toBe('th1')
+    expect(a.contentBlocks).toEqual([{ type: 'thinking', refId: 'th1' }])
+  })
+
+  // U5：tool_call_start push toolCall 块
+  it('U5: 收 tool_call_start(toolCallId="tc1") → toolCalls 含 tc1 且 contentBlocks 尾部 push {type:toolCall,refId:tc1}', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
+    dispatchMessageEvent(ctx, SID, msg('message.tool_call_start', { entry: { type: 'toolCall', toolCallId: 'tc1', toolName: 'read', arguments: {}, timestamp: new Date(0).toISOString() } }))
+    const a = lastAssistant(ctx)
+    expect(a.toolCalls?.[0].id).toBe('tc1')
+    expect(a.contentBlocks).toEqual([{ type: 'toolCall', refId: 'tc1' }])
+  })
+
+  // U6：多类型块严格按首次到达顺序
+  it('U6: message_start→thinking(th1)→text_delta→tool_call(tc1)→thinking(th2) → contentBlocks 顺序=[thinking:th1, text, toolCall:tc1, thinking:th2]', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
+    dispatchMessageEvent(ctx, SID, msg('message.thinking_start', { thinkingId: 'th1' }))
+    dispatchMessageEvent(ctx, SID, msg('message.text_delta', { delta: 'hi' }))
+    dispatchMessageEvent(ctx, SID, msg('message.tool_call_start', { entry: { type: 'toolCall', toolCallId: 'tc1', toolName: 'read', arguments: {}, timestamp: new Date(0).toISOString() } }))
+    dispatchMessageEvent(ctx, SID, msg('message.thinking_start', { thinkingId: 'th2' }))
+    const a = lastAssistant(ctx)
+    expect(a.contentBlocks).toEqual([
+      { type: 'thinking', refId: 'th1' },
+      { type: 'text', refId: 'text' },
+      { type: 'toolCall', refId: 'tc1' },
+      { type: 'thinking', refId: 'th2' },
+    ])
+  })
+
+  // U7：thinking_end + thinking_delta 不改 contentBlocks
+  it('U7: contentBlocks 已定，收 thinking_end + thinking_delta → contentBlocks 数组不变（仅 thinking 内容更新）', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
+    dispatchMessageEvent(ctx, SID, msg('message.thinking_start', { thinkingId: 'th1' }))
+    const before = lastAssistant(ctx).contentBlocks
+    dispatchMessageEvent(ctx, SID, msg('message.thinking_delta', { delta: '推理' }))
+    dispatchMessageEvent(ctx, SID, msg('message.thinking_end'))
+    const a = lastAssistant(ctx)
+    expect(a.contentBlocks).toEqual(before)
+    expect(a.thinking?.[0].content).toBe('推理')
+    expect(a.thinking?.[0].endTime).toBeTypeOf('number')
+  })
+
+  // U8：prev 无 assistant，收 text_delta 不抛错
+  it('U8: prev 无 assistant，收 text_delta → 不抛错（return early）', () => {
+    const ctx = makeCtx([{ id: 'u1', role: 'user', content: 'hi', status: 'complete', timestamp: 0 }])
+    expect(() => dispatchMessageEvent(ctx, SID, msg('message.text_delta', { delta: 'x' }))).not.toThrow()
+    // user 消息不变
+    expect(getMsgs(ctx)).toHaveLength(1)
+  })
+
+  // U11：message_start 起新 assistant，旧 assistant 的 contentBlocks 原样保留
+  it('U11: a1 已有 contentBlocks，message_start(a2)→text_delta → a1.contentBlocks 原样；text 写入 a2', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
+    dispatchMessageEvent(ctx, SID, msg('message.text_delta', { delta: 'first' }))
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a2' }))
+    dispatchMessageEvent(ctx, SID, msg('message.text_delta', { delta: 'second' }))
+    const list = getMsgs(ctx)
+    // a1 不被改
+    expect(list[0].contentBlocks).toEqual([{ type: 'text', refId: 'text' }])
+    expect(list[0].content).toBe('first')
+    // a2 收到 text
+    expect(list[1].content).toBe('second')
+    expect(list[1].contentBlocks).toEqual([{ type: 'text', refId: 'text' }])
+  })
+
+  // U11b：thinking_start 无 thinkingId → fallback blockId 同时用于 thinking[].id 与 contentBlocks[].refId
+  it('U11b: thinking_start 无 thinkingId → fallback id 在 thinking[].id 与 contentBlocks[].refId 一致', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
+    dispatchMessageEvent(ctx, SID, msg('message.thinking_start')) // 无 thinkingId
+    const a = lastAssistant(ctx)
+    const thkId = a.thinking?.[0].id
+    expect(thkId).toBeTruthy()
+    const refId = a.contentBlocks?.[0].refId
+    expect(refId).toBe(thkId)
+  })
+
+  // U11c：tool_call_start 无 toolCallId → fallback UUID 在 toolCalls[].id 与 contentBlocks[].refId 一致
+  it('U11c: tool_call_start 无 toolCallId → fallback id 在 toolCalls[].id 与 contentBlocks[].refId 一致', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
+    dispatchMessageEvent(ctx, SID, msg('message.tool_call_start', { entry: { type: 'toolCall', toolName: 'read', arguments: {}, timestamp: new Date(0).toISOString() } })) // 无 toolCallId
+    const a = lastAssistant(ctx)
+    const tcId = a.toolCalls?.[0].id
+    expect(tcId).toBeTruthy()
+    const refId = a.contentBlocks?.[0].refId
+    expect(refId).toBe(tcId)
+  })
+
+  // U11d：tool_call_end 不改 contentBlocks
+  it('U11d: contentBlocks 已定，收 tool_call_end → contentBlocks 不变，仅 toolCalls[].status 更新', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
+    dispatchMessageEvent(ctx, SID, msg('message.tool_call_start', { entry: { type: 'toolCall', toolCallId: 'tc1', toolName: 'read', arguments: {}, timestamp: new Date(0).toISOString() } }))
+    const before = lastAssistant(ctx).contentBlocks
+    dispatchMessageEvent(ctx, SID, msg('message.tool_call_end', { entry: { type: 'message', parentId: null, timestamp: new Date(0).toISOString(), message: { role: 'toolResult', toolCallId: 'tc1', content: [{ type: 'text', text: 'ok' }], isError: false, timestamp: 0 } } }))
+    const a = lastAssistant(ctx)
+    expect(a.contentBlocks).toEqual(before)
+    expect(a.toolCalls?.[0].status).toBe('completed')
+    expect(a.toolCalls?.[0].output).toBe('ok')
   })
 })

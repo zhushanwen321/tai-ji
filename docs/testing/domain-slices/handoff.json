@@ -1,0 +1,28 @@
+{
+  "name": "handoff",
+  "summary": "交接编排（runtime handoff-service/prompt/formatter + shared/handoff 契约 + renderer fork-handoff composable；renderer useHandoffActions 测试在 Wave3 混合 bundle rd5-hardening，见批 C 报告 sharedBy 建议）",
+  "layers": [
+    "runtime",
+    "renderer",
+    "shared"
+  ],
+  "scope": {
+    "runtime": [
+      "packages/runtime/src/services/handoff-service.ts",
+      "packages/runtime/src/services/handoff-prompt.ts",
+      "packages/runtime/src/services/handoff-formatter.ts"
+    ],
+    "shared": [
+      "packages/shared/src/handoff.ts"
+    ],
+    "renderer": [
+      "packages/renderer/src/composables/features/fork-handoff/**"
+    ]
+  },
+  "tests": [
+    "packages/runtime/src/services/__tests__/handoff-service.test.ts"
+  ],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

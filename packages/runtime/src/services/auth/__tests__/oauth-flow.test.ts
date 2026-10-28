@@ -346,7 +346,7 @@ describe('runOAuthLogin — callback flow', () => {
     // onAuthUrl 在 server listen 后同步触发（startCallbackServer await 完成后才调 hooks）
     await vi.waitFor(() => {
       expect(hooks.onAuthUrl).toHaveBeenCalled()
-    })
+    }, { interval: 1 })
     const authUrl = (hooks.onAuthUrl as ReturnType<typeof vi.fn>).mock.calls[0][0] as { url: string }
     const url = new URL(authUrl.url)
     expect(url.searchParams.get('client_id')).toBe('anthropic-client')
@@ -386,7 +386,7 @@ describe('runOAuthLogin — callback flow', () => {
 
     await vi.waitFor(() => {
       expect(hooks.onAuthUrl).toHaveBeenCalled()
-    })
+    }, { interval: 1 })
     const authUrl = (hooks.onAuthUrl as ReturnType<typeof vi.fn>).mock.calls[0][0] as { url: string }
     const url = new URL(authUrl.url)
     // authorize 只带 callback_url + challenge（无 client_id/scope/state）
@@ -411,7 +411,7 @@ describe('runOAuthLogin — callback flow', () => {
 
     await vi.waitFor(() => {
       expect(hooks.onAuthUrl).toHaveBeenCalled()
-    })
+    }, { interval: 1 })
     controller.abort()
     await expect(flow).rejects.toThrow('Login cancelled')
   })
@@ -468,7 +468,7 @@ describe('runOAuthLogin — token exchange 错误路径（MF-1）', () => {
     const assertion = expect(flow).rejects.toThrow('OAuth token exchange failed (HTTP 500)')
     await vi.waitFor(() => {
       expect(hooks.onAuthUrl).toHaveBeenCalled()
-    })
+    }, { interval: 1 })
     const authUrl = (hooks.onAuthUrl as ReturnType<typeof vi.fn>).mock.calls[0][0] as { url: string }
     const url = new URL(authUrl.url)
     const state = url.searchParams.get('state') as string
@@ -491,7 +491,7 @@ describe('runOAuthLogin — token exchange 错误路径（MF-1）', () => {
     const assertion = expect(flow).rejects.toThrow('OAuth key exchange failed (HTTP 500)')
     await vi.waitFor(() => {
       expect(hooks.onAuthUrl).toHaveBeenCalled()
-    })
+    }, { interval: 1 })
     const authUrl = (hooks.onAuthUrl as ReturnType<typeof vi.fn>).mock.calls[0][0] as { url: string }
     const url = new URL(authUrl.url)
     const callbackUrl = url.searchParams.get('callback_url') as string
@@ -556,7 +556,7 @@ describe('runOAuthLogin — token exchange 错误路径（MF-1）', () => {
     const flow = runOAuthLogin('anthropic', ANTHROPIC_CONFIG, hooks, controller.signal, POLL_TUNING)
     await vi.waitFor(() => {
       expect(hooks.onAuthUrl).toHaveBeenCalled()
-    })
+    }, { interval: 1 })
     const authUrl = (hooks.onAuthUrl as ReturnType<typeof vi.fn>).mock.calls[0][0] as { url: string }
     const url = new URL(authUrl.url)
     const state = url.searchParams.get('state') as string
@@ -568,7 +568,7 @@ describe('runOAuthLogin — token exchange 错误路径（MF-1）', () => {
     const fetchMock = vi.mocked(globalThis.fetch)
     await vi.waitFor(() => {
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/v1/oauth/token'))).toBe(true)
-    })
+    }, { interval: 1 })
     controller.abort()
     await expect(flow).rejects.toThrow()
   })

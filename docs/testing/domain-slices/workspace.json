@@ -1,0 +1,34 @@
+{
+  "name": "workspace",
+  "summary": "workspace/project 两小域合并（runtime services/workspace+project + transport 两 handler + renderer stores/workspace+project 与 workspace 组件 + shared 契约）",
+  "layers": [
+    "runtime",
+    "renderer",
+    "shared"
+  ],
+  "scope": {
+    "runtime": [
+      "packages/runtime/src/services/workspace/**",
+      "packages/runtime/src/services/project/**",
+      "packages/runtime/src/transport/workspace-message-handler.ts",
+      "packages/runtime/src/transport/project-message-handler.ts"
+    ],
+    "renderer": [
+      "packages/renderer/src/stores/workspace.ts",
+      "packages/renderer/src/stores/project.ts",
+      "packages/renderer/src/components/workspace/**"
+    ],
+    "shared": [
+      "packages/shared/src/workspace.ts",
+      "packages/shared/src/project.ts"
+    ]
+  },
+  "tests": [
+    "packages/runtime/src/services/workspace/**",
+    "packages/runtime/test/recent-workspaces-real.test.ts",
+    "packages/renderer/src/__tests__/sidebar/project-store.test.ts"
+  ],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

@@ -51,7 +51,7 @@ fi
 # 检测待发布范围（v<LATEST_VER> tag → 当前工作区）内 @earendil-works/pi-coding-agent
 # 依赖是否变更（实际声明在 root package.json devDependencies；同时覆盖
 # packages/runtime/package.json，对齐 plan W25 对两处表述的兼容）。变更时先跑
-# packages/runtime/src/__tests__/equivalence/pi-protocol-contract.test.ts
+# packages/runtime/src/__tests__/equivalence/equivalence-bundle.test.ts
 # （RPC 命令范围 / 事件范围 / entry 面三断言 + entry_appended 不发射的 D5 固化），
 # 红 = 上游协议漂移，先处理漂移再 bump，防事件语义漂移静默制造新分叉。
 # 注意：契约测试 spawn 真实 pi（skip-if-no-pi 约定）——pi 缺席时 skip 放行并警告补跑。

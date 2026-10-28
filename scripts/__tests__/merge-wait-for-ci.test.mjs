@@ -131,8 +131,8 @@ describe('verifyReleasePayload（Release 产物判定）', () => {
 })
 
 describe('makeFetchRuns（gh 查询失败与「成功且空」分流）', () => {
-  /** 按 lib/exec.mjs run 的返回形态造假实现。 */
-  const fakeRun = (over = {}) => (_cmd, _args, _opts) => ({
+  /** 按 lib/exec.mjs run 的返回形态造假实现；调用方会传 (cmd, args, opts)，形参略去即忽略。 */
+  const fakeRun = (over = {}) => () => ({
     code: 0,
     ok: true,
     stdout: '[]',

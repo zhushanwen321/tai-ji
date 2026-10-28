@@ -1,20 +1,26 @@
 /**
- * UpdateCheckCard · 版本检查卡片测试（Settings 系统页内嵌组件）。
+ * UpdateCheckCard 单文件多源合并（round5-d 分区 4 簇 4-4 的相容子集）。
  *
- * 覆盖 TC1-TC8：按 useAppUpdate.state.state 分支渲染 DOM 断言 + 交互。
- * - TC1 idle      渲染当前版本 + 检查按钮（settings-update-check）
- * - TC2 click 检查 → checkForUpdate(true)
- * - TC3 checking   按钮 loading + disabled
- * - TC4 available  显示新版本号 + 下载按钮（settings-update-download），click → performDownload
- * - TC5 downloaded 重启安装按钮（settings-update-install），click → 弹确认 Dialog
- * - TC6 确认 Dialog 点「立即重启安装」（settings-update-confirm-install）→ performInstall
- * - TC7 error      重试按钮（settings-update-retry），click → checkForUpdate(true)
- * - TC8 unsupported 前往下载按钮（settings-update-unsupported），click → openFallbackUrl
+ * 为什么单文件：vitest 按测试文件隔离模块图——两文件同 SUT（UpdateCheckCard.vue）、
+ * 同 useAppUpdate mock 工厂（helpers/update-card-mock.ts），单文件共享一份装载。
  *
- * Mock 策略：仅需 vi.mock('@/composables/features/settings/useAppUpdate')（UpdateCheckCard 唯一外部依赖），
- * 工厂注入真实控制器（helpers/update-card-mock.ts：createAppUpdateController + 内存 ipc）。
- * 不需 SystemPage 的其他 mock（getAutoRenameEnabled/useToast/useCommandStore/listSystemSounds）——
- * UpdateCheckCard 是自包含组件，无 props、无 onMounted 副作用。
+ * 来源文件（describe/it 块原样搬运，测试名零改动）：
+ *  - system-page-update.test.ts（版本检查卡片 TC1-TC8 + 状态机补全，主体）
+ *  - update-manual-channel.test.ts（手动升级通道区 D9 + 打开目录按钮 u7b）
+ *
+ * 冲突处理（试点模式）：
+ *  - 两文件 vi.mock('@/composables/features/settings/useAppUpdate') 工厂相同
+ *    （useAppUpdateCardModule），去重取一份；update-manual 独有的
+ *    vi.mock('@/api/domains/settings')（getDataDir/openUpdateManualDir 窄 mock）
+ *    提升为文件级——主体节的用例不断言手动通道区 DOM，mock 后无断言影响
+ *  - 两文件模块级 wrapper 变量与 beforeEach/afterEach（resetCardUpdateHarness +
+ *    wrapper unmount + toast 清空，均幂等重置）合并为一份公共 hook，共享一个
+ *    wrapper 变量（两节用例互不重叠使用，语义等价）
+ *
+ * 簇注：同簇的 llm-retry-section / default-prompt-reference / remote-access-page
+ * 不并入——llm-retry 的 useToast mock 与 remote-access 的真实 useToast 单例断言
+ * 实质冲突；remote-access 的 @/lib/ipc 三方法窄 mock 会泄漏进 default-prompt 的
+ * SettingsModal 全树。三文件保持原样。
  *
  * Dialog 测试要点（参考 UpdateButton.test.ts W3TC2-4）：
  * - Dialog content 经 DialogPortal(Teleport) 挂到 document.body，wrapper.find 不可见，
@@ -32,9 +38,22 @@ import type { UpdateAppState } from '@/composables/features/settings/use-app-upd
 
 // __APP_VERSION__ 在 vitest-i18n-setup.ts 全局 stub
 
+// ── mock 层（useAppUpdate 两源文件同工厂去重；settings 域来自 update-manual-channel）──
+
+const getDataDirMock = vi.hoisted(() => vi.fn())
+const openUpdateManualDirMock = vi.hoisted(() => vi.fn())
+
+vi.mock('@/api/domains/settings', () => ({
+  getDataDir: getDataDirMock,
+  openUpdateManualDir: openUpdateManualDirMock,
+}))
+
 vi.mock('@/composables/features/settings/useAppUpdate', () => useAppUpdateCardModule())
 
 import UpdateCheckCard from '@/components/settings/UpdateCheckCard.vue'
+import { useToast } from '@/composables/useToast'
+
+// ══════════ 主体：原 system-page-update.test.ts 的 helper 与用例 ══════════
 
 /** 设置测试态（驱动组件 v-if/v-else-if 分支；直改真实控制器的 state） */
 function setTestState(partial: Partial<UpdateAppState>): void {
@@ -47,16 +66,25 @@ function expectForceCheckCalledOnce(): void {
   expect(getCardUpdateHarness().ipc.checkForUpdate).toHaveBeenCalledWith({ force: true })
 }
 
+// 公共 hook（两源文件顶层 hook 的幂等并集：resetCardUpdateHarness + 手动通道 mock
+// 默认值 + wrapper 兜底卸载 + toast 单例清列）
 let wrapper: ReturnType<typeof mount> | null = null
 
 beforeEach(() => {
   resetCardUpdateHarness()
+  // 默认：dev 数据目录（~ 缩写展示形态，与 bridge-handlers get-data-dir 返回一致）
+  getDataDirMock.mockReset()
+  getDataDirMock.mockResolvedValue('~/.taiji-dev')
+  openUpdateManualDirMock.mockReset()
+  openUpdateManualDirMock.mockResolvedValue({ success: true })
 })
 
 afterEach(() => {
-  // 若有未 unmount 的 wrapper（含 Teleport Dialog 节点），这里兜底清理
   wrapper?.unmount()
   wrapper = null
+  // 清空 toast 单例在列（失败态用例入列的 error toast 不跨用例残留）
+  const { toasts } = useToast()
+  toasts.value.splice(0, toasts.value.length)
 })
 
 describe('UpdateCheckCard 版本检查卡片', () => {
@@ -197,5 +225,119 @@ describe('UpdateCheckCard 版本检查卡片', () => {
     wrapper = mount(UpdateCheckCard)
     await flushPromises()
     expect(wrapper.text()).toContain('即将重启')
+  })
+})
+
+// ══════════ 来源：update-manual-channel.test.ts（手动升级通道区；其
+//             @/api/domains/settings mock 与顶层 hook 已并入上方公共区） ══════════
+
+describe('UpdateCheckCard 手动升级通道区（D9）', () => {
+  it('默认展开：DOM 含引导文案与「仅支持 app 已提示的新版本」限定语', async () => {
+    wrapper = mount(UpdateCheckCard)
+    await flushPromises()
+    // 引导文案（用户可见）
+    const hint = wrapper.find('[data-testid="settings-update-manual-hint"]')
+    expect(hint.exists()).toBe(true)
+    expect(hint.text()).toContain('从 release 页手动下载安装包')
+    expect(hint.text()).toContain('重启应用或重试更新即可识别')
+    // 限定语（D3 已知边界必须言明）
+    const restriction = wrapper.find('[data-testid="settings-update-manual-restriction"]')
+    expect(restriction.exists()).toBe(true)
+    expect(restriction.text()).toContain('仅支持 app 已提示的新版本')
+  })
+
+  it('目录路径展示：getDataDir + /update/manual（与 main 侧 MANUAL_ASSET_DIR 同源）', async () => {
+    wrapper = mount(UpdateCheckCard)
+    await flushPromises()
+    const dir = wrapper.find('[data-testid="settings-update-manual-dir"]')
+    expect(dir.exists()).toBe(true)
+    expect(dir.text()).toBe('~/.taiji-dev/update/manual')
+  })
+
+  it('折叠交互：点触发器 → 引导内容从 DOM 消失（标题仍可见）', async () => {
+    wrapper = mount(UpdateCheckCard)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="settings-update-manual-hint"]').exists()).toBe(true)
+    await wrapper.find('[data-testid="settings-update-manual-toggle"]').trigger('click')
+    // reka-ui CollapsibleContent 无 forceMount：关闭即卸载内容
+    expect(wrapper.find('[data-testid="settings-update-manual-hint"]').exists()).toBe(false)
+    // 折叠区标题（触发器文案）常驻
+    expect(wrapper.find('[data-testid="settings-update-manual-toggle"]').text()).toContain('手动升级通道')
+  })
+
+  it('降级：getDataDir 无值（web/mock 环境）→ 展示「路径暂不可用」占位', async () => {
+    getDataDirMock.mockResolvedValue(undefined)
+    wrapper = mount(UpdateCheckCard)
+    await flushPromises()
+    const dir = wrapper.find('[data-testid="settings-update-manual-dir"]')
+    expect(dir.exists()).toBe(true)
+    expect(dir.text()).toBe('路径暂不可用')
+  })
+
+  it('降级：getDataDir reject（IPC 异常）→ 不产生未处理 rejection，路径区显示占位', async () => {
+    getDataDirMock.mockRejectedValue(new Error('ipc get-data-dir unavailable'))
+    const unhandled = vi.fn()
+    process.on('unhandledRejection', unhandled)
+    try {
+      wrapper = mount(UpdateCheckCard)
+      await flushPromises()
+      // onMounted async 不被 await：无 catch 会以 unhandledRejection 形态逃逸
+      expect(unhandled).not.toHaveBeenCalled()
+      const dir = wrapper.find('[data-testid="settings-update-manual-dir"]')
+      expect(dir.exists()).toBe(true)
+      expect(dir.text()).toBe('路径暂不可用')
+    } finally {
+      process.off('unhandledRejection', unhandled)
+    }
+  })
+})
+
+describe('UpdateCheckCard 手动通道「打开目录」按钮（D9 u7b）', () => {
+  it('按钮可见（用户可见 DOM：文案「打开目录」），点击触发 openUpdateManualDir IPC', async () => {
+    wrapper = mount(UpdateCheckCard)
+    await flushPromises()
+    const btn = wrapper.find('[data-testid="settings-update-manual-open-dir"]')
+    expect(btn.exists()).toBe(true)
+    // 使用者黑盒：按钮文案用户可读
+    expect(btn.text()).toBe('打开目录')
+    expect(openUpdateManualDirMock).not.toHaveBeenCalled()
+
+    await btn.trigger('click')
+    // 构建者白盒：点击 → ipc 包装函数被调一次
+    expect(openUpdateManualDirMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('路径占位态（getDataDir 无值）按钮仍可用：目录由 main 侧创建，打开不依赖路径展示', async () => {
+    getDataDirMock.mockResolvedValue(undefined)
+    wrapper = mount(UpdateCheckCard)
+    await flushPromises()
+    const btn = wrapper.find('[data-testid="settings-update-manual-open-dir"]')
+    expect(btn.exists()).toBe(true)
+    await btn.trigger('click')
+    expect(openUpdateManualDirMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('失败降级：IPC reject → toast 错误提示（观察者形态），组件不中断', async () => {
+    openUpdateManualDirMock.mockRejectedValue(new Error('Failed to open manual asset directory: no access'))
+    wrapper = mount(UpdateCheckCard)
+    await flushPromises()
+
+    const unhandled = vi.fn()
+    process.on('unhandledRejection', unhandled)
+    try {
+      await wrapper.find('[data-testid="settings-update-manual-open-dir"]').trigger('click')
+      await flushPromises()
+      // 观察者形态：错误进入 toast 单例在列（ToastContainer 渲染的用户可见通道）
+      const { toasts } = useToast()
+      expect(
+        toasts.value.some((toast) => toast.type === 'error' && toast.message.includes('Failed to open manual asset directory')),
+      ).toBe(true)
+      // catch 已兜住，无未处理 rejection（不打断页面）
+      expect(unhandled).not.toHaveBeenCalled()
+      // 组件仍在渲染（按钮未消失）
+      expect(wrapper.find('[data-testid="settings-update-manual-open-dir"]').exists()).toBe(true)
+    } finally {
+      process.off('unhandledRejection', unhandled)
+    }
   })
 })

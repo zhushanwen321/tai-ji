@@ -185,6 +185,10 @@ function sha256Hex(content: Buffer): string {
   return createHash('sha256').update(content).digest('hex')
 }
 
+/** 12MB 夹具的 sha256 只算一次（模块级单例夹具的确定值，round6 慢用例治理前移——
+ *  13 处用例原本各自全量重哈希 12MB，纯重复 CPU）。 */
+const MULTI_PART_SHA256 = sha256Hex(MULTI_PART_CONTENT)
+
 describe('W3: download-asset (W3TC1-3)', () => {
   let originalFetch: typeof globalThis.fetch
   let downloadAsset: typeof import('../update/download-asset.js')['downloadAsset']
@@ -291,7 +295,7 @@ describe('W3: download-asset (W3TC1-3)', () => {
   // ── W3TC4：多段并行下载（大文件 + probe 206 放行）──────────────────
   // 超时豁免登记：CI mac runner threadpool 拥塞（口径对齐 [RM3-CI 回归] 用例登记），本地实测 <0.2s——60s 是负载余量非真实耗时
   it('W3TC4: 大文件且探测 206 放行 → 多段并发下载 → 文件完整 + sha256 通过', { timeout: 60_000 }, async () => {
-    const expectedSha = sha256Hex(MULTI_PART_CONTENT)
+    const expectedSha = MULTI_PART_SHA256
     globalThis.fetch = vi.fn(async (url, init) => {
       const rangeHeader = (init?.headers as Record<string, string> | undefined)?.Range ?? ''
       // probe 探测请求（GET Range: bytes=0-0）→ 206 + Content-Range total 达标，放行多段
@@ -332,7 +336,7 @@ describe('W3: download-asset (W3TC1-3)', () => {
   // ── W3TC4b：单段大文件下载速度基准（用于对比多段）────────────────
   // 超时豁免登记：CI mac runner threadpool 拥塞（口径对齐 [RM3-CI 回归] 用例登记），本地实测 <0.2s——60s 是负载余量非真实耗时
   it('W3TC4b: 大文件但探测回 200 全量（不支持 Range）→ 单段下载 → 文件完整', { timeout: 60_000 }, async () => {
-    const expectedSha = sha256Hex(MULTI_PART_CONTENT)
+    const expectedSha = MULTI_PART_SHA256
     globalThis.fetch = vi.fn(async () => makeContentResponse(MULTI_PART_CONTENT)) as unknown as typeof globalThis.fetch
 
     const result = await downloadAsset({
@@ -395,7 +399,7 @@ describe('W3 multipart error path (S#10)', () => {
   // ── W3TC5：某段 Range 返回 500 → downloadAsset rejects + 全部临时文件清理 ──
   // 超时豁免登记：CI mac runner threadpool 拥塞（口径对齐 [RM3-CI 回归] 用例登记），本地实测 <0.2s——60s 是负载余量非真实耗时
   it('W3TC5: 某段 Range 请求返回 500 → downloadAsset rejects UpdateError，.part-* 与 .downloading 全部清理', { timeout: 60_000 }, async () => {
-    const expectedSha = sha256Hex(MULTI_PART_CONTENT)
+    const expectedSha = MULTI_PART_SHA256
     // 让 part-0 的 Range 请求返回 500，其余段正常；probe 探测 206 放行多段。
     globalThis.fetch = vi.fn(async (url, init) => {
       const rangeHeader = (init?.headers as Record<string, string> | undefined)?.Range ?? ''
@@ -489,7 +493,7 @@ describe('RM3: multipart Range violation → fallback to single-stream', () => {
   // 文件 → sha 失败重试死循环。修复后：整批放弃多段，降级单段完整下载。
   // 超时豁免登记：CI mac runner threadpool 拥塞（口径对齐 [RM3-CI 回归] 用例登记），本地实测 <0.2s——60s 是负载余量非真实耗时
   it('服务器忽略 Range 回 200 → 整批放弃多段，降级单段完整下载且产物正确', { timeout: 60_000 }, async () => {
-    const expectedSha = sha256Hex(MULTI_PART_CONTENT)
+    const expectedSha = MULTI_PART_SHA256
     // 记录每个 GET 请求是否带 Range 头，用于断言「最终走了单段全新下载」
     const getRangeHeaders: Array<string | undefined> = []
     globalThis.fetch = vi.fn(async (url, init) => {
@@ -522,7 +526,7 @@ describe('RM3: multipart Range violation → fallback to single-stream', () => {
   // 无论 content-length 是否可提前发现，都应降级单段完整下载，绝不合并错位内容。
   // 超时豁免登记：CI mac runner threadpool 拥塞（口径对齐 [RM3-CI 回归] 用例登记），本地实测 <0.2s——60s 是负载余量非真实耗时
   it('段响应 206 但段长与请求不符 → 降级单段完整下载', { timeout: 60_000 }, async () => {
-    const expectedSha = sha256Hex(MULTI_PART_CONTENT)
+    const expectedSha = MULTI_PART_SHA256
     globalThis.fetch = vi.fn(async (url, init) => {
       const rangeHeader = (init?.headers as Record<string, string> | undefined)?.Range ?? ''
       // probe 探测请求（GET Range: bytes=0-0）→ 206 + Content-Range 放行多段
@@ -562,7 +566,7 @@ describe('RM3: multipart Range violation → fallback to single-stream', () => {
   // 代理半途截断）。提前拦截无法发现，靠流结束后的实下字节数兜底校验降级。
   // 超时豁免登记：CI mac runner threadpool 拥塞（口径对齐 [RM3-CI 回归] 用例登记），本地实测 <0.2s——60s 是负载余量非真实耗时
   it('段响应 206 且 content-length 声称相符但 body 实际截短 → 流结束校验降级单段', { timeout: 60_000 }, async () => {
-    const expectedSha = sha256Hex(MULTI_PART_CONTENT)
+    const expectedSha = MULTI_PART_SHA256
     globalThis.fetch = vi.fn(async (url, init) => {
       const rangeHeader = (init?.headers as Record<string, string> | undefined)?.Range ?? ''
       // probe 探测请求（GET Range: bytes=0-0）→ 206 + Content-Range 放行多段
@@ -623,7 +627,7 @@ describe('批次 5: resume-state 原子写序列（§3.7.2）', () => {
 
   // 超时豁免登记：CI mac runner threadpool 拥塞（口径对齐 [RM3-CI 回归] 用例登记），本地实测 <0.2s——60s 是负载余量非真实耗时
   it('多段下载过程中 saveResumeState → 先写 resume-state.json.tmp 再 renameSync 到终态（验收③）', { timeout: 60_000 }, async () => {
-    const expectedSha = sha256Hex(MULTI_PART_CONTENT)
+    const expectedSha = MULTI_PART_SHA256
     // 单段大文件下载（服务器不支持 Range）→ data 流式回调触发 saveResumeState
     // （多段成功路径不写 resume-state，分段写入只发生在单段流式下载）。
     // probe 探测请求（GET Range: bytes=0-0）同样回 200 全量 → 出口④ 非 206 → 单段。
@@ -909,7 +913,7 @@ describe('RM3-4: 段失败 → 共享 signal 中断其余段', () => {
   })
 
   it('part-0 返回 500 → 其余三段挂起流收到 abort 被中断（非跑完），整批 rejects', { timeout: 30_000 }, async () => {
-    const expectedSha = sha256Hex(MULTI_PART_CONTENT)
+    const expectedSha = MULTI_PART_SHA256
     // 每个健康段的可观察状态：aborted = 该段 fetch 的 signal 收到 abort
     const partAborted = new Map<number, { aborted: boolean }>()
     globalThis.fetch = makeSharedAbortFetchMock(partAborted)
@@ -953,7 +957,7 @@ describe('RM3-4: 段失败 → 共享 signal 中断其余段', () => {
   // （fd 生命周期终态）落定后再清理，清理才能确定作用于已存在（或从未创建）的文件。
   it('open 完成晚于失败清理（CI threadpool 拥塞形态）→ 段失败清理仍无 .part 残留', { timeout: 30_000 }, async () => {
     fsSpy.writeStreamOpenDelayMs = 50
-    const expectedSha = sha256Hex(MULTI_PART_CONTENT)
+    const expectedSha = MULTI_PART_SHA256
     const partAborted = new Map<number, { aborted: boolean }>()
     globalThis.fetch = makeSharedAbortFetchMock(partAborted)
 
@@ -1049,7 +1053,7 @@ describe('probe 四出口归类（GET Range 0-0 + Content-Range 判定）', () =
   // 出口①：206 + Content-Range total 达标 → supported；totalBytes 来自 Content-Range。
   // 超时豁免登记：CI mac runner threadpool 拥塞（口径对齐 [RM3-CI 回归] 用例登记），本地实测 <0.2s——60s 是负载余量非真实耗时
   it('① 206 + Content-Range total 达标 → 多段启动，首段 Range 证明 totalBytes 取自 Content-Range 而非恒 1 的 content-length', { timeout: 60_000 }, async () => {
-    const expectedSha = sha256Hex(MULTI_PART_CONTENT)
+    const expectedSha = MULTI_PART_SHA256
     // P7 实测两源形态：206 + Content-Range total 正确 + Content-Length 恒 1
     const { rangeLog } = makeRangeRecordingFetch(
       () => makeProbeResponse(MULTI_PART_CONTENT.length),
@@ -1078,7 +1082,7 @@ describe('probe 四出口归类（GET Range 0-0 + Content-Range 判定）', () =
   // 出口②：206 + total 数字低于阈值 → not supported（文件不够大，单段）。
   // 超时豁免登记：CI mac runner threadpool 拥塞（口径对齐 [RM3-CI 回归] 用例登记），本地实测 <0.2s——60s 是负载余量非真实耗时
   it('② 206 但 Content-Range total 低于 10MB 阈值 → not supported，单段完成不抛错', { timeout: 60_000 }, async () => {
-    const expectedSha = sha256Hex(MULTI_PART_CONTENT)
+    const expectedSha = MULTI_PART_SHA256
     const { rangeLog } = makeRangeRecordingFetch(
       () => new Response(new Uint8Array([0]), {
         status: 206,
@@ -1110,7 +1114,7 @@ describe('probe 四出口归类（GET Range 0-0 + Content-Range 判定）', () =
     ['单位非 bytes', { 'Content-Range': 'items 0-0/12582912' }],
     ['形态不可解析', { 'Content-Range': 'garbage' }],
   ])('③ 206 但 %s → not supported，单段完成不抛错', { timeout: 60_000 }, async (_label, extraHeaders) => {
-    const expectedSha = sha256Hex(MULTI_PART_CONTENT)
+    const expectedSha = MULTI_PART_SHA256
     const { rangeLog } = makeRangeRecordingFetch(
       () => new Response(new Uint8Array([0]), {
         status: 206,
@@ -1136,7 +1140,7 @@ describe('probe 四出口归类（GET Range 0-0 + Content-Range 判定）', () =
   // not supported，单段合法出口，正确性无风险。
   // 超时豁免登记：CI mac runner threadpool 拥塞（口径对齐 [RM3-CI 回归] 用例登记），本地实测 <0.2s——60s 是负载余量非真实耗时
   it('④ 探测回 200 全量退化 → not supported，单段完成不抛错', { timeout: 60_000 }, async () => {
-    const expectedSha = sha256Hex(MULTI_PART_CONTENT)
+    const expectedSha = MULTI_PART_SHA256
     const { rangeLog } = makeRangeRecordingFetch(
       () => makeContentResponse(MULTI_PART_CONTENT),
     )

@@ -5,7 +5,8 @@
  * 包含：tool、hook、storage、notify、session、config、sessionData、ui、agent、workspace。
  */
 
-import type { ProviderId } from '@taiji/shared'
+import { PLUGIN_EVENT_PAYLOAD_MAX_BYTES } from '@taiji/shared'
+import type { ProviderId, PluginViewScope, ViewSnapshotItem, PluginEventPayload } from '@taiji/shared'
 import type { PluginRpcServer } from './plugin-rpc-server.js'
 import type { PluginStorage } from './plugin-storage.js'
 import type { IPluginServiceDeps } from './plugin-types.js'
@@ -26,6 +27,8 @@ import { registerWorkspaceRpcHandlers } from './api/workspace-api.js'
 import { registerCommandRpcHandlers } from './api/commands-api.js'
 import type { CommandRegistration } from './api/commands-api.js'
 import { registerViewRpcHandlers } from './api/views-api.js'
+import { asBoundedString, asString } from './validation.js'
+import { errorWithCode } from '../../utils/errors.js'
 import type { PluginUiSnapshotStore } from './plugin-ui-snapshot-store.js'
 import type { GuiComponent } from '@zhushanwen/extension-protocol'
 import type { ToolEntry } from './plugin-types.js'
@@ -113,17 +116,138 @@ export interface RpcSetupContext {
    * bus 定向发布（transient）/ 全局广播兜底分流，见 publishViewUpdate 实现。
    */
   publishViewUpdate: PluginServiceLike['publishViewUpdate']
+  /**
+   * plugin:event 广播出线（provider-plugin-access D9）：plugin.event Worker RPC
+   * handler 校验后的业务事件经此广播给 renderer（broadcastOrBroker 强类型出口）。
+   */
+  broadcastPluginEvent: (payload: PluginEventPayload) => void
+  /**
+   * 系统级 URL 唤起出口（provider-plugin-access D9，plugin.ui.openUrl）：scheme
+   * 白名单校验通过后由宿主打开（生产 = 系统浏览器 spawn，装配侧注入）。缺省
+   * undefined = 出口未装配——校验仍生效（拒绝路径成立），放行路径回执
+   * { opened:false } 并 warn（装配缺陷可见，不假成功——B-F2 同款纪律）。
+   */
+  openExternal?: (url: string) => void
 }
 
-/** 仅用于 RpcSetupContext.publishViewUpdate 的类型（避免 rpc-setup 反向 import plugin-service 成环） */
+/** 仅用于 RpcSetupContext.publishViewUpdate 的类型（避免 rpc-setup 反向 import plugin-service 成环）。
+ *  payload = shared ViewSnapshotItem（scope 二选一 + generation，U2 单一来源）。 */
 interface PluginServiceLike {
-  publishViewUpdate(payload: {
-    sessionId: string
-    viewId: string
-    pluginId: string
-    guiTree: GuiComponent[]
-    updatedAt: number
-  }): void
+  publishViewUpdate(payload: ViewSnapshotItem): void
+}
+
+// ── provider-plugin-access D9 / D8：plugin:event 上报、plugin.uiEvent 投递、openUrl ──
+
+/**
+ * 插件业务事件上报的 Worker RPC 方法名（D9）：插件 → 宿主 notify（无回包），
+ * 宿主校验后广播 'plugin:event' 帧。命名与 protocol.ts PluginEventPayload 注释
+ * （u-foundation SSOT）一致。
+ */
+export const PLUGIN_EVENT_RPC_METHOD = 'plugin.event'
+
+/**
+ * renderer uiEvent 值回传投递给插件 Worker 的通知方法名（D8）：宿主 → Worker 单向
+ * notify（fire-and-forget——输入值变更即发，插件侧始终持有最新值；单条丢失由下一条
+ * 变更自然覆盖）。Worker 侧监听点归插件 agentAPI 接线（plugin-bootstrap 域）。
+ */
+export const PLUGIN_UI_EVENT_NOTIFY = 'plugin.ui.event'
+
+/** openUrl scheme 白名单（D9）：仅 http(s)。file:// 与自定义 scheme 直接拒绝。 */
+const OPEN_URL_ALLOWED_PROTOCOLS: ReadonlySet<string> = new Set(['http:', 'https:'])
+
+/**
+ * openUrl scheme 白名单判定（D9 / S28）：URL 解析归一化后与白名单比对
+ * （`new URL(url).protocol`），不做字符串前缀匹配——`javascript:`、大小写、
+ * 空白变体由解析器归一拦截（WHATWG URL 剥离前后空白与内部 tab/换行后解析
+ * scheme，scheme 统一小写；`file:` / `javascript:` 等不在白名单即拒绝，
+ * 不可解析（相对地址 / 纯文本）同样拒绝）。
+ */
+export function isAllowedOpenUrl(url: string): boolean {
+  try {
+    return OPEN_URL_ALLOWED_PROTOCOLS.has(new URL(url).protocol)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * plugin.event 上报的 channel 长度上限（自命开放字符串，防超长入广播帧）。
+ * payload 大小上限见 PLUGIN_EVENT_PAYLOAD_MAX_BYTES——两档都在 RPC 入口拒绝，不经广播端截断。
+ */
+const PLUGIN_EVENT_CHANNEL_MAX_BYTES = 256
+
+/**
+ * payload 字节上限 PLUGIN_EVENT_PAYLOAD_MAX_BYTES（SSOT = @taiji/shared constants，
+ * 与 OUTBOUND_FRAME_* 出站阈值族同居）：plugin:event 是全局广播通路（broadcastFn/
+ * broker.broadcast 直发 ws.send，不经 session push 双档检查），上限在 RPC 入口拒绝
+ * （序列化实测字节，error response 回插件）。超限错误码 PLUGIN_EVENT_PAYLOAD_TOO_LARGE
+ * （结构化，插件侧可据此降级为更小载荷重试）。
+ */
+const PLUGIN_EVENT_PAYLOAD_TOO_LARGE = 'PLUGIN_EVENT_PAYLOAD_TOO_LARGE'
+
+/**
+ * 注册 plugin.event RPC handler（D9：插件 → renderer 的业务事件上报）。
+ *
+ * pluginId 归属取通道身份优先（ctx.identity.pluginId——宿主注册时闭包捕获不可伪造，
+ * sandbox 通道必有），trusted 共享 Worker 无唯一归属时回落 params.pluginId（trusted
+ * 插件间互不设防是既有设计语义）。channel/payload 窄校验后经广播出线转发，handler
+ * 本体不解释业务语义（payload unknown 透传，消费方自定）；payload 超
+ * PLUGIN_EVENT_PAYLOAD_MAX_BYTES 在入口拒绝（本通路是全局广播，不经 session push
+ * 出站双档检查——C-comm-14 治理的入口防线）。
+ */
+export function registerPluginEventRpcHandler(
+  rpcServer: PluginRpcServer,
+  deps: { broadcast: (payload: PluginEventPayload) => void },
+): void {
+  rpcServer.registerMethod(PLUGIN_EVENT_RPC_METHOD, async (params, ctx) => {
+    const pluginId = ctx.identity?.pluginId ?? asString(params.pluginId, 'pluginId')
+    const channel = asBoundedString(params.channel, 'channel', PLUGIN_EVENT_CHANNEL_MAX_BYTES)
+    const payloadBytes = Buffer.byteLength(JSON.stringify(params.payload ?? null), 'utf8')
+    if (payloadBytes > PLUGIN_EVENT_PAYLOAD_MAX_BYTES) {
+      throw errorWithCode(
+        `plugin:event payload too large: ${payloadBytes} bytes (limit ${PLUGIN_EVENT_PAYLOAD_MAX_BYTES}); shrink the payload or split the report`,
+        PLUGIN_EVENT_PAYLOAD_TOO_LARGE,
+      )
+    }
+    deps.broadcast({ pluginId, channel, payload: params.payload })
+    return { forwarded: true }
+  })
+}
+
+/**
+ * 注册 plugin.ui.openUrl RPC handler（D9：插件 → 宿主的授权页打开服务调用，
+ * 与 plugin.storage.* 同类——宿主公共服务，不经 capabilities 词表逐项声明）。
+ *
+ * 校验：url 过 isAllowedOpenUrl（http(s) 白名单）——`file://` / `javascript:` 及
+ * 大小写空白变体在入口拒绝（INVALID_URL_SCHEME，S28 ②③「宿主侧拒绝、无浮层唤起」
+ * 在本层结构性成立）。放行路径交 deps.openExternal 出口；出口未装配时回执
+ * { opened:false } + warn（装配缺陷可见）。放行不鉴定 URL 内容安全性——scheme
+ * 白名单是本调用点的全部风险收敛面（D9），302 重定向由浏览器侧处置（S28 ④ 边界）。
+ */
+export function registerOpenUrlRpcHandler(
+  rpcServer: PluginRpcServer,
+  deps: { openExternal?: (url: string) => void },
+): void {
+  rpcServer.registerMethod('plugin.ui.openUrl', async (params) => {
+    const url = asString(params.url, 'url')
+    if (!isAllowedOpenUrl(url)) {
+      throw errorWithCode(
+        `INVALID_URL_SCHEME: plugin.ui.openUrl only allows http(s) URLs (got a non-allowlisted ` +
+          `or unparseable URL). file:// and custom schemes are rejected by design — ` +
+          `floating-layer file rendering and system handler invocation are real attack surface.`,
+        'INVALID_URL_SCHEME',
+      )
+    }
+    if (!deps.openExternal) {
+      console.warn(
+        '[plugin-rpc-setup] plugin.ui.openUrl passed scheme check but no openExternal exit wired — ' +
+          'URL not opened. Recovery: wire openExternal into registerAllRpcMethods deps.',
+      )
+      return { opened: false }
+    }
+    deps.openExternal(url)
+    return { opened: true }
+  })
 }
 
 export function registerAllRpcMethods(ctx: RpcSetupContext): void {
@@ -338,27 +462,45 @@ export function registerAllRpcMethods(ctx: RpcSetupContext): void {
       ctx.deliverInvokeResult(handlerId, payload, sourceWorkerId),
   })
 
+  // ── Plugin event / openUrl RPC handlers（provider-plugin-access D9）──────
+  // plugin.event（插件 → renderer 业务事件上报）：校验后经 ctx.broadcastPluginEvent
+  // 出线广播 'plugin:event' 帧（首个消费方 = 凭据状态上报，D5——宿主只转发不解释）。
+  registerPluginEventRpcHandler(rpcServer, {
+    broadcast: (payload) => ctx.broadcastPluginEvent(payload),
+  })
+  // plugin.ui.openUrl（插件 → 宿主授权页打开）：http(s) scheme 白名单校验后交
+  // openExternal 出口（生产 = 系统浏览器；装配缺失回执 {opened:false} 可见降级）。
+  registerOpenUrlRpcHandler(rpcServer, {
+    openExternal: ctx.openExternal,
+  })
+
   // ── Views RPC handlers ───────────────────────────────────
-  // views.update → handleViewUpdate（[D1/u5b] payload.sessionId 显式归属投递——旧
-  // ActiveSessionResolver 盖戳猜测路径已删除：空闲会话是 modal 推树的常态而非边缘，
-  // "第一个 active 会话"猜测会把推送丢弃或落错分区（D1 不采用④））。
+  // views.update → handleViewUpdate（U2 归属二选一：会话域 { sessionId } 定向投递 /
+  // 全局域 { mountId, pluginId } 全局广播——校验在 views-api resolveViewScope，
+  // 都缺或都给 → INVALID_VIEW_SCOPE）。
   // listMountPoints → 读挂载点集合副本（AC10：sync 注入→查询一致）。
   // wave:perf-w08（02 文档 D1-1，R-06）：广播出口为 ctx.publishViewUpdate——
-  // bus 已装配时按 sessionId 定向 publish（plugin:viewUpdate 归 transient 类，
-  // 不占 seq 不入 ring）。
+  // bus 已装配时按 sessionId 定向 publish（transient），全局域走全局广播（分流见
+  // publishViewUpdateTo）。快照写入与广播同源：setView 返回带 generation 的存储条目，
+  // 广播帧与快照条目携带同一代际（U2 全量替换）。
   registerViewRpcHandlers(rpcServer, {
     mountPoints: ctx.mountPoints,
-    handleViewUpdate: (pluginId: string, viewId: string, guiTree: GuiComponent[], sessionId: string) => {
+    handleViewUpdate: (pluginId: string, viewId: string, guiTree: GuiComponent[], scope: PluginViewScope) => {
+      const updatedAt = Date.now()
       // 快照写入与广播同源（ADR-0097）：[null] 树 = 清除分区（渲染端 ViewHostStore
-      // consumeWidget 清除语义的同构镜像，见 PluginUiSnapshotStore.setView）
-      ctx.uiSnapshotStore.setView({ sessionId, viewId, pluginId, guiTree, updatedAt: Date.now() })
-      ctx.publishViewUpdate({
-        sessionId,
+      // consumeWidget 清除语义的同构镜像，见 PluginUiSnapshotStore.setView）；返回
+      // undefined（清除 / 归属畸形防御丢弃）时不广播——无内容可推。
+      const stored = ctx.uiSnapshotStore.setView({
+        ...(scope.kind === 'session' ? { sessionId: scope.sessionId } : { mountId: scope.mountId }),
         viewId,
         pluginId,
         guiTree,
-        updatedAt: Date.now(),
+        updatedAt,
+        generation: 0,
       })
+      if (stored !== undefined) {
+        ctx.publishViewUpdate(stored)
+      }
     },
   })
 

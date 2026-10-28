@@ -323,7 +323,7 @@ describe('checkpoint 删除属主时序（D3 删除实现语义固定）', () =>
 
     appMock.handlers.get('before-quit')?.(event)
 
-    await vi.waitFor(() => expect(existsSync(checkpointPath)).toBe(false))
+    await vi.waitFor(() => expect(existsSync(checkpointPath)).toBe(false), { interval: 1 })
     expect(event.preventDefault).toHaveBeenCalled() // 二段式：先拦住 quit，异步清理后再 quit
     expect(runtimeMock.stopCalls).toBe(1)
     expect(runtimeMock.markAppQuittingCalls).toBe(1)
@@ -341,7 +341,7 @@ describe('checkpoint 删除属主时序（D3 删除实现语义固定）', () =>
       appMock.handlers.get('before-quit')?.({ preventDefault: vi.fn() })
 
       // stop() 被调两次（window-all-closed + before-quit），但删除属主已放弃
-      await vi.waitFor(() => expect(runtimeMock.stopCalls).toBe(2))
+      await vi.waitFor(() => expect(runtimeMock.stopCalls).toBe(2), { interval: 1 })
       expect(existsSync(checkpointPath)).toBe(true)
       // marker 清除与删除解耦：删除跳过但 marker 仍清（否则下次误判 unclean 走 eager，违反 A3b）
       appMock.handlers.get('will-quit')?.()
@@ -361,7 +361,7 @@ describe('checkpoint 删除属主时序（D3 删除实现语义固定）', () =>
     try {
       appMock.handlers.get('before-quit')?.({ preventDefault: vi.fn() })
 
-      await vi.waitFor(() => expect(appMock.quit).toHaveBeenCalled())
+      await vi.waitFor(() => expect(appMock.quit).toHaveBeenCalled(), { interval: 1 })
       expect(existsSync(checkpointPath)).toBe(true)
     } finally {
       consoleError.mockRestore()
@@ -374,7 +374,7 @@ describe('checkpoint 删除属主时序（D3 删除实现语义固定）', () =>
     runtimeMock.isRunning = false
 
     appMock.handlers.get('before-quit')?.({ preventDefault: vi.fn() })
-    await vi.waitFor(() => expect(appMock.quit).toHaveBeenCalled())
+    await vi.waitFor(() => expect(appMock.quit).toHaveBeenCalled(), { interval: 1 })
 
     expect(existsSync(checkpointPath)).toBe(true)
     expect(journalMock.events.filter((e) => e.event === 'shutdown')).toEqual([])

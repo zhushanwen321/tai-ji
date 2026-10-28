@@ -221,7 +221,7 @@ describe('session.subagents routeInbound 兜底', () => {
     // 等 loadWorkflows RPC flush
     await vi.waitFor(() => {
       expect(workflowStore.getRecordsBySession('sess-A')[0].status).toBe('done')
-    })
+    }, { interval: 1 })
 
     expect(workflowStore.hasRunningWorkflow('sess-A')).toBe(false)
     expect(sessionApi.getWorkflows).toHaveBeenCalledWith('sess-A')

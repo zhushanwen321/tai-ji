@@ -15,6 +15,7 @@ import importSession from './zh-CN/importSession'
 import rollingRestart from './zh-CN/rollingRestart'
 import plan from './zh-CN/plan'
 import btw from './zh-CN/btw'
+import pluginProvider from './zh-CN/pluginProvider'
 import workflowViz from './zh-CN/workflow-viz'
 import canvas from './zh-CN/canvas'
 import find from './zh-CN/find'
@@ -53,5 +54,6 @@ export default {
   rollingRestart,
   plan,
   btw,
+  pluginProvider,
   find,
 }

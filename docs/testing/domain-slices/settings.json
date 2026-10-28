@@ -1,0 +1,45 @@
+{
+  "name": "settings",
+  "summary": "设置/配置（renderer settings 页面树 + components/settings + ui features/settings + core domain/settings；W2-B 冻结：provider/tts/remote-access/worktree/preset 的页面件归本域。runtime pi 配置存储的专属测试经 Wave3 合并进混合 bundle，归 uncategorized 注记）",
+  "layers": [
+    "renderer",
+    "ui",
+    "core",
+    "runtime",
+    "shared"
+  ],
+  "scope": {
+    "renderer": [
+      "packages/renderer/src/components/settings/**"
+    ],
+    "ui": [
+      "packages/ui/src/features/settings/**"
+    ],
+    "core": [
+      "packages/core/src/domain/settings/**"
+    ],
+    "runtime": [
+      "packages/runtime/src/services/mcp-servers-service.ts",
+      "packages/runtime/src/infra/pi/pi-settings-store.ts",
+      "packages/runtime/src/infra/pi/pi-mcp-store.ts",
+      "packages/runtime/src/infra/pi/pi-mcp-servers.ts",
+      "packages/runtime/src/infra/pi/pi-codemode-settings.ts"
+    ]
+  },
+  "tests": [
+    "packages/renderer/src/__tests__/settings/**",
+    "packages/renderer/src/__tests__/composables/settings-domain-bundle.test.ts",
+    "packages/renderer/src/__tests__/provider-builtin-ui.test.ts",
+    "packages/renderer/src/components/settings/**",
+    "packages/ui/src/features/settings/**",
+    "packages/core/src/domain/settings/**",
+    "packages/renderer/src/composables/shell/__tests__/useSettingsShell.test.ts"
+  ],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": [],
+  "w2bMountCompat": {
+    "mountSource": "docs/testing/domain-map.json",
+    "status": "enforced"
+  }
+}

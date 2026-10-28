@@ -1,0 +1,73 @@
+{
+  "name": "provider",
+  "summary": "provider/模型（runtime provider-* 服务 + model-service/model-capability + auth 凭据 + migration provider-importer + remote-config 模板同步 + provider-live-sync 扩展 + shared provider/wool 契约；renderer provider 页面按 W2-B 冻结归 settings 域）；runtime auth 凭据生命周期（OAuth/API key，批 D 归并）；runtime auth 凭据生命周期（OAuth/API key，批 D 归并）；runtime auth 凭据生命周期（OAuth/API key，批 D 归并）；runtime auth 凭据生命周期（OAuth/API key，批 D 归并）",
+  "layers": [
+    "runtime",
+    "extension",
+    "shared"
+  ],
+  "scope": {
+    "runtime": [
+      "packages/runtime/src/infra/model-connection-tester.ts",
+      "packages/runtime/src/infra/pi/pi-provider-store.ts",
+      "packages/runtime/src/services/auth/**",
+      "packages/runtime/src/services/auth/**",
+      "packages/runtime/src/services/auth/**",
+      "packages/runtime/src/services/auth/**",
+      "packages/runtime/src/services/auth/**",
+      "packages/runtime/src/services/migration/legacy-provider-migration.ts",
+      "packages/runtime/src/services/migration/provider-extras-migration.ts",
+      "packages/runtime/src/services/migration/provider-importer.ts",
+      "packages/runtime/src/services/migration/provider-parser.ts",
+      "packages/runtime/src/services/model-capability.ts",
+      "packages/runtime/src/services/model-mapper.ts",
+      "packages/runtime/src/services/model-service.ts",
+      "packages/runtime/src/services/provider-catalog-refresh.ts",
+      "packages/runtime/src/services/provider-catalog.ts",
+      "packages/runtime/src/services/provider-config-helper.ts",
+      "packages/runtime/src/services/provider-extras-store.ts",
+      "packages/runtime/src/services/provider-header-redaction.ts",
+      "packages/runtime/src/services/provider-model-item.ts",
+      "packages/runtime/src/services/provider-write-proxy.ts",
+      "packages/runtime/src/services/remote-config/**"
+    ],
+    "extension": [
+      "extensions/universal/provider-live-sync/src/**"
+    ],
+    "shared": [
+      "packages/shared/src/provider.ts"
+    ]
+  },
+  "tests": [
+    "extensions/universal/provider-live-sync/src/**",
+    "packages/runtime/src/services/__tests__/merged-catalog-three-state.test.ts",
+    "packages/runtime/src/services/__tests__/model-quota-bundle.test.ts",
+    "packages/runtime/src/services/__tests__/provider-catalog-refresh.test.ts",
+    "packages/runtime/src/services/__tests__/provider-config-helper-builtin-malformed.test.ts",
+    "packages/runtime/src/services/__tests__/provider-config-helper-remote-dedupe.test.ts",
+    "packages/runtime/src/services/__tests__/provider-extras-store.test.ts",
+    "packages/runtime/src/services/__tests__/provider-importer-bundle.test.ts",
+    "packages/runtime/src/services/__tests__/provider-write-fields.test.ts",
+    "packages/runtime/src/services/__tests__/wool-provider-write-proxy.test.ts",
+    "packages/runtime/src/services/auth/__tests__/auth-bundle.test.ts",
+    "packages/runtime/src/services/auth/__tests__/auth-bundle.test.ts",
+    "packages/runtime/src/services/auth/__tests__/auth-bundle.test.ts",
+    "packages/runtime/src/services/auth/__tests__/auth-bundle.test.ts",
+    "packages/runtime/src/services/auth/__tests__/device-code-flow.test.ts",
+    "packages/runtime/src/services/auth/__tests__/device-code-flow.test.ts",
+    "packages/runtime/src/services/auth/__tests__/device-code-flow.test.ts",
+    "packages/runtime/src/services/auth/__tests__/device-code-flow.test.ts",
+    "packages/runtime/src/services/auth/__tests__/oauth-flow.test.ts",
+    "packages/runtime/src/services/auth/__tests__/oauth-flow.test.ts",
+    "packages/runtime/src/services/auth/__tests__/oauth-flow.test.ts",
+    "packages/runtime/src/services/auth/__tests__/oauth-flow.test.ts",
+    "packages/runtime/src/services/migration/__tests__/provider-importer.template-empty.test.ts",
+    "packages/runtime/src/services/remote-config/__tests__/remote-provider-sync.test.ts",
+    "packages/runtime/src/services/remote-config/__tests__/remote-provider-templates.test.ts",
+    "packages/shared/src/__tests__/provider-kind.test.ts",
+    "packages/shared/src/__tests__/wool.test.ts"
+  ],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

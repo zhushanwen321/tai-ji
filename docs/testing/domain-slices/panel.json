@@ -1,0 +1,76 @@
+{
+  "name": "panel",
+  "summary": "工作台面板容器与 Composer 工具条（renderer panel 容器/composer 族/command-popover 族 + core domain/composer 状态逻辑 + domain/session-trace 追溯视图 core 层；含冻结的调度内联卡/preset-chip/skill-notice-stream 等页面件；runtime skill-notice-publisher 的发布侧消费方在 skill-notice-stream，随本域触发）",
+  "layers": [
+    "renderer",
+    "core",
+    "runtime"
+  ],
+  "scope": {
+    "renderer": [
+      "packages/renderer/src/components/panel/**",
+      "packages/renderer/src/composables/panel/**",
+      "packages/renderer/src/composables/features/command/**"
+    ],
+    "runtime": [
+      "packages/runtime/src/services/session/skill-notice-publisher.ts"
+    ],
+    "core": [
+      "packages/core/src/domain/composer/**",
+      "packages/core/src/domain/session-trace/**"
+    ]
+  },
+  "tests": [
+    "packages/renderer/src/__tests__/panel/BrowserPane.test.ts",
+    "packages/renderer/src/__tests__/panel/command-popover-landing.test.ts",
+    "packages/renderer/src/__tests__/panel/command-popover-symbols-format-age.test.ts",
+    "packages/renderer/src/__tests__/panel/composer-band-alignment.test.ts",
+    "packages/renderer/src/__tests__/panel/composer-bar-density-wiring.test.ts",
+    "packages/renderer/src/__tests__/panel/composer-compact-queue.test.ts",
+    "packages/renderer/src/__tests__/panel/composer-file-injection.test.ts",
+    "packages/renderer/src/__tests__/panel/composer-file-popover.test.ts",
+    "packages/renderer/src/__tests__/panel/composer-fork-mode.test.ts",
+    "packages/renderer/src/__tests__/panel/composer-hash-trigger.test.ts",
+    "packages/renderer/src/__tests__/panel/composer-send-button-states.test.ts",
+    "packages/renderer/src/__tests__/panel/composer-session-injection.test.ts",
+    "packages/renderer/src/__tests__/panel/composer-skill-trigger.test.ts",
+    "packages/renderer/src/__tests__/panel/composer-slash-trigger.test.ts",
+    "packages/renderer/src/__tests__/panel/composer-smoke.test.ts",
+    "packages/renderer/src/__tests__/panel/context-capacity-quota.test.ts",
+    "packages/renderer/src/__tests__/panel/context-chips-bar.test.ts",
+    "packages/renderer/src/__tests__/panel/fast-fork-e2e-journeys.test.ts",
+    "packages/renderer/src/__tests__/panel/force-quit-draft-recovery-dom.test.ts",
+    "packages/renderer/src/__tests__/panel/landing-bash-integration.test.ts",
+    "packages/renderer/src/__tests__/panel/panel-container-drawer-mode.test.ts",
+    "packages/renderer/src/__tests__/panel/panel-container-lazy-retry-detail.test.ts",
+    "packages/renderer/src/__tests__/panel/panel-container-lazy-retry.test.ts",
+    "packages/renderer/src/__tests__/panel/panel-view.test.ts",
+    "packages/renderer/src/__tests__/panel/preset-chip.test.ts",
+    "packages/renderer/src/__tests__/panel/schedule-create-inline.test.ts",
+    "packages/renderer/src/__tests__/panel/session-active-state.test.ts",
+    "packages/renderer/src/__tests__/panel/session-file-format.test.ts",
+    "packages/renderer/src/__tests__/panel/skill-notice-stream.test.ts",
+    "packages/renderer/src/__tests__/panel/turn-working.test.ts",
+    "packages/renderer/src/components/panel/__tests__/Panel.test.ts",
+    "packages/renderer/src/components/panel/__tests__/Panel.dead-diagnostics-export.test.ts",
+    "packages/renderer/src/components/panel/detail-renderers/__tests__/DiffView.seq-guard.test.ts",
+    "packages/renderer/src/composables/panel/__tests__/composables-panel-mock-bundle.test.ts",
+    "packages/renderer/src/__tests__/composables/useCommandPopoverTrigger.mutual-exclusion.test.ts",
+    "packages/renderer/src/__tests__/composables/useCommandPopoverTrigger.session-subagent.test.ts",
+    "packages/renderer/src/__tests__/composables/use-command-sync.test.ts",
+    "packages/renderer/src/__tests__/composables/useCopy.test.ts",
+    "packages/core/src/domain/composer/**",
+    "packages/core/src/domain/session-trace/**"
+  ],
+  "sharedBy": {
+    "packages/renderer/src/__tests__/composables/useCommandPopoverTrigger.session-subagent.test.ts": [
+      "subagent"
+    ]
+  },
+  "contracts": [],
+  "e2eRules": [],
+  "w2bMountCompat": {
+    "mountSource": "docs/testing/domain-map.json",
+    "status": "enforced"
+  }
+}

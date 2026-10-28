@@ -181,14 +181,15 @@ export const HIDDEN_ALLOWLIST = new Map([
   ['packages/core/src/extension-host/header-action-store.ts:27', '插件 headerAction 运行时条目 hidden（HeaderActionEntry 声明，入口整体不渲染）'],
   ['packages/core/src/extension-host/header-action-store.ts:38', '插件 headerAction 声明侧静态形状 hidden（ContributionRegistry 侧）'],
   ['packages/core/src/extension-host/header-action-store.ts:78', '插件 headerAction 帧载荷 hidden 透传（set 写入）'],
-  ['packages/core/src/extension-host/message-bus-bridge.ts:241', '插件 headerActionUpdate 帧 hidden 解析透传'],
+  ['packages/core/src/extension-host/message-bus-bridge.ts:251', '插件 headerActionUpdate 帧 hidden 解析透传（241→251 随插件化分支合并漂移）'],
   ['packages/plugin-sdk/src/types.ts:754', 'plugin-sdk HeaderActionOptions.hidden 声明（插件 API 面）'],
+  ['packages/plugin-sdk/src/types.ts:854', 'plugin-sdk updateHeaderAction opts.hidden 声明（provider-plugin-access D9 新增方法，与 754 行同族）'],
   ['packages/runtime/src/services/plugin-service/api/ui-api.ts:254', '插件 ui.updateHeaderAction 入参 hidden 校验'],
   ['packages/runtime/src/services/plugin-service/api/ui-api.ts:256', '插件 ui.updateHeaderAction hidden 校验错误文案'],
   ['packages/runtime/src/services/plugin-service/api/ui-api.ts:271', '插件 ui.updateHeaderAction hidden 透传'],
   ['packages/runtime/src/services/plugin-service/api/ui-api.ts:331', '插件 ui.updateHeaderAction 方法签名 hidden 形参（跨行断言的声明行）'],
-  ['packages/runtime/src/services/plugin-service/api/ui-api.ts:346', '插件 ui.updateHeaderAction 实现签名 hidden 形参（跨行断言的声明行）'],
-  ['packages/shared/src/protocol.ts:624', '协议 plugin headerAction 条目 hidden 字段声明（HeaderActionUpdatePayload；611→624 随 fix-chat-flow-order 合并加字段漂移）'],
+  ['packages/runtime/src/services/plugin-service/api/ui-api.ts:352', '插件 ui.updateHeaderAction 实现签名 hidden 形参（346→352 随插件化分支合并改内联签名漂移）'],
+  ['packages/shared/src/protocol.ts:642', '协议 plugin headerAction 条目 hidden 字段声明（HeaderActionUpdatePayload；611→624 随 fix-chat-flow-order、624→642 随插件化分支合并加字段漂移）'],
   // document.hidden（浏览器 API）
   ['packages/renderer/src/composables/features/settings/use-app-update-autocheck.ts:166', 'document.hidden（浏览器 API：页面可见性）'],
   ['packages/ui/src/features/chat/composables/useTurnElapsed.ts:123', 'document.hidden（浏览器 API：页面可见性，计时器暂停判据）'],
@@ -197,10 +198,11 @@ export const HIDDEN_ALLOWLIST = new Map([
   ['packages/renderer/src/components/canvas/canvas-display.ts:229', 'canvas 布局 opts.hidden 形参声明'],
   ['packages/renderer/src/components/canvas/canvas-display.ts:232', 'canvas 布局 opts.hidden 属性访问'],
   // renderer 扩展宿主桥的插件条目 hidden（帧面透传）
-  ['packages/renderer/src/composables/shell/useExtensionHostBridge.ts:256', '插件 headerAction 运行时镜像 hidden（扩展宿主桥透传）'],
-  // locale 键（设置页「注册但不可达」开关的字面键名）
-  ['packages/ui/src/locale/en-US/settings.ts:1392', 'locale 键 hidden（设置项字面键名，非会话语义；1393→1392 随并发 genstats locale 编辑漂移）'],
-  ['packages/ui/src/locale/zh-CN/settings.ts:1390', 'locale 键 hidden（设置项字面键名，非会话语义；1392→1391→1390 先后随 stepfun i18n 键替换与并发 genstats locale 编辑漂移）'],
+  ['packages/renderer/src/composables/shell/useExtensionHostBridge.ts:267', '插件 headerAction 运行时镜像 hidden（扩展宿主桥透传；256→267 随插件化分支合并漂移）'],
+  // locale 键（设置页「注册但不可达」开关的字面键名；dev 登记 1394/1393、main 登记 1392/1390，
+  // 合并后实测 1393/1391——dev 插件化分支漂移与 main stepfun i18n 键替换/genstats locale 编辑漂移叠加）
+  ['packages/ui/src/locale/en-US/settings.ts:1393', 'locale 键 hidden（设置项字面键名，非会话语义）'],
+  ['packages/ui/src/locale/zh-CN/settings.ts:1391', 'locale 键 hidden（设置项字面键名，非会话语义）'],
 ])
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -247,6 +249,7 @@ export const SURFACE_SAME_NAME_EXCLUDE = new Map([
   ['packages/ui/src/primitives/dialog/DialogContent.vue', '界面 surface id（dialog-confirm）'],
   ['packages/ui/src/primitives/popover/PopoverContent.vue', '界面 surface id（popover-content）'],
   ['packages/ui/src/primitives/select/SelectContent.vue', '界面 surface id（select-content）'],
+  ['packages/renderer/src/components/panel/workflow-viz/panel/AgentStreamDrawer.vue', '界面 surface id（agent-stream-drawer，modal-surface-registry 族注册）'],
 ])
 
 /**

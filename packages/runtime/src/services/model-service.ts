@@ -272,6 +272,8 @@ export class ModelService implements IModelService, ProviderConnectionTestServic
     // W2：runtime enabled 过滤——provider.enabled===false 时其下所有 model 不进结果；
     // model.enabled===false 时该 model 不进结果。缺省/true 视为启用（向上兼容存量）。
     // 过滤在 listProviders 读出 ProviderInfo 之后做，config.enabled !== false 语义统一在此处收敛。
+    // （羊毛聚合特例已随 D6 插件化退役移除——羊毛条目自身持久在 config.providers，
+    // providerId 即 wool-<family>，与既有来源同管道零特例。）
     const allModels = providers
       .filter(p => p.enabled !== false)
       .flatMap(p =>

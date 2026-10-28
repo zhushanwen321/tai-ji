@@ -9,7 +9,9 @@
  *   settingsStore.providers + settingsStore.models → selectableModels（添加面板全量可选）
  *   add/remove/move → config.setScopedModels（乐观 + 回滚）
  *
- * 依赖方向：@taiji/shared 类型 + @/api(config) + settingsStore。
+ * 依赖方向：@taiji/core（SettingsTransport seam + settingsStore）+
+ * @taiji/core/foundation/optimistic-update + @taiji/ui 类型（[C3] 通道分工——settings
+ * 域读写不经 @/api 门面，全走 seam）。
  */
 import { computed } from 'vue'
 import { getSettingsStore, getSettingsTransport } from '@taiji/core'
@@ -38,10 +40,9 @@ export function useScopedModels() {
       const providerId = fullId.substring(0, slashIdx)
       const modelId = fullId.substring(slashIdx + 1)
       const provider = providers.find((p) => p.id === providerId)
+      const model = provider?.models.find((m) => m.id === modelId)
+      if (!provider || !model) return { scoped: fullId, modelName: modelId, providerName: provider?.name ?? providerId, apiKeySet: provider?.apiKeySet ?? true, missing: !model }
 
-      if (!provider) return { scoped: fullId, modelName: modelId, providerName: providerId, apiKeySet: true, missing: true }
-
-      const model = provider.models.find((m) => m.id === modelId)
       return {
         scoped: fullId,
         modelName: model?.name ?? modelId,

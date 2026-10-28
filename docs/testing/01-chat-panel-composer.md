@@ -799,7 +799,7 @@ Composer.onSend(segments)（send 显式接收 sessionId——双 panel 各自绑
 - 断线窗口通知丢失 / runtime 重启 → `session.delivery` 快照孤儿对账（D1⑤）静默清除；操作域仅限受理回执登记的命令条目（普通条目清除会在快照先于回执窗口删掉已送达气泡）。
 - pi 重启响应丢失 / 命令清单假阳性 → 内核 sweepInFlight 超宽限（10s）静默终局 + 日志，不重投（重投会重复执行命令）。
 
-单测：[`packages/core/src/domain/chat/__tests__/use-chat-disposition.test.ts`](../../packages/core/src/domain/chat/__tests__/use-chat-disposition.test.ts)（三件套静默回滚 / 孤儿对账终态双分支 / extension.error 命令 toast 同 key 限频 / pendingSend 命令条目豁免）。
+单测：[`packages/core/src/domain/chat/__tests__/store-merged-merged.test.ts`](../../packages/core/src/domain/chat/__tests__/store-merged-merged.test.ts)（三件套静默回滚 / 孤儿对账终态双分支 / extension.error 命令 toast 同 key 限频 / pendingSend 命令条目豁免）。
 
 ## 5. ServerMessage 类型表（流式 chunk）
 
@@ -908,7 +908,7 @@ message.complete {messageId, stopReason:'complete', usage:{inputTokens:1280, out
 | [`__tests__/panel/turn-working.test.ts`](../../packages/renderer/src/__tests__/panel/turn-working.test.ts) | Turn working 态（完成复位/elapsed 计时/非 working 静态） |
 | [`__tests__/stores/toolcall-anchor.test.ts`](../../packages/renderer/src/__tests__/stores/toolcall-anchor.test.ts) | toolCallId 锚定（findToolCallOwner 乱序无害化） |
 | [`__tests__/effects/use-streaming-pin.test.ts`](../../packages/renderer/src/__tests__/effects/use-streaming-pin.test.ts) + [`__tests__/components/MessageStream-kind.test.ts`](../../packages/renderer/src/__tests__/components/MessageStream-kind.test.ts) | message-stream-editing-pin-identity keepMounted 崩溃回归：streaming pin 恒定 identity（turnStableId 身份固定，virtua keepMounted 下序列变更不崩）/ MessageStream kind 查表分发（三态互斥，防死分支复辟） |
-| [`packages/core/src/domain/chat/__tests__/use-chat-disposition.test.ts`](../../packages/core/src/domain/chat/__tests__/use-chat-disposition.test.ts)（core 包） | 发送终局行为分型（§4.4，pi1-disposition-chat-flow D1/D2/D14③）：handled 三件套静默回滚 / 孤儿对账终态双分支 + 在途窗口反向 / extension.error 命令 toast 限频 / pendingSend 命令条目豁免 |
+| [`packages/core/src/domain/chat/__tests__/store-merged-merged.test.ts`](../../packages/core/src/domain/chat/__tests__/store-merged-merged.test.ts)（core 包） | 发送终局行为分型（§4.4，pi1-disposition-chat-flow D1/D2/D14③）：handled 三件套静默回滚 / 孤儿对账终态双分支 + 在途窗口反向 / extension.error 命令 toast 限频 / pendingSend 命令条目豁免 |
 
 **运行**：
 ```bash

@@ -151,7 +151,7 @@ describe('RD-5#5 useBrowserZoom seq 检查 + catch', () => {
     const sid = ref('sess-1')
     const { zoomFactor } = useBrowserZoom(sid)
 
-    await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled())
+    await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled(), { interval: 1 })
     const texts = warnSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n')
     expect(texts).toContain('sess-1')
     // 本地值不被写坏（维持默认 1.0）

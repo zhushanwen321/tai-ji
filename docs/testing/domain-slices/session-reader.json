@@ -1,0 +1,31 @@
+{
+  "name": "session-reader",
+  "summary": "会话读取基座（extensions/universal/session-reader 整包 + packages/session-core + packages/zcode-session-source 读取源，方案 §1.2 映射表第 16 行两基座随本域）",
+  "layers": [
+    "extension",
+    "shared"
+  ],
+  "scope": {
+    "extension": [
+      "extensions/universal/session-reader/**"
+    ],
+    "shared": [
+      "packages/session-core/**",
+      "packages/zcode-session-source/**"
+    ]
+  },
+  "tests": [
+    "extensions/universal/session-reader/**",
+    "packages/session-core/**",
+    "packages/zcode-session-source/**"
+  ],
+  "sharedBy": {},
+  "contracts": [
+    {
+      "carrier": "packages/zcode-session-source/**",
+      "on": ["import"],
+      "note": "runtime import-source-zcode 与 session-reader 扩展消费同一 zcode 读取源，改读取源需联跑 import 域"
+    }
+  ],
+  "e2eRules": []
+}

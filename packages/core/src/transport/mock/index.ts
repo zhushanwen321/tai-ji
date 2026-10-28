@@ -29,6 +29,8 @@ import type {
   BashDispatchReceipt,
   SkillInfo, AgentInfo, PluginInfo, SetProviderData,
   PluginUiSnapshotPayload,
+  PluginEventPayload, PluginListAvailableReply, PluginCatalogReply,
+  PluginPrepareInstallReply, PluginConfirmInstallReply,
   SkillDirConfig, FileNode, RecommendedExtension, SubagentRecord, WorkflowRunRecord,
   SystemPromptConfig,
   RetryableErrorRule,
@@ -1984,8 +1986,26 @@ export const extension = {
 
 const pluginsSub = makeMockSubscription((): PluginInfo[] => [])
 
+// plugin:event 订阅骨架（provider-plugin-access D9）：mock 无插件运行时、无事件生产方，
+// 恒空订阅（结构面与 real 同构，消费方可订阅但收不到帧——mock 无插件的真实形态）。
+const pluginEventsSub = makeMockSubscription((): PluginEventPayload => ({ pluginId: '', channel: '', payload: null }))
+
+// plugin:crashed 订阅骨架（S13 崩溃恢复）：恒空订阅（mock 无插件进程可崩溃，同上形态）。
+const pluginCrashedSub = makeMockSubscription((): { pluginId: string; workerId?: string; error?: string } => ({ pluginId: '' }))
+
 const pluginImpl = {
   onPlugins: (h: (plugins: PluginInfo[]) => void) => pluginsSub.subscribe(h),
+  // 插件运行态（S13 崩溃恢复）：list/toggle mock 无插件运行时返回空列表（与 onPlugins
+  // 恒空同形态——家族卡无崩溃标记可呈）；crashed 订阅恒空（无生产方）。
+  async listPlugins(): Promise<PluginInfo[]> {
+    await sleep(TIMING.ack)
+    return []
+  },
+  async togglePlugin(_pluginId: string, _enabled: boolean): Promise<PluginInfo[]> {
+    await sleep(TIMING.ack)
+    return []
+  },
+  onPluginCrashed: (h: (payload: { pluginId: string; workerId?: string; error?: string }) => void) => pluginCrashedSub.subscribe(h),
   // 插件权限审批/回收/拒绝（[G4 锚定补齐]：锚定前 mock 缺此族成员，门面三元下不可达）。
   // mock 无插件运行时，ack 型 stub resolve 即可。revokePermissions / denyPermissions
   // 与 real 同为单参（锚定曾抓出 stub 多参，已对齐）。
@@ -1999,10 +2019,55 @@ const pluginImpl = {
     await sleep(TIMING.ack)
   },
   // 插件 UI 快照拉取（ADR-0097 拉为主）：mock 无插件运行时，恒返空快照（渲染端按
-  // 「未推送」处理——headerAction 入口不渲染，与 mock 模式零插件的真实形态一致）
-  async getPluginUiSnapshot(_filter: { sessionId?: string; viewId?: string } = {}): Promise<PluginUiSnapshotPayload> {
+  // 「未推送」处理——headerAction 入口不渲染，与 mock 模式零插件的真实形态一致）。
+  // 过滤参数为 scope 二选一（U2：{ sessionId } 会话域 / { mountId, pluginId } 全局域）。
+  async getPluginUiSnapshot(_filter: { sessionId?: string; mountId?: string; pluginId?: string; viewId?: string } = {}): Promise<PluginUiSnapshotPayload> {
     await sleep(TIMING.ack)
     return { headerActions: [], views: [] }
+  },
+  // ── provider-plugin-access D9 / D8 / U5（mock 不支持项显式登记，非静默丢弃）──
+  // invoke / uiEvent：mock 无插件 Worker 可执行，ack 型 stub（invoke 返回 undefined——
+  // mock 模式下无插件业务方法可调，消费方拿到 undefined 与「插件返回 undefined」同形）。
+  async invokePlugin(_pluginId: string, _method: string, _params?: Record<string, unknown>): Promise<unknown> {
+    await sleep(TIMING.ack)
+    return undefined
+  },
+  async sendPluginUiEvent(_payload: { pluginId: string; viewId: string; componentId: string; event: string; value: unknown }): Promise<void> {
+    await sleep(TIMING.ack)
+  },
+  // executeCommand：mock 无插件 Worker 可执行，ack 型 stub（与 invokePlugin 同款降级形态）。
+  async executePluginCommand(_payload: { pluginId: string; commandId: string; args?: Record<string, unknown> }): Promise<void> {
+    await sleep(TIMING.ack)
+  },
+  // plugin:event 订阅骨架：恒空（无生产方），与 onPlugins 同款订阅形态。
+  onPluginEvent: (h: (payload: PluginEventPayload) => void) => pluginEventsSub.subscribe(h),
+  // 清单域：mock 无远程清单基建（runtime remote-config 通道），恒空清单（UI 按
+  // 「清单为空」空态渲染，与 mock 模式无清单数据的真实形态一致）。
+  async listAvailablePlugins(): Promise<PluginListAvailableReply> {
+    await sleep(TIMING.ack)
+    return { plugins: [] }
+  },
+  async getPluginCatalog(): Promise<PluginCatalogReply> {
+    await sleep(TIMING.ack)
+    return { entries: [] }
+  },
+  // 两段式安装（U4/U6）：mock 无安装基建（无 registry / 暂存 / manifest），prepare 返回
+  // 空声明的最小知情面（确认卡展示「无声明」即 mock 模式的真实形态）、confirm 演示成功
+  //——三段流（家族卡 → 确认卡 → 授权）在 mock 模式可走通，无真实落盘。
+  async preparePluginInstall(packageSpec: string): Promise<PluginPrepareInstallReply> {
+    await sleep(TIMING.ack)
+    return { pluginId: packageSpec, packageName: packageSpec, version: '0.0.0', capabilities: [], readPaths: [], permissions: [] }
+  },
+  async confirmPluginInstall(_pluginId: string): Promise<PluginConfirmInstallReply> {
+    await sleep(TIMING.ack)
+    return { success: true }
+  },
+  // 挂载位分区清理（U2 裁决①家族切换防陈旧）：mock 无快照存储，ack 型 stub。
+  async clearPluginMountUi(_mountId: string): Promise<void> {
+    await sleep(TIMING.ack)
+  },
+  async cancelPluginInstall(_pluginId: string): Promise<void> {
+    await sleep(TIMING.ack)
   },
 }
 

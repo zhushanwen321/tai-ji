@@ -68,7 +68,7 @@ let scriptPath: string;
 let argv1Saved: string | undefined;
 let logs: Array<{ level: LogLevel; component: string; message: string }>;
 
-interface Harness {
+interface Harness { // oe-exempt:20261027:test:测试夹具接口（合并产物内多节共用的 mock 形状契约）
   handleReady: Array<{ sessionRef: Record<string, string> }>;
   stateChanges: Array<{ state: "running" | "exited" }>;
 }

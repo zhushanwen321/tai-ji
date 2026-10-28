@@ -145,6 +145,8 @@
       </div>
     </div>
     <!-- hover actions：复制常驻 hover；编辑仅 AI 停止（非活跃态）时显示；撤回单入口（D6，路由判定在 core）。
+         vid 视图（isVidView，subagent/agentcall 快照）只读：编辑与撤回入口整体不渲染——动作类
+         RPC 被 vid 门拒绝（shared vid-rpc-gate），复制是本地动作保留。
          流内固定槽位（2026-10 用户裁决）：常驻于气泡行下方（mt-1 + h-6），不占气泡内部、
          不悬浮遮挡轮头；显隐走 opacity 零布局跳动（槽位恒在，悬停/键盘焦点才可命中——
          pointer-events 默认 none 消除「隐形按钮拦截点击」形态）。DOM 序在气泡行之后 =
@@ -166,7 +168,7 @@
         <Copy v-else class="size-3" />
       </Button>
       <Button
-        v-if="canEdit && !isSessionEditable"
+        v-if="canEdit && !isSessionEditable && !isVidView"
         variant="ghost"
         size="icon"
         class="size-6 text-neutral-dim hover:text-neutral-fg"
@@ -177,8 +179,10 @@
       </Button>
       <!-- [U5 消息撤回 D6] 撤回按钮：生成中（isActive 置灰 + tooltip，D2 附带裁决）用伪禁用
            （aria-disabled + click 检查）而非 disabled attribute——disabled 元素不触发 hover，
-           tooltip 会被一并吞掉。 -->
+           tooltip 会被一并吞掉。vid 视图（isVidView）不渲染——isActive(vid) 恒 false 使置灰
+           判据失效恒可点，点击必被 vid 门拒绝。 -->
       <Button
+        v-if="!isVidView"
         variant="ghost"
         size="icon"
         class="size-6 text-neutral-dim"
@@ -205,7 +209,7 @@ import { Textarea } from '../../primitives/textarea'
 import { turnStableId } from '@taiji/core/domain/chat'
 import type { MessageTurn } from '@taiji/core/domain/chat'
 import type { Segment } from '@taiji/shared'
-import { normalizeContent, needsBoundarySpace, normalizeSegmentOrder, segmentsToText, textToSegments } from '@taiji/shared'
+import { isAgentCallVirtualId, isSubagentVirtualId, normalizeContent, needsBoundarySpace, normalizeSegmentOrder, segmentsToText, textToSegments } from '@taiji/shared'
 import { rebuildSegmentsWithEditedText } from '../../lib/segment-rebuild'
 import { useCopy } from './composables/useCopy'
 import { formatClock } from './format-utils'
@@ -235,6 +239,15 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const chatViewDeps = useChatViewDeps()
 const { editAndResend, openDrawer, onFileClick, isPendingSend } = chatViewDeps
+
+/**
+ * vid 视图判定（subagent 三段式 / agentcall 两段式，谓词 SSOT 在 shared）：vid 只是前端
+ * 路由 key，对话流为只读快照——编辑重发 / 撤回是动作类 RPC，会被 vid 门拒绝
+ * （shared vid-rpc-gate），入口裁剪在本组件单点完成（MessageStream 传 vid 无需上游各自判）。
+ */
+const isVidView = computed(
+  () => isSubagentVirtualId(props.sessionId) || isAgentCallVirtualId(props.sessionId),
+)
 
 /** 点击 skill badge → 打开 drawer Doc tab */
 function openCommandDoc(commandName: string): void {
@@ -342,8 +355,10 @@ function onRevokeClick(): void {
 /* ── 编辑（= fork）：编辑 user 消息后 fork 新会话 ── */
 const editingUserId = ref<string | null>(null)
 const draftText = ref('')
+// isVidView 参与：vid 下编辑入口已裁剪，editingUserId 理论不可被置位——此处兜住
+// 「置位残留 + sessionId 变为 vid」的极端序列，保证 vid 视图永不渲染编辑器（防御一致性）。
 const isEditingThisUser = computed(
-  () => !!props.turn.user && editingUserId.value === props.turn.user.id,
+  () => !isVidView.value && !!props.turn.user && editingUserId.value === props.turn.user.id,
 )
 
 watch(isEditingThisUser, (editing) => {

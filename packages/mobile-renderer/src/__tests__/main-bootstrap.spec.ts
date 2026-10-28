@@ -1,7 +1,7 @@
 // main.ts bootstrap 失败兜底呈现（code-harden 观测项 1）：bootstrap 任一环 reject 时
 // #app 呈现极简错误信息（重试指引），不白屏、不静默；全局错误留痕监听随 main 装配。
 //
-// 单独成文件的原因：mobile-shell.spec 的 TC-5 消费真实 bootstrap（注入链路断言），
+// 单独成文件的原因：mobile-shell-integration.test.ts 的 TC-5 消费真实 bootstrap（注入链路断言），
 // vi.mock 是模块级替换，两者不能共存于同一 spec 文件。
 //
 // 从 vitest 导入（禁 node:test / tsx --test）。运行：npx vitest run。

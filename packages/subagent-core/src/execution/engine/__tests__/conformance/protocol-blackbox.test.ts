@@ -20,6 +20,12 @@
 // 措辞统一（R9-1）：「子进程零残留」一律指一代子进程 + 组内后代；引擎自身
 // detached 后代不判 fail（设计 §3.9 已接受代价）。
 
+// ── round5-g C22 合并产物说明 ──
+// 本文件吸收同目录 contract.agent-events.test.ts 与 golden-replay.pi.test.ts（来源
+// 区块 describe("contract.agent-events") / describe("golden-replay.pi")，用例逐字
+// 并入）：断言器正反例与 golden 回放是黑盒套件的契约面与回放面（三文件头互引为
+// 同一 conformance 套件），同目录合并零路径重写。
+//
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -30,11 +36,12 @@ import { EngineClient } from "../../client/engine-client.ts";
 import { localSpawnEnv } from "../local-spawn-env.ts";
 import { JournalWriter, replayJournal } from "../../common/event-journal.ts";
 import type { AgentEvent } from "../../../assembly/types.ts";
-import { assertAgentEventInvariants } from "./agent-event-invariants.ts";
+import { assertAgentEventInvariants, checkAgentEventInvariants } from "./agent-event-invariants.ts";
 import {
   _resetHostUiRequestEndpointForTest,
   setHostUiRequestEndpoint,
 } from "../../host/host-ui-endpoint.ts";
+import { parseSpawnLine } from "@zhushanwen/pi-subagent-cli";
 
 const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), "__fixtures__", "engine-protocol");
 const FAKE_ENGINE = join(FIXTURE_DIR, "fake-engine-protocol.mjs");
@@ -382,4 +389,150 @@ describe("协议黑盒：fixture 回放结构等价（基线三层①）", () =>
       await h.client.dispose();
     }
   });
+});
+
+// ── 来源区块：contract.agent-events.test.ts（C3 断言器正反例 + 负例自证）──
+describe("contract.agent-events", () => {
+  describe("conformance C3：AgentEvent 不变量（断言器正反例，手工构造样本）", () => {
+    it("不变量 1：终态唯一——turn_end 后不得再出现非 error 事件", () => {
+      const events: AgentEvent[] = [{ type: "message_end" }, { type: "turn_end" }, { type: "text_delta", delta: "x" }];
+      const findings = checkAgentEventInvariants(events, { granularity: "coarse" });
+      expect(findings.some((f) => f.invariant === "1")).toBe(true);
+    });
+
+    it("不变量 2：message_end.usage 残缺对象（NaN token）被判违例", () => {
+      const events: AgentEvent[] = [
+        { type: "message_end", usage: { input: Number.NaN, output: 1, cacheRead: 0, cacheWrite: 0 } },
+        { type: "turn_end" },
+      ];
+      const findings = checkAgentEventInvariants(events, { granularity: "coarse" });
+      expect(findings.some((f) => f.invariant === "2")).toBe(true);
+    });
+
+    it("不变量 2 正例：usage 显式缺省整个字段 = 合法（不给残缺）", () => {
+      const events: AgentEvent[] = [{ type: "message_end" }, { type: "turn_end" }];
+      expect(checkAgentEventInvariants(events, { granularity: "coarse" })).toEqual([]);
+    });
+
+    it("不变量 3a：流式 text_delta 拼接 ≠ content 判违例（byte 级）", () => {
+      const events: AgentEvent[] = [
+        { type: "text_delta", delta: "abc" },
+        { type: "message_end", usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } },
+        { type: "turn_end" },
+      ];
+      const findings = checkAgentEventInvariants(events, { granularity: "stream", content: "abd" });
+      expect(findings.some((f) => f.invariant === "3a")).toBe(true);
+    });
+
+    it("不变量 3b：coarse 序列缺 message_end（turn_end 裸终态）判违例", () => {
+      const events: AgentEvent[] = [{ type: "turn_end" }];
+      const findings = checkAgentEventInvariants(events, { granularity: "coarse" });
+      expect(findings.some((f) => f.invariant === "3b")).toBe(true);
+    });
+
+    it("不变量 4：未配对 tool_start 且无 error 兜底判违例；error 兜底合法", () => {
+      const unpaired: AgentEvent[] = [
+        { type: "tool_start", toolName: "bash" },
+        { type: "turn_end" },
+      ];
+      expect(checkAgentEventInvariants(unpaired, { granularity: "coarse" }).some((f) => f.invariant === "4")).toBe(true);
+
+      const withError: AgentEvent[] = [
+        { type: "tool_start", toolName: "bash" },
+        { type: "error", message: "boom" },
+        { type: "turn_end" },
+      ];
+      expect(checkAgentEventInvariants(withError, { granularity: "coarse" }).some((f) => f.invariant === "4")).toBe(false);
+    });
+  });
+
+  describe("conformance 负例自证（A12：套件有牙）", () => {
+    it("注入坏 parser（抽掉 message_end 的合成器）：断言器必须检出（不变量 3b 转红）", () => {
+      // 坏 parser 形态：zcode 新版本漂移后合成器丢 message_end——不变量 3b 应抓到
+      const badParser = (): AgentEvent[] => [{ type: "turn_end" }];
+      const events = badParser();
+      const findings = checkAgentEventInvariants(events, { granularity: "coarse" });
+      expect(findings.length).toBeGreaterThan(0);
+      expect(findings.some((f) => f.invariant === "3b")).toBe(true);
+      // 断言形态同步转红（conformance 用例消费的入口）
+      expect(() => assertAgentEventInvariants(events, { granularity: "coarse" })).toThrowError(/不变量/);
+    });
+
+    it("注入坏 parser（usage 半映射）：断言器必须检出（不变量 2 转红）", () => {
+      // 坏 parser 形态：新版本 usage 字段改名，数值映射 Number(undefined) → NaN 渗入
+      const badParser = (): AgentEvent[] => [
+        { type: "message_end", usage: { input: Number.NaN, output: 2, cacheRead: 0, cacheWrite: 0 } },
+        { type: "turn_end" },
+      ];
+      const findings = checkAgentEventInvariants(badParser(), { granularity: "coarse" });
+      expect(findings.some((f) => f.invariant === "2")).toBe(true);
+    });
+  });
+
+});
+
+// ── 来源区块：golden-replay.pi.test.ts（pi golden 回放 + journal 往返 + parseSpawnLine）──
+describe("golden-replay.pi", () => {
+  interface PiGoldenFile {
+    events: AgentEvent[];
+    content: string;
+  }
+
+  // 引擎层 golden 随引擎包（基线三层②）：pi 包 __golden__/ 为采集 SSOT（W10 前
+  // 副本在 conformance/__fixtures__，已上移；core 侧本测试为协议层回放消费方）。
+  const fixturePath = join(
+    dirname(fileURLToPath(import.meta.url)),
+    "../../../../../../pi-subagent-cli/src/__golden__", "pi-golden-events.json",
+  );
+  const golden = JSON.parse(readFileSync(fixturePath, "utf8")) as PiGoldenFile;
+
+  describe("pi golden 回放（conformance C3/C5-journal，免 LLM）", () => {
+    it("golden 事件序列满足全部产出不变量（流式口径：text_delta 拼接 === content）", () => {
+      assertAgentEventInvariants(golden.events, { granularity: "stream", content: golden.content });
+    });
+
+    it("journal 往返保真：golden 序列经 JournalWriter 落盘后 replayJournal 逐事件相等", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "pi-golden-journal-"));
+      const writer = new JournalWriter({
+        path: join(dir, "journal-sa-pi-golden.jsonl"),
+        taskId: "sa-pi-golden",
+        engineId: "pi",
+      });
+      try {
+        for (const ev of golden.events) writer.append(ev);
+        await writer.close();
+        const replayed = replayJournal(writer.path);
+        // 深比较（含 undefined 键缺省语义——JSON 序列化后 undefined 字段自然消失，两侧同构）
+        expect(replayed).toEqual(golden.events);
+      } finally {
+        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+      }
+    });
+
+    it("parseSpawnLine 回归：实录行形态（header/事件行）识别不漂移", () => {
+      const header = parseSpawnLine(
+        JSON.stringify({ type: "session", id: "sess-pi-golden", timestamp: "2026-08-25T01:00:00.000Z", cwd: "/tmp" }),
+      );
+      expect(header?.kind).toBe("header");
+
+      const toolLine = parseSpawnLine(
+        JSON.stringify({ type: "tool_execution_start", toolName: "bash", toolCallId: "c1", args: { command: "ls" } }),
+      );
+      expect(toolLine?.kind).toBe("event");
+      if (toolLine?.kind === "event") expect(toolLine.event.type).toBe("tool_execution_start");
+
+      const msgEnd = parseSpawnLine(
+        JSON.stringify({
+          type: "message_end",
+          message: { role: "assistant", usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0 } },
+        }),
+      );
+      expect(msgEnd?.kind).toBe("event");
+      if (msgEnd?.kind === "event") expect(msgEnd.event.type).toBe("message_end");
+
+      const turnEnd = parseSpawnLine(JSON.stringify({ type: "turn_end" }));
+      expect(turnEnd?.kind).toBe("event");
+    });
+  });
+
 });
