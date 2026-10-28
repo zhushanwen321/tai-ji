@@ -24,8 +24,8 @@
  *  - D1 延续条目 title 权威【漂移待对齐】：pi 侧 title 清单权威——inheritCarryoverFields
  *    仅在清单侧缺 title 时回填、已有 title 不覆盖（f5c7f1506 裁决）；zcode 侧延续合并
  *    `prev.title = i.title` 无条件覆盖（$HOME/.zcode/workflows/review-fix-loop.dwf.ts）。
- *    severity 两侧一致（均采信本轮），分歧仅 title——待「延续条目 title 清单权威」
- *    ADR 裁决后两侧对齐或登记豁免。
+ *    severity 单向只升不降（两侧一致，dmg-r2-3 起 zcode 侧镜像 pi 守卫），分歧仅
+ *    title——待「延续条目 title 清单权威」ADR 裁决后两侧对齐或登记豁免。
  *  - D2 聚合条目 title 可选性【与 D1 同根】：pi 侧 schema 宽——normalizeMustFixEntry
  *    容忍缺 title 并配套回填补偿；zcode 侧 AggIssueInput.title 必填（schema 窄，
  *    无补偿需求）。对齐裁决时与 D1 同批处理。
@@ -35,11 +35,13 @@
  *    reviewer escalate 申报。两侧宿主演化路径不同，接受为刻意差异（dormant/deferred
  *    域模型统一未立项）。
  *  - D4 inheritCarryoverFields / dormantRevivalTitle 的 zcode 侧处置：前者对应物为
- *    zcode 延续合并内联赋值（title 语义差随 D1，severity 语义一致）；后者属 dormant
+ *    zcode 延续合并内联赋值（title 语义差随 D1）；severity 单向只升不降（两侧一致，
+ *    dmg-r2-3 起 zcode 侧带同款等级表守卫）；后者属 dormant
  *    机制（随 D3 无对应物），登记豁免、无镜像义务。
- *  - D5 suggestion 台账机制【刻意】：pi 侧 suggestion 条目走 aggregator
- *    suggestion_ids 独立台账（schema 条目级 + detectSuggestionLedgerDefect 入口
- *    fail-fast：suggestion>0 而 ids 缺失/条数不足 = 带因重试一次后
+ *  - D5 台账 fail-fast 机制【刻意】：pi 侧走 aggregator 独立台账（schema 条目级 +
+ *    detectLedgerDefect 入口 fail-fast，双通道：must-fix 通道按 adjudication=evidence
+ *    活跃口径、suggestion 通道按全量口径做计数-台账核对——must_fix>0 而活跃条目不足，
+ *    或 suggestion>0 而 suggestion_ids 缺失/条数不足 = 带因重试一次后
  *    aggregator-failure；终态 suggestion-not-accounted ES3 记账防 suggestion 静默
  *    遗漏）。zcode 侧无对应物：minor 与 must-fix 同在单一问题清单（severity 词表
  *    含 minor），「不静默遗漏」由 reconciliation 逐条申报 + clean 轮清单守门
