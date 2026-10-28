@@ -10,6 +10,8 @@
 //     发送成功摘除条目
 //   ④ 中断成功插动作通知（§6.20「已中断本轮生成」——经 appendActionNotice → core
 //     appendSystemNotice，v2 为其首个生产消费方）
+//   ⑤ 锚定编辑降级路径 D6（edited=false 按普通新消息发出）：降级投递成功 → 清输入 +
+//     草稿摘除（残留 = 同一内容双投）；降级失败 → 输入与草稿原地保留可重发
 //
 // mock 策略（对齐 v1 mobile-composer.test 先例）：app-runtime 部分模块级 mock 隔离 core
 // WS；ComposerInput 真实挂载（DOM 注入 input 事件驱动 hasInput 与草稿写入，使用者视角
@@ -20,11 +22,25 @@ import { resetChatModuleStateForTest } from '@taiji/core'
 import Composer from '../Composer.vue'
 import { i18n } from '../../i18n'
 import { draftOf, resetSessionsRuntimeForTesting, setDraft } from '../../shell/sessions-runtime'
-import { chatStore, composerInjectionStore } from '../../shell/app-runtime'
+import {
+  beginQueueEdit,
+  chatStore,
+  clearQueueEditFor,
+  composerInjectionStore,
+  queueEditAnchorOf,
+} from '../../shell/app-runtime'
 
-const { sendMock, abortMock, chatIsActiveRef } = vi.hoisted(() => ({
+const { sendMock, abortMock, editDeliveryMock, chatIsActiveRef } = vi.hoisted(() => ({
   sendMock: vi.fn<(sid: string, segments: unknown[], options?: { clientUuid?: string }) => Promise<boolean>>(),
   abortMock: vi.fn<(sid: string) => Promise<void>>(),
+  editDeliveryMock: vi.fn<
+    (
+      sid: string,
+      clientUuid: string,
+      content: string,
+      segments?: unknown[],
+    ) => Promise<{ clientUuid: string; edited: boolean; reason?: 'delivered' | 'unconfirmed' | 'cancelled' | 'not-found' }>
+  >(),
   chatIsActiveRef: { value: false },
 }))
 
@@ -46,6 +62,8 @@ vi.mock('../../shell/app-runtime', async (importOriginal) => {
       send: sendMock,
       abort: abortMock,
     },
+    // 锚定编辑分流（D6）RPC 出口：降级路径（edited=false）测试驱动点
+    editDelivery: editDeliveryMock,
   }
 })
 
@@ -87,6 +105,10 @@ beforeEach(() => {
   sendMock.mockResolvedValue(true)
   abortMock.mockReset()
   abortMock.mockResolvedValue(undefined)
+  editDeliveryMock.mockReset()
+  // 锚定表（app-runtime queueEditAnchorMap）不随 sessions-runtime 测试复位走——显式解除，
+  // 防上一用例锚定残留串入（对齐 queue-strip-v2.test beforeEach 先例）
+  clearQueueEditFor(SID)
   chatIsActiveRef.value = false
   composerInjectionStore.clearInjection()
 })
@@ -216,6 +238,49 @@ describe('会话草稿三条边界（§7.1 / 验收条款 5；载体 = sessions-
     setDraft(SID, '预置的草稿')
     const wrapper = mountComposer()
     expect(readDraft(wrapper)).toContain('预置的草稿')
+    wrapper.unmount()
+  })
+})
+
+describe('锚定编辑降级路径（chat-flow-consistency D6：edited=false 按普通新消息发出）', () => {
+  it('降级投递成功 → 输入清空 + 草稿摘除 + 锚定解除（成功分支才清输入；残留 = 再点发送双投）', async () => {
+    const wrapper = mountComposer()
+    // 锚定在挂载后登记（真实时序：进聊天页 → 点 ✎）——挂载期 restoreDraft 的 clear 输入
+    // 边沿本身会解除锚定（onInputChange 清空边界），先 mount 再登记防误触
+    beginQueueEdit(SID, 'anchor-entry')
+    editDeliveryMock.mockResolvedValue({ clientUuid: 'anchor-entry', edited: false, reason: 'cancelled' })
+
+    writeDraft(wrapper, '降级发出的内容')
+    await flushPromises()
+    expect(draftOf(SID)).toBe('降级发出的内容')
+
+    await sendButton(wrapper).trigger('click')
+    await flushPromises()
+
+    // 投递链：editDelivery 降级（edited=false）→ 走 send 新消息通路且受理成功
+    expect(editDeliveryMock).toHaveBeenCalledTimes(1)
+    expect(sendMock).toHaveBeenCalledTimes(1)
+    // 修复锚点：降级成功后清输入（此前无条件 return 跳过 clear → 同一内容可双投）
+    expect(readDraft(wrapper)).toBe('')
+    expect(draftOf(SID)).toBe('')
+    expect(queueEditAnchorOf(SID)).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('降级投递失败 → 输入与草稿原地保留（D6 失败路径可重发，不误清）', async () => {
+    const wrapper = mountComposer()
+    beginQueueEdit(SID, 'anchor-entry')
+    editDeliveryMock.mockResolvedValue({ clientUuid: 'anchor-entry', edited: false, reason: 'cancelled' })
+    sendMock.mockResolvedValueOnce(false)
+
+    writeDraft(wrapper, '降级失败的内容')
+    await flushPromises()
+    await sendButton(wrapper).trigger('click')
+    await flushPromises()
+
+    expect(sendMock).toHaveBeenCalledTimes(1)
+    expect(readDraft(wrapper)).toContain('降级失败的内容')
+    expect(draftOf(SID)).toBe('降级失败的内容')
     wrapper.unmount()
   })
 })

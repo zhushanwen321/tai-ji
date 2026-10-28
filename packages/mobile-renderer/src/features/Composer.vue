@@ -166,6 +166,10 @@ async function onSend(): Promise<void> {
       }
       showErrorBar(t(editReplyNoticeKey(reply.reason)))
       if (!(await deliverNew(sid, segments, comp))) return
+      // 降级成功显式清输入（对齐 v1 MobileComposer delivered !== false 分支的 comp.clear()；
+      // D6 成功分支才清输入——不清则已发内容残留输入框与草稿分区，再点发送 = 同一内容双投）。
+      // 不能改删 return 落到底部统一 clear：会穿入下方普通新消息路径再投一次（双投）
+      comp.clear()
       return
     }
     if (!(await deliverNew(sid, segments, comp))) return
