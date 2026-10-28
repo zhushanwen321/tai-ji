@@ -1,5 +1,11 @@
 # @zhushanwen/pi-subagent-cli
 
+## 0.9.1
+
+### Patch Changes
+
+- 3107549df: Recognize the snake_case tool names (`structured_output`) alongside the legacy hyphenated ones, so session and journal replay keeps working across the tool rename.
+
 ## 0.9.0
 
 ### Minor Changes

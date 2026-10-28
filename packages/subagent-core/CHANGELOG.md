@@ -1,5 +1,11 @@
 # @zhushanwen/subagent-core
 
+## 2.1.1
+
+### Patch Changes
+
+- 3107549df: Fix a cold-start crash where index stat fields leaked into the session identity base; the review-fix-loop script follows the snake_case tool rename.
+
 ## 2.1.0
 
 ### Minor Changes

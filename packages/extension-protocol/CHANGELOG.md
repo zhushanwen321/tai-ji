@@ -1,5 +1,11 @@
 # @zhushanwen/extension-protocol
 
+## 0.25.0
+
+### Minor Changes
+
+- 3107549df: Add plugin-provider protocol types: capability-derived scope payloads, manifest capability extension, and the plugin invoke/event/uiEvent channel shapes used by the provider plugin platform.
+
 ## 0.24.0
 
 ### Minor Changes

@@ -1,5 +1,11 @@
 # @zhushanwen/pi-rename-session
 
+## 0.14.2
+
+### Patch Changes
+
+- 3107549df: chore: refresh dependency range (triggered by @zhushanwen/extension-protocol@0.24.0 → @zhushanwen/extension-protocol@0.25.0)
+
 ## 0.14.1
 
 ### Patch Changes

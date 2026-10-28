@@ -1,5 +1,11 @@
 # @zhushanwen/zcode-subagent-cli
 
+## 0.8.4
+
+### Patch Changes
+
+- 3107549df: Follow the snake_case tool rename and skip nested codemode calls when judging structured-output delivery.
+
 ## 0.8.3
 
 ### Patch Changes
