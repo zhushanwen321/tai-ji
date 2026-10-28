@@ -1307,7 +1307,7 @@ vi.mock('../services/provider-catalog-refresh.js', async (importOriginal) => {
 
 
 const PRESETS = [
-  { fetcher: 'zhipu', label: '智谱 GLM Coding Plan', auth: ['api-key'], match: { baseUrlPattern: 'bigmodel.cn', namePattern: 'zhipu' } },
+  { fetcher: 'zhipu', label: 'Zhipu Coding Plan', auth: ['api-key'], match: { baseUrlPattern: 'bigmodel.cn', namePattern: 'zhipu' } },
 ] as never
 
 

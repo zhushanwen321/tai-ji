@@ -12,6 +12,7 @@
  *   保存侧识别哨兵不发送（保留既存）；哨兵展示单源来自 syncFromProvider 的磁盘态重建
  */
 import { ref, computed, watch } from 'vue'
+import type { ComputedRef } from 'vue'
 import type {
   NormalizedQuotaRow,
   QuotaConfigurePayload,
@@ -21,12 +22,13 @@ import type {
   QuotaAuthKind,
   QuotaFetchFailureReason,
 } from '@taiji/shared'
-import { normalizeCookieHeader, normalizeQuotaParamValue, resolveQuotaCredentialSource, resolveQuotaPresets, supportsExclusiveCredential } from '@taiji/shared'
+import { normalizeCookieHeader, normalizeQuotaParamValue, getQuotaRefreshTarget, resolveQuotaCredentialSource, resolveQuotaPresets, supportsExclusiveCredential } from '@taiji/shared'
 // W3c：presets 数据源从编译期基线切到 runtime 下发的合并视图（remote-config 域 2）
 import { getSettingsStore } from '@taiji/core'
 import type {
   QuotaConfigureInputs,
   QuotaConfigureModule,
+  QuotaCookieRefreshView,
   QuotaDraftInput,
   QuotaFailureKind,
   QuotaParamView,
@@ -40,6 +42,7 @@ import type {
 import { API_KEY_CLEAR_SENTINEL, QUOTA_SECRET_MASK, getSettingsTransport } from '@taiji/core'
 import { optimisticUpdate, refCell } from '@taiji/core/foundation/optimistic-update'
 import { useQuotaStore } from '@/stores/quota'
+import { refreshQuotaCookie } from '@/lib/ipc'
 import { quotaFailReasonText } from '@/composables/features/model/useQuotaQuery'
 
 /**
@@ -154,6 +157,38 @@ function toMissingFields(checks: ReadinessCheck[]): ReadinessMissing[] {
   return missing
 }
 
+/** preset params spec → UI 参数区视图（label 缺省回落 key；placeholder/helpText 按声明透传）。 */
+function toParamViews(specs: readonly QuotaParamSpec[]): QuotaParamView[] {
+  return specs.map((spec) => ({
+    key: spec.key,
+    label: spec.label ?? spec.key,
+    ...(spec.placeholder !== undefined ? { placeholder: spec.placeholder } : {}),
+    ...(spec.helpText !== undefined ? { helpText: spec.helpText } : {}),
+    required: spec.required !== false,
+  }))
+}
+
+/** 用户维度参数草稿 → payload 段（明文回显字段，逐必填项取归一化后的草稿值；
+ *  D13：永不传 ''——空/非法本地拦截。必填项空值只在 readiness 被放行的不可能路径到达
+ *  （直接调用 saveAndTest 的对称防御）。 */
+function buildParamsPayloadFrom(
+  specs: readonly QuotaParamSpec[],
+  paramsDraft: Record<string, string>,
+): { ok: true; params: Record<string, string> } | { ok: false; errorKey: string } {
+  const params: Record<string, string> = {}
+  for (const spec of specs) {
+    const raw = paramsDraft[spec.key]
+    if (raw === undefined || raw.trim() === '') {
+      if (spec.required !== false) return { ok: false, errorKey: 'settings.providerEdit.quotaParamRequired' }
+      continue
+    }
+    const normalized = normalizeParamDraft(spec, raw)
+    if (!normalized.ok) return { ok: false, errorKey: normalized.errorKey }
+    params[spec.key] = normalized.payload
+  }
+  return { ok: true, params }
+}
+
 // ── 失败原因归一（A2-4）──
 
 /**
@@ -175,13 +210,110 @@ const FAILURE_KINDS: Record<QuotaFetchFailureReason, QuotaFailureKind> = {
   'credential-unsupported': 'generic',
 }
 
+// ── cookie 自动续期控制器（手动入口；执行体 = main 隐藏窗口刷新器，经 lib/ipc 调用）──
+
+/**
+ * 控制器输入：主工厂内 ref 的 getter 只读视图（getter 内读 ref 建立响应式依赖）。
+ * 拆为模块级工厂是为主工厂行数上限（taste max-lines-per-function 300）——
+ * 续期状态与动作自成一组，不与草稿 / readiness 判定交叉。
+ */
+interface CookieRefreshInputs {
+  t: QuotaConfigureInputs['t']
+  /** 当前编辑 provider id（无 provider = undefined，动作 no-op） */
+  providerId: () => string | undefined
+  /** 当前类型草稿（未选 = undefined） */
+  fetcherId: () => string | undefined
+  /** 磁盘已保存的 fetcher（从未保存 = undefined） */
+  savedFetcher: () => string | undefined
+  /** 当前草稿是否 cookie 形态（isCookieAuth 透传） */
+  isCookieAuth: () => boolean
+  /** 续期导出串的落盘（走 quota.configure 保存链，runtime 单点写 secrets 文件） */
+  saveCookie: (pid: string, cookie: string) => Promise<{ ok: boolean; error?: string }>
+  /** 续期成功后的结果刷新（重跑 testQuery） */
+  onRefreshed: () => Promise<void>
+}
+
+function createCookieRefreshController(inputs: CookieRefreshInputs): {
+  view: ComputedRef<QuotaCookieRefreshView>
+  refreshCookie: () => Promise<void>
+} {
+  const running = ref(false)
+  const result = ref<'ok' | 'fail' | null>(null)
+  const error = ref('')
+
+  /**
+   * 入口可用性：cookie 形态 + 当前 fetcher 在 QUOTA_REFRESH_TARGETS 在册（在册 ⊆ cookie
+   * 类——opendesign 等 cookie 类但无刷新目标的 fetcher 不在册，入口不渲染）+ 类型未变更
+   * （归属判据同 readiness：类型已变未保存时，续期保存的 cookie 归属不明，等保存后再刷）。
+   * 从未保存过类型的 provider（savedFetcher undefined）放行：选好类型即可先续期登录
+   * （SSO 窗弹出），cookie 落盘后「保存并测试」即可消费。
+   */
+  const available = computed<boolean>(() => {
+    if (!inputs.isCookieAuth()) return false
+    const fid = inputs.fetcherId()
+    if (!fid || getQuotaRefreshTarget(fid) === undefined) return false
+    const saved = inputs.savedFetcher()
+    return saved === undefined || fid === saved
+  })
+
+  const view = computed<QuotaCookieRefreshView>(() => ({
+    available: available.value,
+    running: running.value,
+    result: result.value,
+    error: error.value,
+  }))
+
+  /**
+   * 手动触发续期：main 隐藏窗口刷新器导出新 cookie 串（main 不落盘），经 saveCookie
+   * （quota.configure 保存链）由 runtime 单点写 secrets 文件。成功（保存 ok）重跑
+   * testQuery；失败只写 error——不动草稿与既有测试结果（用户已填的输入不因续期失败
+   * 丢失）。lib/ipc 封装保证不 reject（main 侧业务失败也 resolve ok:false），
+   * catch 面只覆盖通道装配异常。
+   */
+  async function refreshCookie(): Promise<void> {
+    const pid = inputs.providerId()
+    const fid = inputs.fetcherId()
+    if (!pid || !fid || !available.value || running.value) return
+
+    running.value = true
+    result.value = null
+    error.value = ''
+    try {
+      const refreshed = await refreshQuotaCookie({ fetcherId: fid, providerId: pid })
+      if (!(refreshed.ok && refreshed.cookie)) {
+        result.value = 'fail'
+        error.value = refreshed.error || inputs.t('settings.providerEdit.quotaCookieAutoRefreshFail')
+        return
+      }
+      // 单写方落盘（data-source-registry #66）：保存失败按续期失败呈现（cookie 未生效）
+      const saved = await inputs.saveCookie(pid, refreshed.cookie)
+      if (!saved.ok) {
+        result.value = 'fail'
+        error.value = saved.error || inputs.t('settings.providerEdit.quotaCookieAutoRefreshFail')
+        return
+      }
+      result.value = 'ok'
+      await inputs.onRefreshed()
+      // ok 文案（「正在重新查询」）随重查完成使命结束——结果由测试结果区呈现，
+      // 不复位会永久悬挂
+      result.value = null
+    } catch (e) {
+      result.value = 'fail'
+      error.value = e instanceof Error ? e.message : inputs.t('settings.providerEdit.quotaCookieAutoRefreshFail')
+    } finally {
+      running.value = false
+    }
+  }
+
+  return { view, refreshCookie }
+}
+
 /**
  * QuotaConfigure module 实现（契约见 core QuotaConfigureModule）。
  *
  * @param inputs - 工厂输入（业务输入由 ProviderEditBody 按当前编辑体装配；t 由壳层包装
  *   函数注入，见 core QuotaConfigureInputs / useSettingsShell provide 点）
- */
-export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureModule {
+ */export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureModule {
   const { t, provider: providerRef, preset, providerOauthPresent, providerApiKeyDraft } = inputs
   const quotaStore = useQuotaStore()
   const enabled = ref(false)
@@ -361,13 +493,8 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
         sourceHint,
         providerWarning,
       },
-      params: paramSpecs.value.map((spec): QuotaParamView => ({
-        key: spec.key,
-        label: spec.label ?? spec.key,
-        ...(spec.placeholder !== undefined ? { placeholder: spec.placeholder } : {}),
-        ...(spec.helpText !== undefined ? { helpText: spec.helpText } : {}),
-        required: spec.required !== false,
-      })),
+      params: toParamViews(paramSpecs.value),
+      cookieRefresh: cookieRefresh.view.value,
       help: helpUrl ? { url: helpUrl, text: activePreset.value?.helpText ?? '' } : null,
     }
   })
@@ -509,24 +636,11 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
   }
 
   /**
-   * 用户维度参数草稿 → payload 段（2026-10 泛化，原 workspace）：明文回显字段，逐必填项取
-   * 归一化后的草稿值（D13：永不传 ''——空/非法本地拦截）。归一化分流按当前草稿 fetcher 的
-   * param spec（与 runtime 侧同源：同 input 同 spec 同规则）。
+   * 用户维度参数草稿 → payload 段（2026-10 泛化，原 workspace）：委托模块级纯函数，
+   * spec 清单与草稿值由当前响应式状态传入（归一化分流与 runtime 侧同源）。
    */
   function buildParamsPayload(): { ok: true; params: Record<string, string> } | { ok: false; errorKey: string } {
-    const params: Record<string, string> = {}
-    for (const spec of paramSpecs.value) {
-      const raw = draft.value.params[spec.key]
-      if (raw === undefined || raw.trim() === '') {
-        // 必填项空值只在 readiness 被放行的不可能路径到达（直接调用 saveAndTest 的对称防御）
-        if (spec.required !== false) return { ok: false, errorKey: 'settings.providerEdit.quotaParamRequired' }
-        continue
-      }
-      const normalized = normalizeParamDraft(spec, raw)
-      if (!normalized.ok) return { ok: false, errorKey: normalized.errorKey }
-      params[spec.key] = normalized.payload
-    }
-    return { ok: true, params }
+    return buildParamsPayloadFrom(paramSpecs.value, draft.value.params)
   }
 
   /**
@@ -661,6 +775,21 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
     }
   }
 
+  // ── cookie 自动续期（手动入口；控制器实现见模块级 createCookieRefreshController）──
+  // 放在 testQuery 之后：onRefreshed 引用 testQuery（函数声明提升，显式后置消除前向引用）
+  const cookieRefresh = createCookieRefreshController({
+    t,
+    providerId: () => providerRef.value?.id,
+    fetcherId: () => fetcherIdDraft.value,
+    savedFetcher: () => providerRef.value?.quota?.fetcher,
+    isCookieAuth: () => isCookieAuth.value,
+    // 落盘中转：main 只导出串，保存走 quota.configure 保存链（enabled 传当前值，
+    // 其余键缺省 = 不变——fetcher/来源/params 继承磁盘既存）
+    saveCookie: (pid, cookie) =>
+      getSettingsTransport().configureQuota({ providerId: pid, enabled: enabled.value, cookie }),
+    onRefreshed: testQuery,
+  })
+
   return {
     draft,
     view,
@@ -668,5 +797,6 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
     selectType,
     setEnabled,
     saveAndTest,
+    refreshCookie: cookieRefresh.refreshCookie,
   }
 }

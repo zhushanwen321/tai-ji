@@ -17,7 +17,9 @@
  * - 类型 / 凭证 / Workspace 是草稿，经 saveAndTest 一次点击提交（D2/D5）；
  *   开关退化为纯配置位、即时落盘（D4）
  * - 密文字段（cookie / 专属 Key）取「草稿 ∨ 已保存」并集，明文 Workspace 只看草稿（D13）
- * - readiness 是「保存并测试」按钮禁用状态的唯一依据，也是字段徽标 / 提示的唯一真相源（D1）
+ * - readiness 是「保存并测试」按钮禁用状态的唯一依据，也是字段徽标 / 提示的唯一真相源
+ *   （D1；param 字段的徽标 / 提示按 key 经 isQuotaParamMissing 判定——missing 的 'param'
+ *   条目不编码 key，判据与 readiness 的 param 检查同源）
  * - 密文输入掩码哨兵：已保存的 cookie / 专属 Key 在输入框显示 QUOTA_SECRET_MASK（D7）
  * - 凭证来源显式化（D3）：UI 显示的选择与 runtime 使用的凭证由同一份持久化数据驱动
  */
@@ -47,8 +49,10 @@ export type QuotaTestStatus = 'idle' | 'loading' | 'success' | 'error'
  *                 「只渲染下拉 + 一句说明」，不渲染按钮，故该值**不配 i18n 文案**，
  *                 只用于让契约自解释。
  * - 'cookie' / 'apiKey' / 'param' : 已选类型下的具体缺口，各配一条 i18n 提示。
- *   'param'（2026-10 泛化，原 'workspace'）= 必填用户维度参数未填（具体键由
- *   view.params[].required 可见，i18n 文案通用化不按键分叉）。
+ *   'param'（2026-10 泛化，原 'workspace'）= 必填用户维度参数未填。条目按键聚合、
+ *   不编码具体 key（生产方按 spec 逐项判空、逐条落 'param'），多必填参数时从 missing
+ *   无法定位缺的是哪个框——字段级提示 / 徽标按 key 判定用 isQuotaParamMissing；
+ *   i18n 文案通用化不按键分叉。
  */
 export type ReadinessMissing = 'type' | 'cookie' | 'apiKey' | 'param'
 
@@ -108,6 +112,26 @@ export interface QuotaFailure {
 }
 
 /**
+ * cookie 自动续期入口的展示态（手动「自动续期」按钮）。
+ * 刷新执行体 = main 隐藏窗口刷新器（QUOTA_REFRESH_TARGETS 在册 fetcher），
+ * 经 renderer lib/ipc 封装调用；本视图只承载 UI 渲染所需的状态。
+ */
+export interface QuotaCookieRefreshView {
+  /**
+   * 入口是否可用：cookie 形态 + 当前 fetcher 在 QUOTA_REFRESH_TARGETS 在册 + 类型
+   * 未变更（类型已变未保存时刷新写回的 cookie 归属不明，等保存后再刷）。
+   * false = 按钮不渲染（非 cookie 类 / 不在册如 opendesign / 类型草稿已切换）。
+   */
+  available: boolean
+  /** 刷新执行中（可达 15s~120s，登录页停留等用户完成 SSO）；按钮禁用 + 进行中文案 */
+  running: boolean
+  /** 最近一次结果：null = 从未触发 / 'ok' = cookie 已写入并重查 / 'fail' = 失败 */
+  result: 'ok' | 'fail' | null
+  /** 失败文案（result==='fail' 时非空；main 侧 error 透传，无则 i18n 兜底） */
+  error: string
+}
+
+/**
  * 输入草稿（v-model 直绑，「保存并测试」一次提交）。
  * 类型草稿不在其中 —— 它有写入规则（同值短路 / 真变清凭证草稿），写入必须经 selectType。
  */
@@ -162,6 +186,8 @@ export interface QuotaSectionView {
   }
   /** 用户维度参数区（2026-10 泛化，原 workspace 单输入框）：按 preset.params 逐项渲染 */
   params: readonly QuotaParamView[]
+  /** cookie 自动续期入口（cookie 形态且刷新目标在册时渲染；见 QuotaCookieRefreshView） */
+  cookieRefresh: QuotaCookieRefreshView
   /** 帮助链接（基于当前选中 fetcher；null = 不渲染） */
   help: { url: string; text: string } | null
 }
@@ -180,6 +206,20 @@ export interface QuotaParamView {
   helpText?: string
   /** 是否必填（spec.required ?? true）：false 不阻塞 readiness。 */
   required: boolean
+}
+
+/**
+ * 必填用户维度参数的 per-key 缺口判定（字段级提示 / 徽标定位到具体输入框）。
+ *
+ * ReadinessMissing 的 'param' 条目按键聚合、不编码 key，多必填参数时从 missing 无法
+ * 定位缺的是哪个框；UI 按 key 渲染缺口提示 / 徽标时用本函数判定。判据与 readiness
+ * 的 param 检查同源：required ∧ 草稿为空白（D13 屏幕即真相，只看草稿、不看已保存值）。
+ */
+export function isQuotaParamMissing(
+  param: Pick<QuotaParamView, 'key' | 'required'>,
+  paramsDraft: Record<string, string>,
+): boolean {
+  return param.required && (paramsDraft[param.key] ?? '').trim() === ''
 }
 
 /** 测试结果侧（只读） */
@@ -252,4 +292,10 @@ export interface QuotaConfigureModule {
    * 类型发生变更时清该 provider 的 QuotaCache 条目（§7.1 副作用表）
    */
   saveAndTest(): Promise<void>
+  /**
+   * 手动触发 cookie 自动续期（main 隐藏窗口刷新器写回 secrets 文件）。成功（ok 且
+   * cookieWritten）后重跑 testQuery 刷新结果；失败只写 view.cookieRefresh.error，
+   * 不动草稿与既有测试结果。刷新目标不可用（view.cookieRefresh.available=false）时 no-op。
+   */
+  refreshCookie(): Promise<void>
 }

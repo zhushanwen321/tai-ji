@@ -362,3 +362,29 @@ export type LocalFileReadReason = LocalFileServableReason | 'read_failed'
 export type LocalFileReadResult =
   | { ok: true; content: string; truncated: boolean }
   | { ok: false; reason: LocalFileReadReason }
+
+// ── cookie 登录态刷新（QUOTA_REFRESH_COOKIE = 'quota:refresh-cookie' invoke 通道）
+//    [quota cookie 刷新器] ──────────────────────────────────────────────────
+
+/**
+ * quota:refresh-cookie 请求 payload。fetcherId 必须在 QUOTA_REFRESH_TARGETS 在册
+ * （main handler 校验，不在册 reject）；providerId 决定 persist partition 与 secrets
+ * 文件名（`<providerId>-cookie.txt`）。
+ */
+export interface QuotaRefreshCookiePayload {
+  fetcherId: string
+  providerId: string
+}
+
+/**
+ * quota:refresh-cookie 返回。ok=false 时 error 携带可展示原因（超时 / 页面加载失败 /
+ * 未知 fetcher）；ok=true 时 cookie 携带导出的目标域 cookie 串（`name=value; name2=value2`
+ * 手贴格式）。main 刷新器不落盘——secrets 文件的唯一写方进程 = runtime QuotaService，
+ * 导出串经 IPC 回 renderer 后由续期链走 quota.configure 保存链单点落盘
+ * （跨进程单写方裁决，data-source-registry #66）。
+ */
+export interface QuotaRefreshCookieResult {
+  ok: boolean
+  cookie?: string
+  error?: string
+}

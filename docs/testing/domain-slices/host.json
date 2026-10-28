@@ -96,6 +96,7 @@
     "packages/mobile-renderer/src/views/__tests__/mobile-composer.test.ts",
     "packages/mobile-renderer/src/views/__tests__/session-flow.test.ts",
     "packages/renderer/src/__tests__/composables/useAppUpdate.test.ts",
+    "apps/electron/main/quota/__tests__/cookie-refresher.test.ts",
     "packages/runtime/src/cli/__tests__/**",
     "packages/runtime/src/services/startup-background-init.test.ts",
     "packages/runtime/src/__tests__/process-manager-pi-path-reset.test.ts",

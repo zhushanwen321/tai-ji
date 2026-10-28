@@ -1174,7 +1174,7 @@
     },
     {
       "id": "E2E-PIPE-01",
-      "summary": "review-pipeline 工程门脚本组：quality-gates（typecheck 三处 + coverage/metrics 聚合 + 盲区判定）/ changeset-check（check_changeset 唯一实装）/ cross-branch-overlap（兄弟线 diff 交集）单测锁 + pr-pre-merge 一体化脚本 + skill-data-dir（gate 产物目录解析单一出口）；单测层极端形态静态检查 + CI 慢用例门禁自测；测试族清单单一登记（test-suites SUITES）+ 对账器（ci.yml 命令/孤儿测试双向红灯，CI Invariants 与 pre-commit 双接线）+ quality-gates gate5 快速守卫族执行面",
+      "summary": "review-pipeline 工程门脚本组：quality-gates（typecheck 三处 + coverage/metrics 聚合 + 盲区判定）/ changeset-check（check_changeset 唯一实装）/ cross-branch-overlap（兄弟线 diff 交集）单测锁 + pr-pre-merge 一体化脚本 + skill-data-dir（gate 产物目录解析单一出口）；单测层极端形态静态检查 + CI 慢用例门禁自测",
       "scope": [
         "scripts/quality-gates.mjs",
         "scripts/changeset-check.mjs",
@@ -2954,7 +2954,6 @@
         "scripts/merge/**",
         "scripts/__tests__/merge-gate.test.mjs",
         "scripts/__tests__/merge-state.test.mjs",
-        "scripts/__tests__/merge-sync.test.mjs",
         "scripts/__tests__/merge-wait-for-ci.test.mjs"
       ],
       "layer": "L1",
@@ -2974,10 +2973,6 @@
         {
           "kind": "spec",
           "ref": "scripts/__tests__/merge-state.test.mjs"
-        },
-        {
-          "kind": "spec",
-          "ref": "scripts/__tests__/merge-sync.test.mjs"
         },
         {
           "kind": "spec",
@@ -3002,42 +2997,20 @@
       ],
       "trigger": "on-diff",
       "serial": false,
-      "run": "pnpm exec vitest run scripts/__tests__/merge-gate.test.mjs scripts/__tests__/merge-state.test.mjs scripts/__tests__/merge-sync.test.mjs scripts/__tests__/merge-wait-for-ci.test.mjs",
+      "run": "pnpm exec vitest run scripts/__tests__/merge-gate.test.mjs scripts/__tests__/merge-state.test.mjs scripts/__tests__/merge-wait-for-ci.test.mjs",
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "merge skill 判定承载脚本（pr-merge/wait-for-ci 的 Node 实装 + lib）迁入仓库后的登记：真实运行形态 = merge skill 薄壳经 main worktree 调起（.agents/skills/merge/scripts 同名 .sh），本表 run = 零 token fixture 回归（79 用例）；CI 固定环节 = ci.yml「Test - scripts guards」步骤同批文件"
     },
     {
-      "id": "E2E-REPO-01",
-      "summary": "仓库标识（slug）字面量对账：脚本域内 zhushanwen321/tai-ji 只允许出现在登记白名单（repo.mjs / _lib/repo.sh / runtime 常量镜像两处），其余脚本一律从单一来源取值（Node import DEFAULT_REPO / shell git remote 推导）——仓库改名漏改即红（xyz-agent→tai-ji 教训）",
-      "scope": [
-        "scripts/merge/lib/repo.mjs",
-        "scripts/__tests__/check-repo-literal.test.mjs"
-      ],
-      "layer": "L1",
-      "assets": [
-        {
-          "kind": "spec",
-          "ref": "scripts/__tests__/check-repo-literal.test.mjs"
-        }
-      ],
-      "trigger": "on-diff",
-      "serial": false,
-      "run": "pnpm exec vitest run scripts/__tests__/check-repo-literal.test.mjs",
-      "owner": "scripts/",
-      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "发现 12 修复（2026-10-26 merge 流程架构审查）：白名单带理由登记在测试文件 ALLOW；CI 固定环节 = ci.yml「Test - scripts guards」步骤同批文件"
-    },
-    {
       "id": "E2E-CHANGESET-01",
-      "summary": "changeset 声明包合法性双防线：pre-commit staged 拦截 + Gate-1a.5/dev-merge gates 无条件 fail 方向——private/ignore 包声明永不生效（纯 private 被 version 静默跳过残留、混合声明阻断 version）；包枚举出口 versionable-packages.mjs（workspace globs + config.ignore 单一 CLI，check-version-changes.sh / apply-version.sh / changeset-check 方向① 三处消费，四份平行枚举归一）",
+      "summary": "changeset 声明包合法性双防线：pre-commit staged 拦截 + Gate-1a.5/dev-merge gates 无条件 fail 方向——private/ignore 包声明永不生效（纯 private 被 version 静默跳过残留、混合声明阻断 version）",
       "scope": [
         "scripts/changeset-versionable.mjs",
         "scripts/changeset-check.mjs",
         ".githooks/check_changeset_packages.mjs",
         "scripts/__tests__/changeset-versionable.test.mjs",
-        "scripts/__tests__/changeset-check.test.mjs",
-        "scripts/versionable-packages.mjs"
+        "scripts/__tests__/changeset-check.test.mjs"
       ],
       "layer": "L1",
       "assets": [
@@ -3060,10 +3033,6 @@
         {
           "kind": "spec",
           "ref": "scripts/__tests__/changeset-check.test.mjs"
-        },
-        {
-          "kind": "script",
-          "ref": "scripts/versionable-packages.mjs"
         }
       ],
       "trigger": "on-diff",
@@ -4395,6 +4364,161 @@
       "note": "R2 态 + 用例级门控（文件留 main 默认组，快用例继续占默认组；门控 = TAIJI_TEST_INTEGRATION，SSOT = test-guard/integration-gate.ts，skip 理由注入 describe 名）（现仅一段门控 describe：linux mv 段（4 例，无 hdiutil 依赖、CI ubuntu 可跑）；mac 真链三段（端到端/中断注入/磁盘满 P10）全部走 TAIJI_E2E_UPDATER E2E 档，登记 = E2E-UPDATER-01；单测层保留 bash -n 语法 3 条 + CLI 工具可用性 2 条 + mock 模板断言 12 条）。触发条件 = 升级脚本本体 diff 命中。断言本质 = 升级脚本对真实 bash 的组合行为（门控用例断言体零改动，文件级 60s 预算只辖门控组）；serial=真 的理由 = 真 bash 子进程与真实等待窗，重执行用例 1-5s。run 命令唯一正确入口 = test:main script（vitest 直跑因 config 上浮 no tests found，见 TEST-STRATEGY.md 已知坑）。CI test-main job 已带 env=1（mac 真链段在该 env 下 skip，属 E2E 档语义）。"
     },
     {
+      "id": "E2E-PIPE-20",
+      "summary": "W5 会话字段退场机器检查与存量清扫脚本组（session-identity-visibility-state）：check-session-hidden-surface（hidden 字段退场双形态检查——类型级 grep + ALLOWLIST + surface 四形态（对象键含可选声明形态）+ usage 三值词表，自带样本树 selftest）+ sweep-orphan-session-dirs（ext-sessions 存量磁盘孤儿清扫——三条件 + trashDirectory 端口镜像 + 失败集合留痕 + 点检记录 + --selftest 六形态，禁触真实数据目录）",
+      "scope": [
+        "scripts/check-session-hidden-surface.mjs",
+        "scripts/sweep-orphan-session-dirs.mjs",
+        "scripts/__tests__/check-session-hidden-surface.test.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-session-hidden-surface.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/sweep-orphan-session-dirs.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/check-session-hidden-surface.test.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-session-hidden-surface.mjs --selftest && node scripts/sweep-orphan-session-dirs.mjs --selftest && npx vitest run scripts/__tests__/check-session-hidden-surface.test.mjs",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态：当前执行形态 = 本表 run 三条（两个 selftest 实跑 exit 0 + vitest 单测）；check-session-hidden-surface.mjs 已接入 pre-commit（.githooks/install-hooks.sh 新增段——触发范围 = staged 命中 packages/<任意包>/src 下 .ts/.tsx/.vue 或检查脚本及其单测，执行 = 全仓扫描 + 脚本单测 vitest，清单外命中即红）；sweep-orphan-session-dirs.mjs（破坏性 fs 清扫，仅 --selftest 形态）未接入 pre-commit / CI——其生产执行属验收项 14 点检流程（人工触发 + 点检记录留痕），不进自动触发器。非恒绿证明由 check 脚本自带 selftest（样本树期望红/绿各形态）与 sweep --selftest（六形态 + 边界 + prod 护栏 + 纯函数）承载。补登原因（dmg-r1-4 同型）：新脚本落入 scripts/ 与 scripts/__tests__/ 看护目录，零登记被 e2e-map --staged 门禁拦截，随修复同批补登。"
+    },
+    {
+      "id": "E2E-PIPE-19",
+      "summary": "D3 脚本层验收资产（session-identity-visibility-state 设计 §7 项 1/6/9/11/12/13 的行为验收测试）：item1 fork 混合分支冷读（§10.1 六步序列离线等价物 + 负向对照）/ item6 getState 冷线零 spawn + 快照未就绪无 restore / item9 五类键容器行为点检 / item11 宿主不变量四族集合 diff / item12 session.list 功能+负例+两口径深等 / item13 createNew 三态 + 项 10 复跑。由 dev-flow verify 剧本（skill-data 下 .mjs）驱动，亦可直接 vitest 跑",
+      "scope": [
+        "packages/runtime/test/acceptance/**"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/acceptance/acceptance-bundle.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/acceptance/acceptance-bundle.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/acceptance/item9-key-containers.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/acceptance/acceptance-bundle.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/acceptance/acceptance-bundle.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/acceptance/acceptance-bundle.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "pnpm -C packages/runtime exec vitest run test/acceptance/",
+      "owner": "packages/runtime/test/acceptance/",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态：真实运行形态 = dev-flow D3 verify 剧本逐节点驱动（剧本在 ~/.agents/skill-data/dev-flow/<slug>/<name>.verify/，node 直跑、退出码判定）；本表 run 为同资产的仓内直跑形态（D3 首批 7 节点全 exit 0 实跑证据）。fixture 全部 mkdtemp 隔离（禁触真实数据目录）。补登原因（dmg-r1-4 同型）：验收测试目录落 packages/runtime/test/ 看护目录（看护根源头 E2E-INTEG-19），零登记被 e2e-map --staged 门禁拦截，随修复同批补登。"
+    },
+    {
+      "id": "E2E-BATCH-14",
+      "summary": "轮应答事实文案单元层：轮收条五分支（失败/中止/被接管/空正文/正常）→ 轮应答文案如实 + finished a round 废除回归锚（subagent-observability u4 交付，L1 单测资产登记防漏）",
+      "scope": [
+        "packages/subagent-core/src/execution/notify/**"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/subagent-core/src/execution/__tests__/notifier.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "authority": "docs/TEST-STRATEGY.md#subagent-轮收条事实化与债权结清",
+      "serial": false,
+      "run": "cd packages/subagent-core && pnpm vitest run src/execution/__tests__/notifier-round-facts.test.ts",
+      "owner": "packages/subagent-core"
+    },
+    {
+      "id": "E2E-BATCH-15",
+      "summary": "list 轮收条 wire 形状对拍单元层：core SubagentListLastRound ⊇ shared SubagentLastRound 键集 + 已登记偏差清单（stderrTeePath/swept）——形状漂移静态防线（subagent-observability D5 sync 交付，L1 单测资产登记防漏）",
+      "scope": [
+        "packages/subagent-core/src/execution/assembly/**"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/subagent-core/src/execution/__tests__/subagent-list-last-round-parity.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "authority": "docs/TEST-STRATEGY.md#subagent-轮收条事实化与债权结清",
+      "serial": false,
+      "run": "cd packages/subagent-core && pnpm vitest run src/execution/__tests__/subagent-list-last-round-parity.test.ts",
+      "owner": "packages/subagent-core"
+    },
+    {
+      "id": "E2E-SPAWNISOL-01",
+      "summary": "真机批次 spawn 隔离契约 guard（mock 层零 token）：settings 播种剥 packages/skills 且凭据继承（认证不破坏）、discovery.json 空态在盘（缺失即回落 preset 全默认勾选——宿主扩展/ skill 目录经 discovery 源进真机 argv 的缺口，batch-s3 现场实证）、schema 与 runtime discovery-store v2 形态对齐",
+      "scope": [
+        "e2e/fixtures/batch-real-helpers.ts",
+        "packages/runtime/src/infra/pi/discovery-store.ts",
+        "packages/pi-rpc/src/spawn-args.ts",
+        "packages/pi-subagent-cli/src/spawn-args.ts"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "e2e/spawn-isolation-guard.spec.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "serial": false,
+      "run": "npx playwright test e2e/spawn-isolation-guard.spec.ts --project=electron",
+      "owner": "e2e"
+    },
+    {
+      "id": "E2E-RETRYRULES-01",
+      "summary": "重试规则域 mock 层（零 token）：runtime handler 接线契约（config.get/setRetryRules → reply/broadcast/sendError 形态，服务层 mock）+ 服务层 ext-config 读写回退契约（文件缺失/坏形状回落空集不抛错）",
+      "scope": [
+        "packages/runtime/src/transport/retry-rules-config-message-handler.ts",
+        "packages/runtime/src/services/remote-config/remote-retry-rules.ts"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/mcp-codemode-bundle.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/services/remote-config/__tests__/remote-retry-rules.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "serial": false,
+      "run": "pnpm -C packages/runtime exec vitest run test/retry-rules-config-message-handler.test.ts src/services/remote-config/__tests__/remote-retry-rules.test.ts",
+      "owner": "packages/runtime",
+      "note": "subagent-observability §3.3.12 特性域的 mock 层（零 token，可进 CI）：断言本质 = handler 对服务层调用的消息形态契约（校验失败 sendError 不 reply 不广播 / 成功 reply 读回终态 + broadcast 同帧）+ 服务层读回退与写校验。settings UI 面由 renderer settings-transport-adapter 转发矩阵单测承接（packages/renderer，非看护目录）；真实进程层当前无登记，落建时同 commit 增补 rule（先例 E2E-DELIVERY-01/02 双层口径）。"
+    },
+    {
       "id": "E2E-PLUGINPERM-01",
       "summary": "能力放行主池测试：基线 16 项黑名单 + computeBlockedBuiltins 放行计算 + fs 只读子集 ESM 源码模板结构断言 + P-perm 四 fixture 插件（声明内读/声明外读/os 免声明/写操作变体拒）",
       "scope": [
@@ -4552,161 +4676,6 @@
       "owner": "packages/runtime",
       "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
       "note": "R2 态（2026-10-24 D2 补登，U6 插件侧出口 API 契约测试）。宿主侧三 RPC 注册与帧审计归 E2E-PLUGPROTO-01。"
-    },
-    {
-      "id": "E2E-PIPE-20",
-      "summary": "W5 会话字段退场机器检查与存量清扫脚本组（session-identity-visibility-state）：check-session-hidden-surface（hidden 字段退场双形态检查——类型级 grep + ALLOWLIST + surface 四形态（对象键含可选声明形态）+ usage 三值词表，自带样本树 selftest）+ sweep-orphan-session-dirs（ext-sessions 存量磁盘孤儿清扫——三条件 + trashDirectory 端口镜像 + 失败集合留痕 + 点检记录 + --selftest 六形态，禁触真实数据目录）",
-      "scope": [
-        "scripts/check-session-hidden-surface.mjs",
-        "scripts/sweep-orphan-session-dirs.mjs",
-        "scripts/__tests__/check-session-hidden-surface.test.mjs"
-      ],
-      "layer": "L1",
-      "assets": [
-        {
-          "kind": "script",
-          "ref": "scripts/check-session-hidden-surface.mjs"
-        },
-        {
-          "kind": "script",
-          "ref": "scripts/sweep-orphan-session-dirs.mjs"
-        },
-        {
-          "kind": "spec",
-          "ref": "scripts/__tests__/check-session-hidden-surface.test.mjs"
-        }
-      ],
-      "trigger": "on-diff",
-      "serial": false,
-      "run": "node scripts/check-session-hidden-surface.mjs --selftest && node scripts/sweep-orphan-session-dirs.mjs --selftest && npx vitest run scripts/__tests__/check-session-hidden-surface.test.mjs",
-      "owner": "scripts/",
-      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 态：当前执行形态 = 本表 run 三条（两个 selftest 实跑 exit 0 + vitest 单测）；check-session-hidden-surface.mjs 已接入 pre-commit（.githooks/install-hooks.sh 新增段——触发范围 = staged 命中 packages/<任意包>/src 下 .ts/.tsx/.vue 或检查脚本及其单测，执行 = 全仓扫描 + 脚本单测 vitest，清单外命中即红）；sweep-orphan-session-dirs.mjs（破坏性 fs 清扫，仅 --selftest 形态）未接入 pre-commit / CI——其生产执行属验收项 14 点检流程（人工触发 + 点检记录留痕），不进自动触发器。非恒绿证明由 check 脚本自带 selftest（样本树期望红/绿各形态）与 sweep --selftest（六形态 + 边界 + prod 护栏 + 纯函数）承载。补登原因（dmg-r1-4 同型）：新脚本落入 scripts/ 与 scripts/__tests__/ 看护目录，零登记被 e2e-map --staged 门禁拦截，随修复同批补登。"
-    },
-    {
-      "id": "E2E-PIPE-19",
-      "summary": "D3 脚本层验收资产（session-identity-visibility-state 设计 §7 项 1/6/9/11/12/13 的行为验收测试）：item1 fork 混合分支冷读（§10.1 六步序列离线等价物 + 负向对照）/ item6 getState 冷线零 spawn + 快照未就绪无 restore / item9 五类键容器行为点检 / item11 宿主不变量四族集合 diff / item12 session.list 功能+负例+两口径深等 / item13 createNew 三态 + 项 10 复跑。由 dev-flow verify 剧本（skill-data 下 .mjs）驱动，亦可直接 vitest 跑",
-      "scope": [
-        "packages/runtime/test/acceptance/**"
-      ],
-      "layer": "L1",
-      "assets": [
-        {
-          "kind": "spec",
-          "ref": "packages/runtime/test/acceptance/acceptance-bundle.test.ts"
-        },
-        {
-          "kind": "spec",
-          "ref": "packages/runtime/test/acceptance/acceptance-bundle.test.ts"
-        },
-        {
-          "kind": "spec",
-          "ref": "packages/runtime/test/acceptance/item9-key-containers.test.ts"
-        },
-        {
-          "kind": "spec",
-          "ref": "packages/runtime/test/acceptance/acceptance-bundle.test.ts"
-        },
-        {
-          "kind": "spec",
-          "ref": "packages/runtime/test/acceptance/acceptance-bundle.test.ts"
-        },
-        {
-          "kind": "spec",
-          "ref": "packages/runtime/test/acceptance/acceptance-bundle.test.ts"
-        }
-      ],
-      "trigger": "on-diff",
-      "serial": false,
-      "run": "pnpm -C packages/runtime exec vitest run test/acceptance/",
-      "owner": "packages/runtime/test/acceptance/",
-      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 态：真实运行形态 = dev-flow D3 verify 剧本逐节点驱动（剧本在 ~/.agents/skill-data/dev-flow/<slug>/<name>.verify/，node 直跑、退出码判定）；本表 run 为同资产的仓内直跑形态（D3 首批 7 节点全 exit 0 实跑证据）。fixture 全部 mkdtemp 隔离（禁触真实数据目录）。补登原因（dmg-r1-4 同型）：验收测试目录落 packages/runtime/test/ 看护目录（看护根源头 E2E-INTEG-19），零登记被 e2e-map --staged 门禁拦截，随修复同批补登。"
-    },
-    {
-      "id": "E2E-BATCH-14",
-      "summary": "轮应答事实文案单元层：轮收条五分支（失败/中止/被接管/空正文/正常）→ 轮应答文案如实 + finished a round 废除回归锚（subagent-observability u4 交付，L1 单测资产登记防漏）",
-      "scope": [
-        "packages/subagent-core/src/execution/notify/**"
-      ],
-      "layer": "L1",
-      "assets": [
-        {
-          "kind": "spec",
-          "ref": "packages/subagent-core/src/execution/__tests__/notifier.test.ts"
-        }
-      ],
-      "trigger": "on-diff",
-      "authority": "docs/TEST-STRATEGY.md#subagent-轮收条事实化与债权结清",
-      "serial": false,
-      "run": "cd packages/subagent-core && pnpm vitest run src/execution/__tests__/notifier-round-facts.test.ts",
-      "owner": "packages/subagent-core"
-    },
-    {
-      "id": "E2E-BATCH-15",
-      "summary": "list 轮收条 wire 形状对拍单元层：core SubagentListLastRound ⊇ shared SubagentLastRound 键集 + 已登记偏差清单（stderrTeePath/swept）——形状漂移静态防线（subagent-observability D5 sync 交付，L1 单测资产登记防漏）",
-      "scope": [
-        "packages/subagent-core/src/execution/assembly/**"
-      ],
-      "layer": "L1",
-      "assets": [
-        {
-          "kind": "spec",
-          "ref": "packages/subagent-core/src/execution/__tests__/subagent-list-last-round-parity.test.ts"
-        }
-      ],
-      "trigger": "on-diff",
-      "authority": "docs/TEST-STRATEGY.md#subagent-轮收条事实化与债权结清",
-      "serial": false,
-      "run": "cd packages/subagent-core && pnpm vitest run src/execution/__tests__/subagent-list-last-round-parity.test.ts",
-      "owner": "packages/subagent-core"
-    },
-    {
-      "id": "E2E-SPAWNISOL-01",
-      "summary": "真机批次 spawn 隔离契约 guard（mock 层零 token）：settings 播种剥 packages/skills 且凭据继承（认证不破坏）、discovery.json 空态在盘（缺失即回落 preset 全默认勾选——宿主扩展/ skill 目录经 discovery 源进真机 argv 的缺口，batch-s3 现场实证）、schema 与 runtime discovery-store v2 形态对齐",
-      "scope": [
-        "e2e/fixtures/batch-real-helpers.ts",
-        "packages/runtime/src/infra/pi/discovery-store.ts",
-        "packages/pi-rpc/src/spawn-args.ts",
-        "packages/pi-subagent-cli/src/spawn-args.ts"
-      ],
-      "layer": "L1",
-      "assets": [
-        {
-          "kind": "spec",
-          "ref": "e2e/spawn-isolation-guard.spec.ts"
-        }
-      ],
-      "trigger": "on-diff",
-      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "serial": false,
-      "run": "npx playwright test e2e/spawn-isolation-guard.spec.ts --project=electron",
-      "owner": "e2e"
-    },
-    {
-      "id": "E2E-RETRYRULES-01",
-      "summary": "重试规则域 mock 层（零 token）：runtime handler 接线契约（config.get/setRetryRules → reply/broadcast/sendError 形态，服务层 mock）+ 服务层 ext-config 读写回退契约（文件缺失/坏形状回落空集不抛错）",
-      "scope": [
-        "packages/runtime/src/transport/retry-rules-config-message-handler.ts",
-        "packages/runtime/src/services/remote-config/remote-retry-rules.ts"
-      ],
-      "layer": "L1",
-      "assets": [
-        {
-          "kind": "spec",
-          "ref": "packages/runtime/test/mcp-codemode-bundle.test.ts"
-        },
-        {
-          "kind": "spec",
-          "ref": "packages/runtime/src/services/remote-config/__tests__/remote-retry-rules.test.ts"
-        }
-      ],
-      "trigger": "on-diff",
-      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "serial": false,
-      "run": "pnpm -C packages/runtime exec vitest run test/retry-rules-config-message-handler.test.ts src/services/remote-config/__tests__/remote-retry-rules.test.ts",
-      "owner": "packages/runtime",
-      "note": "subagent-observability §3.3.12 特性域的 mock 层（零 token，可进 CI）：断言本质 = handler 对服务层调用的消息形态契约（校验失败 sendError 不 reply 不广播 / 成功 reply 读回终态 + broadcast 同帧）+ 服务层读回退与写校验。settings UI 面由 renderer settings-transport-adapter 转发矩阵单测承接（packages/renderer，非看护目录）；真实进程层当前无登记，落建时同 commit 增补 rule（先例 E2E-DELIVERY-01/02 双层口径）。"
     },
     {
       "id": "E2E-PIPE-21",
@@ -5630,6 +5599,43 @@
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "R1 态：真实运行 = 发布验证阶段（merge 技能 4N.5）对 npm 版本端点逐包探测（重试 60s×6、单次 20s 超时；超限输出「传播延迟 vs 真失败」判断材料，逐包 200 底线不变）；判定语义由注入式单测零 token 锁定"
+    },
+    {
+      "id": "E2E-PIPE-29",
+      "summary": "发布门禁收敛工程件（main 的 gate-verdict-ssot / ADR-0170~0175 家族）：versionable-packages 单一出口（changeset 判定）、test-suites SUITES 清单 + check-test-suite-wiring 接线对账、merge-sync 管线状态同步、ci-yaml-runs 的 CI runs 形态解析——全部为确定性脚本 + 零等待单测锁",
+      "scope": [
+        "scripts/versionable-packages.mjs",
+        "scripts/test-suites.mjs",
+        "scripts/check-test-suite-wiring.mjs",
+        "scripts/lib/ci-yaml-runs.mjs",
+        "scripts/__tests__/check-test-suite-wiring.test.mjs",
+        "scripts/__tests__/merge-sync.test.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/versionable-packages.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/test-suites.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/check-test-suite-wiring.test.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/merge-sync.test.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "pnpm exec vitest run scripts/__tests__/check-test-suite-wiring.test.mjs scripts/__tests__/merge-sync.test.mjs",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R1 态：main 侧 gate-verdict-ssot 收敛（ADR-0170~0175）的工程件，随 feat-quota-cookie-refresh 合并 main 带入；日常 CI 由 ci.yml scripts-guards 步骤聚合判红。"
     }
   ]
 }

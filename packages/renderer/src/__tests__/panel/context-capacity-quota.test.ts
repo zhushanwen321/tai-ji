@@ -145,7 +145,7 @@ const deepseekProvider: ProviderInfo = {
 }
 
 const mockQuotaRow: NormalizedQuotaRow = {
-  label: '智谱 GLM Coding Plan',
+  label: 'Zhipu Coding Plan',
   wins: [
     { pct: 68, resetSec: 4980 },
     { pct: 42, resetSec: 266400 },
@@ -447,7 +447,7 @@ describe('ComposerMetricsAggregate coding-plan 区', () => {
       quotaStore.setCache('zhipu', mockQuotaRow, 500)
       quotaStore.setError('zhipu', 'panel.context.quotaFailNetwork')
       const freshRow: NormalizedQuotaRow = {
-        label: '智谱 GLM Coding Plan',
+        label: 'Zhipu Coding Plan',
         wins: [{ pct: 90, resetSec: 3600 }, { pct: 80, resetSec: 86400 }, { pct: null, resetSec: null }],
       }
       vi.mocked(quotaApi.refreshQuota).mockResolvedValue({ data: freshRow, lastFetchAt: 2000 })
@@ -642,7 +642,7 @@ describe('ComposerMetricsAggregate coding-plan 区', () => {
 
     it('整数 pct 不补尾零，与设置页同一函数（formatQuotaPct）', async () => {
       const wrapper = mountCardWithRow({
-        label: '智谱 GLM Coding Plan',
+        label: 'Zhipu Coding Plan',
         wins: [{ pct: 68, resetSec: 4980 }, { pct: 100, resetSec: 266400 }, { pct: null, resetSec: null }],
       })
       await flushPromises()

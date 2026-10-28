@@ -262,6 +262,7 @@ export {
   UPDATE_CHECK, UPDATE_DOWNLOAD, UPDATE_INSTALL, UPDATE_GET_PRELOADED, UPDATE_GET_LAUNCH_RESULT, UPDATE_GET_PROXY_CONFIG, UPDATE_SET_PROXY_CONFIG, UPDATE_TEST_PROXY, UPDATE_GET_PENDING, UPDATE_GET_SETTINGS, UPDATE_SET_SETTINGS, UPDATE_OPEN_MANUAL_DIR, UPDATE_PROGRESS, UPDATE_ERROR,
   GET_REMOTE_ACCESS_INFO, ROTATE_REMOTE_ACCESS_TOKEN, SET_REMOTE_ACCESS_ENABLED,
   SOUND_LIST, SOUND_PLAY,
+  QUOTA_REFRESH_COOKIE,
 } from './ipc-channels'
 // local-file 预检 / 源码读取通道 payload 类型（chat-html-support §6.9 D9：preload 两文件 /
 // renderer lib/ipc / main local-file-prefixes 四方共用同一形态声明——C-comm-22 唯一类型源）。
@@ -312,6 +313,9 @@ export type { OverlayContentKind } from './ipc-payloads'
 // browser:state view 状态推送载荷（display-containers W2：main 组装点 / preload
 // ElectronAPI 签名 / renderer ipc 封装三方共用同一形态声明，防漂移）。
 export type { BrowserFrameState } from './ipc-payloads'
+// quota:refresh-cookie 通道契约（请求 payload / 返回类型——main quota handler、
+// preload ElectronAPI 签名与 renderer 刷新入口三方共用同一形态声明，防漂移）。
+export type { QuotaRefreshCookiePayload, QuotaRefreshCookieResult } from './ipc-payloads'
 // 崩溃条目清单事件 Schema SSOT（docs/architecture/crash-forensics-and-watchdog.md §3.3 D1，
 // 实施计划 u1a：layer/event/reason 枚举 + 字段集 + writer 接口——u1b runtime 与
 // u1c main 两 writer 共用，禁止复制定义；纯类型/常量无 node 依赖，barrel 安全）。
@@ -434,9 +438,13 @@ export type {
   QuotaCredentialSource,
   QuotaConfigurePayload,
 } from './quota-types'
-export { extractQuotaWorkspaceId, normalizeQuotaParamValue, normalizeCookieHeader, resolveQuotaCredentialSource, supportsExclusiveCredential, formatQuotaPct, QUOTA_PCT_DECIMALS } from './quota-types'
+export { extractQuotaWorkspaceId, normalizeQuotaParamValue, normalizeCookieHeader, mergeCookieHeader, resolveQuotaCredentialSource, supportsExclusiveCredential, formatQuotaPct, QUOTA_PCT_DECIMALS } from './quota-types'
 export type { QuotaPreset, QuotaParamSpec } from './quota-presets'
 export { QUOTA_PRESETS, isQuotaPreset, matchQuotaPreset, resolveQuotaPresets } from './quota-presets'
+// cookie 登录态刷新目标（quota:refresh-cookie 通道的导航信息 SSOT：main 隐藏窗口
+// 刷新器与 renderer 入口判定共用，与 runtime baseline-fetchers 的请求解析规则分治）
+export type { QuotaRefreshTarget, QuotaFetcherProviderLike } from './quota-refresh-targets'
+export { QUOTA_REFRESH_TARGETS, getQuotaRefreshTarget, resolveQuotaFetcherId } from './quota-refresh-targets'
 // 语音合成朗读（TTS）契约类型（ai-voice-tts 设计 §7.1/§7.3；协议载荷形状 SSOT，纯类型无 node 依赖）
 export type {
   TtsProviderId,

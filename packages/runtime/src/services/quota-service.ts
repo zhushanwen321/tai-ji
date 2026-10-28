@@ -16,7 +16,7 @@
 import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync, chmodSync } from 'node:fs'
 import { join } from 'node:path'
 import type { NormalizedQuotaRow, ProviderQuotaFetcher, QuotaAuthKind, QuotaCredentialSource, QuotaConfigurePayload, QuotaFetchFailureReason, QuotaFetcherConfig } from '@taiji/shared'
-import { matchQuotaPreset, normalizeCookieHeader, resolveQuotaCredentialSource, supportsExclusiveCredential } from '@taiji/shared'
+import { mergeCookieHeader, normalizeCookieHeader, resolveQuotaCredentialSource, resolveQuotaFetcherId, supportsExclusiveCredential } from '@taiji/shared'
 import { mapLegacyWorkspaceParams, normalizeQuotaParams, paramSpecsForFetcher, resolveParamsValue } from './quota-params.js'
 import { getQuotaFetcher, listQuotaPresets } from './quota-providers/index.js'
 import { QuotaCache } from './quota-cache.js'
@@ -383,6 +383,31 @@ export class QuotaService {
   }
 
   /**
+   * 服务端 Set-Cookie 滑动续期回写（doFetch 出口 ③/④ 的辅助落地写）：把响应捕获的
+   * Set-Cookie 行经 mergeCookieHeader 合并回 secrets cookie 文件，平台续期机制
+   * （如 stepfun 半年滑动窗口）跟着每次额度查询走，静态快照不再过期。
+   *
+   * 辅助功能降级契约：回写失败不影响 quota 主结果（不重发请求、成功/失败态照常返回），
+   * 只记含恢复指引的 warn。cookie 文件读侧失败（io-error）时放弃回写——读不到现值
+   * 就盲写会丢掉用户手贴的其余 cookie。合并结果为空串走 writeCookieSecret 的清除语义
+   * （服务端把全部 cookie 标记删除，文件残留反而会被下次读侧复活）。
+   */
+  private persistCookieRotation(providerId: string, setCookies: string[]): void {
+    const current = this.readSecret(this.getCookiePath(providerId))
+    if (current.status === 'io-error') return // readSecret 已 warn 带路径
+    const currentHeader = current.status === 'ok' ? current.credential : ''
+    const merged = mergeCookieHeader(currentHeader, setCookies)
+    if (merged === currentHeader) return // 服务端下发了 Set-Cookie 但值未变：跳过写盘
+    const writeError = this.writeCookieSecret(providerId, merged)
+    if (writeError !== undefined) {
+      logger.warn(
+        '[quota] cookie refresh write-back failed; quota result unaffected — re-save the cookie in Settings or wait for the next successful fetch to retry',
+        { providerId, error: writeError },
+      )
+    }
+  }
+
+  /**
    * secrets 文件删除（§7.3 改动 2，cookie 空串=清除与 apiKey 清除分支共用同一语义）：
    * 文件存在则删除；文件不存在视为成功（幂等）。删除失败返回 error 文案使 configure
    * 整体失败。不做 existsSync 预检——预检本身是 TOCTOU，直接 unlink 按 ENOENT 判定缺席。
@@ -648,9 +673,18 @@ export class QuotaService {
       }
       const outcome = await fetcher.fetchQuota(resolved.credential, resolved.kind, config)
 
+      // 服务端 Set-Cookie 滑动续期回写（仅 cookie 形态消费——api-key/oauth 凭证无
+      // 「响应续期」语义）。回写调用放 finishFetch 的 commit 闭包内 = 在途 fetcher 变更
+      // 守卫语义内（换类型时不回写，与三件套同等对待）。
+      const setCookies = outcome.setCookies ?? []
+      const rotateCookie = resolved.kind === 'cookie' && setCookies.length > 0
+        ? () => this.persistCookieRotation(providerId, setCookies)
+        : undefined
+
       if (outcome.ok) {
         // 出口 ③（成功）：清失败标记 + 更新缓存
         return this.finishFetch(providerId, force, fetcherIdAtStart, () => {
+          rotateCookie?.()
           this.lastFailure.delete(providerId)
           this.cache.update(providerId, outcome.data)
           return { data: outcome.data, lastFetchAt: Date.now() }
@@ -661,8 +695,10 @@ export class QuotaService {
       // 不再降级展示旧缓存（§3.4 失败态语义：旧缓存保留内存，可经 getCached 查看并
       // 标注 lastFetchAt）；401 恢复指引文案归 Phase B（i18n key 已就绪）。
       logger.warn('[quota] fetch failed', { providerId, reason: outcome.reason })
-      return this.finishFetch(providerId, force, fetcherIdAtStart, () =>
-        this.fetchFailed(providerId, outcome.reason))
+      return this.finishFetch(providerId, force, fetcherIdAtStart, () => {
+        rotateCookie?.()
+        return this.fetchFailed(providerId, outcome.reason)
+      })
     } catch (err) {
       // 出口 ⑤（异常防御，fetcher 契约不 throw，此处兜底逃逸异常）：按 network 失败态处理 + log
       const msg = toErrorMessage(err)
@@ -726,20 +762,19 @@ export class QuotaService {
   private getFetcherForProvider(providerId: string): ProviderQuotaFetcher | null {
     const info = this.getProviderInfo(providerId)
 
-    // 优先级 1：用户手动指定的 fetcher id（不再依赖 baseUrl/name 自动匹配，
-    // 适配自建反代、非标准 baseUrl 等自动匹配失败/猜错的场景）
-    if (info?.quota?.fetcher) {
-      const manual = getQuotaFetcher(info.quota.fetcher)
-      if (manual) return manual
-    }
-
-    // 优先级 2：经 baseUrl/name 匹配 preset（presets = 基线 ⊕ 远程合并视图，
-    // 远程更新匹配规则后 runtime 匹配链同步生效——与前端同源，无 UI/执行背离）
-    if (info) {
-      const preset = matchQuotaPreset({ baseUrl: info.baseUrl, name: info.name }, listQuotaPresets())
-      if (preset) {
-        return getQuotaFetcher(preset.fetcher)
-      }
+    // 优先级 1+2 单源在 shared resolveQuotaFetcherId（手动 quota.fetcher 在册优先，
+    // 否则 matchQuotaPreset 按 baseUrl/name 匹配；presets = 基线 ⊕ 远程合并视图，
+    // 远程更新匹配规则后 runtime 匹配链同步生效——与前端同源，无 UI/执行背离）。
+    // preset 命中但 fetcher 已下线（远程配置下线该 id）时 getQuotaFetcher 得 null =
+    // 显式失败，不落第三级兜底——下线的 fetcher 不得静默换源
+    // （quota-providers 头注「只增不改名」契约）。
+    const fetcherId = resolveQuotaFetcherId(
+      info ?? {},
+      listQuotaPresets(),
+      (id) => getQuotaFetcher(id) !== null,
+    )
+    if (fetcherId !== undefined) {
+      return getQuotaFetcher(fetcherId)
     }
 
     // 优先级 3：直接按 providerId 查 fetchers（仅命中 provider id 恰好等于 fetcher id 的场景）
