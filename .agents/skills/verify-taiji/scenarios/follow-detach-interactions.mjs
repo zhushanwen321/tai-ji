@@ -95,7 +95,7 @@ export async function run(ctx) {
   const gotchas = [
     'A6 前置双条件：历史 >20 轮（HISTORY_BUDGET.RECENT_TURNS）+ renderer 窗口状态经 hydrate 刷新（活会话必须切走再切回，reconcileHistory 才写 historyWindows）',
     '「回到最新」胶囊无 testid：断言锚点 = button[title="回到最新"]（panel.message.scrollToBottom，zh-CN 默认 locale）',
-    '触顶自动续载阈值 64px 且要求已脱离——点「加载更早」时 Playwright scrollIntoView 到顶可能抢先触发同一 handleLoadMore（防重入 guard 单一），按 triggeredBy 如实记录',
+    'A6 点击走 DOM click（无滚动副作用）；触顶自动续载阈值 64px 且要求已脱离，若采样位已近顶抢先触发同一 handleLoadMore（防重入 guard 单一），按 triggeredBy 如实记录',
     '滚轮脱离一律小步推进（-150px/步，等惯性结束再下一步）：单次大 delta 的动量惯性会把整段内容顶到列表头（st=0），顶头 + 脱离态触发自动续载，前插打断后续回底/静态序列',
     '流式增长中点「回到最新」回底实测停滞在距底 ~1000px（四轮一致复现 905/1134/1044/1078；静态内容对照实验冷/热缓存均正常收敛 6 拍内）——机制推断 = 跟随通路流式期间高频即时 scrollToIndex 打断原生 smooth 动画 + 中途视口下 scrollToIndex 估算目标偏差；基线行为发现，非本设计引入',
     '滚轮注入前必须 hover 对话流中心（page.mouse.wheel 派发到当前鼠标位置下的可滚动容器）',
@@ -309,9 +309,12 @@ export async function run(ctx) {
     ev.step({ step: 'a6.precondition', channel: 'A', exitCode: barReachable ? 0 : 1, stats: { barReachable } })
 
     if (barReachable) {
-      // 脱离 + 上滑两屏，脱离位采 before；点击用 force（跳过 Playwright actionability 的
-      // scrollIntoView——按钮在 sticky 顶区，标准 click 会先把视口滚到顶，污染 before/after
-      // 之间的视口位置，:shift 度量即失真）。按钮在场性由 barReachable（截断条可见）保证。
+      // 脱离 + 上滑两屏，脱离位采 before；点击走 DOM click（el.click() 无滚动入视口副作用）。
+      // 教训：按钮浮层是 absolute top-0 锚定 scrollEl、随内容滚走（MessageStream 浮层结构），
+      // 脱离位时按钮远在视口上方，Playwright click（含 force:true——force 只跳过 actionability
+      // 等待，不跳过点击前 scrollIntoView）会把视口滚到顶，before/after 之间视口位置被污染，
+      // :shift 度量即失真（插桩实测 st 5229→0、Δd 5160 中滚顶占 5122）。DOM click 直接触发
+      // 同一 handleLoadMore 通路，视口零位移。按钮在场性由 barReachable（截断条可见）保证。
       await hoverStream()
       await page.mouse.wheel(0, -600)
       await page.mouse.wheel(0, -600)
@@ -323,13 +326,14 @@ export async function run(ctx) {
         expected: '脱离态且视口顶存在可见 turn',
         actual: anchor ? `st=${before?.st.toFixed(0)} d=${before?.d.toFixed(0)} top=${anchor.text.slice(0, 20)}` : '未找到可见 turn',
       })
-      let triggeredBy = 'force-click'
+      let triggeredBy = 'dom-click'
       try {
-        await page.locator('[data-testid="load-more-history"]').first().click({ force: true, timeout: 6_000 })
+        await page.locator('[data-testid="load-more-history"]').first().evaluate((el) => el.click())
       } catch {
-        // 触顶自动续载可能抢先触发（scrollIntoView 到顶 + 已脱离）：同一 handleLoadMore 通路
+        // DOM click 无滚动入视口副作用；走 catch 多为自动续载已抢先触发（采样位近顶 + 已脱离，
+        // 同一 handleLoadMore 通路）或按钮已 loading/卸载导致 evaluate 等待超时
         triggeredBy = 'auto-at-top（按钮 loading/detached，按同一通路继续）'
-        log('load-more 点击被自动续载抢先，按同一通路继续')
+        log('load-more DOM click 未生效（可能被自动续载抢先），按同一通路继续')
       }
       // 等翻页完成：截断条收敛消失（22 轮 < 2 页 → 翻完后 truncated=false）且 scrollHeight 增长
       const after = await (async () => {
