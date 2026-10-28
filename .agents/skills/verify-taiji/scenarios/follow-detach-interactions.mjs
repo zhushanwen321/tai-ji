@@ -112,6 +112,7 @@ export async function run(ctx) {
     'A6 前置双条件：历史 >20 轮（HISTORY_BUDGET.RECENT_TURNS）+ renderer 窗口状态经 hydrate 刷新（活会话必须切走再切回，reconcileHistory 才写 historyWindows）',
     '「回到最新」胶囊无 testid：断言锚点 = button[title="回到最新"]（panel.message.scrollToBottom，zh-CN 默认 locale）',
     '触顶自动续载阈值 64px 且要求已脱离——点「加载更早」时 Playwright scrollIntoView 到顶可能抢先触发同一 handleLoadMore（防重入 guard 单一），按 triggeredBy 如实记录',
+    '滚轮脱离一律小步推进（-150px/步，等惯性结束再下一步）：单次大 delta 的动量惯性会把整段内容顶到列表头（st=0），顶头 + 脱离态触发自动续载，前插打断后续回底/静态序列',
     '滚轮注入前必须 hover 对话流中心（page.mouse.wheel 派发到当前鼠标位置下的可滚动容器）',
   ]
 
@@ -152,16 +153,26 @@ export async function run(ctx) {
 
     // ══ A4 前半：滚轮脱离 → 胶囊浮现 → 点胶囊回底恢复跟随 ══
     await hoverStream()
-    await page.mouse.wheel(0, -600)
-    // 等滚轮惯性滚动结束再取基线（wheel 后立即采样会把惯性位移算进 |ΔscrollTop|）
-    await new Promise((r) => setTimeout(r, 600))
+    // 小步滚轮脱离：单次大 delta 的动量惯性会把整段内容直接顶到列表头（st=0），顶头 +
+    // 脱离态会触发触顶自动续载（前插打断后续回底序列）——小步推进到距底超一屏即停。
+    // 每步等 550ms 让惯性完成后读数（惯性未完成时判据低估 d，会多滚数步）
+    {
+      let m = null
+      for (let i = 0; i < 8; i++) {
+        await page.mouse.wheel(0, -150)
+        await new Promise((r) => setTimeout(r, 550))
+        m = await metrics()
+        if (m && m.d > 800 && m.st > 0) break
+      }
+    }
+    // 脱离基线：惯性结束后再取（wheel 后立即采样会把惯性位移算进 |ΔscrollTop|）
     const det0 = await metrics()
-    await new Promise((r) => setTimeout(r, 1200))
+    await new Promise((r) => setTimeout(r, 3000))
     const det1 = await metrics()
-    ev.assert('A4 前半: 脱离后视口不跟随（内容增长而 scrollTop 不动）', Boolean(det0 && det1 && det1.sh - det0.sh >= 80 && Math.abs(det1.st - det0.st) <= 5 && det1.d > BOTTOM_THRESHOLD), {
+    ev.assert('A4 前半: 脱离后视口不跟随（内容增长而 scrollTop 不动）', Boolean(det0 && det1 && det1.sh - det0.sh >= 40 && Math.abs(det1.st - det0.st) <= 5 && det1.d > BOTTOM_THRESHOLD && det1.st > 0), {
       channel: 'A',
-      expected: 'scrollHeight 增长 ≥80px 且 |ΔscrollTop| ≤5px 且 distance >40',
-      actual: det0 && det1 ? `Δsh=${det1.sh - det0.sh} Δst=${(det1.st - det0.st).toFixed(1)} d=${det1.d.toFixed(0)}` : 'metrics null',
+      expected: 'scrollHeight 增长 ≥40px（3s 窗口）且 |ΔscrollTop| ≤5px 且 distance >40 且未顶头（st>0）',
+      actual: det0 && det1 ? `Δsh=${det1.sh - det0.sh} Δst=${(det1.st - det0.st).toFixed(1)} d=${det1.d.toFixed(0)} st=${det1.st.toFixed(0)}` : 'metrics null',
     })
     ev.step({ step: 'a4.detach', channel: 'A', exitCode: 0, stats: { det0, det1 } })
 
@@ -174,11 +185,13 @@ export async function run(ctx) {
     ev.step({ step: 'a4.pill.visible', channel: 'A', exitCode: 0, stats: {} })
 
     await ui.click('css=button[title="回到最新"]', { timeoutMs: 10_000 })
-    // 回底 + 恢复跟随：轮询 distance ≤40（smooth 滚动收敛历史长距离——实测 ~3500px 需 6-8s，
-    // 轮询按 10s 预算），随后 2s 内持续贴底（流式仍在增长）
+    // 回底 + 恢复跟随：轮询 distance ≤40（smooth 为 JS rAF 动画，中距离 ~1000px 实测 2-4s
+    // 收敛；轮询按 10s 预算），d 序列留 stats 供停滞形态诊断，随后 2s 内持续贴底（流式仍在增长）
     let backBottom = null
+    const backDs = []
     for (let i = 0; i < 40; i++) {
       backBottom = await metrics()
+      if (backBottom) backDs.push(Number(backBottom.d.toFixed(0)))
       if (backBottom && backBottom.d <= BOTTOM_THRESHOLD) break
       await new Promise((r) => setTimeout(r, 250))
     }
@@ -199,12 +212,18 @@ export async function run(ctx) {
       actual: followRestored ? '8 次采样全部 ≤40' : '出现越阈采样',
     })
     await ui.expectGone('css=button[title="回到最新"]', { timeoutMs: 5_000 })
-    ev.step({ step: 'a4.pill.click', channel: 'A', exitCode: followRestored ? 0 : 1, stats: { backBottom, followRestored } })
+    ev.step({ step: 'a4.pill.click', channel: 'A', exitCode: followRestored ? 0 : 1, stats: { backBottom, followRestored, backDs } })
 
     // ══ A4 后半：再脱离 → 手动滚回 ≤40px → 自动恢复贴底 ══
     await hoverStream()
-    await page.mouse.wheel(0, -500)
-    await new Promise((r) => setTimeout(r, 1000))
+    // 小步滚轮脱离（同 A4 前半：防动量惯性顶头触发自动续载）；后半只需 d > 40
+    for (let i = 0; i < 6; i++) {
+      await page.mouse.wheel(0, -150)
+      await new Promise((r) => setTimeout(r, 350))
+      const m2 = await metrics()
+      if (m2 && m2.d > BOTTOM_THRESHOLD) break
+    }
+    await new Promise((r) => setTimeout(r, 600))
     const det2 = await metrics()
     ev.assert('A4 后半: 再次脱离成立（distance >40）', Boolean(det2 && det2.d > BOTTOM_THRESHOLD), {
       channel: 'A',
@@ -239,7 +258,13 @@ export async function run(ctx) {
 
     // ══ A7：再次脱离后静止 ≥3 秒不被扯回（S6 负面验证）══
     await hoverStream()
-    await page.mouse.wheel(0, -800)
+    // 小步滚轮脱离（防动量顶头：顶头触发自动续载，前插 :shift 保位调整会污染 st 序列判据）
+    for (let i = 0; i < 6; i++) {
+      await page.mouse.wheel(0, -150)
+      await new Promise((r) => setTimeout(r, 350))
+      const m3 = await metrics()
+      if (m3 && m3.d > 800 && m3.st > 0) break
+    }
     await new Promise((r) => setTimeout(r, 800))
     const staticSeries = []
     for (let i = 0; i < 14; i++) {
