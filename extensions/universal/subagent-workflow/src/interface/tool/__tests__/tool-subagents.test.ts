@@ -410,7 +410,8 @@ describe("handler 组装：runWorkflow('fan-out') 确定性映射（成员对象
     });
   });
 
-  it("成员已指定 agent 时运行级 agent 不覆盖（成员级优先）；无运行级 agent 时成员原样透传", async () => {    await runSubagentsBatch(
+  it("成员已指定 agent 时运行级 agent 不覆盖（成员级优先）；无运行级 agent 时成员原样透传", async () => {
+    await runSubagentsBatch(
       {
         tasks: [
           { task: "a", agent: "/abs/explicit.md" },
