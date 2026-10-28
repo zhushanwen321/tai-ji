@@ -1858,19 +1858,7 @@ export class RecordStore {
         ? { status: "idle", reason: hit.receipt.stopReason, endedAt: hit.receipt.endedAt }
         : undefined;
     const entry = buildFileCacheEntry(
-      {
-        ...hit,
-        forkDepth: undefined,
-        sessionFile: file,
-        // [H2 S3] 显式归一（exactOptionalPropertyTypes：索引可选属性 → recon 必填）；
-        // 值已过 loadIndex 守卫（undefined/字面量白名单），直传即安全。
-        origin: hit.origin,
-        parentRunId: hit.parentRunId,
-        // [W0 / D1] stepIndex 恒 undefined：索引命中腿只在无 binding 文件时走
-        //（scanFile 的 stamps.binding === null 分支），而 binding 是 stepIndex 的
-        // 唯一磁盘载体——索引不承载本字段（identity entry 同样不承载）。
-        stepIndex: undefined,
-      },
+      identityBaseFromIndexEntry(hit, file),
       file,
       stamps,
       state,
@@ -2129,4 +2117,50 @@ export class RecordStore {
   private readManifestsSync(): readonly ManifestRecord[] {
     return this.manifestStore?.listAllSync() ?? [];
   }
+}
+
+// ============================================================
+// 模块级 helper（buildEntryFromIndex 的索引条目装配）
+// ============================================================
+
+/**
+ * [crash 回归] 索引命中条目 → 身份基底（IdentityHeaderRecon 显式逐字段装配）。
+ *
+ * 纪律：禁止改回对象展开——`{ ...hit }` 会把索引统计域字段（number 型 turns/
+ * totalTokens、receipt）连同戳字段（mtimeMs/size/events*）整体漏进身份基底：TS 对
+ * 展开属性不做多余属性检查，number 型 turns 使 buildRecord 的 "turns" in base
+ * 判别误命中全量分支，getDisplayItems 迭代 number 抛 TypeError（生产冷启动扫描
+ * 崩溃的根因）。返回类型显式标注 IdentityHeaderRecon = 让 TS 多余属性检查对对象
+ * 字面量生效（helper 内混入身份域之外的字段会被编译器拒绝）。
+ *
+ * 身份域未来新增必填字段时漏拷会被编译器抓到（TS2741）；可选字段漏拷是静默
+ * undefined——新增身份字段时必须同步补进本 helper 的拷贝清单。
+ *
+ * 固定覆盖语义（与展开写法时代一致）：forkDepth 恒 undefined（索引不承载，见
+ * SessionsIndexEntry 头注）；stepIndex 恒 undefined（[W0 / D1] 索引命中腿只在无
+ * binding 文件时走——scanFile 的 stamps.binding === null 分支，而 binding 是
+ * stepIndex 的唯一磁盘载体，索引不承载本字段）；sessionFile 取调用方传入路径
+ * （绝对路径不落索引，加载侧由 sessionsDir + basename 重构）；worktree 索引不承载
+ * （缺席 = 未启用），不拷贝保持 undefined。origin/parentRunId 值已过 loadIndex
+ * 守卫（undefined/字面量白名单），直传即安全。
+ */
+function identityBaseFromIndexEntry(hit: SessionsIndexEntry, file: string): IdentityHeaderRecon {
+  return {
+    id: hit.id,
+    agent: hit.agent,
+    mode: hit.mode,
+    task: hit.task,
+    slug: hit.slug,
+    startedAt: hit.startedAt,
+    rootSessionId: hit.rootSessionId,
+    parentRecordId: hit.parentRecordId,
+    depth: hit.depth,
+    forkDepth: undefined,
+    origin: hit.origin,
+    parentRunId: hit.parentRunId,
+    stepIndex: undefined,
+    model: hit.model,
+    thinkingLevel: hit.thinkingLevel,
+    sessionFile: file,
+  };
 }
