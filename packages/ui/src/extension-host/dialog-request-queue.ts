@@ -104,6 +104,12 @@ export interface DialogRequestQueue {
    * 键 = 有非空 pending 队列的会话 id，值 = 该分区 pending 条数；不可变替换触发响应式。
    * 计数登记与分区写点同函数同步维护（enqueue/dequeueByRequestId/resetFor/session 销毁
    * 清理四点封闭），请求内容权威仍在分区——本读口只承载计数，不做内容镜像（禁双轨副本）。
+   *
+   * 模式取舍（对照 form 通道 mobileFormPendingCounts 的 computed 派生）：本队列分区由
+   * useSessionScopedState 工厂承载，工厂分区表是 plain Map 且不提供分区遍历入口，跨分区
+   * computed 建立不了依赖，计数只能由登记表手工维护；form 通道载体是模块级 reactive Map
+   * （companion-bridge formRequestsBySid），computed 迭代即可派生。两轨差异源于分区载体
+   * 的响应性，不是可归并的重复实现。
    */
   readonly pendingCountBySession: Readonly<Ref<ReadonlyMap<string, number>>>
   /** 当前 session 是否有匹配的 pending 请求（filter 可选；非响应式查询） */
