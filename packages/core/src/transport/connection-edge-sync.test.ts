@@ -2,7 +2,10 @@
  * 域同步器单测（connection-datasync-ssot §6.4；impl-plan u4 验收条款 1-3 的机制载体）。
  *
  * 受控 promise（gate deferred）注入 sync，确定性构造回执到达时序，覆盖：
- * - 并发合流单飞：同域在途时再触发（边沿 / requestDomainSync）不重复发（验收 1）
+ * - 并发合流单飞 + trailing 补拉：同域在途时再触发（边沿 / requestDomainSync）不重复
+ *   发但登记 trailing 标志，回执成功落定后补拉一轮收敛（验收 1；dmg-r3-1 多窗口形态：
+ *   失效信号在 load 在途窗口被跳过、在途回执为命令前旧快照且双判旧不命中 → 补拉收敛
+ *   到命令后状态）
  * - 仅最新代提交：旧连接代回执丢弃 + 丢弃点补发收敛；拦截型 apply 不被旧代触达（验收 2）
  * - 命令×同步交错（project 域）：命令回执先于在途 load 回执到达 → 旧 revision 回执判旧
  *   丢弃（不回滚）+ 补发轮收敛（验收 3）
@@ -106,21 +109,26 @@ beforeEach(() => {
 })
 
 describe('并发合流单飞（验收 1：同域在途时再触发不重复发）', () => {
-  it('在途期间 requestDomainSync（changed 触发，不推进连接代）合流跳过，回执正常提交', async () => {
+  it('在途期间 requestDomainSync（changed 触发，不推进连接代）合流跳过 + 登记 trailing，回执提交后补拉一轮收敛', async () => {
     const gate = createGate<string>()
     const sync = vi.fn(() => gate.promise)
     registerDataDomain({ id: 'sessions', sync, whenToSync: () => true, failure: 'retryable' })
 
     notifyConnectedEdge() // gen 1：首轮发起
-    requestDomainSync('sessions') // changed 触发：在途，合流跳过
-    requestDomainSync('sessions')
+    requestDomainSync('sessions') // changed 触发：在途，合流跳过（登记 trailing 标志）
+    requestDomainSync('sessions') // 再次触达：合并为同一次补拉（标志是集合成员资格非计数）
     await flushMicrotasks()
     expect(sync).toHaveBeenCalledTimes(1)
 
     gate.resolve('list')
     await flushMicrotasks()
-    // 回执属最新代（触发未推进代）→ 正常提交，不补发
-    expect(sync).toHaveBeenCalledTimes(1)
+    // 回执属最新代（触发未推进代）→ 正常提交；在途期有触达 → trailing 补拉一轮
+    // （dmg-r3-1：被跳过的触达可能是失效信号，在途回执可能是信号所反应变更前的旧快照，
+    // 补拉保证收敛到最新——纯跳过无补拉是该问题判定的缺口形态）
+    expect(sync).toHaveBeenCalledTimes(2)
+    // 补拉轮回执落定后无新触达 → 不再补发（循环收敛）
+    await flushMicrotasks()
+    expect(sync).toHaveBeenCalledTimes(2)
   })
 
   it('新边沿在途期触达同域：合流跳过（不重复发）；旧代回执到达后丢弃并补发（跨代语义见「仅最新代提交」节）', async () => {
@@ -318,6 +326,69 @@ describe('带重入守卫的 store 集成形态（F1-27：命令回执先行 →
       expect(store.data).toBe('v6')
       expect(store.revision).toBe(6)
       expect(sync).toHaveBeenCalledTimes(3) // 收敛，不再补发
+      expect(errorSpy).not.toHaveBeenCalled()
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+})
+
+describe('在途窗口失效信号 trailing 补拉（dmg-r3-1：多窗口 project.changed 被合流跳过 + 双判旧不命中）', () => {
+  it('B 窗口 load 在途期间 project.changed 触达被跳过，在途回执为命令前旧快照（revision 等于发起时基线，判旧不命中）→ apply 旧快照后 trailing 补拉收敛到命令后状态', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const gate1 = createGate<FakeReceipt>()
+      const gate2 = createGate<FakeReceipt>()
+      const gate3 = createGate<FakeReceipt>()
+      const loadGates = [gate1, gate2, gate3]
+      const { store, sync, apply, isStaleReceipt } = createGuardedProjectStore(() => {
+        const gate = loadGates.shift()
+        return gate
+          ? gate.promise
+          : Promise.resolve({ revision: store.revision ?? 0, data: 'x' })
+      })
+      registerDataDomain({
+        id: 'project',
+        sync,
+        apply,
+        whenToSync: () => true,
+        failure: 'blocking',
+        isStaleReceipt,
+      })
+
+      // B 窗口先完成一轮 load（水位 5）——多窗口形态的基线前提
+      notifyConnectedEdge() // gen 1：首轮 load（gate1 在途）
+      gate1.resolve({ revision: 5, data: 'v5' })
+      await flushMicrotasks()
+      expect(store.revision).toBe(5)
+      expect(store.loadState).toBe('loaded')
+
+      // B 窗口重拉（gen 2 边沿发起，gate2 在途；本轮判旧基线 = 发起时水位 5）
+      notifyConnectedEdge()
+      expect(store.loadState).toBe('loading')
+
+      // 多窗口交错（dmg-r3-1 缺口形态）：A 窗口提交命令——B 未消费其命令回执，B 的
+      // store 水位不动（仍 5），服务端侧已推进到 6；project.changed 广播到达 B →
+      // requestDomainSync 撞在途被合流跳过（此前为纯跳过：信号消费完毕无登记）
+      requestDomainSync('project')
+      expect(sync).toHaveBeenCalledTimes(2)
+
+      // 在途回执（A 命令执行前的旧快照，revision 5 等于 B 发起基线）落定：双判旧均
+      // 不命中——gen 不变 + isStaleReceipt 前半条件 5 < 5 为 false（B 水位未推进）→
+      // apply 旧快照（缺口实然发生）；trailing 标志在位 → apply 后立即补拉一轮
+      gate2.resolve({ revision: 5, data: 'stale-snapshot' })
+      await flushMicrotasks()
+      expect(store.data).toBe('stale-snapshot') // 旧快照先被提交（判旧不可见的窗口内）
+      expect(store.loadState).toBe('loading') // trailing 补拉轮在途（gate3）
+      expect(sync).toHaveBeenCalledTimes(3)
+
+      // 补拉轮回执（命令后状态 revision 6）→ 提交收敛；无新触达不再补发
+      gate3.resolve({ revision: 6, data: 'v6' })
+      await flushMicrotasks()
+      expect(store.loadState).toBe('loaded')
+      expect(store.data).toBe('v6')
+      expect(store.revision).toBe(6)
+      expect(sync).toHaveBeenCalledTimes(3) // 收敛，不再补拉
       expect(errorSpy).not.toHaveBeenCalled()
     } finally {
       errorSpy.mockRestore()

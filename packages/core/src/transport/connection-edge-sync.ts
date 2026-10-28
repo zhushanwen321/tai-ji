@@ -12,9 +12,13 @@
  *   语义（fire-and-forget，不参与落定与代次）。
  *
  * 机制约束（§6.4）：
- * - **并发合流**：同一数据域同一时刻最多一个在途加载，进行中再次触发不重复发——
- *   在途登记收编于 createInflightDedup 共享原语（C-data-18 禁手写 Map+settle 清理
- *   同构实现；每域固定 key 的单键退化形态，meta 携带发起时刻连接代供回执判旧）。
+ * - **并发合流 + trailing 补拉**：同一数据域同一时刻最多一个在途加载，进行中再次触发
+ *   不重复发、但登记域级 trailing 标志，在途回执成功落定后补拉一轮收敛（多窗口失效
+ *   信号形态：project.changed 在消费方 load 在途窗口被合流跳过后，在途回执可能是
+ *   命令执行前旧快照——revision 等于发起时基线，交错判旧不命中——无补拉则停留陈旧
+ *   数据且信号已消费、无自愈）——在途登记收编于 createInflightDedup 共享原语
+ *   （C-data-18 禁手写 Map+settle 清理同构实现；每域固定 key 的单键退化形态，meta
+ *   携带发起时刻连接代供回执判旧）。
  * - **仅最新代提交**：每次尝试携带连接代（实装为 connected 边沿的全局单调计数，与
  *   「实例标识+尝试序」在判旧语义上等价——实例变更与重连必经断连→connected 边沿，
  *   generation 随边沿递增，故「不同实例」必然「不同代」；回执仅携带 generation 数字），
@@ -139,6 +143,16 @@ const auxiliary = new Map<string, AuxiliaryRefreshDescriptor>()
 let connectionGeneration = 0
 /** connected 边沿 watch 的取消函数（非空 = 已安装；resetForTest 时拆卸） */
 let stopEdgeWatch: (() => void) | null = null
+/**
+ * 域级 trailing 补拉登记（dmg-r3-1）：在途期触达被合流跳过时置位（domain id 集合
+ * 成员资格，多次触发合并为一次补拉），在途回执成功落定后据此补发一轮。不用
+ * createInflightDedup({trailing:true}) 工厂选项承载：工厂 trailing 要求在途期触达
+ * 走 run 复用 entry，与 attemptSync 的 has→return 纯跳过契约冲突（见其注释）。
+ */
+// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，已登记）：域同步器 trailing
+// 补拉标志（域同步器登记表同族机制形态的瞬时协调状态；登记见
+// docs/architecture/data-source-registry.md §4 ⑧）
+const trailingSyncRequested = new Set<string>()
 
 /**
  * 幂等登记数据域。同 id 重复登记用最新描述符（壳层多次装配 / HMR 重载闭包刷新），
@@ -171,16 +185,25 @@ export function registerAuxiliaryRefresh(descriptor: AuxiliaryRefreshDescriptor)
 // ── 同步尝试（合流 + 仅最新代提交 + 交错裁决的唯一执行体）──────────────────
 
 /**
- * 发起一轮同步尝试（并发合流：同域在途不重复发——新边沿/补发在在途期触达同域时跳过，
- * 在途回执按代次/revision 判旧后于丢弃点补发，收敛且任一时刻至多一个在途）。
+ * 发起一轮同步尝试（并发合流：同域在途不重复发——新边沿/失效信号在在途期触达同域时
+ * 登记 trailing 标志后跳过；在途回执按代次/revision 判旧后于丢弃点补发、成功落定后按
+ * trailing 标志补拉，收敛且任一时刻至多一个在途）。
  *
  * 在途登记收编于 createInflightDedup（C-data-18）：has→run 仅在无在途时登记消费侧
  * then（在途期的触达为纯跳过——不重复挂接消费回调，避免同回执多次 apply/补发/失败
- * 留痕）；factory 的 settle 清理先于本 then 执行（时序契约），故 then 内的补发 run
- * 必发起新一轮。meta 携带发起时刻连接代（收编前闭包变量形态，语义等价）。
+ * 留痕；trailing 诉求因此不走工厂选项形态，改由模块级标志承载，回执 then 成功路径
+ * 末尾检查补发）；factory 的 settle 清理先于本 then 执行（时序契约），故 then 内的
+ * 补发 run 必发起新一轮。meta 携带发起时刻连接代（收编前闭包变量形态，语义等价）。
  */
 function attemptSync(domain: DomainRuntime, generation: number): void {
-  if (domain.inflight.has(SYNC_INFLIGHT_KEY)) return
+  if (domain.inflight.has(SYNC_INFLIGHT_KEY)) {
+    // 在途期触达登记 trailing 补拉（dmg-r3-1）：触达可能是失效信号（project.changed
+    // 广播的消费）——多窗口形态下他窗口命令不推进本窗口 revision，本轮回执若是命令
+    // 执行前旧快照（revision 等于发起时基线），双判旧均不命中、apply 后停留陈旧数据
+    // 且信号已消费无自愈；标志保证回执成功落定后补拉一轮收敛到最新。
+    trailingSyncRequested.add(domain.descriptor.id)
+    return
+  }
   const isFirstAttempt = !domain.firstAttemptStarted
   domain.firstAttemptStarted = true
   const entry = domain.inflight.run(SYNC_INFLIGHT_KEY, () => domain.descriptor.sync(), {
@@ -208,15 +231,29 @@ function attemptSync(domain: DomainRuntime, generation: number): void {
         // 状态残留由 sync 侧在下一轮入口自行收尾（本模块在丢弃点立即补发，补发轮对
         // sync 的调用即触发收尾）——store 侧不收尾则补发轮撞在途守卫被拒，该域重拉
         // 能力永久失效（F1-27 死锁形态，收尾实装见 stores/project.ts syncLoad）。
+        // 在途期触达登记的 trailing 诉求已由本补发轮覆盖（补发即「回执落定后再拉一轮
+        // 最新代」形态）——清除标志防补发轮回执 apply 后再叠一轮冗余拉取。
+        trailingSyncRequested.delete(domain.descriptor.id)
         attemptSync(domain, connectionGeneration)
         return
       }
       domain.descriptor.apply?.(receipt)
+      // trailing 补拉（dmg-r3-1）：在途期有触达被合流跳过（标志置位）→ 回执成功落定
+      // 后补发一轮（与判旧丢弃点补发同一入口；factory 的 settle 清理先于本 then 执行，
+      // 此刻无在途，任一时刻至多一个在途的不变量保持）。本轮回执可能是触达所反应变更
+      // 之前的旧快照（双判旧不命中形态，见入口置位处注释），补拉轮携带最新水位判旧/
+      // 提交收敛到最新。
+      if (trailingSyncRequested.delete(domain.descriptor.id)) {
+        attemptSync(domain, connectionGeneration)
+      }
     },
     (error: unknown) => {
       if (isFirstAttempt) domain.firstSettleResolve()
       // 失败不补发：重试通道 = 下一连接边沿（whenToSync 判定）或 store 的手动重试，
-      // 不在本模块内建自动重试（事实驱动原则：失败显式上报，不时间推测兜底）。
+      // 不在本模块内建自动重试（事实驱动原则：失败显式上报，不时间推测兜底）。trailing
+      // 标志一并清除：其兑现点是在途回执的成功落定，失败后由失败语义（边沿/手动重试，
+      // 届时拉取必为最新）承载，残留标志只会在后续无关轮次成功后叠一轮冗余拉取。
+      trailingSyncRequested.delete(domain.descriptor.id)
       if (domain.descriptor.failure === 'degraded') {
         console.warn(
           `[core/connection-edge-sync] domain '${domain.descriptor.id}' sync failed (degraded, keeping previous data):`,
@@ -311,5 +348,6 @@ export function resetConnectionEdgeSyncForTest(): void {
   stopEdgeWatch = null
   domains.clear()
   auxiliary.clear()
+  trailingSyncRequested.clear()
   connectionGeneration = 0
 }
