@@ -42,7 +42,7 @@
     ],
     "ui": [
       "packages/ui/src/form-protocol.ts",
-      "packages/ui/src/primitives/Tooltip/**",
+      "packages/ui/src/primitives/tooltip/**",
       "packages/ui/src/primitives/popover/**"
     ],
     "extension": [
