@@ -58,9 +58,9 @@ describe('useVirtuaFollow', () => {
     vi.useRealTimers()
   })
 
-  /** U1 便捷装配：造 mock + 注入 vlistRef + 创建 composable（itemCount/endOffset 可选注入） */
+  /** U1 便捷装配：造 mock + 注入 vlistRef + 创建 composable（itemCount/endOffset/smoothAllowed 可选注入） */
   function setupFollow(
-    followOpts: { itemCount?: () => number; endOffset?: () => number } = {},
+    followOpts: { itemCount?: () => number; endOffset?: () => number; smoothAllowed?: () => boolean } = {},
     mockOverrides?: Parameters<typeof createMockVlist>[0],
   ) {
     mock = createMockVlist(mockOverrides)
@@ -175,6 +175,56 @@ describe('useVirtuaFollow', () => {
       expect(mock.scrollToIndex).toHaveBeenCalledWith(4, { align: 'end', offset: 0, smooth: true })
       // 胶囊即时消失不等动画：距底快照同步清零 → showJumpButton 立即翻 false
       expect(showJumpButton.value).toBe(false)
+    })
+
+    // [fix-ro-follow-loop 缺陷①] smooth 通行门：流式增长期胶囊点击降级即时跳。
+    // 根因（真机插桩定案）：virtua smooth 路径的 jump 相位（case 8 置 w 目标窗 + case 7 置
+    // $=1）会把原生动画扫过条目的「估算→实测」差记账进 h 坐标移位，而流式期逐 delta 的
+    // follow 直写（1）打断动画（2）使 scroll 永不静默 150ms、case 2 冲销分支饿死——h 恒久
+    // 折减后续全部 scrollToIndex 目标，视口停滞在距底 ≈h 处（停滞值 run-to-run 随机 =
+    // 打断时点不同）。即时跳不进 jump 相位，无此缺陷。
+    describe('缺陷①修复：followToBottom smooth 通行门（smoothAllowed）', () => {
+      it('smoothAllowed=()=>false（流式增长期）：followToBottom(true, true) 降级 → scrollToIndex smooth:false', () => {
+        const { followToBottom } = setupFollow({
+          itemCount: () => 5,
+          smoothAllowed: () => false,
+        })
+
+        followToBottom(true, true)
+
+        expect(mock.scrollToIndex).toHaveBeenCalledTimes(1)
+        expect(mock.scrollToIndex).toHaveBeenCalledWith(4, { align: 'end', offset: 0, smooth: false })
+      })
+
+      it('smoothAllowed=()=>true（内容静止期）：smooth 请求原样透传 → scrollToIndex smooth:true', () => {
+        const { followToBottom } = setupFollow({
+          itemCount: () => 5,
+          smoothAllowed: () => true,
+        })
+
+        followToBottom(true, true)
+
+        expect(mock.scrollToIndex).toHaveBeenCalledWith(4, { align: 'end', offset: 0, smooth: true })
+      })
+
+      it('未注入 smoothAllowed：默认放行（向后兼容，W1TC8b 语义不变）', () => {
+        const { followToBottom } = setupFollow({ itemCount: () => 5 })
+
+        followToBottom(true, true)
+
+        expect(mock.scrollToIndex).toHaveBeenCalledWith(4, { align: 'end', offset: 0, smooth: true })
+      })
+
+      it('通行门只影响 smooth 通道：smooth=false 请求（发送即回底 force）不受门状态影响', () => {
+        const { followToBottom } = setupFollow({
+          itemCount: () => 5,
+          smoothAllowed: () => false,
+        })
+
+        followToBottom(true)
+
+        expect(mock.scrollToIndex).toHaveBeenCalledWith(4, { align: 'end', offset: 0, smooth: false })
+      })
     })
 
     describe('W1TC9 showJumpButton 派生 = 离底超过一屏（决策 12 距底几何判定）', () => {

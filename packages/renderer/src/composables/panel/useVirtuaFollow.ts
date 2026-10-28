@@ -97,11 +97,21 @@ const CONVERGENCE_HARD_CAP_MS = 1500
  *   U1→U2 接线窗口的兼容层（MessageStream 消费方本单元不改）。
  * @param opts.endOffset D2 真实底部原语的滚动目标正偏移（尾部块实测总高）。U2 由 tailEl RO
  *   注入。[过渡缺省] 未注入时 = 0（无尾部高度补偿，落点 = 旧版 align-end 语义）。
+ * @param opts.smoothAllowed smooth 通行门（fix-ro-follow-loop 缺陷①）。返回 false 时
+ *   followToBottom(force=true, smooth=true) 降级为即时跳。MessageStream 注入
+ *   `() => 无 streaming 回合`：流式增长期「回到最新」胶囊的 smooth 动画会被逐 delta 的
+ *   follow 直写打断（CSSOM View：程序化 scrollTop 写取消进行中的 smooth 动画），而
+ *   virtua 0.50.0 smooth 路径的 jump 相位（store case 8 置 w 目标窗 + case 7 置 $=1）会把
+ *   动画扫过条目的「估算→实测」差记账进 h 坐标移位、经 getItemOffset 恒久折减后续全部
+ *   scrollToIndex 目标——流式期 scroll 永不静默 150ms、case 2 冲销分支饿死，h 永不复位
+ *   （真机插桩实证：点击后 ~50ms 内 h=+703/+770，停滞距离 ≈ h，跨采样拍恒定）。即时跳
+ *   不进 jump 相位（A9 发送即回底深脱离精准收敛实证），无此缺陷。
  */
 export function useVirtuaFollow(opts: {
   vlistRef: Ref<VirtualizerHandle | null>
   itemCount?: () => number
   endOffset?: () => number
+  smoothAllowed?: () => boolean
 }): {
   stickToBottom: Ref<boolean>
   showJumpButton: ComputedRef<boolean>
@@ -156,9 +166,8 @@ export function useVirtuaFollow(opts: {
   function scrollToRealBottom(v: VirtualizerHandle, smooth = false): void {
     const count = opts.itemCount?.() ?? Number.MAX_SAFE_INTEGER
     if (count <= 0) return
-    // smooth 仅胶囊点击路径（决策 12「点击平滑回底」断言）。已知残留风险：virtua smooth 为
-    // JS rAF 驱动，动画期间用户 wheel 不会打断写入（动画最长数帧到 1.5s 收敛窗同量级），
-    // 极端「点击后立即滚动」场景有短暂抖动——换取长距离回底的可达性反馈。
+    // smooth 仅胶囊点击路径（决策 12「点击平滑回底」断言），且经 opts.smoothAllowed 通行门
+    // （缺陷①：流式增长期降级即时跳，见 opts 注释）。
     v.scrollToIndex(count - 1, { align: 'end', offset: opts.endOffset?.() ?? 0, smooth })
   }
 
@@ -404,7 +413,11 @@ export function useVirtuaFollow(opts: {
     lastOffset = Number.NaN
     openConvergenceWindow()
     const v = vlistRef.value
-    if (v) scrollToRealBottom(v, smooth)
+    if (v) {
+      // 缺陷① smooth 通行门：门关（流式增长期）时 smooth 请求降级即时跳（opts 注释有根因链）
+      const effectiveSmooth = smooth && (opts.smoothAllowed?.() ?? true)
+      scrollToRealBottom(v, effectiveSmooth)
+    }
   }
 
   return {

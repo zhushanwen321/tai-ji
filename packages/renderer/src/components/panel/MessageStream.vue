@@ -465,12 +465,20 @@ const { pinnedIndexes } = useStreamingPin({
 // [U4 护栏⑦] dev-only 贴底跟随断言包装（生产透传零开销；spec 详见 usePinBottomGuard.ts 头注释）。
 // [D2 数学不变量] endOffset = tailEl 实测总高：纵向 padding 参与 viewportSize 扣除与落点
 // 公式，偏差由 BOTTOM_THRESHOLD 吸收（改任一纵向 padding 必复核 D2 推导并真机复验贴底）。
+// [缺陷①] smooth 通行门观察源 = 全部 renderItems 的 isStreaming（与 D1 主触发同口径：
+// bash↔streaming 双工作态下 streaming 回合退居非末位仍要拦 smooth，单点判定会漏）。
+const hasStreamingTurn = computed(() =>
+  renderItems.value.some((item) => item.kind === 'turn' && item.turn.isStreaming),
+)
+
 const { stickToBottom, showJumpButton, onScroll, onWheel, onTouchStart, onTouchMove, followIfStuck, followToBottom, onSessionRebuild, notifyRoActivity, refreshDistanceSnapshot } =
   usePinBottomGuard({
     follow: useVirtuaFollow({
       vlistRef,
       itemCount: () => streamItems.value.length, // [D1] 末项索引直取数据源（= :data 同一 streamItems 基准）
       endOffset: () => tailHeight.value,
+      // [缺陷①] 流式增长期禁 smooth：胶囊点击降级即时跳（根因链见 useVirtuaFollow opts 注释）
+      smoothAllowed: () => !hasStreamingTurn.value,
     }),
     scrollEl,
     isStreaming: () => lastRenderTurn.value?.isStreaming ?? false,
