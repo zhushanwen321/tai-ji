@@ -25,7 +25,7 @@
  *
  * i18n：vitest 全局 setup（vitest-i18n-setup.ts）mock useI18n → t() 返回 zh-CN 文案。
  *
- * 运行：cd packages/renderer && npx vitest run src/components/panel/message-stream/__tests__/ActivityStrip.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=chat npx vitest run src/components/panel/message-stream/__tests__/ActivityStrip.test.ts（本文件登记在 domain-map.json chat 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { chatViewDepsModule } from '@/__tests__/helpers/chat-stream-mount'

@@ -18,7 +18,7 @@
  *  - modal-surface-registry（drawer 独占 partial，registerModalSurface 捕获）+
  *    drawerSurface hoisted
  *
- * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/components/panel/workflow-viz/__tests__/workflow-viz-live-bundle.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=subagent TAIJI_SKIP_REAL_PI=1 npx vitest run src/components/panel/workflow-viz/__tests__/workflow-viz-live-bundle.test.ts（本文件登记在 domain-map.json subagent 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'

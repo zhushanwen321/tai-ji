@@ -20,7 +20,7 @@
  * 时序断言与常量解耦：debounce 用 150ms（>120 且 <200），loading 显用 201ms（>200）——
  * 断言窗口只依赖常量间的大小关系，不依赖具体差值。
  *
- * 运行：cd packages/ui && npx vitest run src/overlays
+ * 运行：cd packages/ui && TAIJI_TEST_DOMAIN=shell npx vitest run src/overlays（本文件登记在 domain-map.json shell 域，默认档被排除）
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'

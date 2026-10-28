@@ -10,7 +10,7 @@
  * 测试模式：reka Dialog 经 Portal teleport 到 document.body，mount attachTo body +
  * flushPromises 后用 document.body.querySelector 查询；点击用原生 HTMLElement.click()。
  *
- * 运行：cd packages/ui && npx vitest run src/primitives/dialog/__tests__/ConfirmDialog.test.ts
+ * 运行：cd packages/ui && TAIJI_TEST_DOMAIN=shell npx vitest run src/primitives/dialog/__tests__/ConfirmDialog.test.ts（本文件登记在 domain-map.json shell 域，默认档被排除）
  */
 import { describe, it, expect, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'

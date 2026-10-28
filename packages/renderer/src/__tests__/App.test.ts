@@ -17,7 +17,7 @@
  * - connectionState 取两源类型超集（disconnected/connected/failed）。
  * - usePermissionRequest mock 取 runtime 源版本（含 initPermissionRequest 导出，超集）。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/App.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=app-shell npx vitest run src/__tests__/App.test.ts（本文件登记在 domain-map.json app-shell 域，默认档被排除）
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'

@@ -21,7 +21,7 @@
  * 互斥登记：use-api-key-auto-enable（mock '@/composables/useToast' 与本产物 oauth 节
  * 真 useToast 单例断言结构性互斥）保留独立。
  *
- * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/composables/settings-domain-bundle.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=settings TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/composables/settings-domain-bundle.test.ts（本文件登记在 domain-map.json settings 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'

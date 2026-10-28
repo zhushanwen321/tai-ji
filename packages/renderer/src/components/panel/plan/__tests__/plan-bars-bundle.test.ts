@@ -22,7 +22,7 @@
  * 互斥登记（保留独立）：plan-docs-panel（'@/stores/chat' 保留式工厂与 mode 版窄替换
  * 同 spec 多工厂互斥）；plan-comment-popover 已并入 components 域 ui-misc-bundle。
  *
- * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/components/panel/plan/__tests__/plan-bars-bundle.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=plan TAIJI_SKIP_REAL_PI=1 npx vitest run src/components/panel/plan/__tests__/plan-bars-bundle.test.ts（本文件登记在 domain-map.json plan 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, DOMWrapper, type VueWrapper } from '@vue/test-utils'

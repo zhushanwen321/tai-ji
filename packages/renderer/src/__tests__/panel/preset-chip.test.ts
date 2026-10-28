@@ -14,7 +14,7 @@
  * （reka HoverCard 未 hover 不渲染 content；stub 常开使浮层内容可 DOM 断言，
  * 对齐 gen-stats-triggers.test.ts 的观察者形态）；i18n 走全局 zh-CN mock。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/preset-chip.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel npx vitest run src/__tests__/panel/preset-chip.test.ts（本文件登记在 domain-map.json panel 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'

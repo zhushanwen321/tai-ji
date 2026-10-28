@@ -9,7 +9,7 @@
  * 用真实 flattenTurnBlocks/computeTraceWindow（RC-1，不 mock core）。
  * TraceCompactorRow 真实组件经内联 i18n plugin mount（RC-2）。
  *
- * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/Turn.test.ts
+ * 运行：cd packages/ui && TAIJI_TEST_DOMAIN=chat npx vitest run src/features/chat/__tests__/Turn.test.ts（本文件登记在 domain-map.json chat 域，默认档被排除）
  */
 import { describe, it, expect, vi } from 'vitest'
 

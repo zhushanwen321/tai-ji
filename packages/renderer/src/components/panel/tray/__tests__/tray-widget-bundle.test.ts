@@ -22,7 +22,7 @@
  *    './tray-counts-stub' 相对说明符已改 '@/__tests__/panel/tray/…'；canvas-panel /
  *    tray-widget 节仅补 composer-tray 未覆盖模块的 import。
  *
- * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/components/panel/tray/__tests__/tray-widget-bundle.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=tray TAIJI_SKIP_REAL_PI=1 npx vitest run src/components/panel/tray/__tests__/tray-widget-bundle.test.ts（本文件登记在 domain-map.json tray 域，默认档被排除）
  */
 // ── composer-tray 头段（imports + fixture + mock 注册，逐字）──
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'

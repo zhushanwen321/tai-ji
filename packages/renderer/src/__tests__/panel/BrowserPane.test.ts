@@ -21,7 +21,7 @@
  *   （window bubble + defaultPrevented 检查）不动作；非编辑态 Esc 不拦 → 编排器照常动作
  * - U5：retryCreate windowId 缺失 → 结构化 warn（口径对齐 onMounted）+ 不调 browserCreate
  *
- * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/panel/BrowserPane.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel npx vitest run src/__tests__/panel/BrowserPane.test.ts（本文件登记在 domain-map.json panel 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'

@@ -28,7 +28,7 @@
  * - 开 Dialog 的用例末尾必须 wrapper.unmount() 清理 Teleport 节点
  * - 禁止 document.body.innerHTML='' 清理——会破坏 Vue 内部 vnode 引用触发 unmount 崩溃
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/settings/system-page-update.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=settings npx vitest run src/__tests__/settings/system-page-update.test.ts（本文件登记在 domain-map.json settings 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { getCardUpdateHarness, makeCardRelease, resetCardUpdateHarness, useAppUpdateCardModule } from '@/__tests__/helpers/update-card-mock'

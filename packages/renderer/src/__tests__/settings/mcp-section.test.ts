@@ -33,7 +33,7 @@
  * core transport mcp 域不走该 seam。appearance-page.test.ts 因 harness 直写真实
  * useToast().toasts.value 与两节 mock 形态实质冲突，保持独立不并入。
  *
- * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/settings/mcp-section.test.ts --pool=threads
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=settings TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/settings/mcp-section.test.ts --pool=threads（本文件登记在 domain-map.json settings 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, DOMWrapper, type VueWrapper } from '@vue/test-utils'

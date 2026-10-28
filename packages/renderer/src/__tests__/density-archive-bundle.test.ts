@@ -14,7 +14,7 @@
  * import '@/api' 门面：前者只 vue/@lucide/shared/ui 组件/store，后者经 composer-density /
  * use-plugin-toolbar / useExtensionHostBridge 触达 @taiji/core 深路径而非 renderer 门面）。
  *
- * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/density-archive-bundle.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=archive TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/density-archive-bundle.test.ts（本文件登记在 domain-map.json archive 域，默认档被排除）
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'

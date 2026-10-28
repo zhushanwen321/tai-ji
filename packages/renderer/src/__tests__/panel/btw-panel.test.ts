@@ -21,7 +21,7 @@
  * useSidebar（只取 refreshLiveState——core 状态层拉取对账入口，缓存缺失门控在 core 侧
  * live-state-pull.test.ts 锁定）与 useChat.ensureStreamSubscription（线消息帧订阅建立）。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/btw-panel.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=btw npx vitest run src/__tests__/panel/btw-panel.test.ts（本文件登记在 domain-map.json btw 域，默认档被排除）
  */
 // helper import 必须先于项目内模块（@/api mock factory 在模块图加载期执行，TDZ 约束同 composer-mount 各消费文件）
 import { composerApiModuleActualWithBtw, composerBtwApiMock, btwLineGroups } from '../helpers/composer-mount'

@@ -35,7 +35,7 @@
  * DrawerPanel（@taiji/ui/features/drawer）真实渲染：drawer-panel/tab/空态断言与
  * header-extra slot 承接都在它身上。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/panel-container-drawer-mode.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel npx vitest run src/__tests__/panel/panel-container-drawer-mode.test.ts（本文件登记在 domain-map.json panel 域，默认档被排除）
  */
 import { describe, it, expect, beforeAll, beforeEach, vi, afterEach } from 'vitest'
 import { mount, enableAutoUnmount } from '@vue/test-utils'

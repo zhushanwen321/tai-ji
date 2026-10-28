@@ -24,7 +24,7 @@
  *   - plugin 节 ViewHost 数据源经 VIEW_HOST_SOURCE_KEY 注入内存表；PluginProviderFlow
  *     以探针 stub 记录 open/focus（流程内部行为由 PluginProviderFlow.test.ts 覆盖）
  *
- * 运行：cd packages/renderer && npx vitest run src/components/settings/provider/__tests__/ProviderPage.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=settings npx vitest run src/components/settings/provider/__tests__/ProviderPage.test.ts（本文件登记在 domain-map.json settings 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'

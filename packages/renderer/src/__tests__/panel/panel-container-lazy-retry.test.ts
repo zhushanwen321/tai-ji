@@ -23,7 +23,7 @@
  * 失败未穷尽期间 wrapper 停 loading 占位（Vue userOnError 契约：链 pending → loading，
  * 非 error 态——瞬时失败不闪错误），穷尽 fail 才呈现错误占位（见 lazy-chunk-retry.ts 头注）。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/panel-container-lazy-retry.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel npx vitest run src/__tests__/panel/panel-container-lazy-retry.test.ts（本文件登记在 domain-map.json panel 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'

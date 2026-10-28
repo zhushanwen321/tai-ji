@@ -15,7 +15,7 @@
  * - [chat-flow-consistency U9 / S6] 压缩行摘要悬停：compactionSummary.summary 非空挂
  *   「压缩摘要」详情（全文 + 复制）；summary 缺失不挂（无内容可显）
  *
- * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/SystemNotice.test.ts
+ * 运行：cd packages/ui && TAIJI_TEST_DOMAIN=chat npx vitest run src/features/chat/__tests__/SystemNotice.test.ts（本文件登记在 domain-map.json chat 域，默认档被排除）
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 

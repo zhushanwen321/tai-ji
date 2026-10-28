@@ -13,7 +13,7 @@
  * 用 document.body.querySelector 查询；点击用原生 HTMLElement.click()。i18n 经
  * vitest.setup mock（t 返回 key）。
  *
- * 运行：cd packages/ui && npx vitest run src/features/settings/__tests__/ProviderTemplatePicker.test.ts
+ * 运行：cd packages/ui && TAIJI_TEST_DOMAIN=settings npx vitest run src/features/settings/__tests__/ProviderTemplatePicker.test.ts（本文件登记在 domain-map.json settings 域，默认档被排除）
  */
 import { describe, it, expect, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'

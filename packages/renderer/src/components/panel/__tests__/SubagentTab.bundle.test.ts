@@ -26,7 +26,7 @@
  *  - 各节 beforeEach 增补的重播行（panelFocusedSid / degradedRef /
  *    subagentRecordsList / workflowRecordsFixture）见各节内注释。
  *
- * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/components/panel/__tests__/SubagentTab.bundle.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=subagent TAIJI_SKIP_REAL_PI=1 npx vitest run src/components/panel/__tests__/SubagentTab.bundle.test.ts（本文件登记在 domain-map.json subagent 域，默认档被排除）
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { nextTick, reactive, ref } from 'vue'

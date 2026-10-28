@@ -14,7 +14,7 @@
  * - U9-U10 mount Composer（stub 子组件 + 真 pinia + mock useChat/useNewTaskFlow/@/api），
  *   从 stub emit slash-trigger/select，断言 CommandPopover stub 收到的 props。
  *
- * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/panel/composer-slash-trigger.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel npx vitest run src/__tests__/panel/composer-slash-trigger.test.ts（本文件登记在 domain-map.json panel 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'

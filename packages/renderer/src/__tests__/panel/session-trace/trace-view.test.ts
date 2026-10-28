@@ -50,7 +50,7 @@ vi.mock('@/api', async (importOriginal) => {
   }
 })
 
-// ── mock useTraceJump（TraceView 溯源链接只验证事件编排链路，真实编排归 useTraceJump.test.ts）──
+// ── mock useTraceJump（TraceView 溯源链接只验证事件编排链路，真实编排归 __tests__/panel/session-trace/useSessionTrace.test.ts（节 2 useTraceJump））──
 const jumpMock = vi.hoisted(() => ({ jumpToParentSession: vi.fn() }))
 vi.mock('@/composables/features/trace/useTraceJump', () => ({
   jumpToParentSession: jumpMock.jumpToParentSession,

@@ -15,7 +15,7 @@
  *  - '@/api'（importActual spread + session 指回）：两源逐字相同。
  *  - transport/api {on 族}（tab 独占，lane 节经 events 不触达）+ virtua/vue（tab 独占）。
  *
- * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/panel/subagent-tab-bundle.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=subagent TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/panel/subagent-tab-bundle.test.ts（本文件登记在 domain-map.json subagent 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import '@/__tests__/helpers/message-stream-shell-mount'

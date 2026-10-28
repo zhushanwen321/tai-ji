@@ -18,7 +18,7 @@
  * mock 策略：vi.mock('@/api') 注入 tts spy（数据 fixture 取 core mock 派生视图）；useTtsPlayer
  * 注入可控桩；@taiji/ui/features/settings 用轻量 GroupCard stub（保留具名 slot）。
  *
- * 运行：cd packages/renderer && npx vitest run src/components/settings/tts/__tests__/tts-page.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=settings npx vitest run src/components/settings/tts/__tests__/tts-page.test.ts（本文件登记在 domain-map.json settings 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'

@@ -18,7 +18,7 @@
  *  - 两节头段逐字保留（native 头仅剔除两处重复工厂与重复模块 import，补 provide/ref）。
  *  - native 节 fake timers（beforeEach/afterEach 配对）随正文包进 describe，作用域不外溢。
  *
- * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/panel/tray/tray-native-bundle.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=tray TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/panel/tray/tray-native-bundle.test.ts（本文件登记在 domain-map.json tray 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'

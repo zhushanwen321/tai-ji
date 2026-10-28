@@ -24,7 +24,7 @@
  *
  * 已标注「已覆盖」的用例（E2E-L1-3 ⌘G/⌘⇧G、E2E-L1-4 Esc 退出、E2E-L1-6 血缘可见）此处不重复。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/fast-fork-e2e-journeys.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel npx vitest run src/__tests__/panel/fast-fork-e2e-journeys.test.ts（本文件登记在 domain-map.json panel 域，默认档被排除）
  *
  * 三视角规则（TEST-STRATEGY §3）：每条用例至少 1 个用户可见 DOM 断言（.exists()/.text()/.classes()），
  * 纯 toHaveBeenCalled 不计 DoD。

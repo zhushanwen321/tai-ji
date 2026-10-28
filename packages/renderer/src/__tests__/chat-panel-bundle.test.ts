@@ -30,7 +30,7 @@
  *    follow-triggers / derive-status / tray-order / model-picker-data / panel.store 各节
  *    不挂这些组件、不消费 useGitStatus，无泄漏危害。
  *
- * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/chat-panel-bundle.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=chat TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/chat-panel-bundle.test.ts（本文件登记在 domain-map.json chat 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, enableAutoUnmount, type VueWrapper } from '@vue/test-utils'
