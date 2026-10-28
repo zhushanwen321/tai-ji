@@ -8,7 +8,7 @@
  * 覆盖用例：
  * - E2E-CF-1: composer 渲染（输入区可见）+ 工具条左簇任务托盘挂载（D1）
  * - E2E-CF-4: + 菜单只剩「附件」「命令」（# 文件改走 inline，@ 引用废弃）
- * - E2E-CF-5: landing 态（无 session）+ 菜单也是 附件/命令 两项；托盘同判据隐藏（D1）
+ * - E2E-CF-5: landing 态（无 session）无 composer 菜单入口（左簇 landing 卸载判据）；托盘同判据隐藏（D1）
  * - E2E-CF-6: 非默认模式会话（launchPresetId='builtin:session-dispatch'）→ 只读模式 chip +
  *   流顶声明行（u4/u5 已落地，本用例为回归断言——见下方用例注释）
  *
@@ -52,7 +52,9 @@ test.describe('Composer 渲染与菜单入口 E2E', () => {
 
   test('E2E-CF-4: + 菜单只剩「附件」「命令」（无文件/引用入口）', async ({ page }) => {
     await activateSession(page)
-    await page.getByTitle(/添加内容/).click()
+    // [2026-10-19 左簇浮层优化后形态] 触发钮原生 title 退役、改 aria-label
+    // （AddMenuPopover.vue :aria-label="t('panel.composer.addContent')"），按 role + name 定位
+    await page.getByRole('button', { name: /添加内容/ }).click()
     // + 菜单 portal 到 body 渲染为 dialog。在 dialog 范围内断言，避免匹配侧边栏「文件」tab。
     // 命令项 accessible name 含 hint「/」（命令 /），用正则前缀匹配
     const menu = page.getByRole('dialog')
@@ -81,16 +83,14 @@ test.describe('Composer 渲染与菜单入口 E2E', () => {
     await expect(page.getByTestId('mode-declaration-row')).toBeVisible({ timeout: 5_000 })
   })
 
-  test('E2E-CF-5: landing 态 + 菜单也是 附件/命令 两项（守门随 file 入口移除）', async ({ page }) => {
+  test('E2E-CF-5: landing 态无 composer 菜单入口（左簇 landing 卸载）+ 托盘同判据隐藏', async ({ page }) => {
     // 不激活 session，保持 landing 态。等 landing composer 渲染
     await expect(page.getByTestId('composer-box')).toBeVisible({ timeout: 10_000 })
     // 任务托盘与指标聚合按钮同判据（D1）：landing 无 session → 不挂载（零视觉噪音）
     await expect(page.getByTestId('composer-tray')).toHaveCount(0)
-    await page.getByTitle(/添加内容/).click()
-    // landing 与 session 态一致：附件/命令两项，无文件/引用
-    const menu = page.getByRole('dialog')
-    await expect(menu.getByRole('button', { name: /^附件/ })).toBeVisible({ timeout: 5_000 })
-    await expect(menu.getByRole('button', { name: /^命令/ })).toBeVisible()
-    expect(await menu.getByRole('button', { name: /文件/ }).count()).toBe(0)
+    // [r4 landing 对齐修复后契约] 「+」挂载判据 = sessionId && !subagent（Composer.vue
+    // 左簇 v-if，注释：原 AddMenuPopover 无 sessionId 检查致空态左下角多出「+」，已修）——
+    // landing 无 session 不渲染菜单入口；session 态菜单形态（附件/命令两项）由 CF-4 守门
+    await expect(page.getByRole('button', { name: /添加内容/ })).toHaveCount(0)
   })
 })

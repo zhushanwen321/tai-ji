@@ -22,12 +22,13 @@
  *       对话流 block 第二入口 mock 不可达——见 case 内注释
  * - OV2（S1/S2 mock 面）：workflow 固定 tab 三子页——trace 表行集与 agentCalls 对账、
  *       事件流子页行集与 fixtureRunEvents 对账、Gantt 子页行/色带/行标签挂载
- * - OV3（S4 mock 面）：trace 行点击 → agent tab 钻取（meta 条与 call 对账）→ tab 关闭
- *       回 workflow 固定 tab → ESC 关 overlay 后 composer 恢复
+ * - OV3（S4 mock 面）：trace 行点击 → 右侧 AgentStreamDrawer 钻取（tab/meta 与 call
+ *       对账，[3ee709342] 后 dock 内 agent 动态 tab 已删）→ 关唯一 tab 收起抽屉 →
+ *       ESC 关 overlay 后 composer 恢复
  * - OV4（V5①）：wf-mock-parse-failed 预置错误臂 → 上区降级列表（parse_failed 原因码 +
  *       重试钮可用 + 列表与 agentCalls 对账），下区 dock 实况面板不受影响
- * - OV5：L2TabBar 编排——关闭激活 tab 激活左侧相邻、关闭首个动态 tab 回固定 tab、
- *       关闭非激活 tab 激活键不变；workflow 固定 tab 无 close 按钮
+ * - OV5：抽屉 tab 编排（[3ee709342] 迁移）——关闭激活 tab 激活左邻、关闭非激活 tab
+ *       激活键不变、全关收起抽屉；dock workflow 固定 tab 无 close 按钮
  * - OV6（设计 §3.1-2 关闭三通道）：ESC / 点遮罩 / 右上关闭按钮统一关闭 + composer 恢复
  * - OV7（V3①④⑤ 六态）：图例六态与 DAG 节点同色同词（dot 类同源 dag/tone.ts）+
  *       六态节点逐一以演员承载断言（done/running/pending/failed/retrying/skipped）+
@@ -209,7 +210,7 @@ test.describe('Workflow 可视化 overlay E2E', () => {
     await expect(gantt.locator('[data-testid="wfvz-gantt-seg"]')).toHaveCount(2)
   })
 
-  test('OV3: trace 行点击钻取 agent tab，tab 关闭回固定 tab，ESC 关 overlay 后 composer 恢复', async ({ page }) => {
+  test('OV3: trace 行点击钻取右侧 agent 抽屉，关唯一 tab 收起抽屉，ESC 关 overlay 后 composer 恢复', async ({ page }) => {
     await activateSession(page)
     const overlay = await openOverlay(page, ACTORS.baseline)
 
@@ -218,29 +219,38 @@ test.describe('Workflow 可视化 overlay E2E', () => {
       .poll(async () => page.evaluate(() => document.activeElement?.getAttribute('data-testid')))
       .toBe('wfvz-overlay-panel')
 
-    // trace 行点击 → agent 一级 tab 开且激活；meta 条与 call #0 对账
+    // [3ee709342 后形态] trace 行点击 → overlay 右侧 AgentStreamDrawer 滑出（dock 内
+    // agent 动态 tab 已删）：单 tab = call #0，标题 dev-W1 激活，AgentTabContent meta
+    // 条对账。开合判据用 tab-strip 挂载 + aria-hidden（抽屉常驻 DOM，translate 滑入
+    // 滑出不改变 toBeVisible 判定）
     await overlay.getByTestId('wf-viz-trace-row-0').click()
-    await expect(overlay.getByTestId('l2-tab-agent:0')).toBeVisible()
-    await expect(overlay.getByTestId('l2-tab-agent:0')).toHaveAttribute('data-active', 'true')
-    const agentTab = overlay.getByTestId('wf-viz-agent-tab')
+    // 抽屉挂宿主 Guard 外（WorkflowVizOverlayHost：抽屉渲染失败不进 D10 回落链），是
+    // wfvz-overlay 的兄弟节点（fixed 浮壳上）——定位根必须用 page，不能用 overlay 子树
+    const drawer = page.getByTestId('wf-viz-agent-drawer')
+    await expect(drawer.getByTestId('wf-viz-agent-drawer-tab-strip')).toBeVisible()
+    const drawerTab = drawer.getByTestId('wf-viz-agent-drawer-tab-item')
+    await expect(drawerTab).toHaveCount(1)
+    await expect(drawerTab).toHaveAttribute('data-active', 'true')
+    await expect(drawerTab).toContainText('dev-W1')
+    const agentTab = drawer.getByTestId('wf-viz-agent-tab')
     await expect(agentTab).toBeVisible()
     await expect(agentTab.getByTestId('wf-viz-agent-meta')).toContainText('dev-W1')
     await expect(agentTab.getByTestId('wf-viz-agent-meta')).toContainText('Dev')
 
-    // [phase tab 钻取] DAG 通道接通后 mock 可达，phase 语义路由由 OV9 以 pending /
-    // skipped 节点点击承载（agent 节点点击语义与本段 trace 行点击同链，不重复）
+    // [phase tab 钻取] DAG 对 agent 节点转 display-only（3ee709342），pending/skipped
+    // 节点点击路由 phase 语义由 OV9 承载（原 agent 节点钻取语义随迁移退役）
 
-    // tab 已存在时再点同一行仅激活不重复追加
-    await overlay.getByTestId('l2-tab-workflow').click()
+    // tab 已存在时再点同一行仅激活不重复追加（AgentStreamDrawer.openAgent includes 守卫；
+    // trace 表恒在 dock，无需原「先回固定 tab」绕行）
     await overlay.getByTestId('wf-viz-trace-row-0').click()
-    await expect(overlay.getByTestId('l2-tab-agent:0')).toHaveCount(1)
-    await expect(overlay.getByTestId('l2-tab-agent:0')).toHaveAttribute('data-active', 'true')
+    await expect(drawer.getByTestId('wf-viz-agent-drawer-tab-item')).toHaveCount(1)
 
-    // 关闭激活的 agent tab（首个动态 tab，无左侧相邻）→ 回 workflow 固定 tab
-    await overlay.getByTestId('l2-tab-close-agent:0').click()
-    await expect(overlay.getByTestId('l2-tab-workflow')).toHaveAttribute('data-active', 'true')
+    // 关闭唯一 tab（无剩余）→ 抽屉收起（tab 集清空 + aria-hidden）。原「关 agent tab 回
+    // workflow 固定 tab」语义随钻取迁抽屉退役：dock 固定 tab 恒激活，trace 子页不受影响
+    await drawer.getByTestId('wf-viz-agent-drawer-tab-close').click()
+    await expect(drawer.getByTestId('wf-viz-agent-drawer-tab-item')).toHaveCount(0)
+    await expect(drawer).toHaveAttribute('aria-hidden', 'true')
     await expect(overlay.getByTestId('wf-viz-subpage-trace-panel')).toBeVisible()
-    await expect(overlay.getByTestId('l2-tab-agent:0')).toHaveCount(0)
 
     // ESC 关 overlay → 临时层消失 + composer 恢复可见。
     // [焦点归还锚精确断言声明] 「归还 = 打开前焦点元素」受入口点击链路的焦点转移
@@ -248,6 +258,8 @@ test.describe('Workflow 可视化 overlay E2E', () => {
     // 「焦点归还打开前焦点元素」项）
     await page.keyboard.press('Escape')
     await expect(overlay).toHaveCount(0)
+    // 抽屉随宿主 v-if="isWorkflowOpen && panelInput" 消亡（tab 集构造性清空）
+    await expect(drawer).toHaveCount(0)
     await expect(page.getByTestId('composer-box')).toBeVisible({ timeout: 5_000 })
   })
 
@@ -279,36 +291,44 @@ test.describe('Workflow 可视化 overlay E2E', () => {
     await expect(overlay.getByTestId('wf-viz-trace-row-0')).toContainText('worker-W1')
   })
 
-  test('OV5: L2TabBar 编排——关闭激活 tab 激活左侧相邻，首个动态 tab 关闭回固定 tab，固定 tab 不可关', async ({ page }) => {
+  test('OV5: 抽屉 tab 编排——关闭激活 tab 激活左侧相邻，关闭非激活 tab 激活键不变，全关收起抽屉，dock 固定 tab 不可关', async ({ page }) => {
     await activateSession(page)
     const overlay = await openOverlay(page, ACTORS.baseline)
-    const tabbar = overlay.getByTestId('wf-viz-tabbar')
+    // 同 OV3：抽屉挂宿主 Guard 外，是 wfvz-overlay 的兄弟节点——定位根用 page
+    const drawer = page.getByTestId('wf-viz-agent-drawer')
 
-    // 固定 tab 无 close 按钮（L2TabBar builtin 项不渲染；panel-tabs.ts 不可关语义）
-    await expect(tabbar.getByTestId('l2-tab-close-workflow')).toHaveCount(0)
+    // dock 固定 tab 无 close 按钮（L2TabBar builtin 项不渲染；panel-tabs.ts 不可关语义，
+    // 3ee709342 后该语义仍属 dock——抽屉侧无固定 tab）
+    await expect(overlay.getByTestId('wf-viz-tabbar').getByTestId('l2-tab-close-workflow')).toHaveCount(0)
 
-    // 开两个 agent tab：点行 0 → 回固定 tab → 点行 1（后开的激活）
+    // 开两个抽屉 tab：点行 0 → 点行 1（后开的激活；trace 表恒在 dock，无需绕行）
+    const tab0 = drawer.getByTestId('wf-viz-agent-drawer-tab-item').filter({ hasText: 'dev-W1' })
+    const tab1 = drawer.getByTestId('wf-viz-agent-drawer-tab-item').filter({ hasText: 'review-W1' })
     await overlay.getByTestId('wf-viz-trace-row-0').click()
-    await overlay.getByTestId('l2-tab-workflow').click()
     await overlay.getByTestId('wf-viz-trace-row-1').click()
-    await expect(overlay.getByTestId('l2-tab-agent:1')).toHaveAttribute('data-active', 'true')
+    await expect(tab1).toHaveAttribute('data-active', 'true')
 
-    // 关闭激活 tab（agent:1）→ 激活左侧相邻 agent:0（内容侧随激活键切换）
-    await overlay.getByTestId('l2-tab-close-agent:1').click()
-    await expect(overlay.getByTestId('l2-tab-agent:0')).toHaveAttribute('data-active', 'true')
-    await expect(overlay.getByTestId('wf-viz-agent-tab')).toBeVisible()
+    // 关闭激活 tab（review-W1）→ 激活左侧相邻 dev-W1（内容侧随激活键切换）
+    await tab1.getByTestId('wf-viz-agent-drawer-tab-close').click()
+    await expect(tab0).toHaveAttribute('data-active', 'true')
+    await expect(drawer.getByTestId('wf-viz-agent-tab')).toBeVisible()
 
-    // 关闭非激活 tab 激活键不变：激活 workflow（不关 tab）后关闭 agent:0 → 仍 workflow
-    await overlay.getByTestId('l2-tab-workflow').click()
-    await overlay.getByTestId('l2-tab-close-agent:0').click()
-    await expect(overlay.getByTestId('l2-tab-workflow')).toHaveAttribute('data-active', 'true')
+    // 关闭非激活 tab 激活键不变：重开 review-W1（激活）→ 点回 dev-W1 → 关 review-W1
+    // （非激活，close 钮 @click.stop 不触发激活）→ 激活键仍 dev-W1
+    await overlay.getByTestId('wf-viz-trace-row-1').click()
+    await expect(tab1).toHaveAttribute('data-active', 'true')
+    await tab0.getByText('dev-W1', { exact: true }).click()
+    await expect(tab0).toHaveAttribute('data-active', 'true')
+    await tab1.getByTestId('wf-viz-agent-drawer-tab-close').click()
+    await expect(tab0).toHaveAttribute('data-active', 'true')
+    await expect(drawer.getByTestId('wf-viz-agent-drawer-tab-item')).toHaveCount(1)
 
-    // 关闭首个动态 tab（无左侧相邻）→ 回 workflow 固定 tab：重开 agent:0 并激活后关闭
-    await overlay.getByTestId('wf-viz-trace-row-0').click()
-    await overlay.getByTestId('l2-tab-close-agent:0').click()
-    await expect(overlay.getByTestId('l2-tab-workflow')).toHaveAttribute('data-active', 'true')
+    // 关闭唯一剩余 tab（无相邻）→ 无剩余收起抽屉（tab 集清空 + aria-hidden）；
+    // dock trace 子页不受影响（原「回固定 tab」断言随钻取迁抽屉退役）
+    await tab0.getByTestId('wf-viz-agent-drawer-tab-close').click()
+    await expect(drawer.getByTestId('wf-viz-agent-drawer-tab-item')).toHaveCount(0)
+    await expect(drawer).toHaveAttribute('aria-hidden', 'true')
     await expect(overlay.getByTestId('wf-viz-subpage-trace-panel')).toBeVisible()
-    await expect(overlay.getByTestId('l2-tab-agent:0')).toHaveCount(0)
   })
 
   test('OV6: ESC / 点遮罩 / 关闭按钮三通道统一关闭，composer 恢复', async ({ page }) => {
