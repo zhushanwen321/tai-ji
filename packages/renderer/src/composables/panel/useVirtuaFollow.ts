@@ -122,7 +122,7 @@ export function useVirtuaFollow(opts: {
   /** [F3] 触屏信号入口：上滑 touchmove 立即脱离（容器 @touchmove.passive 接线） */
   onTouchMove: (e: TouchEvent) => void
   followIfStuck: () => void
-  /** smooth 仅「回到最新」胶囊点击传递（决策 12「点击平滑回底」）；挂载首滚 / session 切换 / 自动跟随保持即时 */
+  /** smooth 仅「回到最新」胶囊点击传递且经 smoothAllowed 通行门（流式增长期降级即时跳，见 opts 注释）；挂载首滚 / session 切换 / 自动跟随保持即时 */
   followToBottom: (force?: boolean, smooth?: boolean) => void
   /** D7 session 重建入口：置 NaN 快照 + 开收敛抑制窗（U2 在 sessionId watch 同步调用） */
   onSessionRebuild: () => void
@@ -399,7 +399,8 @@ export function useVirtuaFollow(opts: {
    *   距底快照同步清零 → 胶囊即时消失（不等 scroll 回声，决策 12「点击平滑回底后消失」——
    *   平滑由 smooth 参数承载，胶囊消失仍走同步清零，不等动画走完）。
    *   状态重置不受 vlistRef null 影响（强滚语义下贴底态为真，即使句柄尚未挂上无法执行滚动）。
-   * - smooth=true：仅胶囊点击传递，scrollToIndex 带平滑动画；动画期间的 scroll 回声在
+   * - smooth=true：仅胶囊点击传递且经 opts.smoothAllowed 通行门（流式增长期降级即时跳），
+   *   门开时 scrollToIndex 带平滑动画；动画期间的 scroll 回声在
    *   stickToBottom=true（offset 单调向底）与收敛抑制窗罩内，不触发脱离误判。
    * - force=false（默认）：同 followIfStuck（受 stickToBottom guard，非贴底时不滚）。
    */

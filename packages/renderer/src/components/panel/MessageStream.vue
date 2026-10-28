@@ -218,7 +218,8 @@
     </div>
 
     <!-- 回到最新胶囊（N11/决策12）：滚动离底超过一屏即浮现（showJumpButton 距底几何判定），
-         点之平滑滚回并恢复锚定（force 同步清零距底快照 → 胶囊即时消失）。
+         点之回底并恢复锚定（流式增长期即时跳 / 静止期平滑——smooth 通行门见
+         useVirtuaFollow opts.smoothAllowed；force 同步清零距底快照 → 胶囊即时消失）。
          形态 = demo .to-latest：elevated 浮层底 + border-strong 边 + shadow-2 + 12px/600 字重 +
          0.02em 字距 + hover 提边框色（无底色反馈）；浮现 = opacity + 6px 上浮（demo .18s，
          取令牌 --duration）；图标 13px（demo .to-latest .sicon）= svg 普通尺寸类（Button 基类
