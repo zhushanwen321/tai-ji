@@ -1915,14 +1915,25 @@ async function metricsFixContext(metPassed: boolean): Promise<string> {
   ].join("\n");
 }
 
+// 大 diff 下 gate 脚本 stdout 可超引擎 world.run 256KB 捕获上限（2026-10-28 实测
+// coverage-gate 单次 318KB 判 failed）——全量输出重定向日志文件（.tmp/，gitignore），
+// stdout 只回传尾部供失败摘要消费；exit code 原样透传（gate 判定唯一权威通道，
+// 失败明细走 coverage.json / metrics.json 产物文件，不经 stdout 解析）
+const GATE_STDOUT_TAIL_BYTES = 60_000;
+const runGateCapped = (label: string, argv: string[]) => {
+  const logPath = `.tmp/prl-gate-${label}.log`;
+  const inner = `${argv.map((a) => shq(a)).join(" ")} > ${shq(logPath)} 2>&1; ec=$?; echo "gate-exit=$ec（完整日志 ${logPath}）"; tail -c ${GATE_STDOUT_TAIL_BYTES} ${shq(logPath)}; exit $ec`;
+  return world.run("bash", ["-c", inner], { timeoutMs: 7_200_000 });
+};
+
 const GATE_SUITE_ROUNDS = 3;
 await step("gate-suite", async () => {
   const extra = await sharedSrcArgs();
   for (let round = 1; round <= GATE_SUITE_ROUNDS; round++) {
     // 两道都跑完才进修复判定（聚合面完整：coverage 失败不阻塞 metrics 的诊断信息；
     // coverage exit 2 工具错误时跳过 metrics，直接走工具错误分支）
-    const cov = await world.run("python3", [".agents/skills/pr-cr-fix/scripts/coverage-gate.py", "--base", base, ...extra], { timeoutMs: 7_200_000 });
-    const met = cov.exitCode === 2 ? null : await world.run("python3", [".agents/skills/pr-cr-fix/scripts/metrics-gate.py", "--base", base], { timeoutMs: 7_200_000 });
+    const cov = await runGateCapped("coverage", ["python3", ".agents/skills/pr-cr-fix/scripts/coverage-gate.py", "--base", base, ...extra]);
+    const met = cov.exitCode === 2 ? null : await runGateCapped("metrics", ["python3", ".agents/skills/pr-cr-fix/scripts/metrics-gate.py", "--base", base]);
     if (cov.exitCode === 2 || met?.exitCode === 2) {
       throw new Error(
         `gate-suite exit 2（工具错误，不自动重试）：\n${tailLines(`${cov.stderr}\n${cov.stdout}${met ? `\n${met.stderr}\n${met.stdout}` : ""}`, 15)}\n按脚本输出指引处理（多为配置漂移/记账未完成，需人看）`,
@@ -1935,7 +1946,7 @@ await step("gate-suite", async () => {
       gates.metrics = (await readJsonViaNode<MetricsJson>(`${prReviewDir}/metrics.json`, READ_METRICS_SLIM))?.verdict ?? "pass";
       log(`[gate-suite] coverage=${gates.coverage}${pct !== null ? `(${pct}%)` : ""} metrics=${gates.metrics}${round > 1 ? `（第 ${round} 轮收敛）` : "（首轮全绿）"}`);
       // PR 规模披露（非门禁）：dev 线累积 diff 的体量让用户知情，供 push 授权决策参考
-      const stat = await world.run("git", ["diff", "--stat", `${baseHash}...HEAD`]);
+      const stat = await runGateCapped("diffstat", ["git", "diff", "--stat", `${baseHash}...HEAD`]);
       log(`[gate-suite] PR 规模披露（${crFixBranch || "当前分支"} 相对 ${base}）：\n${tailLines(stat.stdout, 12)}`);
       return;
     }
@@ -2135,9 +2146,9 @@ await step("final-gates", async () => {
     "final-gates",
     "final-gates（coverage → metrics → pr-pre-merge --test-result，失败从 ① 头部重跑）",
     async () => {
-      const cov = await world.run("python3", [".agents/skills/pr-cr-fix/scripts/coverage-gate.py", "--base", base, ...extra], { timeoutMs: 7_200_000 });
+      const cov = await runGateCapped("coverage-final", ["python3", ".agents/skills/pr-cr-fix/scripts/coverage-gate.py", "--base", base, ...extra]);
       if (cov.exitCode !== 0) return cov;
-      const met = await world.run("python3", [".agents/skills/pr-cr-fix/scripts/metrics-gate.py", "--base", base], { timeoutMs: 7_200_000 });
+      const met = await runGateCapped("metrics-final", ["python3", ".agents/skills/pr-cr-fix/scripts/metrics-gate.py", "--base", base]);
       if (met.exitCode !== 0) {
         return { exitCode: met.exitCode, stdout: `${cov.stdout}\n${met.stdout}`, stderr: met.stderr };
       }
@@ -2146,7 +2157,7 @@ await step("final-gates", async () => {
       //（与 zsw 版同构——其 coverageTestInject 的 insufficient 分工分支同样不可达；
       //「测试跑红 → FAIL」的终局拦截由 runGate 短路本身承担，pre-merge 的 FAIL 注入
       // 判定路径保留在 pr-pre-merge.sh 内部）
-      const pre = await world.run("bash", ["scripts/pr-pre-merge.sh", "--test-result", "PASS", "--base", base, "--quiet"], { timeoutMs: 7_200_000 });
+      const pre = await runGateCapped("premerge-final", ["bash", "scripts/pr-pre-merge.sh", "--test-result", "PASS", "--base", base, "--quiet"]);
       return {
         exitCode: pre.exitCode,
         stdout: `${cov.stdout}\n${met.stdout}\n${pre.stdout}`,
