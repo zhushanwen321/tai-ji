@@ -28,7 +28,10 @@
 // - 断连语义 §6.23（A 级，时间平抑类清空形态退役）：onRuntimeUnavailable 按 reason 分流
 //   ——disconnect 不清分区（重连后 reconcile 对账收敛）；restart 保留分区 + 提交挂起
 //   （suspendFormSubmissions，重连对账完成经 onSnapshotReconciled 恢复），封住「旧
-//   runtime 对已终结 requestId 静默忽略、UI 记为已提交」的假成功窗口；
+//   runtime 对已终结 requestId 静默忽略、UI 记为已提交」的假成功窗口。恢复链去合取化：
+//   对账触发不依赖 activeSessionId 置位（reconcileNow 全分区对账）、RPC 失败重试一轮
+//   + 耗尽经 onReconcileFailed 置错误条可见反馈、dialog 节禁答与 form 通道恢复事件
+//   解耦（FormSheet）——任一条件不满足不再永久锁死待办；
 // - 请求失效呈现联动（§6.4/§7.1）：requests-invalidated / plugin:uiRequestExpired 命中
 //   当前呈现请求 → 关闭活动 Sheet + 原因提示（不把已失效请求提交成成功）；
 //   plugin:permissionRequestExpired 命中当前审批请求 → 仅原因提示（Sheet 收层由 App
@@ -328,7 +331,15 @@ const formChannel = createFormRequestChannel({
     // §6.23 restart 恢复挂点：快照对账完成 = 壳分区已与 runtime 挂起表对齐——提交挂起
     // 解除（仍在的条目恢复可提交、已不存在的已被剔除）。挂起的置位在 suspendFormSubmissions
     // （bootstrap restart 分支），恢复恒经本回调（事件驱动，无定时器——时间平抑红线）。
+    // 对账触发点：连接恢复边沿（reconcileNow，含无活跃会话的全分区对账）+ sid 置位
+    // watch + factory 内 RPC 失败重试——恢复链任一支完成即达本回调（去合取化）。
     formSubmitSuspended.value = false
+  },
+  onReconcileFailed: () => {
+    // §6.23 恢复链去合取化（窗口②）：RPC 失败（factory 内已立即重试一轮）耗尽后的可见
+    // 失败反馈，不静默——挂起期间用户可感知「待办状态未同步」；重连边沿 / sid 变化会
+    // 再次触发 reconcile（事件驱动重试，无定时器）。
+    showErrorBar(t('mobile.errorBar.reconcileFailed'))
   },
   onInvalidated: (sid, _requestIds, removed) => {
     // 请求失效呈现联动（§6.4/§7.1）：当前会话的 form/planReview 请求被撤销 → 关 Sheet +
@@ -438,9 +449,11 @@ export type MobileFormRequests = {
   /** 取消（等价 respond(requestId, null)） */
   cancel(requestId: string): void
   /**
-   * 快照对账立即执行（App.vue watch(isConnected) connected 边沿消费）：静默重连保持
-   * 视图挂载、sessionId 不变，断连期间到达的 form/planReview 请求经此补挂、已终结的
-   * 经此剔除；sid 为空跳过（无会话分区可对账）。
+   * 快照对账立即执行（App.vue watch(isConnected) connected 边沿消费）。§6.23 恢复链
+   * 去合取化——挂起解除不依赖 activeSessionId 置位：活跃 sid 照常对账（sid 首次置位的
+   * 补跑由本 hook 内 watch 承接），另对在场分区逐个对账（用户停留列表页、无活跃会话时，
+   * 任一分区对账完成即触发 onSnapshotReconciled 解除提交挂起）。无 sid 且分区为空时
+   * no-op。
    */
   reconcileNow(): void
 }
@@ -504,14 +517,27 @@ export function useMobileFormRequests(sessionId: Ref<string | null>): MobileForm
     if (sid) formChannel.reconcile(sid)
   }, { immediate: true })
 
-  // 回传/取消/对账的 sid 守卫包装收敛 bindSessionFormActions（双壳同构装配段单点，见 ui
+  // 回传/取消的 sid 守卫包装收敛 bindSessionFormActions（双壳同构装配段单点，见 ui
   // form-request-channel）：回传核心流（定位 / 未送达保留 / 送达摘除）与呈现钩子（已终结
   // 留痕 / 未送达留痕）在 factory + 上方 formChannel 装配段。respond 返回值 = 是否送达，
-  // App 编排消费（false → FormSheet 内联错误行，回传失败不静默）；reconcileNow =
-  // 连接恢复边沿的对账入口（App.vue watch(isConnected) 消费，sid 为空跳过）。
+  // App 编排消费（false → FormSheet 内联错误行，回传失败不静默）。
   const actions = bindSessionFormActions(formChannel, () => sessionId.value)
 
-  return { currentFormRequest, currentPlanReviewRequest, respond: actions.respond, cancel: actions.cancel, reconcileNow: actions.reconcile }
+  // §6.23 恢复链去合取化（窗口①）：连接恢复边沿的对账入口不依赖 sid 置位——活跃 sid
+  // 照常对账（分区为空也拉快照，挂起解除主路径），另对在场分区逐个对账（restart 置挂起
+  // 时用户可能停留在会话列表、activeSessionId 为 null，若只对账活跃 sid 则
+  // onSnapshotReconciled 永不触发、提交挂起永久锁死待办）。bindSessionFormActions 的
+  // sid 守卫 reconcile 不复用（其「sid 空整体跳过」语义正是本窗口缺口）。
+  function reconcileNow(): void {
+    const sid = sessionId.value
+    if (sid) formChannel.reconcile(sid)
+    for (const other of formRequestsBySid.keys()) {
+      if (other === sid) continue
+      formChannel.reconcile(other)
+    }
+  }
+
+  return { currentFormRequest, currentPlanReviewRequest, respond: actions.respond, cancel: actions.cancel, reconcileNow }
 }
 
 // ── §6.18 待办聚合读口段（「需要你处理」区 + BottomNav 计数角标的共同数据源）────────

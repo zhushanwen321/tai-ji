@@ -57,10 +57,12 @@ configureChatNoticeText((key) => t('panel.message.chatNotice.' + key))
  * 形态，§6.23 裁决退役）——重连后由既有 getPendingRequests reconcile 对账收敛（事实源）：
  * - disconnect：网络断连，runtime 同一实例、挂起表还在——分区保留即对账基线，无额外动作；
  * - restart：runtime 重启，新实例挂起表已清零——分区保留（Sheet 视图不闪删）+ 提交挂起
- *   （suspendFormSubmissions）：重连成功后 reconcile 完成前 FormSheet 提交/取消禁用，
- *   封住「旧 runtime 对已终结 requestId 静默忽略、UI 记为已提交」的假成功窗口；恢复恒经
- *   form 通道 onSnapshotReconciled（对账完成事件，无定时器）。dialog 通道 queue 两 reason
- *   均不清（同 §6.23 分区保留语义）。
+ *   （suspendFormSubmissions）：重连成功后 reconcile 完成前 FormSheet 的 form/planReview 节
+ *   提交/取消禁用，封住「旧 runtime 对已终结 requestId 静默忽略、UI 记为已提交」的假成功
+ *   窗口；恢复恒经 form 通道 onSnapshotReconciled（对账完成事件，无定时器）。恢复链去
+ *   合取化（companion-bridge reconcileNow 全分区对账 + reconcile 失败重试/可见反馈 +
+ *   dialog 节禁答解耦）：挂起解除不依赖 activeSessionId 置位或单次 RPC 成功，任一触发点
+ *   对账完成即恢复。dialog 通道 queue 两 reason 均不清（同 §6.23 分区保留语义）。
  * 模块级提取供 __testing 装配断言消费（shellEffects 同式）。
  */
 function handleRuntimeUnavailable(reason: 'restart' | 'disconnect'): void {

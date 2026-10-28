@@ -261,6 +261,7 @@ export default {
     },
     errorBar: {
       responseNotDelivered: '回复未送达，连接恢复后可重试',
+      reconcileFailed: '待办状态同步失败，连接恢复后将自动重试',
       dismiss: '关闭',
     },
     formCard: {

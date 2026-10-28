@@ -7,7 +7,8 @@
 // - input：单行文本回传字符串
 // - editor：多行 Textarea + prefill 预填 + 等宽字体（v1 CompanionBand editor 实装形态）
 // - 未知 method：只读降级（ERR3——不白屏、无作答钮）
-// - submitSuspended（§6.23）：作答钮全禁 + description 提示在场
+// - submitSuspended（§6.23）：form/planReview 节禁答 + description 提示在场；dialog 节
+//   与 form 通道恢复事件解耦（不受挂起禁答——回传面独立，送达判定自带）
 //
 // 呈现查询 = Sheet portal 到 body（sheet.test.ts 同款）；回传断言走 emitted 事件
 // （App 编排路由两通道的集成面在 mobile-form.spec / mobile-companion-band.spec）。
@@ -136,19 +137,33 @@ describe('FormSheet dialog 四型（§6.5 泛化承接）', () => {
     wrapper.unmount()
   })
 
-  it('submitSuspended（§6.23）：作答/取消钮全禁 + description 提示在场（对账完成前不可作答）', async () => {
-    const wrapper = mountSheet({ submitSuspended: true })
+  it('submitSuspended（§6.23）：form/planReview 节禁答 + description 提示在场；dialog 节解耦不受禁（对账完成前 form 面不可作答，dialog 回传面独立）', async () => {
+    // dialog 节：挂起不禁答（§6.23 恢复链去合取化——dialog 作答走 queue 回传面，
+    // 未送达保留重试，不被 form 通道恢复事件连带锁死）
+    const dialogSheet = mountSheet({ submitSuspended: true })
     await flushPromises()
-    expect((expectBodyEl('form-sheet-dialog-ok') as HTMLButtonElement).disabled).toBe(true)
-    expect((expectBodyEl('form-sheet-dialog-cancel') as HTMLButtonElement).disabled).toBe(true)
+    expect((expectBodyEl('form-sheet-dialog-ok') as HTMLButtonElement).disabled).toBe(false)
+    expect((expectBodyEl('form-sheet-dialog-cancel') as HTMLButtonElement).disabled).toBe(false)
+    click('form-sheet-dialog-ok')
+    await flushPromises()
+    expect(dialogSheet.emitted('submit')).toEqual([[{ requestId: 'req-fs-1', result: true }]])
+    // dialog-only 呈现不显示「对账中」提示（被禁答面不存在）
+    expect(bodyEl('sheet-description')?.textContent ?? '').toBe('')
+    dialogSheet.unmount()
+
+    // planReview 节：挂起禁答面保持（form 通道恢复事件驱动）+ description 提示在场
+    const planSheet = mountSheet({
+      dialog: undefined,
+      planReview: { requestId: 'req-fs-2' },
+      submitSuspended: true,
+    })
+    await flushPromises()
+    expect((expectBodyEl('form-sheet-plan-review-approve') as HTMLButtonElement).disabled).toBe(true)
+    expect((expectBodyEl('form-sheet-plan-review-dismiss') as HTMLButtonElement).disabled).toBe(true)
     const hint = bodyEl('sheet-description')?.textContent ?? ''
     expect(hint.length).toBeGreaterThan(0)
     expect(hint.includes('对账') || hint.toLowerCase().includes('reconcil')).toBe(true)
-    // 禁用下点击不产生作答事件（假成功窗口封堵的用户可见面）
-    click('form-sheet-dialog-ok')
-    await flushPromises()
-    expect(wrapper.emitted('submit')).toBeUndefined()
-    wrapper.unmount()
+    planSheet.unmount()
   })
 
   it('allowCancel=false：取消钮隐藏（协议显式收窄，v1 band 同语义）', async () => {

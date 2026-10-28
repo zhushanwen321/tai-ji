@@ -7,7 +7,8 @@
 // - C4 富交互门：form ∨ planReview 放行（isRichInteractionFrame 单点，帧守卫在 form-protocol）
 // - 快照对账算法：getPendingRequests 差集剔除（不在快照中的旧条目一律移除，**空快照也
 //   执行剔除**——覆盖「runtime 已清 pending 而壳分区仍留僵尸请求」主路径）；补入只入
-//   富交互帧（快照补入过滤），空分区 no-op
+//   富交互帧（快照补入过滤），空分区 no-op；RPC 失败 warn + 立即重试一轮，重试耗尽经
+//   onReconcileFailed 外发（§6.23 挂起恢复链——onSnapshotReconciled 必须最终可达）
 // - 失效摘除：按 requestId 摘除（幂等）；摘除前条目集随钩子外发（桌面 planReview
 //   answered 判定的输入）
 // - respond 核心流：定位 → sendExtensionUIResponse 回传 → 未送达保留分区条目可重试
@@ -70,6 +71,12 @@ export interface FormRequestChannelOptions { // oe-exempt:20261016:framework:壳
   onInvalidated?: (sessionId: string, requestIds: readonly string[], removed: readonly ExtensionUIRequest[]) => void
   /** 快照对账收尾钩子：removedIds = 本次被剔除的旧条目 id（桌面 btw 草稿 diff 清理 + 镜像同步） */
   onSnapshotReconciled?: (sessionId: string, removedIds: readonly string[]) => void
+  /**
+   * 快照对账重试耗尽后的失败钩子（§6.23 挂起恢复链去合取化）：壳层置可见失败反馈，
+   * 保证挂起方（suspendFormSubmissions 的解除依赖 onSnapshotReconciled）对「对账未完成」
+   * 有感知、不静默。未注入 = 空操作（桌面现状）。
+   */
+  onReconcileFailed?: (sessionId: string, err: unknown) => void
   /** respond 定位失败（请求已终结）钩子（桌面 toast requestExpired / 移动 console 留痕） */
   onRespondExpired?: (sessionId: string, requestId: string) => void
   /** respond 未送达钩子（桌面 toast / 移动错误条；分区条目保留可重试不变） */
@@ -89,8 +96,9 @@ export interface FormRequestChannel { // oe-exempt:20261016:framework:form/planR
   /** 失效摘除口（壳 requests-invalidated 订阅 handler 消费） */
   invalidate(sessionId: string, requestIds: readonly string[]): void
   /**
-   * 快照对账（getPendingRequests 权威 pending 集：差集剔除 + 富交互帧补入）。失败静默
-   * warn（RPC 降级不抛）。
+   * 快照对账（getPendingRequests 权威 pending 集：差集剔除 + 富交互帧补入）。失败不抛：
+   * warn + 立即重试一次（瞬时竞态自愈）；重试仍失败经 onReconcileFailed 外发壳层反馈
+   * （§6.23 挂起恢复链——onSnapshotReconciled 对挂起方必须最终可达，不能只 console.warn）。
    */
   reconcile(sessionId: string): void
   /** 用户回复指定请求（按 requestId 精确定位）。返回 true = 已送达并摘除；false = 未送达
@@ -111,6 +119,11 @@ export function createFormRequestChannel(options: FormRequestChannelOptions): Fo
   const partitions = options.partitions
   const isFrame = options.frameFilter ?? isRichInteractionFrame
 
+  // 失败立即重试次数（§6.23 挂起恢复链去合取化）：0 次 = 重试 1 轮（共 2 次尝试）。
+  // 无定时器退避（时间平抑红线）——持续失败交 onReconcileFailed 外发壳层可见反馈，
+  // 后续触发点（重连边沿 / sid 变化的 reconcile 调用）天然构成事件驱动重试。
+  const RECONCILE_RETRY_LIMIT = 1
+
   function ingest(sessionId: string, request: DialogRequest, filter?: (req: ExtensionUIRequest) => boolean): void {
     // C4 富交互门（双壳共同放行面）：普通 dialog 帧由 CompanionBand 消费 bus 直连，
     // 与本通道零重叠
@@ -130,7 +143,7 @@ export function createFormRequestChannel(options: FormRequestChannelOptions): Fo
     if (removed.length > 0) options.onInvalidated?.(sessionId, requestIds, removed)
   }
 
-  function reconcile(sessionId: string): void {
+  function reconcile(sessionId: string, attempt = 0): void {
     void getPendingRequests(sessionId)
       .then((pending) => {
         // keepIds 只含富交互帧（快照补入过滤）：普通 dialog 帧不入本通道分区（C4 语义
@@ -153,6 +166,13 @@ export function createFormRequestChannel(options: FormRequestChannelOptions): Fo
       })
       .catch((err) => {
         console.warn('[form-request-channel] failed to reconcile pending form requests:', err)
+        // §6.23 挂起恢复链：失败不能停在 warn——立即重试一轮覆盖瞬时竞态，重试耗尽经
+        // onReconcileFailed 外发（壳层可见反馈），保证 onSnapshotReconciled 最终可达
+        if (attempt < RECONCILE_RETRY_LIMIT) {
+          reconcile(sessionId, attempt + 1)
+          return
+        }
+        options.onReconcileFailed?.(sessionId, err)
       })
   }
 

@@ -15,7 +15,10 @@
 // **取消回传 result:null**（cancel 事件 → App 转 respond(requestId, null)）。Sheet 拖拽/
 // 遮罩关闭 ≠ 取消（请求保留，底部条可再开）——close 事件仅关视图。
 // 提交禁用的第二输入 = submitSuspended（§6.23 restart 重连对账完成前禁答，companion-bridge
-// useFormSubmitSuspended 驱动）；三节任一在场的提交/取消钮同受其禁用。
+// useFormSubmitSuspended 驱动）；作用域限 form/planReview 两节（form 通道恢复事件驱动的
+// 禁答面）。dialog 节与其解耦不受禁（§6.23 恢复链去合取化：dialog 作答走 queue 回传面，
+// 送达判定自带——WS 非 OPEN 返 false 保留重试，无 form 通道对账依赖，不被其恢复事件
+// 连带锁死）。
 //
 // 失效信号消费（§6.4/§7.1）：extension:requestsInvalidated / plugin:uiRequestExpired 命中
 // 呈现中请求时由 companion-bridge 联动 closeSheet + 原因提示（数据源摘除 → 本组件三 prop
@@ -41,7 +44,7 @@ const props = defineProps<{
   dialog?: DialogRequest
   /** 作答回传未送达的 requestId（App 编排持有；匹配当前展示请求时渲染内联错误行） */
   submitFailedId?: string | null
-  /** §6.23 提交挂起（restart 重连对账完成前禁答） */
+  /** §6.23 提交挂起（restart 重连对账完成前禁答；仅作用于 form/planReview 节，dialog 节解耦） */
   submitSuspended?: boolean
 }>()
 
@@ -59,6 +62,12 @@ const { t } = useI18n()
 /** 三节任一在场（Sheet open 的内容门——空槽不渲染浮层壳） */
 const hasContent = computed(() =>
   props.request !== undefined || props.planReview !== undefined || props.dialog !== undefined,
+)
+
+/** 挂起提示可见门：仅 form/planReview 节在场时呈现（被禁答面存在才有「对账中」提示；
+ * dialog-only 呈现不受挂起禁答，不显示——§6.23 dialog 节解耦） */
+const suspendHintVisible = computed(() =>
+  props.submitSuspended === true && (props.request !== undefined || props.planReview !== undefined),
 )
 
 // 回传未送达错误行（role=alert）：submitFailedId 匹配当前展示请求才渲染——请求被摘除
@@ -92,10 +101,11 @@ watch(() => props.dialog?.method, (m) => {
   }
 })
 
-/** dialog 确认：input/editor 回传字符串、select 回传选中值、confirm 回传 true（CompanionBand 同语义） */
+/** dialog 确认：input/editor 回传字符串、select 回传选中值、confirm 回传 true（CompanionBand 同语义）。
+ * 不受 submitSuspended 禁（§6.23 恢复链去合取化：dialog 回传面独立，送达判定自带） */
 function onDialogConfirm(): void {
   const r = props.dialog
-  if (!r || !knownDialogMethod.value || props.submitSuspended) return
+  if (!r || !knownDialogMethod.value) return
   if (r.method === 'input' || r.method === 'editor') {
     emit('submit', { requestId: r.requestId, result: dialogInputValue.value })
   } else if (r.method === 'select') {
@@ -105,10 +115,10 @@ function onDialogConfirm(): void {
   }
 }
 
-/** dialog 取消（回传 null；allowCancel false 的请求不显取消钮，此处兜一道） */
+/** dialog 取消（回传 null；allowCancel false 的请求不显取消钮，此处兜一道。不受挂起禁，同上） */
 function onDialogCancel(): void {
   const r = props.dialog
-  if (!r || props.submitSuspended) return
+  if (!r) return
   emit('cancel', { requestId: r.requestId, source: 'dialog' })
 }
 
@@ -134,7 +144,7 @@ function onDismiss(): void {
   <Sheet
     :open="open && hasContent"
     :title="t('mobile.sheet.formTitle')"
-    :description="submitSuspended ? t('mobile.sheet.submitSuspended') : undefined"
+    :description="suspendHintVisible ? t('mobile.sheet.submitSuspended') : undefined"
     @update:open="!$event && onDismiss()"
   >
     <!-- form 类请求节（choice/text/schedule 题型自包含子组件；根节 testid 由
@@ -209,19 +219,17 @@ function onDismiss(): void {
         {{ dialog.message }}
       </p>
 
-      <!-- confirm：确认/取消（拒绝侧=取消在左） -->
+      <!-- confirm：确认/取消（拒绝侧=取消在左；不受挂起禁答——dialog 节解耦，见文件头） -->
       <div v-if="dialog.method === 'confirm'" class="flex justify-end gap-2 pt-1">
         <Button
           v-if="dialogAllowCancel"
           variant="ghost"
           data-testid="form-sheet-dialog-cancel"
-          :disabled="submitSuspended"
           @click="onDialogCancel"
         >{{ t('common.cancel') }}</Button>
         <Button
           variant="default"
           data-testid="form-sheet-dialog-ok"
-          :disabled="submitSuspended"
           @click="onDialogConfirm"
         >{{ t('common.confirm') }}</Button>
       </div>
@@ -263,13 +271,12 @@ function onDismiss(): void {
             v-if="dialogAllowCancel"
             variant="ghost"
             data-testid="form-sheet-dialog-cancel"
-            :disabled="submitSuspended"
             @click="onDialogCancel"
           >{{ t('common.cancel') }}</Button>
           <Button
             variant="default"
             data-testid="form-sheet-dialog-ok"
-            :disabled="submitSuspended || !dialogSelectReady"
+            :disabled="!dialogSelectReady"
             @click="onDialogConfirm"
           >{{ t('common.confirm') }}</Button>
         </div>
@@ -294,13 +301,11 @@ function onDismiss(): void {
             v-if="dialogAllowCancel"
             variant="ghost"
             data-testid="form-sheet-dialog-cancel"
-            :disabled="submitSuspended"
             @click="onDialogCancel"
           >{{ t('common.cancel') }}</Button>
           <Button
             variant="default"
             data-testid="form-sheet-dialog-ok"
-            :disabled="submitSuspended"
             @click="onDialogConfirm"
           >{{ t('common.confirm') }}</Button>
         </div>

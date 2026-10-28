@@ -259,6 +259,7 @@ export default {
     },
     errorBar: {
       responseNotDelivered: 'Reply not delivered — retry after the connection is restored',
+      reconcileFailed: 'Failed to sync pending requests — will retry when the connection recovers',
       dismiss: 'Dismiss',
     },
     formCard: {

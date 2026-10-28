@@ -462,13 +462,27 @@ describe('form 通道 respond 防御机制（无 App 装配的通道级断言）
     expect(respond('req-1', 'late')).toBe(false)
   })
 
-  it('reconcileNow：sid 为空跳过快照拉取（连接恢复入口无会话上下文的防御）', () => {
+  it('reconcileNow：sid 为空时对在场分区逐个拉快照（§6.23 恢复链去合取化——挂起恢复不依赖 sid 置位）；sid 就位后以当前 sid 拉快照', async () => {
     const sid = ref<string | null>(null)
     const { reconcileNow } = useMobileFormRequests(sid)
+    // 无 sid 且无在场分区：no-op
     reconcileNow()
     expect(mockGetPending).not.toHaveBeenCalled()
 
+    // 无 sid 但分区在场（restart 挂起时用户停留会话列表的形态）：对在场分区逐个拉快照，
+    // 任一分区对账完成即触发 onSnapshotReconciled 解除提交挂起（窗口①封堵）
+    BUS.emit({
+      kind: 'ui-request',
+      sessionId: 'sid-list',
+      request: { requestId: 'req-list', pluginId: '', kind: 'select', ...singleChoiceRequest() },
+    })
+    await flushPromises()
+    reconcileNow()
+    expect(mockGetPending).toHaveBeenCalledWith('sid-list')
+    await flushPromises()
+
     // sid 就位后立即执行：以当前 sid 拉快照（连接恢复边沿的主路径）
+    mockGetPending.mockClear()
     sid.value = 'sid-reconnect'
     reconcileNow()
     expect(mockGetPending).toHaveBeenCalledWith('sid-reconnect')

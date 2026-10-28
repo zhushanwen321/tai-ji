@@ -5,9 +5,12 @@
 //                      （重连后 reconcile 对账收敛），finalizeAllStreaming 收口照常；
 //   restart 分支    —— runtime 重启，新实例挂起表已清零：分区保留（Sheet 视图不闪删）+
 //                      提交挂起（suspendFormSubmissions）——重连成功后 reconcile 完成前
-//                      FormSheet 提交/取消禁用（封住「旧 runtime 对已终结 requestId 静默
-//                      忽略、UI 记为已提交」的假成功窗口）；恢复恒经 form 通道
-//                      onSnapshotReconciled（对账完成事件，无定时器）；
+//                      FormSheet 的 form/planReview 节提交/取消禁用（封住「旧 runtime 对
+//                      已终结 requestId 静默忽略、UI 记为已提交」的假成功窗口）；恢复恒经
+//                      form 通道 onSnapshotReconciled（对账完成事件，无定时器）。恢复链
+//                      去合取化：挂起解除不依赖 activeSessionId 置位（reconcileNow 全分区
+//                      对账）、RPC 失败重试一轮 + 耗尽置错误条可见反馈、dialog 节禁答与
+//                      form 通道恢复事件解耦（FormSheet 组件级测试）；
 //   dialog 通道     —— 两 reason 均不清（同 §6.23 分区保留语义）。
 //
 // 断言面：分区经 useMobileFormRequests 读口 + 挂起态经 useFormSubmitSuspended 读口 +
@@ -22,6 +25,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { __testing as bootstrapTesting } from '../bootstrap'
 import { __testing, isFormSubmitSuspended, useMobileFormRequests } from '../shell/companion-bridge'
+import { errorBarMessage } from '../shell/error-bar'
 import { chatStore } from '../shell/app-runtime'
 import {
   cleanupCompanionTestState,
@@ -145,6 +149,55 @@ describe('onRuntimeUnavailable reason 分流（§6.23）', () => {
     form.reconcileNow()
     await flushPromises()
     expect(form.currentPlanReviewRequest.value?.requestId).toBe('req-1')
+    expect(isFormSubmitSuspended()).toBe(false)
+  })
+
+  it('restart 后无活跃会话（用户停留会话列表）→ 全分区对账仍解除挂起（§6.23 恢复链去合取化·窗口①）', async () => {
+    // 无 App 挂载：form 通道订阅是模块级的，挂起链经读口断言（activeSessionId 保持 null）
+    emitFormRequest(__testing.mobileExtensionBus, singleChoiceRequest(), 'sid-list')
+    await nextTick()
+    bootstrapTesting.handleRuntimeUnavailable('restart')
+    await nextTick()
+    expect(isFormSubmitSuspended()).toBe(true)
+
+    // 重连对账（connected 边沿的 reconcileNow）：sid 为 null 时对在场分区逐个拉快照——
+    // onSnapshotReconciled 可达 → 挂起解除（此前 sid 守卫使 reconcile 整体跳过 = 永久挂起）
+    const { extensionDomainMocks } = await import('./helpers/companion-bridge-test-env')
+    extensionDomainMocks.getPendingRequests.mockResolvedValueOnce([])
+    const form = useMobileFormRequests(ref(null))
+    form.reconcileNow()
+    await flushPromises()
+
+    expect(extensionDomainMocks.getPendingRequests).toHaveBeenCalledWith('sid-list')
+    expect(isFormSubmitSuspended()).toBe(false)
+    // 空快照差集剔除：僵尸条目同步修剪（restart 后 runtime 挂起表已清零的形态）；
+    // 以 sid 读口断言（ref(null) 读口恒 undefined，断言不了分区）
+    expect(useMobileFormRequests(ref('sid-list')).currentFormRequest.value).toBeUndefined()
+  })
+
+  it('restart 后对账 RPC 失败：立即重试一轮，耗尽置错误条可见反馈；连接恢复再对账后解除挂起（窗口②）', async () => {
+    emitFormRequest(__testing.mobileExtensionBus, singleChoiceRequest(), 'sid-retry')
+    await nextTick()
+    bootstrapTesting.handleRuntimeUnavailable('restart')
+    await nextTick()
+    expect(isFormSubmitSuspended()).toBe(true)
+
+    // 恒拒绝：factory 内立即重试一轮（初次 + 重试共 2 次 RPC）→ 耗尽经 onReconcileFailed
+    // 置错误条（不静默停在 console.warn）；对账未完成 → 挂起保持
+    const { extensionDomainMocks } = await import('./helpers/companion-bridge-test-env')
+    extensionDomainMocks.getPendingRequests.mockRejectedValue(new Error('rpc down'))
+    const form = useMobileFormRequests(ref(null))
+    form.reconcileNow()
+    await vi.waitFor(() => expect(errorBarMessage.value).not.toBeNull())
+    expect(
+      extensionDomainMocks.getPendingRequests.mock.calls.filter((c) => c[0] === 'sid-retry'),
+    ).toHaveLength(2)
+    expect(isFormSubmitSuspended()).toBe(true)
+
+    // 连接恢复（重连边沿再次对账）：快照成功 → 挂起解除（事件驱动重试）
+    extensionDomainMocks.getPendingRequests.mockReset().mockResolvedValue([])
+    form.reconcileNow()
+    await flushPromises()
     expect(isFormSubmitSuspended()).toBe(false)
   })
 
