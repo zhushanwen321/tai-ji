@@ -20,7 +20,7 @@ TaiJi is an AI Agent desktop workbench (macOS / Windows / Linux) that puts multi
 
 ## Quick Start
 
-Current latest version: **v0.11.16** ([view all releases](https://github.com/zhushanwen321/tai-ji/releases)). After installation, the app automatically checks for new versions and offers a one-click upgrade.
+Current latest version: **v0.12.0** ([view all releases](https://github.com/zhushanwen321/tai-ji/releases)). After installation, the app automatically checks for new versions and offers a one-click upgrade.
 
 <!-- INSTALL:BEGIN -->
 <!-- Version numbers inside this block are replaced automatically by .agents/skills/merge/scripts/update-readme-install.mjs after each official release; outside the block only the "Current latest version" line above is updated along with it, all other content is left untouched. -->
@@ -32,17 +32,17 @@ Mirror repository: [gitcode.com/qq_18433817/tai-ji](https://gitcode.com/qq_18433
 
 **macOS (Apple Silicon)**
 ```bash
-curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.11.16/TaiJi-0.11.16-mac-arm64.dmg -o /tmp/TaiJi.dmg && open /tmp/TaiJi.dmg
+curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.12.0/TaiJi-0.12.0-mac-arm64.dmg -o /tmp/TaiJi.dmg && open /tmp/TaiJi.dmg
 ```
 
 **Linux**
 ```bash
-curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.11.16/TaiJi-0.11.16-x86_64.AppImage -o ~/TaiJi.AppImage && chmod +x ~/TaiJi.AppImage && ~/TaiJi.AppImage
+curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.12.0/TaiJi-0.12.0-x86_64.AppImage -o ~/TaiJi.AppImage && chmod +x ~/TaiJi.AppImage && ~/TaiJi.AppImage
 ```
 
 **Windows (PowerShell)**
 ```powershell
-Invoke-WebRequest -Uri "https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.11.16/TaiJi-0.11.16-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
+Invoke-WebRequest -Uri "https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.12.0/TaiJi-0.12.0-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
 ```
 
 </details>
@@ -54,17 +54,17 @@ Repository: [github.com/zhushanwen321/tai-ji](https://github.com/zhushanwen321/t
 
 **macOS (Apple Silicon)**
 ```bash
-curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.11.16/TaiJi-0.11.16-mac-arm64.dmg -o /tmp/TaiJi.dmg && open /tmp/TaiJi.dmg
+curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.12.0/TaiJi-0.12.0-mac-arm64.dmg -o /tmp/TaiJi.dmg && open /tmp/TaiJi.dmg
 ```
 
 **Linux**
 ```bash
-curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.11.16/TaiJi-0.11.16-x86_64.AppImage -o ~/TaiJi.AppImage && chmod +x ~/TaiJi.AppImage && ~/TaiJi.AppImage
+curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.12.0/TaiJi-0.12.0-x86_64.AppImage -o ~/TaiJi.AppImage && chmod +x ~/TaiJi.AppImage && ~/TaiJi.AppImage
 ```
 
 **Windows (PowerShell)**
 ```powershell
-Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/download/v0.11.16/TaiJi-0.11.16-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
+Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/download/v0.12.0/TaiJi-0.12.0-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
 ```
 
 </details>
