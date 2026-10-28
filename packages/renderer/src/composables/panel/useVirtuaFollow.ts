@@ -97,13 +97,11 @@ const CONVERGENCE_HARD_CAP_MS = 1500
  *   U1→U2 接线窗口的兼容层（MessageStream 消费方本单元不改）。
  * @param opts.endOffset D2 真实底部原语的滚动目标正偏移（尾部块实测总高）。U2 由 tailEl RO
  *   注入。[过渡缺省] 未注入时 = 0（无尾部高度补偿，落点 = 旧版 align-end 语义）。
- * @param opts.onStickChange stickToBottom 翻转时的副作用回调（消费方可据此收起「回到最新」胶囊等）
  */
 export function useVirtuaFollow(opts: {
   vlistRef: Ref<VirtualizerHandle | null>
   itemCount?: () => number
   endOffset?: () => number
-  onStickChange?: (stuck: boolean) => void
 }): {
   stickToBottom: Ref<boolean>
   showJumpButton: ComputedRef<boolean>
@@ -123,7 +121,7 @@ export function useVirtuaFollow(opts: {
   /** [F2] 脱离态几何快照刷新（RO / 条数 watch 调用点喂入；贴底态 guard 内聚） */
   refreshDistanceSnapshot: () => void
 } {
-  const { vlistRef, onStickChange } = opts
+  const { vlistRef } = opts
 
   /** 是否贴底（只由用户输入信号驱动翻 false，见文件头 INVAR-M4-2′）。初始贴底。 */
   const stickToBottom = ref(true)
@@ -219,7 +217,6 @@ export function useVirtuaFollow(opts: {
   function onWheel(e: WheelEvent): void {
     if (e.deltaY < 0) {
       stickToBottom.value = false
-      onStickChange?.(false)
     }
   }
 
@@ -249,7 +246,6 @@ export function useVirtuaFollow(opts: {
     lastTouchY = y
     if (y < prev) {
       stickToBottom.value = false
-      onStickChange?.(false)
     }
   }
 
@@ -314,7 +310,6 @@ export function useVirtuaFollow(opts: {
       // 恢复分支（不受抑制窗影响，D7②）；此时距底快照已 ≤ 阈值 < 一屏，胶囊自然消失
       if (!stickToBottom.value) {
         stickToBottom.value = true
-        onStickChange?.(true)
       }
       return
     }
@@ -322,7 +317,6 @@ export function useVirtuaFollow(opts: {
       // 复合判据脱离分支（D7②：抑制窗内暂停翻 false）
       if (stickToBottom.value) {
         stickToBottom.value = false
-        onStickChange?.(false)
       }
     }
     // 其余（程序性写入回声等）→ 不动
@@ -411,7 +405,6 @@ export function useVirtuaFollow(opts: {
     openConvergenceWindow()
     const v = vlistRef.value
     if (v) scrollToRealBottom(v, smooth)
-    onStickChange?.(true)
   }
 
   return {
