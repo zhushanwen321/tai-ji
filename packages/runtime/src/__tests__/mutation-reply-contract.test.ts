@@ -3,7 +3,7 @@
  *
  * 锁定行为（ADR-0065 / C-pi-14，设计 state-truth-sync-architecture.md §3.3 D8）：
  * 全部 mutation 类 RPC（改状态值且 renderer 有 store 副本，覆盖域 = session 配置状态 /
- * model / preset / config / mcp / subagent / workspace 七域）必须登记在 MUTATION_RPC_REGISTRY，并按 ADR-0065 两分支归类——
+ * model / preset / config / mcp / subagent / workspace / project 八域）必须登记在 MUTATION_RPC_REGISTRY，并按 ADR-0065 两分支归类——
  * 分支一（后端可变换请求值：pi 钳制/pattern 换模）reply 必须携带生效值字段且消费侧
  * 禁乐观写；分支二（后端原样存储）reply 携带回显字段或登记豁免理由，消费侧允许
  * 乐观写 + reply 权威覆盖 + 失败回滚。
@@ -384,6 +384,50 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
     replyKey: 'workspace.recentList',
     effectiveFields: ['records'],
   },
+  // ── 分支一（project 域）：project 列表写通道命令四件套（connection-datasync-ssot §6.6）。
+  // 四命令共用 ProjectCommandReply（protocol.ts 具名形状：state 完整新状态整表 + revision
+  // 新值，均必需），reply type 与 request 同名、ReplyPayloadMap 引用 ServerMessageMap 同名
+  // 条目（preset.create 同款 payload 消费型同名模式）。后端可变换请求值：id 由 runtime
+  // 生成 / name trim 落盘 / activeProjectId 锚定回落 / INV-4 归一化修复随命令落盘
+  //（project-store createProject/renameProject/removeProject/setActiveProject →
+  // ensureInvariants + commitCommand），请求值 ≠ 生效状态——renderer 缓存视图禁乐观写，
+  // 回执整表提交；拒绝（revision 失配/语义校验失败）走统一 error envelope，renderer 保持
+  // 命令前状态，错误态不走 effectiveFields（信封语义同 mcp ok:false）。──
+  {
+    // create：id 运行时生成（proj-<ts>-<seq>）+ trim 后名称 + 新建即设活跃——生效 id
+    // 与名称仅回执可知。
+    type: 'project.createProject',
+    branch: 'transformable',
+    contract: 'effective-value',
+    replyKey: 'project.createProject',
+    effectiveFields: ['state', 'revision'],
+  },
+  {
+    // rename：trim 后名称生效；nameless 默认项目拒绝（error envelope，不落盘）。
+    type: 'project.renameProject',
+    branch: 'transformable',
+    contract: 'effective-value',
+    replyKey: 'project.renameProject',
+    effectiveFields: ['state', 'revision'],
+  },
+  {
+    // remove：删除的是活跃项时 activeProjectId 锚定回落默认项目（INV-4 回退链），
+    // 生效 active 仅回执可知。
+    type: 'project.removeProject',
+    branch: 'transformable',
+    contract: 'effective-value',
+    replyKey: 'project.removeProject',
+    effectiveFields: ['state', 'revision'],
+  },
+  {
+    // setActive：锚定切换不更新 lastUsedAt（R6.2 顺序稳定不置顶），回执整表 + revision
+    // 新值校准缓存视图。
+    type: 'project.setActiveProject',
+    branch: 'transformable',
+    contract: 'effective-value',
+    replyKey: 'project.setActiveProject',
+    effectiveFields: ['state', 'revision'],
+  },
   // ── 分支二：ack 豁免清单（reply 无回显字段，豁免理由逐条登记）──
   {
     type: 'preset.setDefault',
@@ -605,12 +649,13 @@ const REPLY_PAYLOAD_MAP_BLOCK = extractBlock('export interface ReplyPayloadMap {
 const SERVER_MESSAGE_MAP_BASE_BLOCK = extractBlock('export interface ServerMessageMapBase {')
 
 /** 谓词覆盖域（ADR-0065 范围边界）：session 配置状态 / model / preset / config / mcp /
- * subagent / workspace 七域（mcp 为 pi-mcp-management 设计纳入——add/update/remove 是 mcp.json 配置
+ * subagent / workspace / project 八域（mcp 为 pi-mcp-management 设计纳入——add/update/remove 是 mcp.json 配置
  * 状态 mutation；subagent 为 subagent-model-switch 设计纳入——setModel 是执行模型配置
  * mutation，renderer 持显示副本、回执含生效值字段；workspace 为最近工作区列表纳入——
  * record/setPinned 改 recent-workspaces.json 持久化状态，renderer 持列表副本、reply
- * 回写后终态列表） */
-const MUTATION_DOMAINS = ['session', 'model', 'preset', 'config', 'mcp', 'subagent', 'workspace'] as const
+ * 回写后终态列表；project 为 connection-datasync-ssot 写通道命令化纳入——四命令是
+ * projects.json 持久化状态的 runtime 唯一写入口，renderer 持缓存视图副本、回执整表提交） */
+const MUTATION_DOMAINS = ['session', 'model', 'preset', 'config', 'mcp', 'subagent', 'workspace', 'project'] as const
 
 /**
  * 改值动词形态（宽松 startsWith——宁可误红逼人显式归类，见文件头检查取向声明）。
@@ -865,6 +910,10 @@ describe('MUTATION_RPC_REGISTRY 清单检查（ADR-0065 / C-pi-14，D8 机器强
     // workspace 域（最近工作区列表）：echo-value 的 records 必需回显（degraded optional
     // 是降级信封标记，不入契约）
     const workspaceRecentListRecords: HasRequiredField<ServerMessageMap['workspace.recentList'], 'records'> = true
+    // project 域（connection-datasync-ssot 写通道命令化）：ProjectCommandReply 的完整新
+    // 状态整表与 revision 新值必需（四命令共用形态，以 createProject 一处为代表断言）
+    const projectCommandState: HasRequiredField<ServerMessageMap['project.createProject'], 'state'> = true
+    const projectCommandRevision: HasRequiredField<ServerMessageMap['project.createProject'], 'revision'> = true
 
     const assertions = [
       modelSwitchProvider, modelSwitchModelId, thinkingLevel,
@@ -873,6 +922,7 @@ describe('MUTATION_RPC_REGISTRY 清单检查（ADR-0065 / C-pi-14，D8 机器强
       providerUpdatedEcho, mcpMutationEntry,
       subagentSetModelEffectiveModel, subagentSetModelEffectiveThinking,
       workspaceRecentListRecords,
+      projectCommandState, projectCommandRevision,
     ]
     expect(assertions, '类型断言清单意外为空——本用例失效，请检查').not.toHaveLength(0)
     expect(assertions.every(Boolean)).toBe(true)
