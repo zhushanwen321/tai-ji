@@ -12,7 +12,7 @@
 // - panel/navigation/hooks → no-op（移动壳无 panel/导航 store；SessionEntryPort 全成员
 //   可选缺省 no-op、链零新增步骤可跑，sessionEntry 订阅/LRU 步已接线——remote-use D2）
 // - turn 展开 → 壳内 per-session Map 分区（ADR-0049 范式；桌面 useTurnExpansion 的 mobile 子集）
-import { ref, type Ref } from 'vue'
+import { reactive, ref, type Ref } from 'vue'
 import {
   createChatStore,
   createSessionFlow,
@@ -410,7 +410,11 @@ registerSessionCleanup((sid) => {
 function anchorPartitionOf(sid: string): QueueEditAnchorPartition {
   let p = queueEditAnchorMap.get(sid)
   if (!p) {
-    p = { clientUuid: null }
+    // 分区对象必须 reactive（桌面 useQueueEditAnchor 的 anchorState 同款）：QueueStrip 的
+    // 编辑提示条 computed（queueEditAnchorOf 消费）与离场自动解除 watch 依赖 clientUuid
+    // 读写的响应式追踪——普通对象下锚定写入不触发重渲染/重算，提示条永不显示、离场
+    // 解除失效（编辑态对用户不可见 = D6 契约在移动壳失效）。
+    p = reactive<QueueEditAnchorPartition>({ clientUuid: null })
     queueEditAnchorMap.set(sid, p)
   }
   return p

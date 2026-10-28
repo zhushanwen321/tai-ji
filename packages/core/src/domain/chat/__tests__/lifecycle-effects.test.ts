@@ -62,7 +62,7 @@ interface Fixture { // oe-exempt:20261003:test:测试 fixture 单实现常态
   dispose: () => void
 }
 
-function makeFixture(): Fixture {
+function makeFixture(ensureStream?: (sessionId: string) => void): Fixture {
   const scope = effectScope(true)
   const chat = scope.run(() => createChatStore())!
   const session = createSessionStore()
@@ -90,6 +90,7 @@ function makeFixture(): Fixture {
       markDead: markDeadSpy,
       revive: (sid) => session.revive(sid),
     },
+    ...(ensureStream ? { ensureStream } : {}),
   }
   return {
     chat,
@@ -226,6 +227,18 @@ describe('createLifecycleEffects.openRestoreWindow（恢复窗口订阅）', () 
 
     expect(getSubscriptionState('s1')?.subscribed ?? false).toBe(false)
     warn.mockRestore()
+  })
+
+  it('deps.ensureStream 注入：走全套重建（events handler 重挂 + bus 订阅），不回落 bus 层 resubscribe', () => {
+    const ensureStream = vi.fn()
+    const injected = makeFixture(ensureStream)
+
+    injected.effects.openRestoreWindow('s1')
+
+    expect(ensureStream).toHaveBeenCalledTimes(1)
+    expect(ensureStream).toHaveBeenCalledWith('s1')
+    // 分流断言：注入态不得再发 bus 层 subscribe（避免双订阅）
+    expect(injected.subscribeRpc).not.toHaveBeenCalled()
   })
 })
 

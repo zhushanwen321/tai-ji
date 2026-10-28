@@ -16,15 +16,17 @@ import { getDeliveryProjectionRef, resetChatModuleStateForTest } from '@taiji/co
 import type { DeliveryFrameEntry } from '@taiji/core'
 import QueueStrip from '../QueueStrip.vue'
 import { i18n } from '../../i18n'
+import { clearQueueEditFor, queueEditAnchorOf, composerInjectionStore } from '../../shell/app-runtime'
 
-const { cancelDeliveryMock, resyncDeliveryMock } = vi.hoisted(() => ({
+const { cancelDeliveryMock, resyncDeliveryMock, peekDeliveryMock } = vi.hoisted(() => ({
   cancelDeliveryMock: vi.fn(),
   resyncDeliveryMock: vi.fn(),
+  peekDeliveryMock: vi.fn(),
 }))
 
 vi.mock('@taiji/core/transport/api/domains/chat', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@taiji/core/transport/api/domains/chat')>()
-  return { ...actual, cancelDelivery: cancelDeliveryMock, resyncDelivery: resyncDeliveryMock }
+  return { ...actual, cancelDelivery: cancelDeliveryMock, resyncDelivery: resyncDeliveryMock, peekDelivery: peekDeliveryMock }
 })
 
 const SID = 'sid-queue-strip-v2'
@@ -65,6 +67,9 @@ beforeEach(() => {
   resetChatModuleStateForTest()
   cancelDeliveryMock.mockReset()
   resyncDeliveryMock.mockReset()
+  peekDeliveryMock.mockReset().mockResolvedValue({ clientUuid: '', found: true, content: '' })
+  clearQueueEditFor(SID)
+  composerInjectionStore.clearInjection()
 })
 
 describe('QueueStrip v2 五态状态机（§6.22 / 验收条款 1）', () => {
@@ -182,6 +187,174 @@ describe('QueueStrip v2 五态状态机（§6.22 / 验收条款 1）', () => {
     expect(rows[1]!.find('[data-testid="mobile-queue-cancel"]').exists()).toBe(false)
     expect(rows[2]!.find('[data-testid="mobile-queue-retry"]').exists()).toBe(true)
     expect(rows[2]!.find('[data-testid="mobile-queue-cancel"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+})
+
+describe('QueueStrip 取消失败三分支（§3.4 失败域拆分，各自明确反馈不静默）', () => {
+  it('RPC 异常：cancelFailed 内联错误行（含异常消息），取消钮恢复可点', async () => {
+    cancelDeliveryMock.mockRejectedValue(new Error('ws reset'))
+    setProjection(SID, [entry('q9', 'queued', 'queued', '排队消息')])
+    const wrapper = mountStrip()
+
+    await rowsOf(wrapper)[0]!.get('[data-testid="mobile-queue-cancel"]').trigger('click')
+    await flushPromises()
+
+    const errLine = wrapper.find('[data-testid="mobile-queue-strip-error"]')
+    expect(errLine.exists()).toBe(true)
+    expect(errLine.attributes('role')).toBe('alert')
+    expect(errLine.text()).toBe(tOf('mobile.queueStrip.cancelFailed', { msg: 'ws reset' }))
+    // cancellingId 已复位（防重入锁不跨失败残留）
+    expect(rowsOf(wrapper)[0]!.get('[data-testid="mobile-queue-cancel"]').attributes('aria-disabled')).toBe('false')
+    wrapper.unmount()
+  })
+
+  it('不可撤（cancelled=false 无 reason）：cancelUnavailable 文案，不回填草稿', async () => {
+    cancelDeliveryMock.mockResolvedValue({ clientUuid: 'q9', cancelled: false })
+    setProjection(SID, [entry('q9', 'queued', 'queued', '排队消息')])
+    const wrapper = mountStrip()
+
+    await rowsOf(wrapper)[0]!.get('[data-testid="mobile-queue-cancel"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="mobile-queue-strip-error"]').text()).toBe(
+      tOf('mobile.queueStrip.cancelUnavailable'),
+    )
+    expect(composerInjectionStore.pendingInjection.value).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('不可撤（cancelled=false 带 reason）：reason 入文案', async () => {
+    cancelDeliveryMock.mockResolvedValue({ clientUuid: 'q9', cancelled: false, reason: 'already in-flight' })
+    setProjection(SID, [entry('q9', 'queued', 'queued', '排队消息')])
+    const wrapper = mountStrip()
+
+    await rowsOf(wrapper)[0]!.get('[data-testid="mobile-queue-cancel"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="mobile-queue-strip-error"]').text()).toBe(
+      tOf('mobile.queueStrip.cancelUnavailableWithReason', { reason: 'already in-flight' }),
+    )
+    wrapper.unmount()
+  })
+
+  it('cancelled=true 但回执文本缺失/空白（契约违规）：restoreContentMissing 出声，不静默回空草稿', async () => {
+    cancelDeliveryMock.mockResolvedValue({ clientUuid: 'q9', cancelled: true, content: '   ' })
+    setProjection(SID, [entry('q9', 'queued', 'queued', '排队消息')])
+    const wrapper = mountStrip()
+
+    await rowsOf(wrapper)[0]!.get('[data-testid="mobile-queue-cancel"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="mobile-queue-strip-error"]').text()).toBe(
+      tOf('mobile.queueStrip.restoreContentMissing'),
+    )
+    expect(composerInjectionStore.pendingInjection.value).toBeNull()
+    wrapper.unmount()
+  })
+})
+
+describe('QueueStrip 行内编辑（chat-flow-consistency D6：锚定 + peek 预填 + 放弃/离场解除）', () => {
+  it('点编辑钮：peek 全文 → composerInjection 注入预填 + 编辑提示条在场（锚定登记）', async () => {
+    peekDeliveryMock.mockResolvedValue({ clientUuid: 'e1', found: true, content: '条目全文' })
+    setProjection(SID, [entry('e1', 'queued', 'queued', '条目预览')])
+    const wrapper = mountStrip()
+
+    await rowsOf(wrapper)[0]!.get('[data-testid="mobile-queue-edit"]').trigger('click')
+    await flushPromises()
+
+    expect(peekDeliveryMock).toHaveBeenCalledWith(SID, 'e1')
+    expect(queueEditAnchorOf(SID)).toBe('e1')
+    expect(composerInjectionStore.pendingInjection.value?.text).toBe('条目全文')
+    expect(wrapper.find('[data-testid="mobile-queue-edit-banner"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('conflict 拦截：已锚定 e1 时点 e2 → editConflict 提示，锚定不换', async () => {
+    peekDeliveryMock.mockResolvedValue({ clientUuid: 'e1', found: true, content: '全文一' })
+    setProjection(SID, [entry('e1', 'queued', 'queued', '预览一'), entry('e2', 'queued', 'queued', '预览二')])
+    const wrapper = mountStrip()
+
+    await rowsOf(wrapper)[0]!.get('[data-testid="mobile-queue-edit"]').trigger('click')
+    await flushPromises()
+    // 同条目重复点击幂等 no-op（already-editing-same：无提示不重复 peek）
+    await rowsOf(wrapper)[0]!.get('[data-testid="mobile-queue-edit"]').trigger('click')
+    await flushPromises()
+    expect(peekDeliveryMock).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-testid="mobile-queue-edit-notice"]').exists()).toBe(false)
+
+    // 他行编辑 → conflict 提示，锚定仍 e1
+    await rowsOf(wrapper)[1]!.get('[data-testid="mobile-queue-edit"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="mobile-queue-edit-notice"]').text()).toBe(
+      tOf('mobile.queueStrip.editConflict'),
+    )
+    expect(queueEditAnchorOf(SID)).toBe('e1')
+    wrapper.unmount()
+  })
+
+  it('peek RPC 失败：锚定解除 + editPeekFailed 提示（不静默）', async () => {
+    peekDeliveryMock.mockRejectedValue(new Error('peek boom'))
+    setProjection(SID, [entry('e1', 'queued', 'queued', '预览一')])
+    const wrapper = mountStrip()
+
+    await rowsOf(wrapper)[0]!.get('[data-testid="mobile-queue-edit"]').trigger('click')
+    await flushPromises()
+
+    expect(queueEditAnchorOf(SID)).toBeNull()
+    expect(wrapper.get('[data-testid="mobile-queue-edit-notice"]').text()).toBe(
+      tOf('mobile.queueStrip.editPeekFailed', { msg: 'peek boom' }),
+    )
+    wrapper.unmount()
+  })
+
+  it('peek 回执 found=false / 空文本（条目已离场）：editGone + 锚定解除', async () => {
+    peekDeliveryMock.mockResolvedValue({ clientUuid: 'e1', found: false })
+    setProjection(SID, [entry('e1', 'queued', 'queued', '预览一')])
+    const wrapper = mountStrip()
+
+    await rowsOf(wrapper)[0]!.get('[data-testid="mobile-queue-edit"]').trigger('click')
+    await flushPromises()
+
+    expect(queueEditAnchorOf(SID)).toBeNull()
+    expect(wrapper.get('[data-testid="mobile-queue-edit-notice"]').text()).toBe(
+      tOf('mobile.queueStrip.editGone'),
+    )
+    wrapper.unmount()
+  })
+
+  it('放弃编辑（提示条按钮）：锚定解除 + 提示条消失（草稿文本保留——放弃的是保位意图）', async () => {
+    peekDeliveryMock.mockResolvedValue({ clientUuid: 'e1', found: true, content: '条目全文' })
+    setProjection(SID, [entry('e1', 'queued', 'queued', '预览一')])
+    const wrapper = mountStrip()
+
+    await rowsOf(wrapper)[0]!.get('[data-testid="mobile-queue-edit"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="mobile-queue-edit-abandon"]').trigger('click')
+    await flushPromises()
+
+    expect(queueEditAnchorOf(SID)).toBeNull()
+    expect(wrapper.find('[data-testid="mobile-queue-edit-banner"]').exists()).toBe(false)
+    // 已注入的预填文本不被撤回（草稿保留语义）
+    expect(composerInjectionStore.pendingInjection.value?.text).toBe('条目全文')
+    wrapper.unmount()
+  })
+
+  it('条目离场自动解除（Q3 帧驱动 watch）：锚定条目从快照消失 → 锚定清空 + 提示条消失', async () => {
+    peekDeliveryMock.mockResolvedValue({ clientUuid: 'e1', found: true, content: '条目全文' })
+    setProjection(SID, [entry('e1', 'queued', 'queued', '预览一')])
+    const wrapper = mountStrip()
+
+    await rowsOf(wrapper)[0]!.get('[data-testid="mobile-queue-edit"]').trigger('click')
+    await flushPromises()
+    expect(queueEditAnchorOf(SID)).toBe('e1')
+
+    // 帧更新：锚定条目离场（快照只剩他条目）→ watch 自动清锚定
+    setProjection(SID, [entry('other', 'queued', 'queued', '其他条目')])
+    await flushPromises()
+
+    expect(queueEditAnchorOf(SID)).toBeNull()
+    expect(wrapper.find('[data-testid="mobile-queue-edit-banner"]').exists()).toBe(false)
     wrapper.unmount()
   })
 })
