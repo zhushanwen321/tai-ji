@@ -50,7 +50,8 @@
     "shared": [
       "packages/shared/src/subagent.ts",
       "packages/shared/src/workflow.ts",
-      "packages/shared/src/virtual-session-id.ts"
+      "packages/shared/src/virtual-session-id.ts",
+      "packages/shared/src/vid-rpc-gate.ts"
     ]
   },
   "tests": [
@@ -85,6 +86,7 @@
     "packages/shared/src/__tests__/workflow.test.ts",
     "packages/shared/src/__tests__/workflow-viz-protocol.test.ts",
     "packages/shared/src/__tests__/virtual-session-id.test.ts",
+    "packages/shared/src/__tests__/vid-rpc-gate.test.ts",
     "packages/shared/src/__tests__/protocol-subagent-stream.test.ts",
     "packages/runtime/src/infra/subagent-model-gateway.test.ts"
   ],

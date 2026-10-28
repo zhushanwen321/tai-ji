@@ -590,6 +590,21 @@ export const useWorkflowStore = defineStore('workflow', () => {
     return [...(mainSessionAgentCalls.get(mainSessionId) ?? [])]
   }
 
+  /**
+   * agentcall vid 反查归属主 session id（vid RPC 门消费）。
+   *
+   * agentcall 两段式 vid 无归属命名空间，shared vid-rpc-gate 的 owner 注入口
+   * （registerVidOwnerResolver）经 boot 装配指向本方法——agentcall vid 到达
+   * VID_RESOLVABLE_RPC 查询时在此反查解析。线性遍历（映射条目 = 打开过的
+   * agentcall 视图数，个位数量级）；未命中返回 undefined（门转 unresolvable 拒绝）。
+   */
+  function findMainSessionIdByAgentCallVid(virtualId: string): string | undefined {
+    for (const [mainSid, vids] of mainSessionAgentCalls) {
+      if (vids.has(virtualId)) return mainSid
+    }
+    return undefined
+  }
+
   /** [M7 D6] deleteSession 后清映射条目（主 session 已删，映射无意义） */
   function clearAgentCallMapping(mainSessionId: string): void {
     mainSessionAgentCalls.delete(mainSessionId)
@@ -619,6 +634,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     activeRunSignalEpoch,
     registerAgentCall,
     getAgentCallVirtualIdsByMain,
+    findMainSessionIdByAgentCallVid,
     clearAgentCallMapping,
   }
 })

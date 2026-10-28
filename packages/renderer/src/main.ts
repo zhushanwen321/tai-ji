@@ -13,6 +13,8 @@ import { installRendererErrorReporting } from './boot/error-reporter'
 import { registerCanvasOverlayBridge } from './composables/use-canvas-sync'
 import { openCanvasTab } from './components/panel/workflow-viz/overlay/workflow-viz-overlay'
 import { getImageCacheWritePort } from './lib/ipc'
+import { registerVidOwnerResolver } from '@taiji/shared'
+import { useWorkflowStore } from './stores/workflow'
 import './style.css'
 
 // dev 模式注入（core headless 化，audit §15.6）：core 不能读 import.meta.env，
@@ -65,4 +67,10 @@ initExtensionHostBridge(app)
 initPermissionRequest(app, getExtensionBus())
 app.use(createPinia())
 app.use(i18n)
+
+// vid RPC 门 owner 注入（shared vid-rpc-gate）：agentcall 两段式 vid 无归属命名空间，
+// 门在 command 入口解析时经此反查归属主会话（workflow store 的 mainSessionId → vid 映射）。
+// 懒解引用（反查在 RPC 调用时才执行，pinia 那时必已激活）；mock 模式不经 command 门，注册无副作用。
+registerVidOwnerResolver((vid) => useWorkflowStore().findMainSessionIdByAgentCallVid(vid))
+
 app.mount('#app')

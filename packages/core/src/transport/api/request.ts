@@ -12,9 +12,24 @@
  * 调用方自己从 reply 解包字段（如 `.subagents`）。
  */
 import type { ClientMessage, ClientMessageMap, ReplyPayloadMap } from '@taiji/shared'
+import { gateVidRpcSessionId } from '@taiji/shared'
 import * as pending from './pending'
 import { send } from '../ws-client'
 import { notDeliveredError } from '../errors'
+
+/**
+ * vid 门（shared vid-rpc-gate）：所有 RPC 必经 command，虚拟会话 id（subagent:/agentcall:，
+ * 前端路由 key）在此统一拦截——可解析查询类改写为归属真实会话 id，其余 fail-fast。
+ * 契约与登记清单（VID_RESOLVABLE_RPC）见 shared 模块头。真实 id 直通零干预；
+ * mock 层不经 command 无此防护（mock 无 vid 场景）。
+ */
+function withVidGate<K extends keyof ReplyPayloadMap>(type: K, payload: ClientMessageMap[K]): ClientMessageMap[K] {
+  const src = payload as { sessionId?: unknown }
+  if (src.sessionId === undefined) return payload
+  const gated = gateVidRpcSessionId(String(type), src.sessionId)
+  if (gated === src.sessionId) return payload
+  return { ...src, sessionId: gated } as ClientMessageMap[K]
+}
 
 /**
  * 发送 RPC 请求并等待 reply（类型化原语）。
@@ -46,11 +61,13 @@ export async function command<K extends keyof ReplyPayloadMap>(
   payload: ClientMessageMap[K],
   timeoutMs: number,
 ): Promise<ReplyPayloadMap[K]> {
+  // vid 门在 send 前执行：拒绝型 throw 同步抛出（请求不离机，不占 pending id）
+  const gatedPayload = withVidGate(type, payload)
   const id = pending.createCommandId()
   const result = pending.register<ReplyPayloadMap[K]>(id, timeoutMs)
   // ClientMessage 是 discriminated union（type ↔ payload 对应），helper 的泛型 payload
   // 无法满足精确联合约束，用断言绕过——type 字面量已由 ReplyPayloadMap key 约束，安全。
-  const sent = send({ type, id, payload } as ClientMessage)
+  const sent = send({ type, id, payload: gatedPayload } as ClientMessage)
   if (!sent) {
     // send false = WS 非 OPEN（reconnecting/restarting/connecting），消息根本没送出，
     // 该 id 永远等不到 reply。use-connection 的 rejectAll 只覆盖「connected → 断开」转变；

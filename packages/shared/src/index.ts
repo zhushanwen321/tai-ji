@@ -400,6 +400,15 @@ export {
   extractAgentCallSessionId,
   resolveVirtualSessionId,
 } from './virtual-session-id'
+// vid RPC 门（RPC command 入口统一拦截虚拟会话 id）——core transport request / renderer boot 共用
+export {
+  VID_RESOLVABLE_RPC,
+  VID_RPC_REJECTED_CODE,
+  VidRpcRejectedError,
+  registerVidOwnerResolver,
+  __clearVidOwnerResolverForTest,
+  gateVidRpcSessionId,
+} from './vid-rpc-gate'
 // 终端实例编号格式谓词（`term:<sid>:<seq>`，terminal-multi-instance §0.5 P7 精确前缀口径）——
 // runtime terminal-service / renderer terminal-instance-registry / core terminal-write-queue 三包共用 SSOT
 export {

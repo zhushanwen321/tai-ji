@@ -93,3 +93,33 @@ function lastSentId(): string {
   if (!last?.id) throw new Error('mockSend 未被调用或消息缺 id')
   return last.id
 }
+
+describe('command — vid 门（虚拟会话 id 在 command 入口统一拦截）', () => {
+  it('真实 id：payload 原样送出（门零干预，含其余字段不变）', async () => {
+    mockSend.mockReturnValue(true)
+    const p = command('file.tree.expand', { sessionId: 's1', path: 'packages' }, 0)
+    const sent = mockSend.mock.calls.at(-1)?.[0] as { payload: { sessionId: string; path: string } }
+    expect(sent.payload.sessionId).toBe('s1')
+    expect(sent.payload.path).toBe('packages')
+    pending.rejectAll(new Error('drain'))
+    await expect(p).rejects.toThrow('drain')
+  })
+
+  it('vid + 可解析查询类：送出的 payload.sessionId 已改写为归属真实会话 id', async () => {
+    mockSend.mockReturnValue(true)
+    const p = command('file.search', { sessionId: 'subagent:main-1:sa-04bf', showIgnored: true }, 0)
+    const sent = mockSend.mock.calls.at(-1)?.[0] as { payload: { sessionId: string; showIgnored?: boolean } }
+    expect(sent.payload.sessionId).toBe('main-1')
+    expect(sent.payload.showIgnored).toBe(true)
+    pending.rejectAll(new Error('drain'))
+    await expect(p).rejects.toThrow('drain')
+  })
+
+  it('vid + 未登记方法：拒绝且请求不离机（send 未被调），错误码 session_vid_rejected', async () => {
+    mockSend.mockReturnValue(true)
+    await expect(
+      command('session.revokeMessage', { sessionId: 'subagent:main-1:sa-04bf', targetId: 'u-1' } as never, 0),
+    ).rejects.toMatchObject({ code: 'session_vid_rejected' })
+    expect(mockSend).not.toHaveBeenCalled()
+  })
+})
