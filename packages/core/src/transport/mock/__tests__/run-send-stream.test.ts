@@ -782,6 +782,43 @@ describe("mock-domains", () => {
       await expect(project.createProject('x', 0)).rejects.toMatchObject({ code: 'project_revision_mismatch' })
     })
 
+    it('project：rename/remove/setActive 命令通道 + 保护分支（connection-datasync-ssot u6a 对齐 real）', async () => {
+      // 自包含建项（不依赖上一用例副作用，it.only 单跑亦稳）
+      const base = await project.load()
+      const created = await project.createProject('proj-cmd-target', base.revision)
+      const target = created.state.projects.find((p) => p.name === 'proj-cmd-target')!
+      expect(target.id).not.toBe('proj-default')
+
+      // rename 成功臂：改名生效 + revision 前进
+      let st = await project.load()
+      const renamed = await project.renameProject(target.id, 'proj-renamed', st.revision)
+      expect(renamed.state.projects.find((p) => p.id === target.id)?.name).toBe('proj-renamed')
+      expect(renamed.revision).toBe(st.revision + 1)
+      // rename 错误臂：revision 失配 / 空名 / 不存在 / 默认项目保护（错误码对齐 real ProjectStore）
+      await expect(project.renameProject(target.id, 'x', st.revision + 99)).rejects.toMatchObject({ code: 'project_revision_mismatch' })
+      st = await project.load()
+      await expect(project.renameProject(target.id, '   ', st.revision)).rejects.toMatchObject({ code: 'project_invalid_name' })
+      await expect(project.renameProject('proj-nope', 'x', st.revision)).rejects.toMatchObject({ code: 'project_not_found' })
+      await expect(project.renameProject('proj-default', 'x', st.revision)).rejects.toMatchObject({ code: 'project_default_protected' })
+
+      // setActive 成功臂 + 不存在臂
+      st = await project.load()
+      const activated = await project.setActiveProject('proj-default', st.revision)
+      expect(activated.state.activeProjectId).toBe('proj-default')
+      await expect(project.setActiveProject('proj-nope', activated.revision)).rejects.toMatchObject({ code: 'project_not_found' })
+
+      // remove 错误臂：默认项目保护 + 不存在
+      st = await project.load()
+      await expect(project.removeProject('proj-default', st.revision)).rejects.toMatchObject({ code: 'project_default_protected' })
+      await expect(project.removeProject('proj-nope', st.revision)).rejects.toMatchObject({ code: 'project_not_found' })
+      // remove 成功臂：删除 active 项目 → active 回落默认（先切回 target 再删，覆盖回落分支）
+      await project.setActiveProject(target.id, st.revision)
+      st = await project.load()
+      const removed = await project.removeProject(target.id, st.revision)
+      expect(removed.state.projects.some((p) => p.id === target.id)).toBe(false)
+      expect(removed.state.activeProjectId).toBe('proj-default')
+    })
+
     it('preset：内置目录非空 + CRUD + default', async () => {
       // [u7a] 由「返回空列表」收尾为返回内置模式目录：空列表与「未加载」不可区分，会让非默认模式
       // 会话的 chip / 声明行永远落不到正常分支（见 mock/index.ts 的 mockPresets 注释）。
