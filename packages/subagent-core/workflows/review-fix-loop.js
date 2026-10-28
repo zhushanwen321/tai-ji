@@ -21,6 +21,16 @@
 // fixed（带 evidence）→ reconcileIssues 关闭条目；not-fixed → openStreak 增长走 stuck；
 // 无视 → maxRounds 兜底——任何路径不再产出「clean 终态 + 清单 open 残留」的自相矛盾。
 //
+// suggestion 台账（2026-10-17）：suggestion 与 must-fix 同权追踪——aggregator 经
+// suggestion_ids 返回全部去重后 minor 条目（稳定 id；不再只是 markdown 行 + 数字）；
+// suggestion>0 但 suggestion_ids 缺失/空/条数不足 = 聚合数据缺陷，重试一次（prompt 追加
+// 失败原因）后仍无效即 aggregator-failure，不进入 fix/clean（旧 WARN 放行路径已删除）。
+// R1 初始化与 R2+ merge 同时消费 must_fix_ids + suggestion_ids；fix 队列 = 两者并集，
+// reconcileGroups 漏分兜底把未分组 suggestion 独立成组；ES3 覆盖校验要求每个 active
+// suggestion 必须进 fixes[]/deferred[]/disputed[]（suggestion-not-accounted 违规即
+// fix-failure）；R2 对账对象含 suggestion；终态 remaining 自然覆盖。修复线上事故：
+// 21 条 suggestion 仅计数无台账，4 个 fixer 只修 8 条，剩余 11 条在 clean 终态静默消失。
+//
 // 身份对齐（编号+标题三级）：aggregator 编号跨轮不稳定（紧凑化重排 / 同题换号），
 // 表格号不直接当清单主键——merge 时 resolveIssueIdentity 三级对齐（L1 编号+标题
 // 双命中沿用 / L2 标题归一唯一命中沿用旧键 / L3 避让分配），改键条目记入
@@ -146,7 +156,9 @@ const {
   findNeedsRedesign,
   parseResult,
   normalizeAggregatorResult,
+  detectLedgerDefect,
   buildIssueEntry,
+  combineIssueEntries,
   resolveRunRoot,
   computeOrigin,
   recordDormant,
@@ -263,11 +275,20 @@ function buildRepairFailureMessage(r, envTail) {
         `${r.note !== "" ? `；补修说明：${r.note}` : ""}` +
         `；改动已 staged 未提交，人工检查 git status 后显式路径处置（环境恢复 agent 回复末段：${envTail}）`);
 }
+/** severity 等级表（critical > major > minor）：单向只升不降的判定基准。 */
+const SEVERITY_RANK = { critical: 3, major: 2, minor: 1 };
 /**
  * 延续/重报条目的身份锚点字段继承（空壳缺陷修复核心，wf-1792073055433）：
  * - title：target 缺失侧才回填——已追踪条目的 title 是跨轮身份锚点（L2 标题对账依据），
  *   锁定不覆盖，防聚合器空 title 把锚点抹掉；
- * - severity：source 显式给出（非空且不同）才采信——本轮判定为准，空值不覆盖。
+ * - severity：单向只升不降（dmg-r1-1）——source 显式给出且等级更高时回写，更低时
+ *   不覆盖。同题 suggestion 重报（恒 minor 层）经 L2 标题命中已追踪 critical/major
+ *   条目时若照采本轮标注，追踪条目被洗成 minor 后 ES3 defer 校验以追踪 severity 为
+ *   权威，「must-fix 不得 defer」红线被静默绕过；降级必须走 aggregator 显式裁决
+ *   （adjudication=downgraded → dormant 通道）。与 R1 init 的同题异号防覆盖守卫
+ *   （已建条目不覆盖）镜像，「must-fix 优先」在 R1/R2+ 两个合并站点一致成立。
+ *   target.severity 来自历史状态文件，不在等级表内的意外值不参与降级判定（source
+ *   合法等级照常回写，保持「清单侧字段异常时本轮为权威」语义）。
  * 返回是否有变更（调用方可记 log）。
  */
 function inheritCarryoverFields(target, source) {
@@ -277,8 +298,14 @@ function inheritCarryoverFields(target, source) {
         changed = true;
     }
     if (typeof source.severity === "string" && source.severity && target.severity !== source.severity) {
-        target.severity = source.severity;
-        changed = true;
+        // target.severity 可能 undefined（历史条目缺字段）——等级表查值前先收窄，缺值视同历史脏值
+        const from = target.severity !== undefined ? SEVERITY_RANK[target.severity] : undefined;
+        const to = SEVERITY_RANK[source.severity];
+        // from 缺等级 = 历史脏值 → 采信本轮；to 缺等级（normalize 契约破裂）或降级 → 不覆盖
+        if (from === undefined || to > from) {
+            target.severity = source.severity;
+            changed = true;
+        }
     }
     return changed;
 }
@@ -388,6 +415,17 @@ const REVIEWER_RECOVERY_HINT = "；恢复动作：检查该 agent 的结构化�
 // 报告通常已写盘，重试只需重出有效 schema JSON。仍败才 review-failure 终判（偶发返回
 // 畸形不再终止整个 run）。
 const REVIEWER_RETRY_SUFFIX = "\n\n[RETRY] Your previous response failed schema validation (missing/invalid must_fix, or malformed JSON). Re-output ONLY a valid response matching the required schema. If your report file is already written, keep it unchanged and just return the valid structured response.";
+
+// aggregator suggestion 台账缺陷的原位重试后缀（同 REVIEWER_RETRY_SUFFIX 机制）：
+// suggestion>0 但 suggestion_ids 缺失/条数不足时追加失败原因重问——必须逐条返回，
+// 不允许只有数字或只写 markdown 表；确实没有 suggestion 时须显式 suggestion:0 + []。
+const SUGGESTION_LEDGER_RETRY_SUFFIX = "\n\n[RETRY] Your previous response failed validation: it reported suggestion > 0 but returned missing or too few `suggestion_ids` entries. Re-output ONLY a valid response matching the required schema, with one `suggestion_ids` object for EVERY deduplicated suggestion row (never a bare count and never markdown-only). If there are truly 0 suggestions, return suggestion: 0 with suggestion_ids: [].";
+
+// aggregator must-fix 台账缺陷的原位重试后缀（dmg-r1-4 双通道对称化，同上机制）：
+// must_fix>0 但 must_fix_ids 键缺失或活跃（adjudication=evidence）条目不足时带因重问
+// ——数字口径只计 evidence 条目，downgraded/unverified 行留在 must_fix_ids 但不计入
+// must_fix；确无 evidence 条目时须显式 must_fix:0（must_fix_ids 可为 [] 或保留降级行）。
+const MUST_FIX_LEDGER_RETRY_SUFFIX = "\n\n[RETRY] Your previous response failed validation: it reported must_fix > 0 but returned missing or too few `must_fix_ids` entries with adjudication=evidence (the must_fix number counts evidence rows only; downgraded/unverified rows stay in must_fix_ids but do not count). Re-output ONLY a valid response matching the required schema, with one `must_fix_ids` object for EVERY must-fix table row. If there are truly 0 evidence-backed must-fix entries, return must_fix: 0.";
 
 // fail-fast 批内包装（B1/B2）：结构化返回是必须满足的前提，agent() 失败 resolve 的
 // {value, error} 信封（worker-script-builder 归一化，B4）在此转为 reject——Promise.all
@@ -517,8 +555,8 @@ const reviewerSchema = {
   properties: {
     report_file: { type: "string", description: "Absolute path to the written review report (.md)" },
     report_content: { type: "string", description: "Full markdown report body (for schema-only agents without write tool; workflow writes it to <roundDir>/<report>.md)" },
-    must_fix: { type: "number", description: "Number of must-fix (critical+major) issues found" },
-    suggestion: { type: "number", description: "Number of suggestion-level (minor) issues found" },
+    must_fix: { type: "number", description: "Number of NEW must-fix (critical+major) issues found this round" },
+    suggestion: { type: "number", description: "Number of NEW suggestion-level (minor) issues found this round (a discovery count, NOT the ledger; the ledger is state.issues/suggestion_ids)" },
     reconciliation: {
       type: "array",
       items: {
@@ -530,7 +568,7 @@ const reviewerSchema = {
         },
         required: ["prev_id", "status"],
       },
-      description: "Reconciliation table (structured): return [] on R1 (no previous round); on R2+ every previous issue_id must have a status entry",
+      description: "Reconciliation table (structured): return [] on R1 (no previous round); on R2+ every previous issue_id (must-fix AND suggestion/minor) must have a status entry",
     },
     // W2 §5.4：reviewer 原始发现申报（problems.json 序列化数据源）——可选项（缺失归一
     // 为 []，不 fail）。ref = 报告内该问题行的锚点（分析侧按它回查 reviewer md 报告
@@ -614,11 +652,11 @@ const aggregatorSchema = {
       description: "Issue ids of the deduplicated must-fix list (MF-1..N), matching the first column of the markdown table",
     },
     // 修复分组（并行 fix 派发计划）：optional——键缺失/空时 reconcileGroups 兜底
-    // 全部活跃问题归一组（退化 = 旧单 fixer 行为）；issueIds 引用 must_fix_ids 的
-    // 表格号，组间文件必须不相交（workflow 确定性校验并合并相交组）。
+    // 全部活跃问题归一组（退化 = 旧单 fixer 行为）；issueIds 引用 must_fix_ids /
+    // suggestion_ids 的表格号，组间文件必须不相交（workflow 确定性校验并合并相交组）。
     groups: {
       type: "array",
-      description: "Fix dispatch groups covering every adjudication=evidence issue id exactly once (empty array when none); groups are fixed in parallel so their file sets must not overlap",
+      description: "Fix dispatch groups covering every adjudication=evidence issue id (must_fix_ids AND suggestion_ids) exactly once (empty array when none); groups are fixed in parallel so their file sets must not overlap",
       items: {
         type: "object",
         required: ["issueIds"],
@@ -667,7 +705,7 @@ const fixSchema = {
       items: {
         type: "object",
         properties: {
-          issue_id: { type: "string", description: "Issue identifier from the aggregated report" },
+          issue_id: { type: "string", description: "Issue identifier from your fixer task document (task document is authoritative)" },
           description: { type: "string", description: "One-line description of the fix" },
           self_check: { type: "string", description: "grep command + hit count + sync action proving the fix is complete" },
           affected_files: { type: "array", items: { type: "string" }, description: "Files touched by this fix + files checked/synced as reference points" },
@@ -793,6 +831,34 @@ function freshState() {
     dormant: [],
     disputed: [],
     fixResults: [],
+    // suggestion_ids（suggestion 台账，与 must_fix_ids 同构）：suggestion 不再只是数字/
+    // markdown 行——每条有稳定 id、进问题清单、进 fixer 文档、进 ES3 覆盖校验与 R2 对账。
+    // 键可选，但消费侧 detectLedgerDefect 核对数字与台账：suggestion>0 而缺失/条数不足 =
+    // 台账缺陷（带因重试一次，仍缺陷即 aggregator-failure 终止）；仅 suggestion=0 时缺失
+    // 合法放行（「向后兼容旧输出」实际只兼容 suggestion=0 的旧输出）。
+    suggestion_ids: {
+      type: "array",
+      description: "Issue ids of the deduplicated suggestion-level (minor) list, same object shape as must_fix_ids; every suggestion row must appear here, never markdown-only",
+      items: {
+        oneOf: [
+          { type: "string" },
+          {
+            type: "object",
+            required: ["id"],
+            properties: {
+              id: { type: "string" },
+              title: { type: "string", description: "One-line suggestion title (cross-round identity anchor)" },
+              severity: { type: "string", enum: ["critical", "major", "minor"] },
+              files: { type: "array", items: { type: "string" } },
+              evidence: { type: "string" },
+              guidance: { type: "string", description: "One-line fix direction for the fixer" },
+              adjudication: { type: "string", enum: ["evidence", "unverified", "downgraded"] },
+              note: { type: "string" },
+            },
+          },
+        ],
+      },
+    },
     issues: undefined,
     knownRemaining: [],
     convergeStreak: 0,
@@ -892,10 +958,10 @@ function buildCallRecord({ batch, round, role, name, model, prompt, promptMode, 
 // A8（guidance/evidence 缺失观测）：活跃条目缺 guidance/evidence 的单行 WARN——
 // 数据链断点（aggregator 未提取 / 归一化丢失）的可观测信号；fixer 免侦查降级提示。
 // 仅 N+M>0 时打，不逐条刷屏。
-function warnMissingFields(mustFixIds) {
-  const miss = countMissingFields(mustFixIds);
+function warnMissingFields(entries) {
+  const miss = countMissingFields(entries);
   if (miss.missingGuidance > 0 || miss.missingEvidence > 0) {
-    log("WARN: " + miss.missingGuidance + " active must-fix entries lack guidance (" + miss.missingEvidence + " lack evidence) — fixer self-investigation expected");
+    log("WARN: " + miss.missingGuidance + " active issue entries lack guidance (" + miss.missingEvidence + " lack evidence) — fixer self-investigation expected");
   }
 }
 
@@ -1396,21 +1462,35 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     // returnMeta 下 aggRaw = {value, error}；失败时 value 为空串、error 在 finalMessage 透出（MF-1）
     let aggValue = aggRaw?.value ?? aggRaw;
     let agg = normalizeAggregatorResult(aggValue);
+    // suggestion 台账完整性（消费前 fail-fast）：suggestion>0 必须配足 suggestion_ids，
+    // 否则数字没有条目/owner/覆盖校验——线上事故形态（21 条只有数字）会让残留 suggestion
+    // 在 clean 终态静默消失。显式 suggestion:0 + [] 合法；条数多于数字合法。
+    // dmg-r1-4：must-fix 通道对称 fail-fast——must_fix>0 而 must_fix_ids 键缺失或活跃
+    // （evidence）条目不足同判缺陷，不再静默走 G1 空清单降级（ES3 无法逐条覆盖校验）。
+    let ledgerDefect = (agg && typeof agg.must_fix === "number") ? detectLedgerDefect(agg) : null;
 
-    if (!agg || typeof agg.must_fix !== "number") {
+    if (!agg || typeof agg.must_fix !== "number" || ledgerDefect) {
       // 重试一次争取完整恢复（重试失败即终判，无 md 兜底——弱格式降级通道已整体
-      // 拆除）：numeric-only 兜底会丢 must_fix_ids 整条数据链（merge 跳过 / fixed 重报
-      // 转 regressed 链断 / dormant 不落 / W5 门控退化），不可接受。重试回注失败原因
-      //（对齐 zcode 版聚合重试形态 + REVIEWER_RETRY_SUFFIX 同款逻辑：「报告已写好 +
-      // 结构化返回畸形」是最常见失败形态，回注后 agent 以已写报告为准重出 JSON，
-      // 同 prompt 盲重试对该场景命中率低）。
-      const retryReason = !agg ? "JSON 解析失败或返回非对象" : "缺少 must_fix 数字字段";
-      log("Aggregator JSON invalid (" + retryReason + ", len=" + (typeof aggValue === "string" ? aggValue.length : 0) + ") — retrying once with the failure reason fed back.");
+      // 拆除）：numeric-only 兜底会丢 must_fix_ids/suggestion_ids 整条数据链（merge
+      // 跳过 / fixed 重报转 regressed 链断 / dormant 不落 / W5 门控退化），不可接受。
+      // 重试一律回注失败原因：台账缺陷按通道选重试后缀；非缺陷（JSON 失效）回注
+      // 失效原因（对齐 zcode 版聚合重试形态 + REVIEWER_RETRY_SUFFIX 同款逻辑：
+      // 「报告已写好 + 结构化返回畸形」是最常见失败形态，回注后 agent 以已写报告
+      // 为准重出 JSON，同 prompt 盲重试对该场景命中率低）。
+      let retryPrompt;
+      if (ledgerDefect) {
+        log("Aggregator " + ledgerDefect.channel + " ledger invalid (reported " + ledgerDefect.reported
+          + ", ids=" + ledgerDefect.provided + ") — retrying once with the failure reason.");
+        retryPrompt = aggPrompt + (ledgerDefect.channel === "must-fix" ? MUST_FIX_LEDGER_RETRY_SUFFIX : SUGGESTION_LEDGER_RETRY_SUFFIX);
+      } else {
+        const retryReason = !agg ? "JSON 解析失败或返回非对象" : "缺少 must_fix 数字字段";
+        log("Aggregator JSON invalid (" + retryReason + ", len=" + (typeof aggValue === "string" ? aggValue.length : 0) + ") — retrying once with the failure reason fed back.");
+        retryPrompt = aggPrompt
+          + "\n\n[RETRY] Your previous response was judged invalid (reason: " + retryReason
+          + "). Re-output ONLY a valid response matching the required schema. If your aggregated report is already written, keep it unchanged and just return the valid structured response.";
+      }
       aggRaw = await agent({
-        prompt:
-          aggPrompt +
-          "\n\n[RETRY] Your previous response was judged invalid (reason: " + retryReason +
-          "). Re-output ONLY a valid response matching the required schema. If your aggregated report is already written, keep it unchanged and just return the valid structured response.",
+        prompt: retryPrompt,
         model: AGG_MODEL,
         schema: aggregatorSchema,
         description: "aggregate",
@@ -1419,18 +1499,20 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
       });
       recordCall(buildCallRecord({
         batch: batchIndex, round, role: "aggregator", name: "aggregate",
-        model: AGG_MODEL, prompt: aggPrompt, promptMode: null, meta: aggRaw,
+        model: AGG_MODEL, prompt: retryPrompt, promptMode: null, meta: aggRaw,
       }));
       aggValue = aggRaw?.value ?? aggRaw;
       agg = normalizeAggregatorResult(aggValue);
+      ledgerDefect = (agg && typeof agg.must_fix === "number") ? detectLedgerDefect(agg) : null;
     }
 
-    if (!agg || typeof agg.must_fix !== "number") {
+    if (!agg || typeof agg.must_fix !== "number" || ledgerDefect) {
       const rawPreview = (aggValue === undefined ? "undefined" : typeof aggValue === "string" ? aggValue : JSON.stringify(aggValue)).slice(0, 200);
       log("Aggregator retry failed (len=" + (typeof aggValue === "string" ? aggValue.length : 0) + "): " + rawPreview);
       // fail-fast 终判：md 兜底解析已随弱格式降级通道整体拆除——重试失败即终止，
-      // 不从报告 md 猜计数（numeric-only 丢失 must_fix_ids 整条数据链：merge 跳过 /
-      // fixed 重报转 regressed 链断 / dormant 不落 / W5 门控退化，代价高于终止重跑）。
+      // 不从报告 md 猜计数（numeric-only 丢失 must_fix_ids/suggestion_ids 整条数据链：
+      // merge 跳过 / fixed 重报转 regressed 链断 / dormant 不落 / W5 门控退化 /
+      // suggestion 无 owner 静默遗留，代价高于终止重跑）。
       // W8：aggregator-failure 轮的当前轮条目落 batchRounds——review/aggregate 相位
       // 时长已实测（fix 相位 null 如实采集）；F3：聚合失败，mustFix/suggestion 未知
       // 非 0（null，消费侧 ?? "-" 兜底，不误读为 clean 轮）。
@@ -1438,14 +1520,29 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
       state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
       saveState(state);
       terminated = "aggregator-failure";
-      finalMessage = "Batch " + batchIndex + " round " + round + ": aggregator 失败（重试后仍无效）"
-        + (aggRaw && typeof aggRaw === "object" && aggRaw.error ? " — " + aggRaw.error : "");
+      if (ledgerDefect) {
+        finalMessage = "Batch " + batchIndex + " round " + round + ": aggregator " + ledgerDefect.channel
+          + " 台账缺陷（reported=" + ledgerDefect.reported + ", ids=" + ledgerDefect.provided
+          + "）— 声称 " + ledgerDefect.reported + " 条"
+          + (ledgerDefect.channel === "must-fix" ? "（adjudication=evidence 口径）" : "去重条目")
+          + " 但只提供 " + ledgerDefect.provided + " 条台账（不允许只有数字或只写 markdown 表），条目无法分派与覆盖校验，继续执行会让残留条目静默消失"
+          + (aggRaw && typeof aggRaw === "object" && aggRaw.error ? " — " + aggRaw.error : "")
+          + "。恢复动作：重跑 workflow；或换聚合模型 / 检查 aggregator 输出是否按 prompt 返回 "
+          + (ledgerDefect.channel === "must-fix" ? "must_fix_ids（每条 must-fix 表行一个条目，must_fix 只计 evidence 行；确无 evidence 条目时显式返回 must_fix: 0）" : "suggestion_ids（每条去重 suggestion 一个条目；确实没有 suggestion 时显式返回 suggestion: 0 + suggestion_ids: []）");
+      } else {
+        finalMessage = "Batch " + batchIndex + " round " + round + ": aggregator 失败（重试后仍无效）"
+          + (aggRaw && typeof aggRaw === "object" && aggRaw.error ? " — " + aggRaw.error : "");
+      }
       batchIndex = BATCHES.length + 1; // 终止外层循环
       break;
     }
 
     const mustFix = agg.must_fix;
     const suggestion = agg.suggestion ?? 0;
+    // 问题台账统一入口：must-fix + suggestion 合并（同 id must-fix 优先）。R1 初始化 /
+    // dormant 落盘 / R2+ merge / fix 队列全部消费这一份，避免 suggestion 在任一环掉队
+    //（线上事故：21 条 suggestion 只有数字，无 id/无 owner/无覆盖校验 → 11 条静默遗留）。
+    const aggEntries = combineIssueEntries(agg.must_fix_ids, agg.suggestion_ids);
     log("Aggregated: " + mustFix + " must-fix + " + suggestion + " suggestion(s).");
     // W2 §5.3：聚合产物结构化落盘——从聚合 agent 的既有结构化返回确定性序列化
     //（非 agent 手写第二产物；issues 含 sourceRefs 申报（缺省 []，元素 {round, ref}），
@@ -1477,14 +1574,15 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     // 身份对齐（编号+标题三级）：R1 时 issues/dormant 均空（批开始重置），解析恒走
     // L3 直接沿用表格号——统一入口调用保持一致性（fallow 前置批等未来变化下防御）。
     // title 随条目落储（跨轮身份锚点 + 清单注入段展示原料）。
-    if (round === 1 && agg.must_fix_ids && agg.must_fix_ids.length > 0) {
+    if (round === 1 && aggEntries.length > 0) {
       if (!state.issues) state.issues = {};
-      const activeIds = new Set(filterActiveIds(agg.must_fix_ids));
+      const activeIds = new Set(filterActiveIds(aggEntries));
       const r1IdMap = {};
-      for (const entry of agg.must_fix_ids) {
-        // normalize 契约：must_fix_ids 元素恒为对象（string 已被 normalizeMustFixEntry
-        // 转为 {id, severity:"major"}，畸形条目含空 id 已被 filter(Boolean) 剔除）——
-        // entry.id 直读不设防。下方 !id 仅是廉价防线，权威拦截在 normalize 层（AC1-B1）。
+      for (const entry of aggEntries) {
+        // normalize 契约：must_fix_ids/suggestion_ids 元素恒为对象（string 已被
+        // normalizeMustFixEntry/normalizeSuggestionEntry 转为对象，畸形条目含空 id 已
+        // 被 filter(Boolean) 剔除）——entry.id 直读不设防。下方 !id 仅是廉价防线，
+        // 权威拦截在 normalize 层（AC1-B1）。
         const id = entry.id;
         // Object.hasOwn：truthy 查表会让原型链键（"__proto__"/"toString"）误判已登记
         // 而 continue 跳过真实条目（与 utils findIssueKey 同款加固；id 来自 LLM 产出）。
@@ -1492,11 +1590,14 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         if (!activeIds.has(id)) continue;
         const resolved = resolveIssueIdentity(entry, { issues: state.issues, dormant: state.dormant || [] });
         if (resolved.mapped) r1IdMap[id] = resolved.key;
+        // 同题重复（L2 标题命中已建条目，如 suggestion 与 must-fix 同题异号）不覆盖：
+        // combineIssueEntries 已保 must-fix 优先，此处防后处理条目改写先建条目的 severity。
+        if (Object.hasOwn(state.issues, resolved.key)) continue;
         state.issues[resolved.key] = buildIssueEntry(entry, { round: 1 });
       }
       state.idMap = { round: 1, map: r1IdMap };
       // A8：R1 落盘后观测 guidance/evidence 缺失（数据链断点信号）
-      warnMissingFields(agg.must_fix_ids);
+      warnMissingFields(aggEntries);
     }
 
     // dormant exclude 基准：issues 键（R1 恒等即表格号）；R2+ merge 后并入翻译命中的活跃表格号
@@ -1507,9 +1608,9 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     // 表格号」——L2/L3 改键后，活跃条目的表格号 ≠ 清单键，仅用 issues 键做 exclude
     // 会把活跃追踪中的条目误落 dormant（exec-review 修复场景的改键形态复发）。
     function recordDormantThisRound() {
-      if (!(agg.must_fix_ids && agg.must_fix_ids.length > 0)) return;
+      if (aggEntries.length === 0) return;
       const before = (state.dormant || []).length;
-      state.dormant = recordDormant(state.dormant, agg.must_fix_ids, round, dormantExcludeIds);
+      state.dormant = recordDormant(state.dormant, aggEntries, round, dormantExcludeIds);
       if (state.dormant.length > before) {
         log("Dormant recorded: " + (state.dormant.length - before) + " adjudication-downgraded issue(s) (total " + state.dormant.length + ")");
       }
@@ -1552,11 +1653,14 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     // （会以本轮 roundIdMap 覆盖 state.idMap）之前快照；clean 轮 merge 不执行，
     // 快照自然携带最近一次聚合的 map。
     const prevIdMap = (state.idMap && state.idMap.map) || {};
-    if (round > 1 && state.issues && agg.must_fix_ids && agg.must_fix_ids.length > 0) {
+    if (round > 1 && aggEntries.length > 0) {
+      if (!state.issues) state.issues = {};
       let added = 0;
-      const activeIds = new Set(filterActiveIds(agg.must_fix_ids));
+      const activeIds = new Set(filterActiveIds(aggEntries));
       const roundIdMap = {};
-      for (const entry of agg.must_fix_ids) {
+      // 本轮聚合已覆盖的清单键（must-fix + suggestion）；漏报 WARN 的对照集
+      const consumedKeys = new Set();
+      for (const entry of aggEntries) {
         // normalize 契约：元素恒对象（同 R1 init 注释）；!id 仅廉价防线，权威拦截在
         // normalize 层（AC1-B1）
         const id = entry.id;
@@ -1569,12 +1673,15 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         // 三级身份对齐：resolved.key = 清单键（mapped=true 时 ≠ 表格号，记入 idMap）
         const resolved = resolveIssueIdentity(entry, { issues: state.issues, dormant: state.dormant || [] });
         if (resolved.mapped) roundIdMap[id] = resolved.key;
+        consumedKeys.add(resolved.key);
         const tracked = state.issues[resolved.key];
         if (tracked) {
           dormantExcludeIds.add(id); // 翻译后仍在问题清单活跃的表格号 → dormant exclude
           // 延续条目字段继承（wf-1792073055433 空壳缺陷修复）：重报命中已追踪条目时，
-          // title 缺失侧从本轮重报回填、severity 采信本轮显式标注——防无 title 延续条目
-          // 断跨轮身份锚点（下轮 L2 标题对账失配 → clean 轮无法销账 → 误判 stuck）。
+          // title 缺失侧从本轮重报回填、severity 单向只升不降（dmg-r1-1，与 R1 init 的
+          // 同题异号防覆盖守卫镜像）——防同题 suggestion 重报把追踪 must-fix 洗成 minor
+          // 绕过 defer 红线；也防无 title 延续条目断跨轮身份锚点（下轮 L2 标题对账
+          // 失配 → clean 轮无法销账 → 误判 stuck）。
           if (inheritCarryoverFields(tracked, entry)) {
             log("Carryover fields inherited for " + resolved.key + " (title/severity synced from re-report)");
           }
@@ -1610,7 +1717,18 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
       }
       state.idMap = { round, map: roundIdMap };
       // A8：R2+ merge 落盘后观测 guidance/evidence 缺失（与 R1 init 同一观测口径）
-      warnMissingFields(agg.must_fix_ids);
+      warnMissingFields(aggEntries);
+      // 聚合漏报但清单仍 open → 保留 + WARN（防静默丢失，对齐 pr-lifecycle 的
+      // nextIssues 保留段）：dict 形态的 issues 不会因漏报被删除，但「无人再报」的
+      // 条目若无显式信号只能等 maxRounds 兜底——让漏报成为可观测事实。
+      // reconciliation 已申报（含 not-fixed）的条目不属漏报。
+      const reconLedgerKeys = new Set([...reconAll].map((rid) => translateId(prevIdMap, rid, state.issues)));
+      for (const [id, issue] of Object.entries(state.issues)) {
+        if (!issue || issue.firstSeen === round) continue;
+        if (issue.status !== "open" && issue.status !== "regressed") continue;
+        if (consumedKeys.has(id) || reconLedgerKeys.has(id)) continue;
+        log("WARN: ledger issue " + id + " not re-reported by this round's aggregation or reconciliation — retained (anti-silent-loss)");
+      }
       if (added > 0) log("New findings tracked: " + added + " new or re-reported issue(s) in round " + round);
     }
     // dormant 落盘（merge 后：excludeIds 已并入翻译命中的活跃表格号）
@@ -1746,7 +1864,8 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     if (mustFix === 0
       && suggestion === 0
       && reviewResults.some((r) => r.must_fix > 0)
-      && (agg.must_fix_ids ? filterActiveIds(agg.must_fix_ids).length : 0) === 0) {
+      && (agg.must_fix_ids ? filterActiveIds(agg.must_fix_ids).length : 0) === 0
+      && (agg.suggestion_ids ? filterActiveIds(agg.suggestion_ids).length : 0) === 0) {
       // 问题清单守门（第三收工点）：本轮聚合活跃条目为 0 不蕴涵清单已清——上轮 open
       // 条目本轮聚合漏报时残留仍在，此时收工 = 假 clean。有残留则跳过 fix（修复
       // 队列为空，派 fixer 只会对着全降级报告乱动）继续轮追账，且不授予 W5 跨批
@@ -1808,21 +1927,24 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
 
     // A3（guidance 链最后一跳，文件总线形态）：aggregator 聚合去重时合并各维度的
     // guidance 为最具体表述（见 buildAggregatorPrompt），随组写入 aggregate-4-fixer-<k>.md，
-    // fixer 读文档定位修复点；脚本补写文档时 guidance 取自 must_fix_ids schema 数据。
+    // fixer 读文档定位修复点；脚本补写文档时 guidance 取自 must_fix_ids/suggestion_ids schema 数据。
     // W2 口径保持：只传活跃条目（filterActiveIds 同口径过滤），降级条目的 guidance 不进 fixer。
-    const activeIdSetForFix = new Set(filterActiveIds(agg.must_fix_ids || []));
-    const activeEntriesForFix = (agg.must_fix_ids || [])
+    // 全等级覆盖（suggestion 静默遗留修复）：修复队列 = must-fix ∪ suggestion（按 id 去重，
+    // must-fix 优先）——reconcileGroups 的漏分兜底对 suggestion 同样生效，fixer 文档渲染
+    // 组内全部 severity。
+    const activeIdSetForFix = new Set(filterActiveIds(aggEntries));
+    const activeEntriesForFix = aggEntries
       .filter((e) => e && typeof e === "object" && typeof e.id === "string" && activeIdSetForFix.has(e.id));
 
     // 分组（确定性 reconcile：漏分兜底独立组 + 相交合并；groups 缺失时全部归一组
-    // = 旧单 fixer 行为退化）。活跃条目为 0（聚合数据不一致的罕见路径）时归一组
-    // 派一个 fixer 读报告处理 suggestion——与旧行为等价。
+    // = 旧单 fixer 行为退化）。活跃条目为 0（聚合数据不一致的罕见路径）时归一组空清单。
     const fixGroups = reconcileGroups(agg.groups, activeEntriesForFix);
     if (fixGroups.length === 0) {
-      // 全 clean 轮不会走到 fix（all-clean/A4 break 拦截）；活跃为 0 但 suggestion>0
-      // 的路径给单组空 issue 清单——fixer 按报告 suggestion 修复（buildFixPrompt 的
-      // suggestion 文件归属条款）。
-      fixGroups.push({ id: "G1", issueIds: [], files: [], note: "no active must-fix entries; suggestion-only round" });
+      // 全 clean 轮不会走到 fix（all-clean/A4 break 拦截）；must_fix>0 / suggestion>0 而
+      // 台账缺失或不足已在聚合入口双通道 fail-fast（detectLedgerDefect，dmg-r1-4），
+      // 不会到这里。可达残留仅剩活跃条目为 0 且未被上游拦截的形态（如 mustFix=0 且
+      // suggestion 全降级）——派单个 fixer 读报告；该轮无条目级 id，ES3 无法逐条覆盖校验。
+      fixGroups.push({ id: "G1", issueIds: [], files: [], note: "no active ledger entries (aggregator returned no issue ids)" });
     }
     log("Fix: " + fixGroups.length + " group(s) — " + fixGroups.map((g) => g.id + "(" + g.issueIds.length + ")").join(", "));
 
@@ -1946,30 +2068,35 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
       disputed: perGroupResults.flatMap((r) => r.disputed || []),
     };
 
-    // ES3 硬校验（5.3 红线，恢复 mustFixIds 交叉校验——wave 3 后 agg.must_fix_ids
-    // 已是标准字段）：(1) deferred 只允许 minor；(2) must-fix 必须全进 fixes[]（漏修
-    // 判 violation）。任一违规 → fix-failure（结构化终止）。trackedIssues 传入
+    // ES3 硬校验（5.3 红线，全活跃问题覆盖）：(1) deferred 只允许 minor；(2) must-fix
+    // 必须全进 fixes[]/disputed[]（漏修判 violation）；(3) 每个 active suggestion 必须进
+    // fixes[]/deferred[]/disputed[]（suggestion-not-accounted——suggestion 静默遗留防护）。
+    // 任一违规 → fix-failure（结构化终止），不得静默 clean。trackedIssues 传入
     // state.issues——deferred severity 与追踪表交叉核对（MF-4）：must-fix 被标 minor
     // 塞进 deferred 的逃逸路径在追踪表面前失效（追踪 severity 为准）。
-    // rfl（tier-1 6.3）：mustFixIds 传 filterActiveIds 结果——降级条目不占修复队列
-    //（must_fix 计数由 aggregator 按非降级条目报，两侧口径一致）。
-    // idMap（本轮表格号→清单键）只翻译 deferred 交叉核对的查表输入；mustFixIds 与
-    // fixes[].issue_id 的集合比较双侧保持表格号空间（同源 aggregated.md，翻译即误杀）。
+    // rfl（tier-1 6.3）：mustFixIds/suggestionIds 传 filterActiveIds 结果——降级条目
+    // 不占修复队列（计数由 aggregator 按非降级条目报，两侧口径一致）。
+    // idMap（本轮表格号→清单键）只翻译 deferred/disputed 交叉核对的查表输入；
+    // mustFixIds/suggestionIds 与 fixes[].issue_id 的集合比较双侧保持表格号空间
+    //（同源 aggregated.md，翻译即误杀）。
     const fixIdMap = (state.idMap && state.idMap.round === round && state.idMap.map) || {};
     const es3MustFixIds = filterActiveIds(agg.must_fix_ids);
-    const es3Violations = validateFixResult(fixResult, es3MustFixIds, state.issues, fixIdMap);
+    const es3SuggestionIds = filterActiveIds(agg.suggestion_ids);
+    const es3Violations = validateFixResult(fixResult, es3MustFixIds, state.issues, fixIdMap, es3SuggestionIds);
     if (es3Violations.length > 0) {
-      // m7: violation 分四类——deferred 非 minor / must-fix 漏修（must-fix-not-fixed）/
-      // disputed 申述格式非法（untracked / no-evidence），finalMessage 文案区分：
-      // 统一文案会把漏修误报成 defer 违规，误导修复方向
+      // m7: violation 分类——deferred 非 minor / must-fix 漏修（must-fix-not-fixed）/
+      // suggestion 漏处理（suggestion-not-accounted）/ disputed 申述格式非法（untracked /
+      // no-evidence），finalMessage 文案区分：统一文案会把漏修误报成 defer 违规，误导修复方向
       const parts = es3Violations.map((v) =>
         v.severity === "must-fix-not-fixed"
           ? "must-fix 未在 fixes[]/disputed[] 中处理（漏修）— " + v.issue_id
-          : v.severity === "disputed-untracked"
-            ? "disputed 申述未命中问题清单条目 — " + v.issue_id
-            : v.severity === "disputed-no-evidence"
-              ? "disputed 申述缺实质反证（需 file:line + 聚合方核实遗漏点）— " + v.issue_id
-              : "deferred 含非 minor 条目（must-fix 不得 defer）— " + v.issue_id + "(" + v.severity + ")"
+          : v.severity === "suggestion-not-accounted"
+            ? "suggestion 未在 fixes[]/deferred[]/disputed[] 中处理（漏修）— " + v.issue_id
+            : v.severity === "disputed-untracked"
+              ? "disputed 申述未命中问题清单条目 — " + v.issue_id
+              : v.severity === "disputed-no-evidence"
+                ? "disputed 申述缺实质反证（需 file:line + 聚合方核实遗漏点）— " + v.issue_id
+                : "deferred 含非 minor 条目（must-fix 不得 defer）— " + v.issue_id + "(" + v.severity + ")"
       );
       log("ES3 violation: " + JSON.stringify(es3Violations));
       batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings, critical: roundCritical });

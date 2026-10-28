@@ -117,10 +117,12 @@ export declare function matchByTitle(
   dormant: unknown,
 ): { kind: string; id?: string; [key: string]: unknown };
 export declare function nextFreeId(existingIds: string[]): string;
+/** merge 三级身份对齐：为活跃聚合条目决定清单键（L1 编号恒等 / L2 标题唯一命中 /
+ *  L3 避让分配）；mapped=true 表示表格号≠清单键，需记入 idMap。 */
 export declare function resolveIssueIdentity(
   entry: { id?: string; title?: string; [key: string]: unknown },
   ctx: { issues: Record<string, unknown>; dormant: unknown[] },
-): { kind: string; id: string; [key: string]: unknown };
+): { key: string; mapped: boolean };
 export declare function translateId(
   idMap: Record<string, string> | null | undefined,
   id: string,
@@ -138,6 +140,7 @@ export declare function validateFixResult(
   mustFixIds?: string[],
   trackedIssues?: Record<string, unknown>,
   idMap?: Record<string, string>,
+  suggestionIds?: string[],
 ): Array<Record<string, unknown>>;
 export declare function reconcileIssues(
   prevIssues: Record<string, unknown>,
@@ -177,9 +180,15 @@ export declare function normalizeAggregatorResult(raw: unknown): {
   must_fix: number;
   suggestion: number;
   must_fix_ids: Array<AggMustFixEntry>;
+  suggestion_ids?: Array<AggMustFixEntry>;
   scores?: ScoreEntry[];
   [key: string]: unknown;
 };
+/** aggregator 台账完整性（双通道计数-台账核对）：must_fix/suggestion > 0 但配套 ids
+ *  键缺失或条目不足（must-fix 按 adjudication=evidence 活跃口径）→ 缺陷描述。 */
+export declare function detectLedgerDefect(
+  agg: { must_fix?: number; must_fix_ids?: unknown; suggestion?: number; suggestion_ids?: unknown; [key: string]: unknown } | null | undefined,
+): { channel: "must-fix" | "suggestion"; reported: number; provided: number } | null;
 export declare function resolveRunRoot(opts: {
   runId?: string;
   cwd?: string;
@@ -209,6 +218,16 @@ export interface AggMustFixEntry {
   [key: string]: unknown;
 }
 
+export declare function normalizeMustFixEntry(x: unknown): AggMustFixEntry | null;
+/** suggestion_ids 单条归一：severity 归一为 minor；显式 critical/major 保留（按 must-fix 处理）。 */
+export declare function normalizeSuggestionEntry(x: unknown): AggMustFixEntry | null;
+/** must-fix ∪ suggestion 合并（保序，同 id must-fix 优先）。 */
+export declare function combineIssueEntries(
+  mustFixIds?: Array<{ id?: string; severity?: string; [key: string]: unknown } | null> | null,
+  suggestionIds?: Array<{ id?: string; severity?: string; [key: string]: unknown } | null> | null,
+): Array<{ id: string; severity?: string; [key: string]: unknown }>;
+// inheritCarryoverFields 已随实装迁出 utils.cjs（单源化：workflows/src/review-fix-loop.shared.ts，
+// 双平台产物共用）——类型载体随迁，不在本声明文件登记。
 export declare function dormantRevivalTitle(
   dormantHit: { title?: string; [key: string]: unknown } | undefined | null,
   entry: AggMustFixEntry,

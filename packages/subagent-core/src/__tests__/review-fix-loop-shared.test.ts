@@ -34,12 +34,30 @@ describe("B3b 延续条目字段继承（wf-1792073055433 空壳缺陷修复；A
     expect(tracked.title).toBe("原始标题");
   });
 
-  it("inheritCarryoverFields：severity 采信本轮显式标注（聚合权威语义，与 regressed 分支一致）", () => {
+  it("inheritCarryoverFields：severity 单向只升不降——重报升级回写（minor→critical）", () => {
     const tracked = mkTracked({ title: "t", severity: "minor" });
     expect(inheritCarryoverFields(tracked, { id: "MF-1", severity: "critical" })).toBe(true);
     expect(tracked.severity).toBe("critical");
     // 相同值不记变更
     expect(inheritCarryoverFields(tracked, { id: "MF-1", severity: "critical" })).toBe(false);
+  });
+
+  it("inheritCarryoverFields：重报降级不回写（dmg-r1-1：防同题 suggestion 重报把追踪 must-fix 洗成 minor 绕过 defer 红线；降级须走 adjudication=downgraded → dormant 通道）", () => {
+    const tracked = mkTracked({ title: "t", severity: "major" });
+    expect(inheritCarryoverFields(tracked, { id: "S-2-1", severity: "minor" })).toBe(false);
+    expect(tracked.severity).toBe("major");
+    const critical = mkTracked({ title: "t", severity: "critical" });
+    expect(inheritCarryoverFields(critical, { id: "MF-2-1", severity: "major" })).toBe(false);
+    expect(critical.severity).toBe("critical");
+  });
+
+  it("inheritCarryoverFields：tracked.severity 历史脏值（不在等级表）→ 采信本轮合法标注（清单侧字段异常时本轮为权威）；entry 意外等级不动", () => {
+    const dirty = mkTracked({ title: "t", severity: "trivial" });
+    expect(inheritCarryoverFields(dirty, { id: "MF-1", severity: "major" })).toBe(true);
+    expect(dirty.severity).toBe("major");
+    const tracked = mkTracked({ title: "t", severity: "major" });
+    expect(inheritCarryoverFields(tracked, { id: "MF-1", severity: "trivial" })).toBe(false);
+    expect(tracked.severity).toBe("major");
   });
 
   it("inheritCarryoverFields：空壳重报（无 title/severity）不动已追踪字段——旧 zcode 无条件覆盖缺陷的回归锚点", () => {

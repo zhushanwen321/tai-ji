@@ -31,6 +31,31 @@ const WORKFLOW_SOURCE = readFileSync(
   "utf8",
 );
 
+/** 按常量名从源码文本截取完整 const 声明行（值为对象字面量时按花括号配平到收尾分号）。
+ *  抽取不到 → 显式报错（防漂移）。 */
+function extractConst(name: string): string {
+  const marker = "const " + name + " ";
+  const start = WORKFLOW_SOURCE.indexOf(marker);
+  if (start < 0) {
+    throw new Error("extraction guard failed: " + marker + "not found — const renamed/moved?");
+  }
+  const eq = WORKFLOW_SOURCE.indexOf("=", start);
+  if (WORKFLOW_SOURCE.slice(eq + 1).trimStart().startsWith("{")) {
+    const open = WORKFLOW_SOURCE.indexOf("{", eq);
+    let depth = 0;
+    for (let i = open; i < WORKFLOW_SOURCE.length; i++) {
+      if (WORKFLOW_SOURCE[i] === "{") depth++;
+      else if (WORKFLOW_SOURCE[i] === "}") {
+        depth--;
+        if (depth === 0) return WORKFLOW_SOURCE.slice(start, i + 1) + ";";
+      }
+    }
+    throw new Error("extraction guard failed: unbalanced braces for " + name);
+  }
+  const semi = WORKFLOW_SOURCE.indexOf(";", eq);
+  return WORKFLOW_SOURCE.slice(start, semi + 1);
+}
+
 /** 按函数名从源码文本截取完整函数段（参数括号配平后 brace 配平函数体）。
  *  抽取不到 → 显式报错（防漂移）。buildCallRecord 的解构参数含花括号，
  *  函数体起点必须从参数列表的结束括号之后找，不能直接 indexOf("{")。 */
@@ -349,7 +374,9 @@ describe("review-fix-loop.js buildRemaining（终态残留四字段清单）", (
 describe("review-fix-loop.js applyCarryoverRegression — 「重报 → regressed」转移（merge 路径单点实装，C2）", () => {
   const loadFns = () =>
     vm.runInNewContext(
-      [extractFn("inheritCarryoverFields"), extractFn("applyCarryoverRegression"), "({ inheritCarryoverFields, applyCarryoverRegression })"].join("\n"),
+      // SEVERITY_RANK 是 inheritCarryoverFields 的模块级依赖（severity 单向只升不降
+      // 守卫的等级表），函数段抽取时一并取出，缺它求值即 ReferenceError
+      [extractConst("SEVERITY_RANK"), extractFn("inheritCarryoverFields"), extractFn("applyCarryoverRegression"), "({ inheritCarryoverFields, applyCarryoverRegression })"].join("\n"),
       {},
     ) as {
       inheritCarryoverFields: (t: Record<string, unknown>, e: Record<string, unknown>) => boolean;
@@ -376,11 +403,17 @@ describe("review-fix-loop.js applyCarryoverRegression — 「重报 → regresse
     expect(tracked.fixAttempts).toBe(2);
     expect(tracked.openStreak).toBe(3);
   });
-  it("severity 继承：采信本轮显式标注（shared 单源 inheritCarryoverFields 同一权威语义）", () => {
+  it("severity 继承：单向只升不降——重报升级回写（shared 单源 inheritCarryoverFields 同一守卫语义）", () => {
     const { applyCarryoverRegression } = loadFns();
     const tracked = trackedBase("fix-attempted");
     applyCarryoverRegression(tracked, { id: "MF-1", severity: "critical" }, 2);
     expect(tracked.severity).toBe("critical");
+  });
+  it("severity 继承：重报降级不回写（dmg-r1-1——防同题 suggestion 重报洗掉 must-fix 等级）", () => {
+    const { applyCarryoverRegression } = loadFns();
+    const tracked = trackedBase("fix-attempted");
+    applyCarryoverRegression(tracked, { id: "S-2-1", severity: "minor" }, 2);
+    expect(tracked.severity).toBe("major");
   });
   it("title 清单权威：转换不覆盖既有 title（title 继承只由调用方继承点承担）", () => {
     const { applyCarryoverRegression } = loadFns();
