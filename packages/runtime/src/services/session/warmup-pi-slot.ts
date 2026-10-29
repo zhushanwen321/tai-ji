@@ -35,6 +35,13 @@
  * P4 命中率结构化日志：每次消费一行 `[warmup] slot outcome=<态> ...`（四态词表：
  * hit / signature-mismatch / empty / process-dead），供命中率探针度量（前提 P4）。
  *
+ * idle 超时自杀（§3.3-2 资源兜底）：槽进程空闲满 WARMUP_SLOT_IDLE_TIMEOUT_MS 即销毁清槽
+ * （常驻内存的兜底上限，对冲空载 60-100MB 长期驻留；超时值 = 实现参数，§5 检查点③
+ * 「空载内存 >150MB 触发收紧」的可调点）。自杀后槽空，下次冷切消费经检查①「槽空 → 回退
+ * + 顺带补位」自然完成重预热——设计原文「超时自杀，被取用时重预热」由「消费必查槽」
+ * 既有检查点承载，无新增复活机制。世代防护：timer 回调比对捕获的槽条目引用，条目已被
+ * 消费/替换/清槽时回调作废，不误杀新槽进程。
+ *
  * 摘除（P4 探针显示命中率持续偏低时的对冲设计）：本模块自包含；session-lifecycle 侧
  * 接线仅两处且同文件（构造器内槽实例组装 + restoreSession 进程获取的 acquireRestoreClient
  * 单一接线点），删除即整体摘除，行为回退 = 现状 restoreSession 全链。
@@ -88,6 +95,8 @@ export interface WarmupPiSlotDeps { // oe-exempt:20261029:framework:依赖注入
   isReattachBusy?: () => boolean
   /** 定时调度（缺省 setTimeout；fake timers/手动时钟测试注入）。 */
   schedule?: WarmupSlotSchedule
+  /** idle 超时值（缺省 WARMUP_SLOT_IDLE_TIMEOUT_MS；测试注入短超时）。 */
+  idleTimeoutMs?: number
   now?: () => number
 }
 
@@ -102,6 +111,13 @@ export interface WarmupPiSlotDeps { // oe-exempt:20261029:framework:依赖注入
 
 /** reattach 让位轮询间隔：busy 解除后至多一个间隔内发火（纯增益时序，无需更细）。 */
 const REATTACH_YIELD_POLL_MS = 1_000
+
+/**
+ * 槽进程 idle 超时（§3.3-2 资源兜底的实现参数）：槽就绪后空闲满此时长即自杀清槽。
+ * 初值取 10 分钟——覆盖「用户连续切换会话」的消费节奏（分钟级间隔），停止活动后进程
+ * 不无限驻留；收紧/放宽 = 改本常量（§5 检查点③「空载内存 >150MB 触发收紧」的调节点）。
+ */
+export const WARMUP_SLOT_IDLE_TIMEOUT_MS = 600_000
 
 /**
  * 槽条目：签名 + spawn 产物。签名在 spawn 时刻定格——进程是按这套参数启动的，取用比对
@@ -131,6 +147,8 @@ export class WarmupPiSlot {
   private entry: WarmupSlotEntry | undefined
   private spawning = false
   private reattachYieldTimer: (() => void) | undefined
+  /** idle 超时自杀定时器（armIdleTimer/cancelIdleTimer 管理，槽条目落定期间活跃）。 */
+  private idleTimerCancel: (() => void) | undefined
   /** 让位推迟期间挂起的补位参数（后到消费覆盖前值——最新消费意图即最新候选）。 */
   private deferredTarget: WarmupSlotTarget | undefined
   private readonly isReattachBusy: () => boolean
@@ -161,6 +179,7 @@ export class WarmupPiSlot {
     // ② 参数签名不匹配：弃槽 + 回退 + 按目标会话参数补位（§3.3-2 检查②）。
     if (!this.signatureMatches(current.target, target)) {
       this.entry = undefined
+      this.cancelIdleTimer()
       this.logConsume('signature-mismatch', target, current.target)
       this.discard()
       this.warm(target)
@@ -169,12 +188,14 @@ export class WarmupPiSlot {
     // ③ 探活失败：清槽 + 回退，不立即补位（死亡环境补位再死 = 空转，等下次消费）。
     if (!isPiProcessAlive(current.client)) {
       this.entry = undefined
+      this.cancelIdleTimer()
       this.logConsume('process-dead', target, current.target)
       this.discard()
       return { kind: 'process-dead' }
     }
     // 三道检查全过：取用（用后不回收，归属转移由接线层 rekey 完成）+ 槽立刻补位。
     this.entry = undefined
+    this.cancelIdleTimer()
     this.logConsume('hit', target, current.target)
     this.warm(target)
     return {
@@ -212,6 +233,7 @@ export class WarmupPiSlot {
     void this.deps.spawnSlotProcess(WARMUP_SLOT_SESSION_ID, target)
       .then((spawned) => {
         this.entry = { target, ...spawned }
+        this.armIdleTimer(this.entry)
         console.log(`[warmup] slot filled presetId=${target.presetId} cwd=${target.cwd}`)
       })
       .catch((e: unknown) => {
@@ -221,6 +243,28 @@ export class WarmupPiSlot {
       .finally(() => {
         this.spawning = false
       })
+  }
+
+  /**
+   * idle 超时自杀定时（§3.3-2 资源兜底）：槽条目落定时启动，条目清除时取消。回调带
+   * 世代防护（比对捕获的槽条目引用）——条目已被消费/替换/清槽时回调作废，不误杀新槽。
+   * 自杀 = 清槽 + destroySlotProcess；下次消费经检查①「槽空 → 回退 + 顺带补位」重预热。
+   */
+  private armIdleTimer(slotEntry: WarmupSlotEntry): void {
+    this.cancelIdleTimer()
+    const timeoutMs = this.deps.idleTimeoutMs ?? WARMUP_SLOT_IDLE_TIMEOUT_MS
+    this.idleTimerCancel = this.schedule(() => {
+      this.idleTimerCancel = undefined
+      if (this.entry !== slotEntry) return
+      this.entry = undefined
+      console.log(`[warmup] slot idle timeout (${timeoutMs}ms), process destroyed; rewarmed on next consume`)
+      this.discard()
+    }, timeoutMs)
+  }
+
+  private cancelIdleTimer(): void {
+    this.idleTimerCancel?.()
+    this.idleTimerCancel = undefined
   }
 
   /** reattach 让位：轮询等编排期结束，或让位上界超时后强制发火（§3.3-6）。 */

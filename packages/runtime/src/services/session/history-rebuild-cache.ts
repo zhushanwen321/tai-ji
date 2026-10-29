@@ -344,10 +344,15 @@ interface RebuildJob {
 }
 
 /**
- * 事件循环让出点（后台任务编排段间）：setImmediate 让并发 RPC 插队，降低后台全量重建
- * 对其他会话请求的干扰（session-cold-switch-perf §3.3-1 实现项②；rebuild 重建段自身
- * 仍是单次同步 O(n)——批内切分需改 entry 树构建语义或 worker 化，后者设计明文
- * out-of-scope，残留风险「数百毫秒级干扰」已在设计登记并设重审触发线）。
+ * 事件循环让出点（全量重建编排段间）：setImmediate 让并发 RPC 插队，降低全量重建
+ * 对其他会话请求的干扰（session-cold-switch-perf §3.3-1 实现项②）。
+ *
+ * 偏差如实登记（impl-plan §5 合理偏差 D1）：设计原案「同步 parse 段分批执行」的批内
+ * 切分需改 entry 树构建语义（convertPiHistory 的 toolCall/toolResult 配对是跨 entry
+ * 窗口语义，按 entry 切批会断配对）或 worker 化（设计明文 out-of-scope），实现降格为
+ * 「编排段间让出」——让出点置于重建各同步块之间（RPC 返回后 / rebuild 调用前 / rebuild
+ * 落定后），rebuild 段自身仍是单次同步 O(n)：42MB 级会话该块为秒级干扰窗口（§2.1 段 3
+ * 实测口径），残留风险与重审触发线已按秒级校准回写设计。
  */
 function yieldToEventLoop(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve))
@@ -744,6 +749,9 @@ export class SessionHistoryReader {
     client: NonNullable<ReturnType<IProcessManager['getClient']>>,
   ): Promise<{ leafId: string | null; messages: Message[] } | null> {
     const result = await client.getEntries() as GetEntriesResult
+    // [session-cold-switch-perf §3.3-1 实现项②] 段间让出（impl-plan §5 偏差 D1 降格形态）：
+    // RPC 响应恢复后先排空事件循环再进同步裁剪块，让并发 RPC 插队。
+    await yieldToEventLoop()
     const entries = result.data?.entries ?? []
     if (entries.length === 0) return null
     // [message-revoke U6a] 全量重建路径接活跃路径裁剪（调用点契约：仅全量重建裁剪）。
@@ -756,6 +764,10 @@ export class SessionHistoryReader {
     // 读 segments.json sidecar（runtime 直接读文件，不经 IPC——IPC 是 renderer→main，runtime 是独立进程）。
     // 文件缺失/损坏 → null（rebuildHistoryFromEntries 全降级为占位文本，非硬错误）。
     const segmentsMetadata = await readSegmentsMetadataFile(sessionId)
+    // [session-cold-switch-perf §3.3-1 实现项②] 段间让出：rebuild 大块（单次同步 O(n)，
+    // 42MB 级会话秒级——偏差 D1）启动前显式排空事件循环；sidecar 的 fs await 在文件命中
+    // 时可能瞬时返回，不构成可靠让出点。
+    await yieldToEventLoop()
     const rebuilt = this.deps.sessionStore.rebuildHistoryFromEntries(scopedEntries, segmentsMetadata)
     return { leafId, messages: rebuilt.messages }
   }

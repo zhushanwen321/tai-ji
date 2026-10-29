@@ -88,6 +88,7 @@ vi.mock('../src/infra/pi/process-manager.js', () => ({
 // ── Import after mocks ──────────────────────────────────────────
 
 import { SessionService, userStoppedMarkStore } from '../src/services/session/session-service.js'
+import { WARMUP_SLOT_SESSION_ID } from '../src/services/session/warmup-pi-slot.js'
 import { PiConfigStore } from '../src/infra/pi/pi-config-store.js'
 import { PiSessionStore } from '../src/infra/pi/session-store.js'
 import type { IMessageBroker, IEventAdapter } from '../src/interfaces.js'
@@ -195,7 +196,11 @@ describe('D5②：session.restore 幂等短路复用', () => {
     const summary = await service.restoreSession(id)
 
     expect(summary.id).toBe(id)
-    expect(createSessionMock).toHaveBeenCalledTimes(1) // 全流程重开
+    // 全流程重开（目标会话恰 1 次）+ 槽空消费触发的补位 spawn（WARMUP_SLOT_SESSION_ID，
+    // §3.3-2 消费驱动补位，fire-and-forget 不阻塞 restore 返回值）
+    const callsBySession = createSessionMock.mock.calls.map((c) => c[0])
+    expect(callsBySession.filter((s) => s === id)).toHaveLength(1)
+    expect(callsBySession).toContain(WARMUP_SLOT_SESSION_ID)
     expect(freshClient.switchSession).toHaveBeenCalledWith(mockScannedSessions[0].filePath)
   })
 
@@ -208,7 +213,59 @@ describe('D5②：session.restore 幂等短路复用', () => {
 
     const summary = await service.restoreSession(id)
     expect(summary.id).toBe(id)
-    expect(createSessionMock).toHaveBeenCalledTimes(1)
+    const callsBySession = createSessionMock.mock.calls.map((c) => c[0])
+    expect(callsBySession.filter((s) => s === id)).toHaveLength(1) // 目标会话恰 1 次（补位 spawn 另计）
+    expect(callsBySession).toContain(WARMUP_SLOT_SESSION_ID) // 槽空消费 → 补位 spawn（§3.3-2）
+  })
+})
+
+describe('warmup slot 附着失败回退（session-cold-switch-perf §3.1 失败路径）', () => {
+  let service: SessionService
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockScannedSessions.length = 0
+    tmpRoot = mkdtempSync(join(tmpdir(), 'restore-attach-fallback-'))
+    service = createService()
+    userStoppedMarkStore.clearAllUserStoppedMarks()
+  })
+
+  afterEach(() => {
+    if (tmpRoot) rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    userStoppedMarkStore.clearAllUserStoppedMarks()
+  })
+
+  it('槽命中（探活通过）但 switch_session 附着失败 → 回退现状 spawn 链完成 restore（最坏 = 现状）', async () => {
+    // ① 首次 restore：槽空 → 现状 spawn（firstClient）+ 消费驱动补位（slotClient 落槽）
+    const id1 = 'warm-attach-seed-id'
+    const id2 = 'warm-attach-target-id'
+    addScannedSession(id1, tmpRoot) // cwd 用真实存在的 tmpRoot：两次消费参数签名一致（§3.3-5 presetId+cwd）
+    addScannedSession(id2, tmpRoot)
+    getClientMock.mockReturnValue(undefined)
+    const firstClient = makeMockClient()
+    const slotClient = makeMockClient()
+    // 槽进程半死形态：探活通过（exited=false + pid 可收信号；借测试进程自身 pid）但
+    // switch_session 抛错
+    ;(slotClient as unknown as { pid: number }).pid = process.pid
+    slotClient.switchSession = vi.fn().mockRejectedValue(new Error('attach failed on warmup slot process'))
+    createSessionMock.mockImplementation(async (sessionId: string) =>
+      sessionId === WARMUP_SLOT_SESSION_ID ? slotClient : firstClient)
+    await service.restoreSession(id1)
+    // 等补位 spawn 落槽（fire-and-forget；落定信号 = 槽 id 的 createSession 调用已发生）
+    await vi.waitFor(() => expect(createSessionMock).toHaveBeenCalledWith(WARMUP_SLOT_SESSION_ID, expect.anything(), expect.anything()))
+
+    // ② 同签名会话冷切：槽命中 → 附着失败 → 回退 spawn 链（respawnClient）完成附着
+    const respawnClient = makeMockClient()
+    createSessionMock.mockClear()
+    createSessionMock.mockImplementation(async (sessionId: string) =>
+      sessionId === WARMUP_SLOT_SESSION_ID ? slotClient : respawnClient)
+    const summary = await service.restoreSession(id2)
+
+    expect(summary.id).toBe(id2) // 切换成功（回退链兜住，不更糟）
+    expect(slotClient.switchSession).toHaveBeenCalledTimes(1) // 槽进程附着尝试过（失败）
+    expect(respawnClient.switchSession).toHaveBeenCalledWith(mockScannedSessions[1].filePath) // 回退 spawn 完成附着
+    const callsBySession = createSessionMock.mock.calls.map((c) => c[0])
+    expect(callsBySession.filter((s) => s === id2)).toHaveLength(1) // 回退 spawn 恰一次
   })
 })
 

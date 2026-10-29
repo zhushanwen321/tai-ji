@@ -540,6 +540,84 @@ describe('WarmupPiSlot reattach 让位', () => {
   })
 })
 
+// ── idle 超时自杀（§3.3-2 资源兜底）──────────────────────────
+
+describe('WarmupPiSlot idle 超时自杀（§3.3-2 资源兜底）', () => {
+  let logSpy: ReturnType<typeof vi.spyOn>
+  let warnSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+  afterEach(() => {
+    logSpy.mockRestore()
+    warnSpy.mockRestore()
+  })
+
+  /** 手动时钟 + 注入短 idle 超时的槽（idle 超时 = 实现参数，测试注入可控值）。 */
+  function makeIdleSlot(idleTimeoutMs: number) {
+    const spawn = makeSpawnPool()
+    const destroy = vi.fn(async () => {})
+    const clock = makeManualClock()
+    const slot = new WarmupPiSlot({
+      spawnSlotProcess: spawn.spawn,
+      destroySlotProcess: destroy,
+      isReattachBusy: () => false,
+      schedule: clock.schedule,
+      now: clock.now,
+      idleTimeoutMs,
+    })
+    return { slot, spawn, destroy, clock }
+  }
+
+  it('槽就绪后空闲满超时：销毁槽进程清槽；下次消费经 empty 回退 + 补位（重预热）', async () => {
+    const { slot, spawn, destroy, clock } = makeIdleSlot(5_000)
+    await warmViaConsume(slot, TARGET_A)
+    expect(spawn.calls).toHaveLength(1)
+
+    clock.advance(4_999)
+    expect(destroy).not.toHaveBeenCalled()
+    clock.advance(1)
+    expect(destroy).toHaveBeenCalledTimes(1) // idle 自杀清槽
+
+    // 设计「超时自杀，被取用时重预热」：下次消费走检查①（empty → 回退 + 顺带补位）。
+    expect(slot.take(TARGET_A).kind).toBe('empty')
+    await flushAsync()
+    expect(spawn.calls).toHaveLength(2)
+    expect(spawn.calls[1]?.target).toEqual(TARGET_A)
+  })
+
+  it('消费命中取消 idle 定时器：被取用进程不因 idle 到期被销毁，新补位槽按新生命周期计时', async () => {
+    const { slot, spawn, destroy, clock } = makeIdleSlot(5_000)
+    await warmViaConsume(slot, TARGET_A)
+    const warmedClient = spawn.clients[0]!
+
+    expect(slot.take(TARGET_A).kind).toBe('hit') // 消费命中（timer 已取消）
+    await flushAsync() // 命中触发的补位落定（新槽 timer 计时起点）
+    expect(warmedClient.kill).not.toHaveBeenCalled()
+
+    clock.advance(4_999)
+    expect(destroy).not.toHaveBeenCalled() // 旧 timer（已取消）不误发；新槽未满超时
+    clock.advance(1)
+    expect(destroy).toHaveBeenCalledTimes(1) // 到期自杀的是新补位槽，非被取用进程
+  })
+
+  it('世代防护：条目被替换后旧 idle 定时器作废（不误杀新槽）', async () => {
+    const { slot, spawn, destroy, clock } = makeIdleSlot(5_000)
+    await warmViaConsume(slot, TARGET_A) // 槽 A 落定（timer A 计 5s）
+    // 签名不匹配弃槽 A（销毁 1 次）+ 补位 B（timer B 重新计 5s）；timer A 随取消作废。
+    expect(slot.take(TARGET_B).kind).toBe('signature-mismatch')
+    expect(destroy).toHaveBeenCalledTimes(1)
+    await flushAsync()
+
+    clock.advance(5_000)
+    // 唯一新增销毁 = timer B 的自杀（恰第 2 次）；timer A 若误发会多出第 3 次。
+    expect(destroy).toHaveBeenCalledTimes(2)
+    expect(slot.take(TARGET_B).kind).toBe('empty') // 槽已被 B 的自杀清空
+  })
+})
+
 // ── 探活原语（存在性检查，禁 RPC）────────────────────────────
 
 describe('isPiProcessAlive（pid 存活 + exited 标记）', () => {

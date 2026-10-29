@@ -1307,8 +1307,7 @@ export class SessionLifecycle implements ISessionRegistry {
     const target = this.resolveRestoreTarget(sessionId)
     await this.clearExistingSessionForRestore(sessionId)
     const { sessionCwd, cwdFellBack } = this.resolveRestoreCwd(target)
-    const { client, presetId, allExtPaths, fellBackFromPresetId } = await this.acquireRestoreClient(target, sessionId, sessionCwd)
-    await this.attachRestoreFile(client, target, sessionId, cwdFellBack)
+    const { client, presetId, allExtPaths, fellBackFromPresetId } = await this.attachRestoredClient(target, sessionId, sessionCwd, cwdFellBack)
 
     // U2: get_state 读回 pi 生效 model + thinkingLevel（D2 设计）。
     // switchSession 成功后 pi 已附着会话文件，get_state 返回当前生效值
@@ -1446,13 +1445,15 @@ export class SessionLifecycle implements ISessionRegistry {
    * 与补位时机全在槽模块内，本方法只裁决「命中与否」）。命中时先 rekey 把槽进程改挂到
    * 目标 sessionId（tee 树随迁 + exit 回调反查正确，create 路径 tempId → piSessionId
    * 同款既有语义），随后按现状链的附着段继续（attachRestoreFile 的 switchSession 对空
-   * pi 进程附着 = 设计 F5 已验证形态；附着失败 safeDestroy 收敛语义与现状 spawn 全等）。
+   * pi 进程附着 = 设计 F5 已验证形态）。fromWarmupSlot 随返回值上抛：附着失败的回退
+   * 裁决（设计 §3.1 失败路径「附着失败 → 回退现状 spawn 链」）由 attachRestoredClient
+   * 按此标记执行——spawn 链来源的附着失败无回退语义（已是最坏 = 现状）。
    */
   private async acquireRestoreClient(
     target: ScannedSession,
     sessionId: string,
     sessionCwd: string,
-  ): Promise<{ client: IPiEngine; presetId: string; allExtPaths: string[]; fellBackFromPresetId?: string }> {
+  ): Promise<{ client: IPiEngine; presetId: string; allExtPaths: string[]; fellBackFromPresetId?: string; fromWarmupSlot: boolean }> {
     const presetId = target.launchPresetId ?? BUILTIN_PRESET_IDS.FULL
     const taken = this.warmupSlot.take({ presetId, cwd: sessionCwd })
     if (taken.kind === 'hit') {
@@ -1462,9 +1463,42 @@ export class SessionLifecycle implements ISessionRegistry {
         presetId,
         allExtPaths: taken.allExtPaths,
         fellBackFromPresetId: taken.fellBackFromPresetId,
+        fromWarmupSlot: true,
       }
     }
-    return this.spawnRestoreClient(target, sessionId, sessionCwd)
+    const spawned = await this.spawnRestoreClient(target, sessionId, sessionCwd)
+    return { ...spawned, fromWarmupSlot: false }
+  }
+
+  /**
+   * restore 进程获取 + 附着编排（session-cold-switch-perf §3.1 失败路径）：槽命中但
+   * 附着失败（探活通过、switch_session/附着断言抛错的半死形态）→ 回退现状 spawn 链
+   * 重试全链（目标 3「最坏体验 = 现状，不更糟」——槽半死时体验劣化为「多等一次 spawn
+   * 后成功」而非「切换失败报错」）。首次附着失败后 safeDestroy 已由 attachRestoreFile
+   * 的 catch 段执行（半死槽进程清册，子进程/监听器不泄漏）；回退 spawn 再失败按原失败
+   * 语义上抛（与现状 spawn 链附着失败同语义）。spawn 链来源（fromWarmupSlot=false）的
+   * 附着失败无回退——已是最坏 = 现状。
+   */
+  private async attachRestoredClient(
+    target: ScannedSession,
+    sessionId: string,
+    sessionCwd: string,
+    cwdFellBack: boolean,
+  ): Promise<{ client: IPiEngine; presetId: string; allExtPaths: string[]; fellBackFromPresetId?: string }> {
+    const acquired = await this.acquireRestoreClient(target, sessionId, sessionCwd)
+    if (!acquired.fromWarmupSlot) {
+      await this.attachRestoreFile(acquired.client, target, sessionId, cwdFellBack)
+      return acquired
+    }
+    try {
+      await this.attachRestoreFile(acquired.client, target, sessionId, cwdFellBack)
+      return acquired
+    } catch (e) {
+      console.warn(`[session-lifecycle] warmup slot client attach failed for ${sessionId}, falling back to spawn chain: ${toErrorMessage(e)}`)
+      const respawned = await this.spawnRestoreClient(target, sessionId, sessionCwd)
+      await this.attachRestoreFile(respawned.client, target, sessionId, cwdFellBack)
+      return respawned
+    }
   }
 
   /**
@@ -1532,6 +1566,10 @@ export class SessionLifecycle implements ISessionRegistry {
   /**
    * restore 附着段：F2/F3 归一化 → switchSession → 附着断言 → 清 .meta.json 旧 sidecar；
    * 任一失败 → **await** safeDestroy 已建进程后原样重抛（子进程/监听器不泄漏）。
+   *
+   * 失败语义按进程来源分轨（session-cold-switch-perf §3.1 失败路径）：spawn 链来源 =
+   * 重抛（现状语义）；槽命中来源的回退（spawn 重试全链）由调用方 attachRestoredClient
+   * 承载——本方法只负责清册 + 上抛，不感知来源。
    *
    * W1（restore-fork-attach-fix）F2/F3 分流：pi 的 switch_session 是「永久重绑读写目标」
    *（pi-mono session-manager.ts setSessionFile 把传入路径存为永久 sessionFile，_persist
