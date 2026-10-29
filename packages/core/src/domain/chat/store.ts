@@ -625,6 +625,14 @@ export function createChatStore(options: ChatStoreOptions = {}) {
       entryStates.delete(sid)
       // [u4d] 截断窗口状态同点清理（重建型，驱逐重进后重 hydrate 重建）
       clearHistoryWindow(sid)
+      // [session-cold-switch-perf §3.3-3] 基线前置 tick 分区同点清理（重建型事件计数，
+      // 驱逐重进后由 reconcileHistory 头部插入判定重新计数；has 门控防无谓新 Map 触发
+      // 响应式——同段 messages 清理范式）
+      if (baselinePrependTicks.value.has(sid)) {
+        const nextTicks = new Map(baselinePrependTicks.value)
+        nextTicks.delete(sid)
+        baselinePrependTicks.value = nextTicks
+      }
     },
     // [B9] agentcall 联动驱逐查询（renderer 装配注入；缺省空数组 = 不联动）
     options.agentCallEvictionsOf,

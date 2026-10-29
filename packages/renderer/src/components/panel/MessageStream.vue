@@ -78,7 +78,8 @@
            滚动容器经 :scroll-ref 显式指定为本 scrollEl（D3 / P-wrap 门，
            virtua 0.50.0 scrollRef prop 实装支持）——wrapper 加入后 parentElement 不再是 scrollEl。
            - :data 全量 renderItems（turn + system 穿插）
-           - :shift 顶部插入（load-more-history）时 true（virta 原生 reverse scroll adjustment，design §2.4）
+           - :shift 顶部插入时 true（驱动源两处：load-more-history 手动翻页 + historyCacheReady 全量精化的
+             基线前置 tick，均经 useLoadMoreHistory 的 isPrepend；virta 原生 reverse scroll adjustment，design §2.4）
            - :keepMounted streaming/editing turn 恒挂载（design §4.3，virta 仍挂 RO 不致测量断；
              [pin-identity D1] editing 项由 useStreamingPin 按 turnKey 反查当前 items 得出）
            - :startMargin load-more 占位高度（virta getItemOffset 已含 startMargin，design §4.11）

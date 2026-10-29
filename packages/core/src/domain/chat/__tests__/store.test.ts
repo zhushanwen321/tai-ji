@@ -1217,6 +1217,24 @@ describe('createChatStore factory', () => {
       expect(sut.store.getChangeSetStatus('s8', 'a8')).toBe('ready')
     })
 
+    it('LRU 驱逐同步清基线前置 tick 分区（[session-cold-switch-perf §3.3-3] 与 messages 分区同生共死）', () => {
+      // 9 个 session 全部 hydrate（时间戳递增 touch），s0 最旧被驱逐；s0 已产生基线前置 tick
+      for (let i = 0; i < 9; i++) {
+        const sid = `s${i}`
+        sut.store.hydrate(sid, [baselineUser(`e1-${i}`), baselineUser(`e2-${i}`)])
+        sut.store.touchLru(sid)
+      }
+      sut.store.reconcileHistory('s0', [baselineUser('e0-0'), baselineUser('e1-0'), baselineUser('e2-0')])
+      expect(sut.store.getBaselinePrependTick('s0')).toBe(1) // 前置：tick 已写入（头部插入更早 e0-0）
+
+      sut.store.evictIfNeeded()
+      expect(sut.store.getMessages('s0')).toHaveLength(0) // 前置：s0 被驱逐
+      // 驱逐同步清该 sid 的 tick 分区（微泄漏防线，对齐 changeSetStatuses / historyWindows 清理）
+      expect(sut.store.getBaselinePrependTick('s0')).toBe(0)
+      // 保留 session 的 tick 不受影响（s8 无 tick 记录，读口缺省 0）
+      expect(sut.store.getBaselinePrependTick('s8')).toBe(0)
+    })
+
     it('streaming session 豁免驱逐（isLruExempt）', () => {
       const streaming = 's-streaming'
       sut.store.setMessages(streaming, [streamingAssistant('a1')])
