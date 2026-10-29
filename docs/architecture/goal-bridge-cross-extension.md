@@ -18,7 +18,7 @@
 
 ### SCQA
 
-- **Situation**：taiji 维护 21 个 `@zhushanwen/pi-*` extension。其中 plan（计划模式工具）与 goal（目标驱动执行）协作：用户在 plan 的 complete 对话框选择「Goal-driven execution (/goal)」档时，plan 需调用 goal 的编程式初始化接口（下称**goal 桥**）在压缩后的会话里预建 goal。
+- **Situation**：taiji 维护 29 个 `@zhushanwen/pi-*` extension（`extensions/` 下，其中 21 个在内置清单 `packages/shared/src/mandatory-extensions.json`）。其中 plan（计划模式工具）与 goal（目标驱动执行）协作：用户在 plan 的 complete 对话框选择「Goal-driven execution (/goal)」档时，plan 需调用 goal 的编程式初始化接口（下称**goal 桥**）在压缩后的会话里预建 goal。
 - **Complication**：pi 0.84.4 的扩展加载器为**每个扩展创建独立的 ExtensionAPI 对象**——goal 挂在自己收到的 pi 对象上的 `__goalInit` 字段，plan 在自己收到的（另一个）pi 对象上永远探测不到。桥自旧仓迁移带入以来（本仓 git 史最早 `e726711d0`）从未在真实双扩展环境跑通过，2026-09-14 ext-simplify-06 u0 探针首次真机暴露。
 - **Question**：在 pi 0.84.4 无官方跨扩展 API 的前提下，plan 如何可靠读到 goal 的初始化能力，且独立 pi 安装与 taiji builtin 双形态同时成立？
 - **Answer**（本设计）：goal 侧把 `GoalInitFn` 直接挂到 `globalThis[Symbol.for("@zhushanwen/pi-goal.goalInit")]` slot，plan 侧在使用时读取——仓内 C-ext-06 进程级共享惯例的通行形态（单向/单例 slot 十余处现役裸挂）。已排除方向（§3.2 展开论证）：等 pi 官方机制（0.84.4 实装无此能力）、taiji runtime 接线（违背 universal 自足性）、plan 运行时 import goal（拿不到 goal 扩展实例闭包 + 倒退 optional peer）。

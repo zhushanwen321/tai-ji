@@ -107,7 +107,7 @@ Renderer 层是三处里**最成熟也最不平衡**的：容器机制（挂载�
 | R33 | 计划审阅三键条 | `renderer/src/components/panel/plan/PlanReviewBar.vue` | `已达` |
 | R34 | 计划文档抽屉 | `renderer/src/components/panel/plan/PlanDocsPanel.vue` | `已达` |
 | R35 | 画布 | `renderer/src/components/canvas/*`（`CanvasPane` 等） | `已达` 但为**固定实现**，走 schema 驱动（`agent-canvas` 工具集）而非插件渲染 |
-| R36 | workflow 可视化浮层 | `renderer/src/components/panel/workflow-viz/overlay/*`（`OverlayTab = 'runs' \| 'scheduler' \| 'canvas'` 三 tab 写死） | `已达` 但 tab 集固定 |
+| R36 | workflow 可视化浮层 | `renderer/src/components/panel/workflow-viz/overlay/*`（`OverlayTab` 已开放 `string`，容器统一批次；tab 元信息与内容分支仍宿主持有） | `已达`，tab 位已开放、派生未完成 |
 | R37 | 后台任务托盘 | `renderer/src/components/panel/tray/*`（`TrayNativePanel` / `TraySessionPanel` / `TrayCanvasPanel`） | `已达` 但面板族固定（`TrayBuiltinKind = 'bash' \| 'subagent' \| 'workflow' \| 'session' \| 'canvas'` 联合写死） |
 | R38 | tool 详情富渲染 | `renderer/src/components/panel/detail-renderers/ToolDetailRenderer.vue`（`read` / `write` / `edit` 三分支） | `已达` 但为**按 toolName 硬编码分支** |
 | R39 | system / custom 消息渲染 | `ui/src/features/chat/SystemNotice.vue`（`customType` 匹配分支） | `受限` 按 `customType` 硬编码（`subagent-directive` / `pi-respawn-notice`） |

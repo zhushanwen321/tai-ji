@@ -340,8 +340,8 @@ extensions/universal/subagent-workflow/src/interface/gui/subagent-actions.ts
 
 ### 4.1 现状（锚点）
 
-**tab 枚举**：`packages/core/src/domain/drawer/types.ts:22`
-`RightDrawerTab = 'git' | 'doc' | 'detail' | 'subagent' | 'bashTask' | 'plan' | 'btw' | 'trace'`（8 员，编译层锁）。
+**tab 位**：`packages/core/src/domain/drawer/types.ts:24`
+`RightDrawerTab = string`（容器统一批次去枚举；内置 8 员 = `RIGHT_DRAWER_TAB_IDS` 已知值 + `isKnownRightDrawerTab` 判别，编译层锁已拆）。
 
 **注册表条目**：`packages/core/src/domain/drawer/registry.ts:97-104 SUBAGENT_ENTRY`
 ```
@@ -454,8 +454,8 @@ subagent 是第 4 个；`drawerTab` 来源 `:386 useDrawerControl().activeTab`�
 
 ### 5.1 现状（锚点）
 
-**overlay 一级 tab 枚举**：`packages/renderer/src/components/panel/workflow-viz/overlay/workflow-viz-overlay.ts:63`
-`OverlayTab = 'runs' | 'scheduler' | 'canvas'`——**subagent 不在其中**。
+**overlay 一级 tab 位**：`packages/renderer/src/components/panel/workflow-viz/overlay/workflow-viz-overlay.ts:68`
+`OverlayTab = string`（容器统一批次去枚举；内置三已知值 = `OVERLAY_TAB_IDS`：'runs' / 'scheduler' / 'canvas'）——**subagent 不在内置 tab 中**。
 
 **tab 条**：`WorkflowVizOverlay.vue:428-432 tabSegments`
 ```

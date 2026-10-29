@@ -23,19 +23,19 @@ scheduler 是全仓唯一「数据面已完全插件化、内容渲染已用通�
 
 | # | 写死物 | 位置 |
 |---|---|---|
-| W1 | `activation === 'scheduler-overlay'` 专属分派分支 | `packages/renderer/src/components/extension/HeaderActionsHost.vue:233-247` |
+| W1 | `activation === 'scheduler-overlay'` 专属分派分支 | `packages/renderer/src/components/extension/HeaderActionsHost.vue:235-249` |
 | W2 | `SchedulerQuickCard.vue` 整个 hover 快捷面板组件（213 行） | `packages/renderer/src/components/extension/SchedulerQuickCard.vue` 全文件 |
-| W3 | 声明类型里 `activation?: 'scheduler-overlay'` 单值枚举 | `packages/core/src/extension-host/types.ts:132`、`:205-221` |
-| W4 | `OverlayTab = 'runs' \| 'scheduler' \| 'canvas'` 联合类型 + `overlayTab` 初值 | `packages/renderer/src/components/panel/workflow-viz/overlay/workflow-viz-overlay.ts:63`、`:67` |
-| W5 | 浮层 tab 条三段写死（label/icon/顺序） | `WorkflowVizOverlay.vue:428-432`、模板 `:142-164` |
-| W6 | 浮层标题三态分支 + 内容三态分支 | `WorkflowVizOverlay.vue:65-136`（标题）、`:168`/`:308`/`:319-327`（内容） |
+| W3 | 已部分改造：`activation` 契约已结构化为 `HeaderActionActivation`（`{kind:'command'\|'overlay'\|'drawer'}` 三成员 + `'scheduler-overlay'` 迁移期兼容值，注释自证「下一版本删除」） | `packages/core/src/extension-host/types.ts:132`、`:205-218`（兼容值字面量 `:218`） |
+| W4 | 已消解：`OverlayTab` 已开放为 `string` + `isKnownOverlayTab` 已知值判别（容器统一批次）；`overlayTab` 初值 `'runs'` 仍在 | `packages/renderer/src/components/panel/workflow-viz/overlay/workflow-viz-overlay.ts:68`、`:74`、`:80` |
+| W5 | 浮层 tab 条三段写死（label/icon/顺序） | `WorkflowVizOverlay.vue:466`（`tabSegments` 现为 computed 声明对象，数据源仍内置）、模板 tab 条遍历 |
+| W6 | 浮层标题三态分支 + 内容三态分支 | `WorkflowVizOverlay.vue`（标题三态 + runs/scheduler/canvas 内容显式分支） |
 | W7 | `SchedulerOverlayPayload` + `openSchedulerOverlay` 专用 opener | `packages/core/src/domain/overlay/types.ts:40-42`、`coordination.ts:67-69` |
-| W8 | SDK 侧 `PluginContributesHeaderAction` 无 `activation` 字段（契约双版本漂移） | `packages/plugin-sdk/src/types.ts:252-259` vs `packages/core/src/extension-host/types.ts:205-221` |
+| W8 | 已消解：SDK 版 `PluginContributesHeaderAction` 已带 `activation?: HeaderActionActivation`，两版契约已对齐（容器扩展点统一 §6.11 阶段 0） | `packages/plugin-sdk/src/types.ts:316` vs `packages/core/src/extension-host/types.ts:205-218` |
 
-距离完全插件化还差 **3 步**（不含可选优化）：
+距离完全插件化还差 **3 步**（不含可选优化；容器统一批次 743f82e6f 与结构化 activation 落地后，第 1 步契约面与第 2 步的类型面已完成）：
 
-- **第 1 步：结构化 activation 声明**。消除 W1+W3+W8。当前 `activation` 是单值字面量，本质是「渲染端存在一个同名 if 分支」的镜像；改成 `{ kind: 'overlay', tabId, viewId, preview? }` 后，渲染端只剩一个通用的「打开该 tab」动作，宿主无需知道 `scheduler` 这个词。
-- **第 2 步：overlay tab 注册表**。消除 W4+W5+W6+W7。tab 元信息（title/icon/order/空态/内容 viewId）由声明提供，`OverlayTab` 从联合类型退化为 `string`，`tabSegments` 从常量变为注册表派生，标题/内容分支收敛为单条 `<ViewHost>`。
+- **第 1 步：结构化 activation 声明（契约面已落地，分派分支未换）**。W3 契约已结构化（`HeaderActionActivation`：command/overlay/drawer 三成员 + `'scheduler-overlay'` 迁移期兼容值）、W8 已消解（SDK 已对齐）；剩 W1——`HeaderActionsHost.vue` 仍按 `'scheduler-overlay'` 字面量专属分派，且兼容值待退役。渲染端收敛为通用「打开该 tab」动作后，宿主无需知道 `scheduler` 这个词。
+- **第 2 步：overlay tab 注册表（类型面已落地，派生面未换）**。W4 已消解（`OverlayTab` 已开放 `string` + `isKnownOverlayTab`）；挂载点已注册三族（`drawer.tab` / `overlay.content` / `settings.section`，`bootstrap.ts:94-99`）；`OVERLAY_REGISTRY` 已补齐 4 条。剩 W5+W6+W7——tab 元信息（label/icon/空态）仍内置（`tabSegments` computed 声明对象、数据源非注册表），标题/内容分支未收敛为单条 `<ViewHost>`，payload/opener 未泛化。
 - **第 3 步：headerAction hover 预览面泛化**。消除 W2。QuickCard 里除「底部直开 overlay 条」外全是通用机制（hover 160ms 开、pin、ViewHost 渲染、disabled 挡开合）；把底部动作条改成声明字段后，任意插件都能声明「我的 headerAction 有 hover 预览面板」。
 
 做完这 3 步，宿主对 scheduler 的专属认知 = 0 行（`SCHEDULER_MODAL_VIEW_ID` 常量被声明内 viewId 取代）。对照 todo/goal 已达成的 A 级形态（`extensions/universal/todo/src/model.ts` 的 `buildGui()`，前端零专属代码），差距恰好就是这三步。
@@ -165,10 +165,10 @@ QuickCard（宿主专属 213 行）：
 | L1-2 | 模板 `v-if="b.schedulerCard"` 硬编码专属组件 | `HeaderActionsHost.vue:39-46` | 8 行 |
 | L1-3 | `HeaderActionButtonView.schedulerCard` 布尔字段 | `HeaderActionsHost.vue:131`、`:244`/`:260` | 视图模型泄漏域概念 |
 | L1-4 | `SchedulerQuickCard.vue` 全组件 | `SchedulerQuickCard.vue:1-213` | 213 行宿主专属 |
-| L1-5 | `PluginContributesHeaderAction.activation` 单值枚举 | `core/extension-host/types.ts:132`、`:205-221` | 类型层把域值写进契约 |
+| L1-5 | 已部分改造：`activation` 契约已结构化（`HeaderActionActivation` 三结构化成员），`'scheduler-overlay'` 兼容值仍留在联合内（迁移期） | `core/extension-host/types.ts:132`、`:205-218` | 结构化成员已落，域字面量残留待退役 |
 | L1-6 | 声明本体 `activation: 'scheduler-overlay'` | `core/extension-host/builtin-contributions.ts:59` | 1 行，但决定了上面 5 项 |
 | L1-7 | 可见性谓词里的 activation 特判 | `useExtensionHostBridge.ts:268` | `ha.activation === 'scheduler-overlay' \|\| !!ha.commandId` |
-| L1-8 | SDK 契约无 `activation` 字段（commandId 必填） | `packages/plugin-sdk/src/types.ts:252-259` | 第三方插件照 SDK 写不出该入口（已登记 `docs/plugins/architecture.md:268`） |
+| L1-8 | 已消解：SDK 契约已带 `activation?: HeaderActionActivation`（两版对齐，容器扩展点统一 §6.11 阶段 0） | `packages/plugin-sdk/src/types.ts:316` | 第三方插件可照 SDK 写出该入口 |
 
 合计 8 个固定点：1 个 213 行整组件、1 个 15 行专属分支、6 个类型/谓词/声明单点。
 
@@ -178,11 +178,11 @@ QuickCard（宿主专属 213 行）：
 
 现状骨架其实已通用，只有三处域耦合：
 
-1. `activation` 值域写死成一个域名字面量（L1-5/L1-6）。
+1. `activation` 值域写死成一个域名字面量（L1-5/L1-6）——契约面已随容器统一批次结构化（`HeaderActionActivation` + `'scheduler-overlay'` 迁移期兼容值），声明本体与分派分支仍是域字面量。
 2. 分派后落到哪个组件写死（L1-2/L1-4）。
 3. QuickCard 的「底部直开 overlay」把 overlay 语义烧进组件（L1-4 的 `:207-210`）。
 
-改造方案（结构化 activation，core 与 SDK 同 commit 改）：
+改造方案（结构化 activation——契约面已按此落地，core 与 SDK 均已结构化）：
 
 ```ts
 // packages/core/src/extension-host/types.ts（与 plugin-sdk 同步）
@@ -272,10 +272,10 @@ interface PluginContributesHeaderAction {
 
 ### 4.1 现状
 
-- 一级 tab 枚举：`packages/core/src/domain/drawer/types.ts:22` `RightDrawerTab = 'git' | 'doc' | 'detail' | 'subagent' | 'bashTask' | 'plan' | 'btw' | 'trace'`——**scheduler 不在其中**，且注释（`:15-21`）明确「workflow 不入本枚举（2026-10-19 用户裁决，drawer workflow tab 删除，唯一入口 = 浮层）」。
-- 注册表：`packages/core/src/domain/drawer/registry.ts:156-165` 八条 `RIGHT_DRAWER_REGISTRY`；`:171` `OVERLAY_REGISTRY = [BROWSER_ENTRY, WORKFLOW_OVERLAY_ENTRY]`——scheduler 与 canvas **连浮层注册表都不在**（只有 2 条，而 `OverlayContentKind` 有 4 员；该不一致已登记 G5）。
-- 渲染分支：`packages/renderer/src/components/workspace/PanelContainer.vue:146-176` 八条 `v-if/v-else-if`，与注册表一一对应（注释 `:140`）。
-- `drawer.tab` 是**被提及但未注册**的挂载点：`bootstrap.ts:73-80` 只注册 5 个（`sidebar.tab` / `panel.header` / `composer.toolbar` / `provider.authorize` / `provider.detail-extra`），`drawer.tab` 仅出现在类型注释（`core/extension-host/types.ts:113`、`:156`，`plugin-sdk/src/types.ts:193`，`mount-point-registry.ts:6`）。
+- 一级 tab 位：`packages/core/src/domain/drawer/types.ts:24` `RightDrawerTab` 已开放为 `string`（容器统一批次去枚举；内置 8 员 = `RIGHT_DRAWER_TAB_IDS` 已知值 + `isKnownRightDrawerTab` 判别）——scheduler 不在内置 8 员中，注释明确「workflow 不入右抽屉（2026-10-19 用户裁决，drawer workflow tab 删除，唯一入口 = 浮层）」。
+- 注册表：`packages/core/src/domain/drawer/registry.ts:187` 八条 `RIGHT_DRAWER_REGISTRY`；`:203` `OVERLAY_REGISTRY` 已补齐 4 条（browser/workflow/scheduler/canvas，容器统一批次消除 G5 不一致）。
+- 渲染分支：`packages/renderer/src/components/workspace/PanelContainer.vue` 原 8 分支 drawerTab 字面量 `v-if/v-else-if` chain 已删（容器统一批次），内容显隐归 `DrawerPanel` aside + ViewHost 推树渲染。
+- `drawer.tab` 挂载点**已注册**（容器统一批次）：`bootstrap.ts:98` `mountRegistryImpl.register('drawer.tab')`（同批注册 `overlay.content` / `settings.section` 三族）。
 
 ### 4.2 固定点清单
 
@@ -283,8 +283,8 @@ scheduler 在本层固定点 = **0**（既不声明、也不渲染、也不在�
 
 | # | 约束 | 位置 | 说明 |
 |---|---|---|---|
-| L3-1 | 一级 tab 枚举为封闭联合（新增必须改类型） | `core/domain/drawer/types.ts:22` | 本层插件化的总闸；对 scheduler 无直接影响 |
-| L3-2 | `drawer.tab` 挂载点提名未注册 | `bootstrap.ts:73-80` 无该调用 | 一旦注册，插件才可能声明 drawer tab |
+| L3-1 | 已消解：tab 位已开放 `string`（`RightDrawerTab` 去枚举 + 已知值判别） | `core/domain/drawer/types.ts:24` | 封闭联合总闸已拆除（容器统一批次） |
+| L3-2 | 已消解：`drawer.tab` 挂载点已注册 | `bootstrap.ts:98` | 插件已可声明 drawer tab |
 
 合计：0 个 scheduler 专属固定点，2 个域外约束。
 
@@ -296,7 +296,7 @@ scheduler 在本层固定点 = **0**（既不声明、也不渲染、也不在�
 2. 交互密度：scheduler 主入口是 composer 左簇图标（常驻、带徽标、hover 即出面板）。drawer 需先开抽屉再切 tab，比 overlay 直开多一层；且 drawer 与对话流并排（宽度挤压），scheduler 的 stats-line + 每任务多行 + action-bar 需要宽面板。
 3. 已有双入口共识：`openSchedulerTab` 与 `openCanvasTab` 是「同壳 tab 切换 + 独立 content kind 直达」的双入口先例（`workflow-viz-overlay.ts:135` 注释「对齐 openSchedulerTab 先例」，设计 §3.1(3) 明文要求两入口同态）。再加 drawer 就是第三态，违反同态。
 
-结论：本层改造动作 = 无。但**应把 scheduler/canvas 补进 `OVERLAY_REGISTRY`**（现只有 browser/workflow 两条，`registry.ts:171`），否则浮层注册表与 `OverlayContentKind` 四员永远不一致，未来「tab 从注册表派生」的第 2 步会缺数据源（见 §5.3）。
+结论：本层改造动作 = 无。scheduler/canvas 已补进 `OVERLAY_REGISTRY`（现 4 条，容器统一批次），浮层注册表与 `OverlayContentKind` 四员已一致，「tab 从注册表派生」的第 2 步数据源已备（见 §5.3）。
 
 ---
 
@@ -313,10 +313,10 @@ scheduler 在本层固定点 = **0**（既不声明、也不渲染、也不在�
 - 生产者：`scheduler-manager/index.ts:497`。
 - 数据链：见 §1.2，与 quick card / 托盘 widget 共用同一个 store。
 
-写死的部分（容器）：
+写死的部分（容器；tab 值域已随容器统一批次开放，其余仍宿主持有）：
 
-1. **tab 值域**：`workflow-viz-overlay.ts:63` `export type OverlayTab = 'runs' | 'scheduler' | 'canvas'`。
-2. **tab 展示态**：`workflow-viz-overlay.ts:67` `export const overlayTab = ref<OverlayTab>('runs')`（`@data-owner` 豁免标注 `:65`；写方封闭集 = `openWorkflowVizOverlay` `:114` / `openSchedulerTab` `:127` / `openCanvasTab` `:140` / `setOverlayTab` `:147` / 关闭复位 watch `:80-86`）。
+1. **tab 值域（已消解）**：`workflow-viz-overlay.ts:68` `export type OverlayTab = string`（`OVERLAY_TAB_IDS` 三已知值 + `isKnownOverlayTab` 判别 `:71`/`:74`）。
+2. **tab 展示态**：`workflow-viz-overlay.ts:80` `export const overlayTab = ref<OverlayTab>('runs')`（写方封闭集 = `openWorkflowVizOverlay` / `openSchedulerTab` / `openCanvasTab` / `setOverlayTab` / 关闭复位 watch，复位目标仍写死 `'runs'`）。
 3. **tab 条分段**：`WorkflowVizOverlay.vue:428-432` `tabSegments` 三项字面量（label 走 i18n `panel.workflowViz.overlayTabRuns/Scheduler/Canvas`，icon 硬绑 `Workflow`/`Clock`/`Network`）；模板 `:142-164` 遍历渲染，禁用判据 `:156` `seg.value === 'runs' && run === null` 写死 runs 语义。
 4. **标题三态**：`WorkflowVizOverlay.vue:65-71`（scheduler：`Clock` + i18n 标题）、`:72-78`（canvas）、`:79-136`（runs 六元素）。
 5. **内容三态**：`:168`（runs）、`:308`（canvas）、`:319-327`（scheduler，`v-else` 兜底）。
@@ -331,8 +331,8 @@ scheduler 在本层固定点 = **0**（既不声明、也不渲染、也不在�
 
 | # | 固定点 | 文件:行 | 性质 |
 |---|---|---|---|
-| L4-1 | `OverlayTab` 联合类型三值 | `workflow-viz-overlay.ts:63` | 类型层封闭枚举 |
-| L4-2 | `overlayTab` ref 初值 `'runs'` | `workflow-viz-overlay.ts:67` | 默认 tab 写死 |
+| L4-1 | 已消解：`OverlayTab` 已开放 `string` + 已知值判别 | `workflow-viz-overlay.ts:68`/`:74` | 类型层封闭枚举已拆（容器统一批次） |
+| L4-2 | `overlayTab` ref 初值 `'runs'` | `workflow-viz-overlay.ts:80` | 默认 tab 写死 |
 | L4-3 | `openSchedulerTab` 专用 opener | `workflow-viz-overlay.ts:127-130` | 每新增 tab 需 +1 函数 |
 | L4-4 | 关闭复位 watch 归 `'runs'` | `workflow-viz-overlay.ts:80-86` | 复位目标写死 |
 | L4-5 | `tabSegments` 三段字面量 | `WorkflowVizOverlay.vue:428-432` | label/icon/序写死 |
@@ -348,9 +348,9 @@ scheduler 在本层固定点 = **0**（既不声明、也不渲染、也不在�
 | L4-15 | 壳开合三类判定 | `WorkflowVizOverlayHost.vue:122-131` | `isWorkflowOpen`/`isSchedulerOpen`/`isCanvasOpen` + OR |
 | L4-16 | `overlaySessionId` 派生（canvas 特判） | `WorkflowVizOverlayHost.vue:135-139` | 会话归属派生 |
 | L4-17 | 会话删除级联 kind 枚举 | `workflow-viz-overlay.ts:159-166` | 条件式关闭 |
-| L4-18 | `OVERLAY_REGISTRY` 只有 2 条（缺 scheduler/canvas） | `core/domain/drawer/registry.ts:171` | 注册表与词表不一致（G5） |
+| L4-18 | 已消解：`OVERLAY_REGISTRY` 已补齐 scheduler/canvas（现 4 条） | `core/domain/drawer/registry.ts:203` | 注册表与词表不一致已修复（容器统一批次） |
 
-合计 18 个固定点，其中 L4-1~L4-14 与 L4-18 构成「新增一个 overlay tab 必须改的 6 文件改动链」：`shared 词表 → core 类型 → core 协调 → core barrel → renderer 控制器 → renderer 壳模板 → renderer 壳宿主 → renderer 交互组件`（runtime 广播层无需改）。
+合计 18 个固定点，其中 L4-1 与 L4-18 已消解（容器统一批次），现行余 16 个；L4-2~L4-14 构成「新增一个 overlay tab 必须改的 6 文件改动链」的剩余部分：`shared 词表 → core 类型 → core 协调 → core barrel → renderer 控制器 → renderer 壳模板 → renderer 壳宿主 → renderer 交互组件`（runtime 广播层无需改）。
 
 ### 5.3 插件化改造方案
 
@@ -377,9 +377,9 @@ scheduler 在本层固定点 = **0**（既不声明、也不渲染、也不在�
 
 配套新增可选字段（`PluginContributesView`，`core/extension-host/types.ts:152-161`）：`icon?: string`、`order?: number`、`openableWithoutEmptyState?: boolean`（对应 runs tab「无 run 禁用」语义，改成**插件自报**而非宿主写死）。
 
-2. **`OverlayTab` 退化为 `string`，tab 列表从注册表派生**：
-   - `workflow-viz-overlay.ts:63` → `export type OverlayTab = string`（或删除该类型，直接用 viewId）。
-   - `tabSegments`（`WorkflowVizOverlay.vue:428-432`）→ `computed(() => registry.getContributions({ placement: 'overlay.tab' }).map(...))`，label 用声明 `title`，icon 走 `HEADER_ACTION_ICONS` 同款映射表。
+2. **`OverlayTab` 退化为 `string`（已完成），tab 列表从注册表派生（待做）**：
+   - ✅ `workflow-viz-overlay.ts:68` `export type OverlayTab = string` 已落地（容器统一批次）。
+   - `tabSegments`（`WorkflowVizOverlay.vue:466`，现为 computed 声明对象）→ 改为 `registry.getContributions({ placement: ... }).map(...)` 派生，label 用声明 `title`，icon 走 `HEADER_ACTION_ICONS` 同款映射表。
    - `overlayTab` 默认值从 `'runs'` 改为「注册表首项」或「最近打开的 tab」（需一处裁决）。
    - 关闭复位（`:80-86`）保留「归首项」语义，不再写 `'runs'`。
 
@@ -485,11 +485,11 @@ scheduler 在本层固定点 = **0**（既不声明、也不渲染、也不在�
 
 | 层 | 固定点数量 | 「整组件/整文件」级 | 「单点」级 |
 |---|---|---|---|
-| 层 1 composer 入口 | 8 | 2（QuickCard 213 行、专属分支 15 行） | 6 |
+| 层 1 composer 入口 | 7（L1-8 已消解，L1-5 部分消解计 1） | 2（QuickCard 213 行、专属分支 15 行） | 5 |
 | 层 2 对话流行内 | 6 | 1（ScheduleForm 494 行） | 5 |
-| 层 3 drawer | 0（域外约束 2） | 0 | 0 |
-| 层 4 overlay | 18 | 0（全是分支/类型/常量单点） | 18 |
-| **合计** | **32** | **3** | **29** |
+| 层 3 drawer | 0（域外约束已消解：L3-1/L3-2 随容器统一批次拆除） | 0 | 0 |
+| 层 4 overlay | 16（L4-1/L4-18 已消解） | 0（全是分支/类型/常量单点） | 16 |
+| **合计** | **29** | **3** | **26** |
 
 ---
 
@@ -560,21 +560,21 @@ scheduler 在本层固定点 = **0**（既不声明、也不渲染、也不在�
 
 目标：把 `activation='scheduler-overlay'` 特例泛化成通用机制，让任意插件都能声明「点击我的 headerAction 打开我的 overlay tab」。按「每步独立可验收、可回滚」排序。
 
-### 步骤 1：契约层统一（无行为变化，纯类型）
+### 步骤 1：契约层统一（已完成：SDK/core 两版已结构化对齐）
 
-- [ ] `packages/plugin-sdk/src/types.ts:252-259` 的 `PluginContributesHeaderAction` 补齐 `activation?`，字段形状与 core 版（`core/extension-host/types.ts:205-221`）逐字一致；`commandId` 改可选。
-- [ ] 两处 `activation` 从 `'scheduler-overlay'` 字面量改结构化（`{ kind: 'overlay'; tabId; viewId; preview? }`），保留 `'scheduler-overlay'` 作为**迁移期联合成员**（一次性兼容，下个版本删）。
-- [ ] `packages/core/src/extension-host/contribution-registry.ts:124-137` 的 `parseHeaderActionContributions` 透传结构（当前已整段透传 `h.activation`，只需类型放宽）。
-- 验收：`pnpm extensions:typecheck` + `packages/core` 单测（`contribution-registry.test.ts:314-341` 现有 AP-1d 断言需同步改）+ `packages/plugin-sdk` 类型测试。
+- [x] `packages/plugin-sdk/src/types.ts` 的 `PluginContributesHeaderAction` 已补 `activation?: HeaderActionActivation`（两版对齐，容器扩展点统一 §6.11 阶段 0 落地）；`commandId` 已可选。
+- [x] 两处 `activation` 已改结构化联合（`{ kind: 'command' | 'overlay' | 'drawer' }` 成员），`'scheduler-overlay'` 作为**迁移期联合成员**保留（`core/extension-host/types.ts:218`，注释自证「下一版本删除」）。
+- [ ] 待做：`'scheduler-overlay'` 兼容值与其分派分支（W1/步骤 3）的退役。
+- 验收：`pnpm extensions:typecheck` + `packages/core` 单测 + `packages/plugin-sdk` 类型测试。
 - 回滚点：只改类型，运行期行为由步骤 3 才切换。
 
-### 步骤 2：注册 overlay.tab 挂载点 + 声明
+### 步骤 2：注册 overlay.tab 挂载点 + 声明（数据面已完成，声明面待做）
 
-- [ ] `packages/core/src/bootstrap.ts:73-80` 增 `mountRegistryImpl.register('overlay.tab')`。
-- [ ] `packages/core/src/domain/drawer/registry.ts:171` 的 `OVERLAY_REGISTRY` 补 scheduler / canvas 两条（先补数据，不改渲染，纯消除 G5 不一致）。
-- [ ] 在 `builtin-contributions.ts` 增 `scheduler.panel` 的 view 声明（`placement: 'overlay.tab'`，`icon: 'clock'`，`order: 20`），与现有 `scheduler-manager` 条目并列。
-- [ ] `PluginContributesView`（`core/extension-host/types.ts:152-161`）补 `icon?` / `order?` / `openableWithoutEmptyState?` 三个可选字段。
-- 验收：`node scripts/validate-constraints.mjs` + `core/domain/drawer/__tests__/registry.test.ts`（现有断言 `OVERLAY_REGISTRY` 长度 2，`registry.test.ts:58`，需同步改）+ `core/extension-host/__tests__/contribution-registry.test.ts`。
+- [x] 挂载点已注册（容器统一批次，`bootstrap.ts:94-99` 三族：`drawer.tab` / `overlay.content` / `settings.section`——浮层走 `overlay.content` 内容注册表形态，非标签页位）。
+- [x] `packages/core/src/domain/drawer/registry.ts:203` 的 `OVERLAY_REGISTRY` 已补 scheduler / canvas（现 4 条，G5 不一致已消除）。
+- [ ] 在 `builtin-contributions.ts` 增 `scheduler.panel` 的 view 声明（placement 走已注册挂载点，`icon: 'clock'`，`order: 20`），与现有 `scheduler-manager` 条目并列。
+- [x] `PluginContributesView`（`core/extension-host/types.ts:150-161`）已补 `icon?` / `order?` 等可选字段。
+- 验收：`node scripts/validate-constraints.mjs` + `core/domain/drawer/__tests__/registry.test.ts` + `core/extension-host/__tests__/contribution-registry.test.ts`。
 - 回滚点：新挂载点无消费方时为零行为变化（`MountPointRegistry.register` 仅登记）。
 
 ### 步骤 3：渲染端通用分派（headerAction）
@@ -597,7 +597,7 @@ scheduler 在本层固定点 = **0**（既不声明、也不渲染、也不在�
 
 ### 步骤 5：浮层壳 tab 从注册表派生
 
-- [ ] `workflow-viz-overlay.ts:63` 的 `OverlayTab` 改 `string`；`:67` 的初值改「注册表首项」（保留 `'runs'` 作为内置项 id，不改行为）。
+- [x] `workflow-viz-overlay.ts:68` 的 `OverlayTab` 已改 `string`（容器统一批次）；`:80` 的初值仍 `'runs'`（改「注册表首项」待做，保留 `'runs'` 作为内置项 id）。
 - [ ] `WorkflowVizOverlay.vue:428-432` 的 `tabSegments` → 从 `ContributionRegistry.getContributions({ placement: 'overlay.tab' })` 派生 + 内置 `runs` 恒在首位（内置项排序权重最高）。
 - [ ] 标题分支（`:65-136`）收敛：通用路径 = `icon + title`；`runs` 保留为 `kind:'builtin'` 的特例分支（用显式 `v-else-if="tab === 'runs'"` 而非 `v-else`）。
 - [ ] 内容分支（`:168`/`:308`/`:319-327`）收敛：`kind:'view'` → 单条 `<ViewHost :view-id="activeTab.viewId">`；`runs` → 内置分支；未知 tabId → 空态占位（禁止 `v-else` 兜底到 scheduler）。
@@ -657,4 +657,4 @@ e2e 影响面（按 `docs/testing/e2e-map.json` 的 SCHED 域登记）：`script
 
 ## 附：一句话回答「scheduler 距完全插件化还差什么」
 
-数据链路、内容原语、写操作执行器三件已完成且是全仓样板；缺的是**容器层的三处「宿主知道 scheduler 这个词」**——`activation` 字面量、`OverlayTab` 联合成员、`SchedulerQuickCard` 专属组件。把这三处换成「结构化声明 + 注册表派生」，新增同类能力从「改 6 文件 18 点」变成「写 1 处 manifest」。
+数据链路、内容原语、写操作执行器三件已完成且是全仓样板；容器层的「宿主知道 scheduler 这个词」三处中，`OverlayTab` 联合成员已开放（容器统一批次）、`activation` 契约已结构化（迁移期兼容值待退役），仍缺 **renderer 专属分派分支（W1）与 `SchedulerQuickCard` 专属组件（W2）**，以及 tab 条/标题/内容分支的注册表派生收敛（W5/W6/W7）。把剩余处换成「结构化声明 + 注册表派生」，新增同类能力从「改 6 文件」变成「写 1 处 manifest」。

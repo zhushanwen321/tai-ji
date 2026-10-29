@@ -22,8 +22,8 @@
  *       对话流 block 第二入口 mock 不可达——见 case 内注释
  * - OV2（S1/S2 mock 面）：workflow 固定 tab 三子页——trace 表行集与 agentCalls 对账、
  *       事件流子页行集与 fixtureRunEvents 对账、Gantt 子页行/色带/行标签挂载
- * - OV3（S4 mock 面）：trace 行点击 → agent tab 钻取（meta 条与 call 对账）→ tab 关闭
- *       回 workflow 固定 tab → ESC 关 overlay 后 composer 恢复
+ * - OV3（S4 mock 面）：trace 行点击 → 右侧 agent 抽屉钻取（meta 条与 call 对账）→
+ *       抽屉 tab 关闭收起抽屉 → ESC 关 overlay 后 composer 恢复
  * - OV4（V5①）：wf-mock-parse-failed 预置错误臂 → 上区降级列表（parse_failed 原因码 +
  *       重试钮可用 + 列表与 agentCalls 对账），下区 dock 实况面板不受影响
  * - OV5：L2TabBar 编排——关闭激活 tab 激活左侧相邻、关闭首个动态 tab 回固定 tab、

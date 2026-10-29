@@ -7,7 +7,7 @@
 >
 > | | **taiji Plugin** | **pi extension** |
 > |---|---|---|
-> | 是什么 | taiji 自有插件（`resources/plugins/` + 用户安装） | pi coding agent 的扩展包（`extensions/` 下 21 个 `@zhushanwen/pi-*`） |
+> | 是什么 | taiji 自有插件（`resources/plugins/` + 用户安装） | pi coding agent 的扩展包（`extensions/` 下 29 个 `@zhushanwen/pi-*`，其中 21 个在内置清单 `packages/shared/src/mandatory-extensions.json`） |
 > | 跑在哪 | runtime 进程管理的 Worker / fork 子进程 | **pi 子进程内**（每 session 一个 pi 进程） |
 > | 解决什么 | UI 贡献、后台服务、provider 来源、命令 | 模型可见能力：tool / slash 命令 / 消息渲染 / provider / pi 事件钩子 |
 > | 契约 | `packages/plugin-sdk/src/types.ts`（`PluginContributes` / `Phase2AgentAPI`） | `@earendil-works/pi-coding-agent` 的 `ExtensionAPI` |

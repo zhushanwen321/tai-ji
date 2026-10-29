@@ -7,11 +7,11 @@
 ## 0 结论摘要
 
 1. **workflow 是四层里唯一零插件化的域**：todo/goal 走「插件推树 + ViewHost」（`extensions/universal/todo/src/index.ts:52-59` → `packages/ui/src/extension-host/ViewHost.vue:72-78`）；scheduler 的 overlay tab 也已是「插件推树 + ViewHost」（`resources/plugins/scheduler-manager/index.ts:497` → `workflow-viz/overlay/WorkflowVizOverlay.vue:326`）。workflow 全链路 0 处插件渲染；`workflow-viz/` 25 个生产文件 4814 行 + 托盘 4 文件 1065 行 + store 624 行全为宿主专属。
-2. **半成品对照样本已存在，只差 tab 位**：`OverlayTab = 'runs' | 'scheduler' | 'canvas'`（`workflow-viz/overlay/workflow-viz-overlay.ts:63`）中只有 scheduler 内容是插件树，另两段宿主专属。机制已验证，缺的是内容替换——而 runs 的内容（DAG/甘特）恰是原语表达不了的（§7.1）。
+2. **半成品对照样本已存在，tab 位障碍已消解（容器统一批次 743f82e6f）**：`OverlayTab` 已开放为 `string` + `isKnownOverlayTab` 已知值判别（`workflow-viz/overlay/workflow-viz-overlay.ts:68`/`:74`——容器 tab 位一律开放，派生视图可产出非内置 tab 位）；三个内置 tab 中只有 scheduler 内容是插件树，另两段宿主专属。缺的只剩内容替换——而 runs 的内容（DAG/甘特）恰是原语表达不了的（§7.1）。
 3. **数据面已完全插件化，渲染面完全没有**：run 状态/事件流/成员表全由 `pi-subagent-workflow` 产出（`host/journal-reporter.ts:156` → `runtime/src/infra/pi/event-adapter.ts:2057` → `services/session/session-records.ts:936` → `stores/workflow.ts:519`）。**零处需要新增协议**，改造是纯消费侧重排。
 4. **对话流的 plugin 通道是空的**：`WORKFLOW_TOOL_NAMES`（`shared/src/constants.ts:47-52`）四名被 pi 侧明示不构造 `__gui__`（`interface/tool/tool-workflow.ts:328`/`:404`、`tool-subagents.ts:30`），宿主按名硬编码路由 `WorkflowRow.vue`（132 行）。同包 `workflow-script` 却正常产树（`tool-workflow-script.ts:278`）——同包两策略并存。
 5. **drawer 裁决是最重要约束**：2026-10-19「浮层是唯一形态」（commit `3ee709342` 删 `WorkflowTab.vue` 395 行 + 2 测试文件 + `selection/workflow.ts` 47 行）。**并非所有功能都该有 drawer tab**，插件化不应做成「每域补一个 tab」。
-6. **两处真实残留/漂移**：① `panel/__tests__/SubagentTab.degraded.test.ts:42` 仍 mock 已删的 `openWorkflowInDrawer`；② `e2e/workflow-viz-overlay.spec.ts` OV3/OV5 仍断言 `l2-tab-agent:*`，而 2026-10-19 起 agent tab 已移入 `AgentStreamDrawer`（testid `wf-viz-agent-drawer-tab-*`），`packages/` 内已无 `l2-tab-agent` 生产者。
+6. **两处残留/漂移均已清理**：① `panel/__tests__/SubagentTab.degraded.test.ts`（含 mock 已删 `openWorkflowInDrawer` 的死 mock）已随测试合并批次 c2422d971 整文件删除；② `e2e/workflow-viz-overlay.spec.ts` OV3/OV5 的 `l2-tab-agent:*` 断言已改写为 `wf-viz-agent-drawer-tab-*`（agent 钻取现经页面级 agent 抽屉承载，2026-10-19 起 agent 内容移入 `AgentStreamDrawer`），`e2e/` 全目录 `l2-tab-agent` 零命中。
 
 ## 1 数据链路全景
 
@@ -122,17 +122,17 @@ Block 壳 → ToolRow（按 toolName 三分）
 
 | # | 锚点 | 内容 | 性质 |
 |---|---|---|---|
-| 1 | `core/src/domain/drawer/types.ts:22` | `RightDrawerTab` 8 员无 workflow（注释：赋给右抽屉 tab 位即编译错） | 联合类型 = 类型层强制 |
-| 2 | `core/src/domain/drawer/registry.ts:25` | `ContainerContentType = RightDrawerTab \| 'terminal' \| 'browser' \| 'workflow'` | workflow 只属 overlay |
-| 3 | `registry.ts:144-151` / `:171` | `WORKFLOW_OVERLAY_ENTRY` ∈ `OVERLAY_REGISTRY`（2 条） | 唯一声明位 |
-| 4 | `renderer/src/components/workspace/PanelContainer.vue:146-176` | 7 分支 v-if chain，无 workflow | 内容分支硬编码 |
+| 1 | `core/src/domain/drawer/types.ts:24` | `RightDrawerTab` 已开放为 `string`（`RIGHT_DRAWER_TAB_IDS` 8 员已知值 + `isKnownRightDrawerTab` 判别，容器统一批次去枚举） | 类型层强制已消解为运行时判别 |
+| 2 | `core/src/domain/drawer/registry.ts:30` | `ContainerContentType = string`（同批去枚举） | workflow 只属 overlay |
+| 3 | `registry.ts:144-151` / `:203` | `WORKFLOW_OVERLAY_ENTRY` ∈ `OVERLAY_REGISTRY`（现 4 条：browser/workflow/scheduler/canvas，容器统一批次补齐） | 唯一声明位 |
+| 4 | `renderer/src/components/workspace/PanelContainer.vue` | 原 8 分支 drawerTab 字面量 v-if chain 已删（容器统一批次），内容显隐归 `DrawerPanel` aside + ViewHost 推树渲染 | 内容分支硬编码已消解 |
 | 5 | `core/src/domain/drawer/coordination.ts:139/147` | `openWorkflow` / `lookupWorkflowRun` 仍在 drawer 域，语义实为开 overlay | 域归属错位 |
-| 6 | `renderer/src/i18n/locales/zh-CN/panel.ts:389/392/393`（en 398/401/402） | `tabWorkflow`/`noWorkflow`/`workflowHint` 唯一引用方 = `registry.ts:148-150` | 死文案 |
-| 7 | `panel/__tests__/SubagentTab.degraded.test.ts:42` | 仍 mock 已删的 `openWorkflowInDrawer` | **残留死 mock** |
-| 8 | `PanelContainer.vue:156/304`、`SubagentTab.vue:12/13/77`、`useSubagentTabData.ts:17`、`stores/workflow.ts:14-25`、`stores/subagent.ts:11-15` | 7 处以 drawer workflow tab 为参照 | 注释漂移 |
+| 6 | `renderer/src/i18n/locales/`（zh-CN/en `panel.ts`） | `tabWorkflow`/`noWorkflow`/`workflowHint` 三死键已删（i18n 目录 grep 零命中） | 死文案已清 |
+| 7 | `panel/__tests__/SubagentTab.degraded.test.ts` | 已随测试合并批次 c2422d971 整文件删除 | 死 mock 已清 |
+| 8 | 余 `SubagentTab.vue:12/13`、`useSubagentTabData.ts:17` 仍以已删 drawer workflow tab 为参照（`PanelContainer.vue` 两处已随容器统一重写消失、`SubagentTab.vue:77` 已更新为浮层归宿） | 3 处以 drawer workflow tab 为参照 | 注释漂移（部分残留） |
 | 9 | `docs/testing/e2e-map.json` E2E-MOCK-01 note | 仍写「归宿 drawer workflow tab」 | 登记漂移 |
 
-残留 = 3 i18n 死键 + 1 死 mock + 7 注释 + 1 e2e-map 表述；结构性固定点仅第 1、4 两处。
+已清理（容器统一批次 743f82e6f + 测试合并批次 c2422d971）：3 i18n 死键、死 mock 文件、e2e 断言（OV3/OV5 改写抽屉 testid）、结构性固定点第 1、4 两处（tab 联合与内容分支 chain）。仍存：注释漂移 3 处（`SubagentTab.vue:12/13`、`useSubagentTabData.ts:17`）+ 1 e2e-map 表述（E2E-MOCK-01 note）。
 
 ### 4.2 对「drawer tab 插件化」方案的影响
 
@@ -158,8 +158,8 @@ AppShell.vue:34 <WorkflowVizOverlayHost/>
 | 1-2 | `shared/src/ipc-payloads.ts:289` / `core/src/domain/overlay/types.ts:55-59` | `OverlayContentKind` 四员 / `OverlayContent` 判别联合 | 联合 ×2（IPC 契约四方共用） |
 | 3 | `core/src/domain/overlay/coordination.ts:54/67/82` | `openBrowser`/`openSchedulerOverlay`/`openCanvasOverlay` + 通用 `openOverlay` | 每内容一 opener |
 | 4 | `apps/electron/main/browser/gateway/display-gate.ts:145-148` | 四员硬校验，非法 throw | 跨进程同步点 |
-| 5 | `core/src/domain/drawer/registry.ts:171` | `OVERLAY_REGISTRY` 仅 2 条（缺 scheduler/canvas） | 注册表与类型不同步（零消费未爆） |
-| 6-7 | `workflow-viz-overlay.ts:63` / `:67`+`:76-82` | `OverlayTab` 三员 / `overlayTab` ref + 关闭复位 watch(`flush:'sync'`) | **tab 轴**联合 + 单例态 |
+| 5 | `core/src/domain/drawer/registry.ts:203` | `OVERLAY_REGISTRY` 已扩 4 条（browser/workflow/scheduler/canvas，容器统一批次补齐） | 注册表与类型不同步已修复 |
+| 6-7 | `workflow-viz-overlay.ts:68`/`:71`/`:74` / `:80`+关闭复位 watch(`flush:'sync'`) | `OverlayTab` 已开放为 `string`（`OVERLAY_TAB_IDS` 三已知值 + `isKnownOverlayTab` 判别）/ `overlayTab` ref | **tab 轴**联合已去枚举（容器统一批次）；单例态仍在 |
 | 8 | `workflow-viz-overlay.ts:147` | `setOverlayTab` 只写展示维度，**不改 core kind** | tab 与 kind 刻意解耦 |
 | 9-11 | `:114` / `:127` / `:140` | `openWorkflowVizOverlay` / `openSchedulerTab` / `openCanvasTab` | 三个专用入口（各含 core 调用 + tab 置位） |
 | 12 | `:159-169` | `closeWorkflowVizOverlayForSession` 三分支（workflow/scheduler 判 sessionId，canvas 走专用） | 级联硬编码 |
@@ -167,7 +167,7 @@ AppShell.vue:34 <WorkflowVizOverlayHost/>
 | 16-17 | `Host:179/187/203` / `:219-227` | `matchResult`/`nodeStates`(六态)/`activePhase` / 1s tick | workflow 专属派生 + 时钟 |
 | 18-20 | `WorkflowVizOverlay.vue:65/72/79` / `:428-432` / `:156`+`:435-438` | header 三态 / `tabSegments` 三项硬编码 / 「runs 无 run 禁用」 | 三段硬编码 |
 | 21-22 | `:168` / `:308-318` | `tab==='runs'` → DAG + dock / `tab==='canvas'` → `CanvasPane`（async） | 宿主专属渲染 |
-| 23-24 | `:322-327` / `workflow-viz-overlay.ts:74` | `v-else` → `<ViewHost :view-id="SCHEDULER_MODAL_VIEW_ID">`；viewId 单源 re-export（值 `modal-scheduler-manager-scheduler-manager.panel`，`extension-protocol/src/extensions/scheduler/types.ts:137`） | **唯一插件渲染段（半成品正面）** |
+| 23-24 | `:322-327` / `workflow-viz-overlay.ts:87` | `v-else` → `<ViewHost :view-id="SCHEDULER_MODAL_VIEW_ID">`；viewId 单源 re-export（值 `modal-scheduler-manager-scheduler-manager.panel`，`extension-protocol/src/extensions/scheduler/types.ts:137`） | **唯一插件渲染段（半成品正面）** |
 | 25 | `WorkflowVizOverlay.vue:415/420` | `canvasPaneId`/`canvasPaneSessionId` 读 core SSOT | 壳受控读 |
 
 数据源与渲染组件：
@@ -182,15 +182,15 @@ AppShell.vue:34 <WorkflowVizOverlayHost/>
 
 ### 5.2 「tab 位写死 vs 内容已插件化」半成品分析
 
-同一 `OverlayTab` 三段，内容成熟度三档：
+同一 overlay 的三个内置 tab（`OVERLAY_TAB_IDS`），内容成熟度三档：
 
 | tab | 内容来源 | tab 位声明 | 差异 |
 |---|---|---|---|
-| `scheduler` | **插件树**：`resources/plugins/scheduler-manager/index.ts:497` `api.views.update(SCHEDULER_MODAL_VIEW_ID, tree,{sessionId})`；tree = `buildModalTree`（`:199-222`：`stats-line`+`list-tree`+`action-bar`+`ansi-text`）；渲染 `ViewHost`（`:326`）`empty="hidden"` | 联合 + `tabSegments[1]` + header 分支 1 = **3 处** | **内容 100% 插件侧，宿主零业务代码** |
-| `canvas` | 宿主 `CanvasPane`（async） | 同上 3 处 | 内容宿主专属；payload 需 `canvasId`（core 类型 + main 校验 + renderer 解读） |
-| `runs` | 宿主：DAG 1234 + dock 1277 + 4 派生 computed + 1s tick | 同上 3 处 + 独有禁用规则（`:156`） | 最重一段 |
+| `scheduler` | **插件树**：`resources/plugins/scheduler-manager/index.ts:497` `api.views.update(SCHEDULER_MODAL_VIEW_ID, tree,{sessionId})`；tree = `buildModalTree`（`:199-222`：`stats-line`+`list-tree`+`action-bar`+`ansi-text`）；渲染 `ViewHost`（`:326`）`empty="hidden"` | `tabSegments` 成员 + header 分支 = **2 处**（`OverlayTab` 联合已去枚举，tab 位不再是障碍） | **内容 100% 插件侧，宿主零业务代码** |
+| `canvas` | 宿主 `CanvasPane`（async） | 同上 2 处 | 内容宿主专属；payload 需 `canvasId`（core 类型 + main 校验 + renderer 解读） |
+| `runs` | 宿主：DAG 1234 + dock 1277 + 4 派生 computed + 1s tick | 同上 2 处 + 独有禁用规则 | 最重一段 |
 
-**结论**：scheduler 证明「tab 位写死」与「内容插件化」是**两个可分离的维度**。把 tab 位注册表化的成本极低（3 处 → 1 处声明），但只有内容本身是树时才有收益。workflow 的 `runs` 内容不是树 → 若只做 tab 注册表化，`runs` 仍需一个宿主专属渲染器的逃生舱（即「注册表项 = viewId 或宿主组件」双形态），这是设计上最需要裁决的点。
+**结论**：scheduler 证明「tab 位写死」与「内容插件化」是**两个可分离的维度**——tab 位侧已被容器统一批次消解（`OverlayTab` 开放 string + `isKnownOverlayTab`，tab 条渲染数据驱动），剩余障碍只在内容本身。workflow 的 `runs` 内容不是树 → `runs` 仍需一个宿主专属渲染器的逃生舱（即「注册表项 = viewId 或宿主组件」双形态），这是设计上最需要裁决的点。
 
 另注意 **tab 与 kind 解耦带来的语义不对称**：`setOverlayTab('scheduler')` 只改展示维度，core 内容仍是 `workflow`（测试实证 `workflow-viz-overlay-host.test.ts:530-541`「tab 只切展示维度，core 内容 kind 不变」）；而 `openSchedulerTab` 会同时改 core kind。于是「点 tab 进 scheduler」与「直达打开 scheduler」是两条不同事实路径，`overlaySessionId` 取 `payload.sessionId` 时对两者都成立，但 `closeWorkflowVizOverlayForSession` 的分支判据（`cur.kind`）在纯 tab 切换后判的是 workflow——改造 tab 注册表时必须保留这条不对称语义，否则级联判定会回退。
 
@@ -202,7 +202,7 @@ AppShell.vue:34 <WorkflowVizOverlayHost/>
 | L1（托盘目录全量） | `packages/renderer/src/components/panel/tray/` 生产文件（含 bash/session/canvas 共用件） | 16 | 3377 |
 | L2 对话流 | `ui/src/features/chat/WorkflowRow.vue` 132 + `folded-notice.ts` 59 + `renderer/src/stores/workflow.ts` 624 | 3 | 815 |
 | L2 关联（宿主侧判定） | `ToolRow.vue` 487 + `Turn.vue` 628 + `core/src/domain/chat/notify-summary.ts` 340 + `message-turns.ts` 870 | 4 | 2325 |
-| L3 drawer 残留 | 删除链：`WorkflowTab.vue` 395（已删）+ 2 测试 420（已删）+ `selection/workflow.ts` 47（已删）；现存残留 = 3 i18n 键 + 1 死 mock + 7 注释 | 0 现存 | 0 现存 |
+| L3 drawer 残留 | 删除链：`WorkflowTab.vue` 395（已删）+ 2 测试 420（已删）+ `selection/workflow.ts` 47（已删）；3 i18n 键与死 mock 文件已清（c2422d971 等批次）；仍存注释漂移 3 处 + e2e-map 1 表述 | 0 现存 | 0 现存 |
 | L4 overlay | `workflow-viz/` 生产 25 文件（overlay 6/1319，panel 8/1277，dag 6/1234，gantt 2/375，根级 3/609） | 25 | 4814 |
 | L4 core+shared | `core/src/domain/overlay/` 4 文件 299 + `drawer/registry.ts` 178 | 5 | 477 |
 | 测试 | `workflow-viz/**/__tests__/*.test.ts` 14 文件 4597；托盘测试 7 文件 4244；e2e 4 spec 1637 | 25 | 10478 |
@@ -258,18 +258,18 @@ AppShell.vue:34 <WorkflowVizOverlayHost/>
 |---|---|---|---|
 | **R1** | **容器操作无原语（真阻塞）** | 不可行（当前协议） | 所有「点击 → 打开宿主容器」的归宿（层 1 行点击 `TrayNativePanel.vue:522`、层 2 块点击 `WorkflowRow.vue:107`）都依赖 `core/domain/drawer/openWorkflow` + `bindWorkflowOverlayOpener` 桥接。`GuiComponent` 11 原语里没有任何「request host container」语义；`action-bar` 只能走 `commandId` → 插件 command，而插件 command 无法改 core overlay kind。→ 需新增原语（如 `action-bar` 的 `hostAction` 字段）或宿主内置命令 `workflow.openRun`。**不解决则层 1/层 2 只能做到「可看不可点」**。 |
 | **R2** | DAG / 甘特原语化 | 不可行（成本远超收益） | 见 §7.1。需要坐标系原语族；`custom` 逃生口无 provide 点且设计上仅内置。 |
-| **R3** | overlay kind 跨进程契约 | 高风险 | 新增 kind 必须同步改 `shared/src/ipc-payloads.ts:289` + `core/src/domain/overlay/types.ts:55` + `apps/electron/main/browser/gateway/display-gate.ts:145-148` 三处；且 `OVERLAY_REGISTRY`（`registry.ts:171`）已与类型不同步（缺 scheduler/canvas）——注册表化前须先修这个不一致，否则「注册表驱动」会立刻失真。 |
+| **R3** | overlay kind 跨进程契约 | 高风险 | 新增 kind 必须同步改 `shared/src/ipc-payloads.ts:289` + `core/src/domain/overlay/types.ts:55` + `apps/electron/main/browser/gateway/display-gate.ts:145-148` 三处；`OVERLAY_REGISTRY` 已补齐 scheduler/canvas（现 4 条，容器统一批次）——原「注册表与类型不同步」前置已消解。 |
 | **R4** | tab 与 kind 解耦语义 | 中风险 | `setOverlayTab` 不改 core kind（`workflow-viz-overlay.ts:147`，测试 `workflow-viz-overlay-host.test.ts:530-541`）；会话删除级联按 `cur.kind` 判（`:159-169`）。注册表化若把「tab 点击」改为「换 content」，该不对称语义会回退 → 级联判定失效。**改造必须显式保留或重新裁决**。 |
 | **R5** | 折叠行跨域规范 | 中风险 | `FoldedNoticeType` 四员（bash/subagent/workflow/managed）共享 4 张映射表与 `specs/chat/system-notices.md` 视觉规范；单域插件化会分裂规范。 |
-| **R6** | 已漂移的测试资产 | 低风险但必须先清理 | `SubagentTab.degraded.test.ts:42` 死 mock；`e2e/workflow-viz-overlay.spec.ts` OV3/OV5 断言 `l2-tab-agent:*`（自 2026-10-19 已无生产者，现 testid 为 `wf-viz-agent-drawer-tab-item`）。这两处会让改造后的回归信号失真。 |
+| **R6** | 已漂移的测试资产 | 已清理 | 死 mock 文件已随 c2422d971 整删；OV3/OV5 断言已改写 `wf-viz-agent-drawer-tab-*`（e2e 全目录 `l2-tab-agent` 零命中）。回归信号失真风险已消除。 |
 | **R7** | 计数双口径 | 低风险 | 迁 widget 后宿主 `useTrayCounts.workflow` 与插件 `WidgetMeta.badge` 并存会双口径；必须同批删宿主派生。 |
 
 ## 8 可执行改造步骤（有序）
 
 **前置（0 阶段，无依赖，可立即做）**
 
-1. 清理漂移资产：删 `SubagentTab.degraded.test.ts:42` 的 `openWorkflowInDrawer` mock；修 `e2e/workflow-viz-overlay.spec.ts` OV3/OV5 的 `l2-tab-agent:*` → `wf-viz-agent-drawer-tab-item`/`data-call-id`；删 `panel.sideDrawer.tabWorkflow/noWorkflow/workflowHint` 三死键（唯一引用方 `registry.ts:148-150` 的 overlay 条目，改为 overlay 专用文案）；修 `e2e-map.json` E2E-MOCK-01 的「drawer workflow tab」表述。同步清 7 处注释漂移（`PanelContainer.vue:156/304`、`SubagentTab.vue:12/13/77`、`useSubagentTabData.ts:17`、`stores/workflow.ts:14-25`、`stores/subagent.ts:11-15`）。
-2. 修注册表与类型不一致：`OVERLAY_REGISTRY` 补 `scheduler` / `canvas` 两条（`registry.ts:171`），或明确裁决「注册表只登记宿主渲染的容器」并写进注释。**这一步必须先做**，否则后续「注册表驱动」会以错误基线推进。
+1. 清理漂移资产（大部分已完成）：死 mock 文件已随 c2422d971 整删；OV3/OV5 断言已改写 `wf-viz-agent-drawer-tab-*`；三 i18n 死键已删；`PanelContainer.vue` 注释漂移已随容器统一重写消失、`SubagentTab.vue:77` 已更新。仍待做：`e2e-map.json` E2E-MOCK-01 的「drawer workflow tab」表述、`SubagentTab.vue:12/13` 与 `useSubagentTabData.ts:17` 注释。
+2. 修注册表与类型不一致：已完成（`OVERLAY_REGISTRY` 现 4 条：browser/workflow/scheduler/canvas）。
 
 **阶段 1（层 1，收益/成本最优，但含 R1 阻塞）**
 
@@ -284,7 +284,7 @@ AppShell.vue:34 <WorkflowVizOverlayHost/>
 
 **阶段 3（层 4，半成品收口）**
 
-8. tab 位注册表化：把 `OverlayTab` 三员 + `tabSegments`（`WorkflowVizOverlay.vue:428-432`）+ header 三分支（`:65/72/79`）+ body 三分支（`:168/308/322`）+ 禁用规则（`:156`）收敛为「overlay tab 声明表」——每项 `{ id, label, icon, renderer: { kind: 'view', viewId } | { kind: 'host', component } }`。scheduler 项用 `view`（现成），runs/canvas 用 `host`（R2 决定它们无法 tree 化）。**必须保留 R4 的 tab/kind 不对称语义**（`setOverlayTab` 只改展示维度），否则级联判定回退。
+8. tab 位声明表收敛：`OverlayTab` 已开放为 `string`（容器统一批次，tab 位不再是障碍），`tabSegments` 已数据驱动渲染 tab 条；剩余收敛点 = body 三分支（runs/scheduler/canvas 显式分支）与禁用规则收敛为「overlay tab 声明表」——每项 `{ id, label, icon, renderer: { kind: 'view', viewId } | { kind: 'host', component } }`。scheduler 项用 `view`（现成），runs/canvas 用 `host`（R2 决定它们无法 tree 化）。**必须保留 R4 的 tab/kind 不对称语义**（`setOverlayTab` 只改展示维度），否则级联判定回退。
 9. 若阶段 8 落地，可把「workflow 的 DAG/甘特」注册为该声明表的 `host` 渲染器项，为将来其他域的重可视化提供同一逃生舱形态——但内容仍归宿主，不声称「已插件化」。
 10. 更新 `docs/plugins/extension-points.md` R36/R37/G5/G8 与 `docs/plugins/renderer-pluginization-scan.md` C6/D1 的判定（R2 结论应把 workflow 从「C 完全写死」细化为「数据面 A + 轻量视图可 B + 重可视化 D」）。
 

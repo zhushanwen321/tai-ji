@@ -75,8 +75,8 @@
 
 | 区域 | 现状锚点 | 固定点 |
 |---|---|---|
-| **tab 集** | `packages/core/src/domain/drawer/types.ts` `RightDrawerTab = 'git' \| 'doc' \| 'detail' \| 'subagent' \| 'bashTask' \| 'plan' \| 'btw' \| 'trace'`（8 员）<br>`core/src/domain/drawer/registry.ts` `RIGHT_DRAWER_REGISTRY`（8 条元信息） | **编译期联合类型**。新增一个抽屉 tab = 改联合类型 + 加注册表条目 + 加 `PanelContainer.vue` 的 `v-else-if` 分支 + 加面板组件 |
-| tab 内容 | `packages/renderer/src/components/workspace/PanelContainer.vue` 8 分支 `v-else-if`（`GitPanel` / `CommandDocPanel` / `DetailPane` / `SubagentTab` / `BackgroundTaskDetailPanel` / `PlanDocsPanel` / `BtwPanel` / `TraceInspector`） | 分支硬编码在壳里 |
+| **tab 集** | `packages/core/src/domain/drawer/types.ts` `RightDrawerTab = string`（`RIGHT_DRAWER_TAB_IDS` 内置 8 员 + `isKnownRightDrawerTab` 判别，容器统一批次去枚举）<br>`core/src/domain/drawer/registry.ts` `RIGHT_DRAWER_REGISTRY`（8 条元信息） | 类型面已开放；新增一个抽屉 tab = 插件声明 `drawer.tab`（挂载点已注册）+ 加注册表条目 + 加面板组件 |
+| tab 内容 | 原 `PanelContainer.vue` 8 分支字面量 `v-else-if` chain 已删（容器统一批次）；内容显隐由 `DrawerPanel` 内部 aside `v-if`（Transition）承接 | 分支硬编码已消解 |
 | 未读徽标 | `PanelContainer.vue` `#header-extra` slot 内联 | 硬编码 |
 
 ### 1.5 底抽屉 / 浮层（bottom-drawer / overlay）
@@ -84,8 +84,8 @@
 | 区域 | 现状锚点 | 固定点 |
 |---|---|---|
 | 底抽屉内容 | `PanelContainer.vue` 直接 `<TerminalView>`，`BOTTOM_DRAWER_REGISTRY` 只 1 员（terminal，注释自述「不预设 tab 枚举，§7.1 YAGNI」） | 单内容写死 |
-| 浮层内容 | `core/src/domain/overlay/types.ts` `OverlayContent` 4 员（browser / workflow / scheduler / canvas）；`OVERLAY_REGISTRY` 只有 2 条 | 联合类型 |
-| 浮层 tab 集 | `renderer/src/components/panel/workflow-viz/overlay/workflow-viz-overlay.ts` `OverlayTab = 'runs' \| 'scheduler' \| 'canvas'`；`WorkflowVizOverlay.vue` `tabSegments` 写死三项 + 三个 `v-if` 标题分支 | 硬编码 |
+| 浮层内容 | `core/src/domain/overlay/types.ts` `OverlayContent` 4 员（browser / workflow / scheduler / canvas）；`OVERLAY_REGISTRY` 已补齐 4 条（容器统一批次） | 联合类型 |
+| 浮层 tab 集 | `renderer/src/components/panel/workflow-viz/overlay/workflow-viz-overlay.ts` `OverlayTab = string`（`OVERLAY_TAB_IDS` 三已知值 + `isKnownOverlayTab` 判别，容器统一批次）；`WorkflowVizOverlay.vue` `tabSegments` computed 声明对象（数据源仍内置）+ 三个标题分支 | tab 位已开放，元信息与内容分支仍宿主持有 |
 | 浮层 opener | `core/src/domain/overlay/coordination.ts` 三个专用函数：`openOverlay` / `openSchedulerOverlay` / `openCanvasOverlay` | 每个新内容加一个 opener |
 
 ### 1.6 托盘（composer task tray）

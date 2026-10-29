@@ -20,7 +20,7 @@ taiji 已完成插件化基础设施（`PluginService` / `ContributionRegistry` 
 |---|---|---|---|
 | todo | `pi-todo` 1326 行，`buildGui()` 产 tab-bar + list-tree | 无专属组件 | **A** |
 | goal | `pi-goal` 3825 行，同样产 GuiComponent | 无专属组件 | **A** |
-| scheduler | `pi-scheduler` 5393 行 + builtin plugin `scheduler-manager` 706 行 | `SchedulerQuickCard.vue` 213 行 + overlay scheduler tab 写死 + `HeaderActionsHost` 的 `activation === 'scheduler-overlay'` 特例 | **B** |
+| scheduler | `pi-scheduler` 5393 行 + builtin plugin `scheduler-manager` 706 行 | `SchedulerQuickCard.vue` 213 行 + overlay scheduler tab 内容渲染（tab 位已开放）+ `HeaderActionsHost` 的 `activation === 'scheduler-overlay'` 特例 | **B** |
 | plan | `pi-plan` 3402 行 | `panel/plan/` 4 组件 1292 行 + 抽屉 `plan` tab + `PLAN_REVIEW_MARKER` 专属分支 | **C** |
 | canvas | `pi-canvas` 1556 行 + **runtime `services/canvas` 2164 行** | `components/canvas/` 19 文件 6065 行 + overlay `canvas` tab | **C（后端双实现）** |
 | subagent | `pi-subagent-workflow` 15501 行 | 前端 28292 行（101 文件）+ 托盘 `TrayTaskKind` 写死 + `SubagentTab.vue` 522 行 | **C** |
@@ -37,8 +37,8 @@ taiji 已完成插件化基础设施（`PluginService` / `ContributionRegistry` 
 
 1. **todo/goal 已证明正确形态，但未推广**：插件侧产 `GuiComponent` 树，宿主完全不知道业务语义。前端专属代码 0 行 vs subagent 28292 行。残留两处硬编码尾巴：`tray-order.ts` 的 `TRAY_WIDGET_KNOWN_ORDER = ['todo','goal']`、`TrayWidgetButton.vue` 的 `BUILTIN_WIDGET_ICONS` 映射。
 2. **托盘并存两套机制**：`TrayTaskKind = 'bash' | 'subagent' | 'workflow'` 是宿主自建计数 + 专属面板；协议 widget 区是插件推送 + 通用渲染。subagent/workflow 数据其实**已由 pi 扩展推送**（`SUBAGENT_INFLIGHT_MARKER` / `SUBAGENT_JOURNAL_MARKER` → `inflight-mirror`），只是宿主选择自己渲染。
-3. **抽屉 8 个 tab 全部固定**：`RightDrawerTab = 'git' | 'doc' | 'detail' | 'subagent' | 'bashTask' | 'plan' | 'btw' | 'trace'`（`packages/core/src/domain/drawer/types.ts:22`）+ `PanelContainer.vue` 8 分支 `v-else-if`。其中 4 个对应 pi 扩展能力（subagent / plan / bashTask / scheduler）。
-4. **overlay 一级 tab 写死**：`OverlayTab = 'runs' | 'scheduler' | 'canvas'`。有意思的是 `scheduler` tab **已经是「插件产树 + ViewHost 渲染」**，只是 tab 位写在联合类型里——机制已跑通一个。
+3. **抽屉 tab 位已开放（容器统一批次 743f82e6f），tab 内容仍固定**：`RightDrawerTab` 已开放为 `string`（`packages/core/src/domain/drawer/types.ts:24`，`RIGHT_DRAWER_TAB_IDS` 内置 8 员 + `isKnownRightDrawerTab` 判别 `:41`），`PanelContainer.vue` 的 8 分支字面量 chain 已删、内容显隐归 ViewHost 推树渲染。内置 8 员中 3 个对应 pi 扩展能力（subagent / plan / bashTask）——tab 位不再是障碍，剩余固定点在各 tab 的内容实现。
+4. **overlay 一级 tab 位已开放，内容派生未完成**：`OverlayTab` 已开放为 `string` + `isKnownOverlayTab` 已知值判别（容器统一批次）。`scheduler` tab 仍是「插件产树 + ViewHost 渲染」的唯一样本；tab 条/标题/内容分支的注册表派生仍待做（tabSegments 数据源内置）。
 5. **配置页伪插件化**：四个 pi extension 的配置后端都是独立 JSON，但 taiji 为每个写了 runtime handler + 一组专属 WS 方法 + renderer 页面（合计约 1282 行前端 + 240 行 runtime）。`permission` 有完整 schema 却一个页面都没写——说明「每插件配一个宿主页面」走不通。
 
 ### 全链路视图（本次分析对象）
@@ -63,7 +63,7 @@ composer 图标/入口  →  对话流（行内呈现）  →  drawer 一级 tab
 
 | # | 问题 | 位置 |
 |---|---|---|
-| S1 | `PluginContributesHeaderAction` 两版定义不一致（SDK `commandId` 必填且无 `activation`；core 可选 + 有 `activation`） | `packages/plugin-sdk/src/types.ts` vs `packages/core/src/extension-host/types.ts` |
+| S1 | 已消解：`PluginContributesHeaderAction` 两版已对齐（SDK 已补 `activation?: HeaderActionActivation`、`commandId` 已可选，容器扩展点统一 §6.11 阶段 0） | `packages/plugin-sdk/src/types.ts:305-316` vs `packages/core/src/extension-host/types.ts:205-218` |
 | S2 | runtime 对 `contributes` 零 schema 校验 | `plugin-registry.ts` `buildDescriptor` |
 | S3 | `contributes.hooks` 只在 `inferActivationEvents` 中被读，hook 类型名被当激活事件 | `plugin-registry.ts:315` |
 | S4 | `custom` GuiComponent 注册表无 provide 点（仓库内只有 inject） | `packages/core/src/rendering-protocol/custom-registry.ts` |
