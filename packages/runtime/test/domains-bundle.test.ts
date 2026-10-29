@@ -498,8 +498,8 @@ describe('Task 2: Worker Sandbox (require 拦截)', () => {
     // fs.read-user-data 的 CJS 通道落地（2026-10-24 裁决）：拦截器对 fs / fs/promises
     // 按能力声明两态放行——声明含该名 → 放行（initSandbox 的 Module._load patch 返回
     // 只读代理对象，与 ESM 通道同语义）；未声明 → PERMISSION_DENIED（fail-closed）。
-    // 放行行为面（代理对象读写正反例）由 plugin-esm-loader.test.ts 的 buildProxyObject
-    // 组与 sandbox-escape 的 fork 门控组覆盖，这里锁定拦截器判定面。
+    // 放行行为集（代理对象读写正反例）由 plugin-esm-loader.test.ts 的 buildProxyObject
+    // 组与 sandbox-escape 的 fork 门控组覆盖，这里锁定拦截器判定。
     let pluginDir = ''
 
     beforeAll(() => {

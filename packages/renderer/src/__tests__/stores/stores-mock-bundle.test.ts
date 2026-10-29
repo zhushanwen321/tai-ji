@@ -3,8 +3,8 @@
  * （happy-dom；四原文件均默认环境；fileTree 为 round5 产物）。
  *
  * 并入来源（基名）：
- *  - subagent（subagent store 全行为面 + streaming 订阅生命周期，44 例）
- *  - workflow（workflow store 全行为面 + 拉取收敛，38 例）
+ *  - subagent（subagent store 全行为集 + streaming 订阅生命周期，44 例）
+ *  - workflow（workflow store 全行为集 + 拉取收敛，38 例）
  *  - fileTree（round5 产物：fileTree store 结构/git overlay/徽章 + B/M 系 chat 联动，46 例）
  *  - list-load-error（三列表加载错误态，4 例）
  *

@@ -691,7 +691,7 @@ describe('plugin-esm-loader', () => {
   describe('plugin-fs-guard readPaths 归一与代理源码模板（in-process：.cjs 真源，D3）', () => {
     // 路径检查的归一在 hooks 线程执行（configure/inlineReadBases），代理行为在主线程
     // 执行的模板源码内——Node hooks 线程隔离（globalThis/process 传递失效，2026-10-24
-    // 探针）决定了 in-process 只能断言归一产物与模板结构；代理行为面由门控组的真
+    // 探针）决定了 in-process 只能断言归一产物与模板结构；代理行为由门控组的真
     // fork P-perm fixture 覆盖。
     let homeDir = ''
     let prevHome = ''

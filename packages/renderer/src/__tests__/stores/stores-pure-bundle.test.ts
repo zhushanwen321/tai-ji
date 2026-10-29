@@ -5,7 +5,7 @@
  *
  * 并入来源（基名）：
  *  - sidebar-store（折叠态两事实源合成 + 持久化，7 例）
- *  - extension-ui（round5 产物：extension-ui store 全行为面，44 例）
+ *  - extension-ui（round5 产物：extension-ui store 全行为集，44 例）
  *  - fileTree-projection（projectVisibleRows 投影等价性/性能量级，20 例）
  *
  * 各文件级 beforeEach（pinia 重置 + sidebar 的 localStorage 清键）已下沉进各自 describe。

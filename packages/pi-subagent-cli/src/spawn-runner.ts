@@ -554,7 +554,7 @@ function collectRunResult(
   const { success, error } = deriveRunVerdict(record, runEnd, exitCode, ackFailure, terminalErrorFact);
   if (ackFailure !== undefined) {
     // 送达失败路径同时发 error 事件（设计 §3.4.2：让 journal 有记录；既有退出码
-    // 失败不加发，行为面不变）。
+    // 失败不加发，行为不变）。
     callbacks.onEvent({ type: "error", message: error ?? "prompt delivery failed" });
   }
   const outcome = collectOutcome(record, buildCollectOutcomeArgs(runEnd, identity, params, startTime, success, error, terminalErrorFact));
