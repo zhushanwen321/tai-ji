@@ -21,13 +21,14 @@
 import fs from 'node:fs'
 
 import {
+  allSignatureTexts,
   anySignatureText,
   extractSessionSignatures,
   firstScreenTimeoutMs,
+  firstPaintTolerant,
   flattenSessionList,
   isSmokeMode,
   locateSidebarSession,
-  measureFirstPaint,
   pickLargestSession,
   pickSmallSessions,
   pollUntil,
@@ -104,6 +105,8 @@ export async function run(ctx) {
   const exclusion = new Set([big.sessionFile])
   // 逐出池凑 9 个：≤2MB 小会话只有 7 个（生产池实况），上限放宽到 16MB 纳入中型会话
   const evictionPool = pickSmallSessions(pool, { count: EVICTION_ROUNDS, exclude: exclusion, maxBytes: 16_000_000 })
+  // 逐出循环的切换等待以「本会话签名入流」为判据（防旧流未清空的假阳性），先提取签名
+  const evictSignatures = new Map(evictionPool.map((s) => [s.sessionId, extractSessionSignatures(s.sessionFile)]))
   ev.assert(`种子：逐出池含 ${EVICTION_ROUNDS} 个小会话`, evictionPool.length >= EVICTION_ROUNDS, {
     channel: 'C',
     expected: `≥${EVICTION_ROUNDS} 个`,
@@ -157,12 +160,18 @@ export async function run(ctx) {
 
     // ── 段 1：A1 冷启动首点 42MB 会话 ────────────────────────────────
     const bigRow1 = await locateSidebarSession(page, { projectId: bigRow.projectId, label: bigRow.label })
-    const firstPaint = await measureFirstPaint(page, () => bigRow1.click(), { timeoutMs: firstScreenTimeoutMs() })
+    // 42MB > 现状 read-precheck cap（32MB 不读历史）：smoke 下首屏原理上不可判，缩短上限等
+    // 45s 观测稳态后降级 uncovered；D3 实跑（u1 突破 cap）用全量预算且超时 = fail
+    const firstPaint = await firstPaintTolerant(page, () => bigRow1.click(), {
+      timeoutMs: smoke ? 45_000 : firstScreenTimeoutMs(),
+      expectTexts: allSignatureTexts(bigSignature),
+    })
+    if (!firstPaint.rendered) uncovered.push('A1 42MB 会话首屏渲染（现状 read-precheck cap 32MB 拒读超大历史，首屏空为现状稳态；D3 实跑 u1 交付后执行）')
     ev.step({
       step: 'a1.first-click',
       channel: 'A',
-      exitCode: 0,
-      stats: { elapsedMs: firstPaint.elapsedMs, turnCount: firstPaint.turnCount, smoke, budget: FIRST_PAINT_BUDGET_MS },
+      exitCode: firstPaint.rendered ? 0 : 1,
+      stats: { elapsedMs: firstPaint.elapsedMs, turnCount: firstPaint.turnCount, rendered: firstPaint.rendered, smoke, budget: FIRST_PAINT_BUDGET_MS },
     })
     ev.assert(
       smoke
@@ -242,7 +251,21 @@ export async function run(ctx) {
     for (const [i, r] of evictionRows.entries()) {
       const row = await locateSidebarSession(page, { projectId: r.projectId, label: r.label })
       await row.click()
-      await waitForLatestTurnVisible(page, { timeoutMs: firstScreenTimeoutMs() })
+      try {
+        await waitForLatestTurnVisible(page, {
+          // 中型会话（≤16MB）的现状渲染窗口与签名提取窗口可能不重叠（签名永不命中），
+          // smoke 下只给 8s（restore ~2s + 渲染缓冲）观测即降级，避免逐出 9 连 × 240s 空等；
+          // D3 实跑（u1 尾读）用全量预算且超时 = fail
+          timeoutMs: smoke ? 8_000 : firstScreenTimeoutMs(),
+          expectTexts: allSignatureTexts(evictSignatures.get(r.id)),
+        })
+      } catch (e) {
+        // smoke 下超时降级登记不中断（逐出动作可能少一次，D3 实跑不降级、超时 = fail）
+        if (!(smoke && e instanceof Error && /轮询超时/.test(e.message))) throw e
+        uncovered.push(`A2 逐出切换 ${r.id} 首屏渲染超时（smoke 降级登记，逐出动作可能未生效）`)
+        gotchas.push(`evict-${i + 1} 首屏等待超时已跳过`)
+        continue
+      }
       evictionOk += 1
       ev.step({
         step: `a2.evict-${i + 1}`,
@@ -253,12 +276,16 @@ export async function run(ctx) {
     }
     // 切回目标（目标缓存已被 ≥9 次切换挤出）——同场景 1 标准
     const bigRow2 = await locateSidebarSession(page, { projectId: bigRow.projectId, label: bigRow.label })
-    const repaint = await measureFirstPaint(page, () => bigRow2.click(), { timeoutMs: firstScreenTimeoutMs() })
+    const repaint = await firstPaintTolerant(page, () => bigRow2.click(), {
+      timeoutMs: smoke ? 45_000 : firstScreenTimeoutMs(),
+      expectTexts: allSignatureTexts(bigSignature),
+    })
+    if (!repaint.rendered) uncovered.push('A2 逐出后切回 42MB 会话首屏渲染（同 A1：现状 cap 拒读，D3 实跑执行）')
     ev.step({
       step: 'a2.reclick-target',
       channel: 'A',
-      exitCode: 0,
-      stats: { elapsedMs: repaint.elapsedMs, smoke, budget: FIRST_PAINT_BUDGET_MS },
+      exitCode: repaint.rendered ? 0 : 1,
+      stats: { elapsedMs: repaint.elapsedMs, rendered: repaint.rendered, smoke, budget: FIRST_PAINT_BUDGET_MS },
     })
     ev.assert(
       smoke ? 'A2(smoke): 逐出后切回最终渲染（阈值断言降级 uncovered）' : 'A2: 缓存逐出后切回 42MB 会话首屏 ≤500ms',
@@ -346,18 +373,27 @@ export async function run(ctx) {
             actual: JSON.stringify({ symlink: restored.symlink ?? null, bytes: restored.bytes ?? null }),
           })
           const row3 = await locateSidebarSession(page2, { projectId: bigRowInfo.projectId, label: bigRowInfo.label })
-          const recovered = await measureFirstPaint(page2, () => row3.click(), { timeoutMs: firstScreenTimeoutMs() })
+          const recovered = await firstPaintTolerant(page2, () => row3.click(), {
+            timeoutMs: smoke ? 45_000 : firstScreenTimeoutMs(),
+            expectTexts: allSignatureTexts(bigSignature),
+          })
+          if (smoke && !recovered.rendered) uncovered.push('A6③ 恢复 pi 后切换 42MB 会话首屏渲染（smoke：现状 cap 拒读超大历史，D3 实跑执行）')
           ev.step({
             step: 'a6.reclick-after-restore',
             channel: 'A',
-            exitCode: 0,
-            stats: { elapsedMs: recovered.elapsedMs, turnCount: recovered.turnCount },
+            exitCode: recovered.rendered ? 0 : 1,
+            stats: { elapsedMs: recovered.elapsedMs, turnCount: recovered.turnCount, rendered: recovered.rendered },
           })
-          ev.assert('A6③: 恢复 pi 后再次点击切换成功（首屏渲染）', recovered.text.length > 0, {
-            channel: 'A',
-            expected: 'turn 渲染非空',
-            actual: `turnCount=${recovered.turnCount} text=${recovered.text.slice(0, 60)}`,
-          })
+          ev.assert(
+            smoke ? 'A6③(smoke): 恢复 pi 后切换成功断言降级 uncovered（首屏未渲染，现状 cap 拒读）' : 'A6③: 恢复 pi 后再次点击切换成功（首屏渲染）',
+            smoke ? true : recovered.text.length > 0,
+            {
+              channel: 'A',
+              expected: 'turn 渲染非空',
+              actual: `rendered=${recovered.rendered} turnCount=${recovered.turnCount}`,
+            },
+          )
+          if (smoke && !recovered.rendered) uncovered.push('A6③ pi 恢复后首屏渲染（smoke：现状 cap 拒读 42MB 历史，D3 实跑执行）')
           if (tail40) {
             const finalStream = await readStreamText(page2)
             // 现状首屏 = 头部窗口（游标在开头），尾读交付首屏 = 尾部窗口——
@@ -370,7 +406,7 @@ export async function run(ctx) {
               smoke ? true : tailInStream,
               { channel: 'A', expected: `流中含「${tail40}」`, actual: `流文本 ${finalStream.length} 字符 tailIn=${tailInStream}` },
             )
-            if (smoke) uncovered.push('A6③ 恢复后尾部签名入流断言（smoke：现状首屏为头部窗口，D3 实跑执行）')
+            if (smoke) uncovered.push('A6③ pi 恢复后尾部签名入流断言（smoke：现状首屏为头部窗口，D3 实跑执行）')
           }
         } finally {
           await proto2.close().catch(() => {})

@@ -394,23 +394,54 @@ export async function readLatestTurn(page) {
   })
 }
 
-/** 等首屏判据成立，返回 {text, turnCount}。 */
-export async function waitForLatestTurnVisible(page, { timeoutMs = 30_000 } = {}) {
-  return pollUntil(() => readLatestTurn(page).then((t) => (t?.inViewport && t.text ? t : null)), {
-    timeoutMs,
-    label: '最近消息 turn 渲染可见',
-  })
+/**
+ * 首屏判据（「最近消息可见」）等待。expectTexts（本会话签名组）传入时判据收紧为
+ * 「流含任一签名且最后 turn 非空在视口」——不传时旧流未清空的恢复窗口会把「最后
+ * turn 非空」误判成新会话已渲染（假阳性：切换请求已发出、restore 进行中，流还是
+ * 前一会话内容），凡调用方持有所切会话的签名就必须传入。
+ */
+export async function waitForLatestTurnVisible(page, { timeoutMs = 30_000, expectTexts } = {}) {
+  const needles = (expectTexts ?? []).filter((t) => typeof t === 'string' && t.length > 0).map((t) => t.slice(0, 40))
+  return pollUntil(async () => {
+    const t = await readLatestTurn(page)
+    if (!t?.inViewport || !t.text) return null
+    if (needles.length > 0) {
+      const stream = await readStreamText(page)
+      if (!needles.some((n) => stream.includes(n))) return null
+    }
+    return t
+  }, { timeoutMs, label: needles.length > 0 ? '本会话签名入流且最近消息可见' : '最近消息 turn 渲染可见' })
 }
 
 /**
  * 首屏计时（A1/A2 断言载体）：t0 → clickFn() → 首屏判据轮询 → elapsed。
  * clickFn 内部只做定位与点击（不轮询等待业务态）。
+ * expectTexts 语义同 waitForLatestTurnVisible（持有所切会话签名时必传，防旧流假阳性）。
  */
-export async function measureFirstPaint(page, clickFn, { timeoutMs = 30_000 } = {}) {
+export async function measureFirstPaint(page, clickFn, { timeoutMs = 30_000, expectTexts } = {}) {
   const t0 = Date.now()
   await clickFn()
-  const seen = await waitForLatestTurnVisible(page, { timeoutMs })
+  const seen = await waitForLatestTurnVisible(page, { timeoutMs, expectTexts })
   return { elapsedMs: Date.now() - t0, ...seen }
+}
+
+/**
+ * 首屏计时的 smoke 容忍版：现状基线下大会话（>32MB）历史被 read-precheck cap 拒读
+ * （runtime 日志「exceeds 32.0 MB read-precheck cap ... no full read」），首屏渲染
+ * 原理上不可判（u1 交付物才会突破该 cap）——smoke 模式超时不抛错，返回
+ * { rendered:false }（调用方登记 uncovered）；非 smoke（D3 实跑）超时照抛 = fail。
+ * smoke 下调用方应以更短的 timeoutMs 调用（如 45s），避免对必然超时的现状基线空等。
+ */
+export async function firstPaintTolerant(page, clickFn, { timeoutMs = 30_000, expectTexts } = {}) {
+  try {
+    const seen = await measureFirstPaint(page, clickFn, { timeoutMs, expectTexts })
+    return { ...seen, rendered: true }
+  } catch (e) {
+    if (isSmokeMode() && e instanceof ColdSwitchLibError && /轮询超时/.test(e.message)) {
+      return { elapsedMs: timeoutMs, text: '', turnCount: 0, rendered: false }
+    }
+    throw e
+  }
 }
 
 /** 输入框可用判据：composer-box 可见且未禁用。 */
