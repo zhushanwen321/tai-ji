@@ -13,6 +13,9 @@
  * smoke 降级：长跑观测（槽探活轨迹 / 四态日志 / 放置后补位）依赖 u2 交付物，实现
  * 未落地时原理上不可判 → 登记 uncovered；「附着成功 / 消息流干净」现状即真，照常执行。
  */
+import fs from 'node:fs'
+import path from 'node:path'
+
 import {
   allSignatureTexts,
   anySignatureText,
@@ -214,6 +217,21 @@ export async function run(ctx) {
     for (const [i, r] of rosterRows.slice(1, 1 + POST_HOLD_TARGETS).entries()) {
       const locator = await locateSidebarSession(page, { projectId: r.projectId, label: r.label })
       const paint = await measureFirstPaint(page, () => locator.click(), { timeoutMs: firstScreenTimeoutMs() })
+      // 诊断：点击后立即 dump 流两端文本与覆盖层状态（归因「切换未生效」用）
+      const diag = await page.evaluate(() => {
+        const turns = document.querySelectorAll('[data-testid^="turn-"]')
+        const first = turns[0]
+        const last = turns[turns.length - 1]
+        const toasts = document.querySelector('[data-testid="toast-container"]')
+        return {
+          turnCount: turns.length,
+          firstTurn: (first?.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 80),
+          lastTurn: (last?.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 80),
+          toastText: (toasts?.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 160),
+          hasDialog: document.querySelector('[role="dialog"]') !== null,
+        }
+      }).catch((e) => ({ diagError: String(e) }))
+      ev.step({ step: `post-hold-diag-${i + 1}`, channel: 'B', exitCode: 0, stats: diag })
       const mineSig = signatures.get(r.id)
       const mineText = anySignatureText(mineSig)
       ev.step({
@@ -242,6 +260,36 @@ export async function run(ctx) {
       // 更新「前会话」为当前（连切两轮，第二轮防第一轮目标串入）
       prevSig = signatures.get(r.id)
       prevSid = r.id
+    }
+
+    // 诊断：attach 时刻 runtime 侧 switch/warmup 活动与 renderer console 尾部
+    {
+      const rtLog = readRuntimeLog(dataDir)
+      const switchLines = rtLog
+        .split('\n')
+        .filter((l) => /switch|attach|01a18|01a17/i.test(l))
+        .slice(-12)
+      let consoleTail = null
+      try {
+        const logsDir = path.join(dataDir, 'logs')
+        const cfiles = fs
+          .readdirSync(logsDir)
+          .filter((f) => f.startsWith('renderer-console-'))
+          .map((f) => ({ f, m: fs.statSync(path.join(logsDir, f)).mtimeMs }))
+          .sort((a, b) => b.m - a.m)
+        if (cfiles.length > 0) {
+          const text = fs.readFileSync(path.join(logsDir, cfiles[0].f), 'utf8')
+          consoleTail = text.split('\n').slice(-15).join('\n').slice(0, 1200)
+        }
+      } catch {
+        consoleTail = '(renderer-console 日志不可读)'
+      }
+      ev.step({
+        step: 'post-hold-runtime-console-diag',
+        channel: 'B',
+        exitCode: 0,
+        stats: { switchLines, consoleTail },
+      })
     }
 
     // ── 段 3：消费路径四态日志可判读 + 放置后补位回升 ────────────────
