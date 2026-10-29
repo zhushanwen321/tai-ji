@@ -63,6 +63,7 @@
       "packages/runtime/src/services/session/session-state-query.ts",
       "packages/runtime/src/services/session/session-summary.ts",
       "packages/runtime/src/services/session/types.ts",
+      "packages/runtime/src/services/session/warmup-pi-slot.ts",
       "packages/runtime/src/services/session-history.ts",
       "packages/runtime/src/infra/pi/session-file-locator.ts",
       "packages/runtime/src/infra/pi/session-file-utils.ts"
@@ -113,6 +114,7 @@
     "packages/runtime/src/__tests__/session-record-entries.test.ts",
     "packages/runtime/src/__tests__/session-service-thinking-effective.test.ts",
     "packages/runtime/src/__tests__/session-service-w07-bus.test.ts",
+    "packages/runtime/src/__tests__/warmup-pi-slot.test.ts",
     "packages/runtime/src/services/__tests__/startup-reattach.test.ts",
     "packages/runtime/src/services/session/__tests__/attachment-store.test.ts",
     "packages/runtime/src/services/session/__tests__/broadcast-session-list-fanout.test.ts",
@@ -153,6 +155,7 @@
     "packages/runtime/test/user-stopped-convergence.test.ts",
     "packages/session-delivery/tests/**",
     "packages/shared/src/__tests__/protocol-create-idempotency.test.ts",
+    "packages/shared/src/__tests__/protocol-history-cache-ready.test.ts",
     "packages/shared/src/__tests__/protocol-occupancy.test.ts",
     "packages/shared/src/__tests__/protocol-revoke.test.ts",
     "packages/shared/src/__tests__/protocol-rolling-restart.test.ts",

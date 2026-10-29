@@ -1717,6 +1717,14 @@ export type ServerMessageType =
   //（data-source-registry.md #20）。对账漂移发现仍由 runtime 记日志，不再占协议帧。
   | 'session.thinkingLevelSet'
   | 'session.state_changed'
+  // session.historyCacheReady（session-cold-switch-perf §3.3-1）：后台全量重建任务完成的
+  // 轻通知广播（一次性事件，非 last-value 快照——同 session.deliveryHandled 不登记
+  // message-bus TOPIC_TABLE / STATE_TYPE_KEY_MAP，miss fallback 'stream'；WS 断连期间
+  // 丢失不补发，收敛由下一次 getHistory 拉取承接，ADR-0097 拉为主推补充）。
+  // 成功/失败都推，失败带 error（renderer 收失败帧不重拉，收敛为既有 loadMore 失败态）；
+  // snapshotLeafId = 重建快照末条 entry id，renderer 做快照版本对账（过期不重拉）。
+  // runtime 构造点与 renderer 监听点引用同一类型定义，帧名对账由类型层承载。
+  | 'session.historyCacheReady'
   // wave:runtime-wiring：session.subscribe 的 RPC reply type（payload 消费型，含 snapshot/lastSeq/gap）。
   // 与 ClientMessageType 的 'session.subscribe'（request）同名——request/reply 同名是本项目惯用模式
   //（见 session.compact→session.compacted 等多数用不同名，但 session.subscribe 因其「订阅」语义
@@ -3155,6 +3163,16 @@ export interface ServerMessageMapBase {
     sessionId: string
     modelId: string
     thinkingLevel?: string
+  }
+  // session.historyCacheReady：后台全量重建任务完成的轻通知广播（session-cold-switch-perf
+  // §3.3-1，同上方 'session.state_changed' 广播帧形态）。payload 字段语义：
+  // snapshotLeafId = 本次重建快照的末条 entry id（renderer 丢弃过期快照的版本对账依据——
+  // 重建期间会话有新追加则基准不匹配，不重拉等下一轮）；error 非空 = 失败帧
+  // （成功/失败都推；失败帧 renderer 不重拉）。帧名对账由类型层承载，禁手抄字面量。
+  'session.historyCacheReady': {
+    sessionId: string
+    snapshotLeafId: string
+    error?: string
   }
   // session.thinkingLevelSet：pi thinking_level_changed → event-adapter 广播 + setThinkingLevel RPC
   // reply（settings-message-handler）双发送点，payload 形状一致（R1 type-safety S4 补登记——
