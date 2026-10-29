@@ -1208,3 +1208,29 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 **登记**：实装——协议地基 `packages/shared/src/{protocol,ipc-channels,constants}.ts`（快照类型 / project 命令域 / IPC 通道常量 / `RUNTIME_ID_ENV`）；主进程 `apps/electron/main/supervisor/{runtime-supervisor,process-control}.ts`（快照持有与签发、4 广播点载荷升级）+ `gateway/bridge-handlers.ts`（快照 IPC 读口）+ `preload/preload.ts`；runtime `packages/runtime/src/transport/connection-manager.ts`（auth 应答回传）+ `transport/project-message-handler.ts` + `services/project/project-store.ts`（四命令 + 串行队列 + revision + 归一化）；core `packages/core/src/transport/use-connection.ts`（连接控制器裁决表）+ `connection-edge-sync.ts`（域同步器）+ `transport/api/domains/project.ts`（命令封装）；renderer `stores/project.ts`（4 值状态机 + 命令化编辑）+ `composables/features/sidebar/{useSidebar,useProjectGroups}.ts` + `components/sidebar/{SessionList,ProjectGroup,ProjectLoadStatus}.vue`。出站 env deny 登记（C-proc-09 spawn-env-contract）随 `TAIJI_RUNTIME_ID` 注入更新。无新约束族；排障条目见 [TROUBLESHOOTING.md](../TROUBLESHOOTING.md) 连接状态词与快照排查节。真机验收（设计 §8 七场景 + P-3/P-4/P-5 探针）由 verify-taiji 场景剧本族承载（`a1-cold-start-groups` / `a2-first-port-occupied` / `a3-runtime-restart-recovery` / `a4-failure-presentation-recovery` / `a5-failure-window-edit-disabled` / `a6-dual-window-revision` / `a7-disk-invariant`）。
 
+### ADR-0178 会话查看数据与执行就绪解耦：getHistory 四态分派 + 尾读快路径 + 后台全量精化 + 切入链并行切口（2026-10-29 设计落地，session-cold-switch-perf §3.3-1 + §3.3-4）
+
+**决策**：查看历史的数据获取与执行进程解耦——机器上没有任何可用 pi 进程时 getHistory 仍成功返回尾读窗口。getHistory 按「runtime 重建缓存 × pi 进程在场」四态分派（分派实现层 = session 域 historyReader，对经 RPC 与 runtime 内部直调的全部调用方一致生效）：缓存命中走既有快路径；缓存 miss + 进程在场 → 尾读首屏立即返回 + 后台用在场进程全量重建；缓存 miss + 进程不在 → 尾读立即返回 + 后台全量任务登记为待启动，由并行的 switch 侧进程获取事件驱动启动（getHistory 分派自身不消费预热槽、不 spawn——查看路径永不占用执行资源；btw 线排除登记，死线重开回放与现状逐点等价）；尾读 IO 失败 → 进程在场同步等后台全量完成（等待时长 ≈ 现状），进程不在或后台失败按既有失败语义返回、不无限等待。带 cursor 的翻页保持 getCursorWindow 既有「缓存 × client」分派结构。后台全量任务（sessionId 键内存单例、并发上限 1、分批 parse 让出）完成后写缓存，推 `session.historyCacheReady` 广播事件（payload `{sessionId, snapshotLeafId, error?}`，成功失败都推，协议登记 packages/shared protocol.ts SSOT）；renderer 活跃会话收成功事件且快照未过期时重拉 getHistory（毫秒级命中缓存）经既有 reconcileHistory 合并，失败事件不重拉、顶部指示转为「加载更早失败 + 重试入口」，runtime 侧首败即停不自动重起（ADR-0122），下次 getHistory 派单按四态重新决策；会话删除汇聚链清理待启动登记与在途任务（删除后在途结果丢弃不写缓存）。切入链最小切口（§3.3-4）：13 步链只开一个口——步 9 getHistory 提前到与步 2 switchSession **并行发出**、reply 写入 chat store 独立于链短路，panel 挂载仍随 switch 返回，其余链序不动；switch 失败仍按现状在步 2 短路（「历史仍上屏」的只读显示形态登记为后续项，完整承载在终态读模型，ADR-0180）。
+
+**否决记录**：维持「全量完成才返回」（首屏被绑在完整恢复链 = 冷切 3-10 秒无反应的根因）；renderer 直接读文件（跨层越权）；新增「全量响应」协议形态（reply 恒经预算窗口是统一契约，绕开会造第二套数据通路）；态 3 待启动登记不排除 btw 线（死线重开回放常态产生无完成时点条目，且冷线删除不经 removeSessionEntry 需另补清理接线）；翻页直接走尾读游标窗口作主路径（深层翻页单页成本随距尾距离线性增长，一次全量重建 + 每页缓存切片更优）；「switch 失败仍挂载只读 panel」（需扩展 13 步链断言与失败语义改造，超出本次最小切口射程，故障形态高发时作独立小设计补做）。
+
+**效果**：冷切点击 500ms 内最近消息上屏（含 42MB 会话）、首屏期间界面立即切换、更早历史后台补齐不跳变；数据层与执行解耦（pi 完全不可用时尾读仍返回）。已接受代价 = 缓存逐出重切与多会话反复按需重建的重复成本，两条重审触发线：同一会话单日全量重建 ≥5 次 → 终态索引（ADR-0180）提前立项；后台重建期间其他会话 RPC p95 > 500ms → parse worker 化提前。
+
+**登记**：实装——shared `packages/shared/src/protocol.ts`（`session.historyCacheReady` 事件类型与 payload）；runtime `packages/runtime/src/services/session/history-rebuild-cache.ts`（四态分派 + 后台任务单例 + 态 3 待启动登记 onSessionActivated 事件驱动 + onSessionDisposed 清理挂点）+ `session-history.ts`（尾读 segments sidecar 回填）+ `transport/session-message-handler.ts`（RPC 入口转发）；core `packages/core/src/domain/session/use-session.ts`（selectSession 于 switch 前并行发出 historyPull + runEntryChain 步 9 仅 await 同一 promise）+ chat store（快照对账与后台重建失败态分区）+ transport 广播事件路由接线。
+
+### ADR-0179 预热空 pi 单槽 = 执行就绪提前支付：一次性消费 + 失败即空槽 + 消费驱动补位（2026-10-29 设计落地，session-cold-switch-perf §3.3-2）
+
+**决策**：spawn 一个空 pi 进程放入单槽，把「执行就绪」成本提前支付到查看期——预热只服务继续对话时的进程就绪，不参与查看链路（尾读 getHistory 不依赖槽），不是会话正确性的一部分。spawn 与现状 spawnRestoreClient 同一构造链产出（禁止预热用简化参数、取用后补挂——pi 每次进程启动读扩展参数，后补挂与原生挂载不可证等价）。冷恢复取用依次过三道检查：① 槽空 → 回退现状 spawn 链；② 参数签名（presetId + cwd）与目标会话不匹配 → 弃槽回退 + 后台按目标参数补位；③ 探活（pid 存在性同步检查，挂死进程由附着阶段 switch_session 失败兜底回退）→ 通过即取用，用后不回收（附着后归该会话生命周期，槽立即补位）。补位策略 = 失败即空槽 + 消费驱动补位：补位 spawn 失败槽保持空、无自动重试，下次消费必查槽即天然重试点。预热目标参数 = lastViewedAtBySession 最新条目 + 扫描元数据派生；冷启动该表恒空 → 槽保持空、无启动期接线，首次发火 = 首次冷切消费后的补位；补位 spawn 与 startup-reattach 恢复接管期（60s 上界）重叠时推迟让位。消费路径记录槽状态分布结构化日志（命中/不匹配/空/进程死四态），命中率持续偏低 → 按降级路径整体摘除（决策对低命中率鲁棒——不命中即回退现状，仅收益归零）。
+
+**否决记录**：补位自动重试状态机（指数退避 + 重试上限 + disabled 态）——为无已发生证据的故障模式提前引入多个概念，消费驱动补位最终到达同一状态且无空转重试；复用回收（进程释放回槽再切别会话）——跨会话扩展状态残留不可证伪，一次性消费保证每会话拿到干净进程；通用进程池（多槽/调度/排队）——无第二使用方证据；RPC 探活——挂死进程会无限挂起卡死 switch（pi 侧 RPC 墙钟超时已随 ADR-0122 退役）。
+
+**效果**：冷切省 spawn 段 0.6-1.1s（收益兑现概率 = 预热命中率，探针持续度量）；预热失效（进程死/环境异常）自动退回现状路径，最坏体验 = 现状。
+
+**登记**：实装——`packages/runtime/src/services/session/warmup-pi-slot.ts`（槽模块自包含：spawn/存在性探活/三道检查取用/失败即空槽 + 消费驱动补位/reattach 让位/四态结构化日志/冷启动恒空）+ `session-lifecycle.ts`（acquireRestoreClient 单一接线点优先走槽，spawn 构造链与现状 spawnRestoreClient 同源）；范围外必要改动 = IPiEngine.pid 声明 + startup-reattach 编排活跃标记。
+
+### ADR-0180 长期终态方向：会话读模型三拆——本方案为过渡形态（2026-10-29 设计裁决，session-cold-switch-perf §6）
+
+**决策**：ADR-0178/0179 优化的是「完整恢复会话」这条链的时序；长期终态让绝大多数查看操作根本不走这条链——「打开会话只是一次本地数据查询，继续会话才是一次执行任务」。职责三拆：持久会话记录（唯一事实来源，现 jsonl）/ 历史查询读模型（read model，面向查询的派生数据，SQLite，可删除可重建，永不回写权威源）/ AI 执行（pi 只是执行资源，独立生命周期状态机，与「选中了哪个会话」「加载到哪页」解耦）。索引在写入时增量完成（独立索引 worker 消费权威记录增量写入读模型），非点击时全量重建；读模型允许短暂未追平，靠版本与恢复机制最终一致。历史单一查询入口——冷启动/缓存命中/加载更早/首次导入全部走同一读模型分页查询，本方案「尾读 + 全量 + 广播事件合并」的双路径一致性成本在终态不复存在。可行性依据：仓内 ext-sessions 派生视图域（projection，从事件流重算的只读查询视图）已是同族机制。**前置条款**：终态 SQLite 选型与 docs/PRODUCT.md 现行非目标「数据持久化：不引入 SQLite」直接冲突——另立终态设计时**必须先修订该非目标条目**（说明 42MB 级会话历史与用户配置数据量级不同的理由），否则两份现行文档互相矛盾；本设计自身不含 SQLite。终态可检验不变量（另立设计的验收基线）：只读独立（无 pi 可查全部历史）/ 读取有界 / 历史单一路径 / 衔接不丢不重 / 重活隔离 / 索引状态真实 / 读模型可重建。
+
+**迁移映射**：文件尾读 → 保留为索引 worker 的首次导入/按需向前补索引算法，不再是独立首屏数据源；预热单槽 → 保留为执行就绪加速（定位同 ADR-0179），与查看无关；后台全量重建 → 仅首次导入/读模型损坏修复；`session.historyCacheReady` 广播事件 → 取消（游标、索引覆盖状态、递增版本分别表达，不再有「等全量」语义）；尾读/全量双路径合并 → 取消（持久历史只从读模型读取）；多层整会话 LRU → 降级为可选页面缓存，不再决定历史能否快速读取。
+
