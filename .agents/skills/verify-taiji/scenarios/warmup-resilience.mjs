@@ -34,6 +34,7 @@ import {
   runtimePidOf,
   scanSessionPool,
   seedSessions,
+  waitForLatestTurnVisible,
   waitForToast,
   PROD_DATA_DIR,
 } from './lib/cold-switch-lib.mjs'
@@ -249,8 +250,11 @@ export async function run(ctx) {
     for (const [i, r] of isolationRows.entries()) {
       const locator = await locateSidebarSession(page, { projectId: r.projectId, label: r.label })
       const paint = await measureFirstPaint(page, () => locator.click(), { timeoutMs: firstScreenTimeoutMs() })
-      const mine = foreignSignatures.get(r.id)
-      const mineHit = mine ? paint.text.includes(mine.slice(0, 40)) : paint.text.length > 0
+      const mineSig = foreignSignatures.get(r.id)
+      const mine = anySignatureText(mineSig)
+      // 头尾双锚兼容：现状首屏=头部窗口（头部签名命中），尾读交付=尾部窗口（尾部签名命中）
+      const mineTexts = mineSig ? allSignatureTexts(mineSig) : []
+      const mineHit = mineTexts.length > 0 ? mineTexts.some((t) => paint.text.includes(t.slice(0, 40))) : paint.text.length > 0
       ev.step({
         step: `a7.cold-switch-${i + 1}`,
         channel: 'A',
@@ -259,16 +263,16 @@ export async function run(ctx) {
       })
       ev.assert(`A7[${i + 1}]: 切入 ${r.id} 后流含本会话独有内容（归属正确）`, mineHit, {
         channel: 'A',
-        expected: mine ? `含「${mine.slice(0, 40)}」` : 'turn 非空',
+        expected: mine ? `含「${mine.slice(0, 40)}」（头/尾任一）` : 'turn 非空',
         actual: paint.text.slice(0, 80) || '(空)',
       })
 
-      // 无串话：其余 4 个会话的签名不在当前流中
+      // 无串话：其余 4 个会话的头尾签名都不在当前流中
       const streamText = await readStreamText(page)
       const leaks = []
       for (const [otherSid, sig] of foreignSignatures) {
         if (otherSid === r.id || !sig) continue
-        if (streamText.includes(sig.slice(0, 40))) leaks.push(otherSid)
+        if (allSignatureTexts(sig).some((t) => streamText.includes(t.slice(0, 40)))) leaks.push(otherSid)
       }
       ev.assert(`A7[${i + 1}]: 消息归属无串话（其余会话内容未出现）`, leaks.length === 0, {
         channel: 'A',

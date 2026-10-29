@@ -14,6 +14,8 @@
  * 未落地时原理上不可判 → 登记 uncovered；「附着成功 / 消息流干净」现状即真，照常执行。
  */
 import {
+  allSignatureTexts,
+  anySignatureText,
   findWarmupPidFromLog,
   firstScreenTimeoutMs,
   flattenSessionList,
@@ -212,8 +214,8 @@ export async function run(ctx) {
     for (const [i, r] of rosterRows.slice(1, 1 + POST_HOLD_TARGETS).entries()) {
       const locator = await locateSidebarSession(page, { projectId: r.projectId, label: r.label })
       const paint = await measureFirstPaint(page, () => locator.click(), { timeoutMs: firstScreenTimeoutMs() })
-      const mine = signatures.get(r.id)
-      const mineText = mine?.lastUser ?? mine?.lastAssistant ?? null
+      const mineSig = signatures.get(r.id)
+      const mineText = anySignatureText(mineSig)
       ev.step({
         step: `post-hold-attach-${i + 1}`,
         channel: 'A',
@@ -225,12 +227,16 @@ export async function run(ctx) {
         expected: 'turn 渲染非空',
         actual: `turnCount=${paint.turnCount}`,
       })
+      // 头尾双锚兼容（现状首屏=头部窗口 / 尾读交付=尾部窗口）；前会话头尾签名都不得串入
       const streamText = await readStreamText(page)
-      const mineOk = mineText ? streamText.includes(mineText.slice(0, 40)) : paint.text.length > 0
-      const leakOk = prevSig?.lastUser ? !streamText.includes(prevSig.lastUser.slice(0, 40)) : true
+      const mineOk = mineSig
+        ? allSignatureTexts(mineSig).some((t) => streamText.includes(t.slice(0, 40)))
+        : paint.text.length > 0
+      const prevTexts = prevSig ? allSignatureTexts(prevSig) : []
+      const leakOk = prevTexts.every((t) => !streamText.includes(t.slice(0, 40)))
       ev.assert(`A4[${i + 1}]: 消息流干净（本会话内容在场、前会话内容未串入）`, mineOk && leakOk, {
         channel: 'A',
-        expected: `含本会话签名${mineText ? `「${mineText.slice(0, 30)}」` : ''} 且不含前会话「${(prevSig?.lastUser ?? '').slice(0, 30)}」`,
+        expected: `含本会话签名${mineText ? `「${mineText.slice(0, 30)}」` : ''} 且不含前会话签名`,
         actual: `mine=${mineOk} leak=${!leakOk}`,
       })
       // 更新「前会话」为当前（连切两轮，第二轮防第一轮目标串入）
