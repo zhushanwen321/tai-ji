@@ -1,6 +1,6 @@
 // src/types.ts
 //
-// @zhushanwen/pi-delivery-port 契约面（设计 .tmp/tech-design/unified-delivery.md
+// @zhushanwen/pi-delivery-port 契约（设计 .tmp/tech-design/unified-delivery.md
 // §3.7 pi 半区组件表 / §3.4 提交选项缺省值表）。
 //
 // 本包是「知 pi 又知内核」的适配层：把 pi 扩展运行时
@@ -136,7 +136,7 @@ export interface DeliveryPortMetrics { // oe-exempt:20261017:framework:分桶诊
 
 // ─── host 端口（装配点接线点）───────────────────────────────
 
-/** host logger 最小面（@zhushanwen/pi-extension-logger 的 ExtensionLogger 结构性满足）。 */
+/** host logger 最小接口（@zhushanwen/pi-extension-logger 的 ExtensionLogger 结构性满足）。 */
 export interface DeliveryPortLogger { // oe-exempt:20261017:framework:日志注入契约（宿主提供实现）
   warn(msg: string, data?: unknown): void;
   debug(msg: string, data?: unknown): void;
@@ -146,10 +146,10 @@ export interface DeliveryPortLogger { // oe-exempt:20261017:framework:日志注�
  * port 宿主最小端口面（session_start 装配点经 createPiDeliveryPortHost 接线；
  * 接口化解耦便于测试，内核/端口本体零 pi import）。
  *
- * 订阅面全部返回退订函数（pi 1.0.0 起 on 返回 unsubscribe；port dispose 时兑现，
+ * 订阅类端口全部返回退订函数（pi 1.0.0 起 on 返回 unsubscribe；port dispose 时兑现，
  * 防 session_start 重绑累积死 handler）。
  */
-export interface DeliveryPortHost { // oe-exempt:20261017:framework:pi 能力注入契约（sendMessage/appendEntry/on 事件宿主面）
+export interface DeliveryPortHost { // oe-exempt:20261017:framework:pi 能力注入契约（sendMessage/appendEntry/on 事件宿主接口）
   /** 写 plain custom entry（outbox / ack 通道；pi.appendEntry——不进 LLM 上下文）。 */
   appendEntry(customType: string, data: unknown): void;
   /** 读当前 session 全部 entry（回执扫描 / 重放扫描；ctx.sessionManager.getEntries()）。 */
@@ -217,7 +217,7 @@ export interface DeliveryPortHandle { // oe-exempt:20261017:framework:进程级�
   /** 销毁：内核 dispose + 退订全部事件订阅 + 摘进程级槽绑定。 */
   dispose(): void;
   /**
-   * collect 面（result-collect 设计 §3.1② 端口挂起面，方法语义以该节为准）。
+   * collect 面（result-collect 设计 §3.1② 端口挂起行为，方法语义以该节为准）。
    * collectArm：同步段登记在途等待集 + 对每个 key 按五态判据定态（快照形态
    * CollectSnapshotEntry——unknown 态键不登记等待集，由消费方组装 errors）。
    */
