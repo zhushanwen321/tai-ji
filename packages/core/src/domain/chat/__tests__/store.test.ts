@@ -161,6 +161,38 @@ describe('createChatStore factory', () => {
         expect(sut.store.getMessages(sid)[0]!.content).toBe('更早')
       })
 
+      // ── [session-cold-switch-perf §3.3-3 滚动位置保持]
+      //    全量精化（historyCacheReady 重拉）走整体合并路径时，基线相对尾读窗口在分区
+      //    头部插入更早历史——virtua 仅 shift=true 时对该形态补偿滚动，store 侧记事件
+      //    计数交 renderer 转一拍 isPrepend。触发面 = 「分区非空 + 变长 + 首条文件侧身份
+      //    变化」三条件同时成立，其余刷新形态一律不触发。──
+      describe('基线前置替换信号（getBaselinePrependTick）', () => {
+        it('全量基线替换头部插入更早历史 → tick 递增', () => {
+          const sid = 's1'
+          // 冷切入形态：hydrate 尾读窗口（最近 2 条）→ 后台全量到达重拉（基线多出更早 e0）
+          sut.store.hydrate(sid, [baselineUser('e1'), baselineUser('e2')])
+          expect(sut.store.getBaselinePrependTick(sid)).toBe(0)
+          sut.store.reconcileHistory(sid, [baselineUser('e0'), baselineUser('e1'), baselineUser('e2')])
+          expect(sut.store.getBaselinePrependTick(sid)).toBe(1)
+          // 分区头部确为插入的更早历史（形态自证：不是等长刷新）
+          expect(sut.store.getMessages(sid)[0]!.id).toBe('e0')
+        })
+
+        it('hydrate 首次填充 / keptEarlier 窗口合并 / 等长刷新均不触发', () => {
+          const sid = 's2'
+          // ① 首次 hydrate（分区空 → 非空）：无前置插入语义（列表初次填充，virtua :key=session 重建）
+          sut.store.hydrate(sid, [baselineUser('e1'), baselineUser('e2')])
+          expect(sut.store.getBaselinePrependTick(sid)).toBe(0)
+          // ② 翻页前插后窗口 reconcile（truncated=true，keptEarlier 保留路径）：头部原样保留
+          sut.store.prependHistory(sid, [baselineUser('e0')])
+          sut.store.reconcileHistory(sid, [baselineUser('e1'), baselineUser('e2')], { truncated: true, loadedTurns: 2, totalTurnsEstimate: 5 })
+          expect(sut.store.getBaselinePrependTick(sid)).toBe(0)
+          // ③ 等长刷新（重连对账形态：同基线整体合并，长度不变）
+          sut.store.reconcileHistory(sid, [baselineUser('e0'), baselineUser('e1'), baselineUser('e2')])
+          expect(sut.store.getBaselinePrependTick(sid)).toBe(0)
+        })
+      })
+
       // ── [steer-bubble u3 / D3]
       //    两步合并快照序列：①尾部保护段收集（streaming assistant ∨ 未确认 user）
       //    ②user 正序-尾窗对齐去重（a=min(n,k)，保护段正数 1..a ↔ 基线尾部 k−a+1..k
