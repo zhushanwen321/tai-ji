@@ -79,10 +79,15 @@ describe('openUrlInSystemBrowser · 宿主系统浏览器出口（D9）', () => 
       const [command, args, options] = execFile.mock.calls[0] as unknown as [
         string, string[], { env: NodeJS.ProcessEnv; timeout: number },
       ]
-      // darwin 宿主（本测试运行平台）：open <url>；非 win32 不带 rundll32 前参
-      expect(process.platform).toBe('darwin')
-      expect(command).toBe('open')
-      expect(args).toEqual(['https://auth.example.com/cb'])
+      // 平台分支与实现三平台对齐（darwin: open / win32: rundll32 + url.dll 前参 / 其余: xdg-open），
+      // 断言按当前运行平台取对应分支——写死 darwin 会在 Linux CI 红（2026-10-29 实发）
+      const expectOpen = process.platform === 'win32'
+        ? { command: 'rundll32', args: ['url.dll,FileProtocolHandler', 'https://auth.example.com/cb'] }
+        : process.platform === 'darwin'
+          ? { command: 'open', args: ['https://auth.example.com/cb'] }
+          : { command: 'xdg-open', args: ['https://auth.example.com/cb'] }
+      expect(command).toBe(expectOpen.command)
+      expect(args).toEqual(expectOpen.args)
       expect(options.timeout).toBe(10_000)
       // 出站 env 经 buildOutboundChildEnv（C-proc-09 出站契约）：仍是对象且带 PATH
       expect(options.env).toBeTypeOf('object')

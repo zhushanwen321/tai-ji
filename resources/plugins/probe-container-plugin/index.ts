@@ -49,12 +49,12 @@ function buildDrawerTree(sessionId: string): GuiComponent[] {
           {
             id: 'probe-row-open-overlay',
             label: '打开探针浮层（hostAction → overlay.content）',
-            action: { hostAction: { kind: 'overlay', tabId: OVERLAY_VIEW_ID } },
+            hostAction: { kind: 'overlay', tabId: OVERLAY_VIEW_ID },
           },
           {
             id: 'probe-row-unknown-params',
             label: '未知参数反例（§5.4 行 8：warning + 动作照常）',
-            action: { hostAction: { kind: 'drawer', tabId: VIEW_ID, params: { unknownKey: 1 } } },
+            hostAction: { kind: 'drawer', tabId: VIEW_ID, params: { unknownKey: 1 } },
           },
         ],
       },
@@ -76,7 +76,7 @@ function buildOverlayTree(): GuiComponent[] {
           {
             id: 'probe-row-open-drawer',
             label: '回到探针面板（hostAction → drawer.tab）',
-            action: { hostAction: { kind: 'drawer', tabId: VIEW_ID } },
+            hostAction: { kind: 'drawer', tabId: VIEW_ID },
           },
         ],
       },
