@@ -98,6 +98,7 @@
     "packages/renderer/src/__tests__/stores/chat-store-bundle.test.ts",
     "packages/renderer/src/components/panel/__tests__/message-stream-bundle.test.ts",
     "packages/renderer/src/components/panel/message-stream/__tests__/ActivityStrip.test.ts",
+    "packages/renderer/src/components/panel/message-stream/__tests__/MessageStream.smooth-gate.wire.test.ts",
     "packages/renderer/src/components/panel/message-stream/__tests__/MessageStream.wire.test.ts",
     "packages/renderer/src/composables/effects/__tests__/stream-sound-bundle.test.ts",
     "packages/renderer/src/composables/effects/__tests__/useCompletionNotify.test.ts",

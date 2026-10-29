@@ -59,6 +59,7 @@
     "packages/shared/src/__tests__/quota-fetcher-resolution.test.ts",
     "packages/shared/src/__tests__/quota-pct-format.test.ts",
     "packages/shared/src/__tests__/quota-presets.test.ts",
+    "packages/shared/src/__tests__/quota-refresh-targets.test.ts",
     "packages/shared/src/__tests__/quota-workspace.test.ts"
   ],
   "sharedBy": {},

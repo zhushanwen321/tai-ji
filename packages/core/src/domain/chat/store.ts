@@ -133,6 +133,23 @@ function attachRunningToolCall(prev: Message[], form: PiToolCallEntryForm): Mess
  * 同源命中（不双计）；真实失配域仅 sidecar 丢失的兜底反解析路径（剥块残留分隔空白
  * 等字节差，含 skill chip 消息）。
  */
+/** 消息的文件侧身份（piEntryId 优先，缺省回退消息 id）——窗口切分锚与基线前置判定的共同读法。 */
+function fileSideId(m: Message): string {
+  return m.piEntryId ?? m.id
+}
+
+/**
+ * [u6] 窗口合并切分锚（reconcileHistory 消费）：window.truncated（窗口响应）时，窗口基线
+ * 首条的文件侧身份在分区中的下标——锚之前的分区消息属「已加载的更早历史」，保留不动，
+ * 仅锚及之后被响应刷新。返回 ≤0 = 无更早历史可保留（0 = 分区无更早历史；-1 = 窗口首条
+ * 不在分区——异常改写，或非窗口响应/空基线）→ 调用方退化为整体合并。
+ */
+function windowedBaselineSplitIdx(cur: Message[], history: Message[], window?: HistoryWindow): number {
+  if (!window?.truncated || history.length === 0) return -1
+  const windowFirstId = fileSideId(history[0]!)
+  return cur.findIndex((m) => fileSideId(m) === windowFirstId)
+}
+
 function userMessageText(m: Message): string {
   const c = m.content
   if (typeof c === 'string') return c
@@ -779,49 +796,48 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    * [u4d] window（可选）随切入刷新覆盖窗口状态（窗口响应 truncated=true 时顶部条保持
    * 「加载更早」入口；全量响应 false 时消失）。
    */
-  function reconcileHistory(sessionId: string, history: Message[], window?: HistoryWindow): void {
-    if (!hydrated.value.has(sessionId)) {
-      hydrate(sessionId, history, window)
-      return
-    }
-    const cur = messages.value.get(sessionId)?.value ?? []
-    // [u6] 窗口合并切分：windowFirstId 是窗口基线的文件侧首条，分区中它之前的消息
-    // 属「已加载的更早历史」——保留不动，仅窗口段被响应刷新。
-    let keptEarlier: Message[] | undefined
-    let tailFromIdx = 0
-    if (window?.truncated && history.length > 0) {
-      const windowFirstId = history[0]!.piEntryId ?? history[0]!.id
-      const splitIdx = cur.findIndex((m) => (m.piEntryId ?? m.id) === windowFirstId)
-      if (splitIdx > 0) {
-        keptEarlier = cur.slice(0, splitIdx)
-        tailFromIdx = splitIdx
-      }
-      // splitIdx === 0（分区无更早历史）或 -1（窗口首条不在分区）→ 走整体合并：
-      // 窗口已覆盖分区全部文件侧内容，无更早历史可保留
-    }
-    if (keptEarlier) {
-      const merged = mergeBaselineWithLive(history, cur.slice(tailFromIdx))
-      commitMessages(messages, sessionId, [...keptEarlier, ...truncateToolOutputBatch(merged)])
-      if (window) setHistoryWindow(sessionId, window)
-      lruTouch(sessionId)
-      return
-    }
-    const merged = mergeBaselineWithLive(history, cur)
-    const next = truncateToolOutputBatch(merged)
-    // [session-cold-switch-perf §3.3-3 滚动位置保持] 基线在分区头部插入更早历史（全量精化
-    // 的常态形态：尾读窗口首条被全量更早首条替换）→ tick +1 通知 renderer 喂 virtua :shift
-    // 保位。判定 = 分区非空 + 变长 + 首条文件侧身份变化：keptEarlier 路径（窗口合并）头部
-    // 原样保留天然不触发；hydrate 首次填充（分区空）与等长刷新（重连对账）不触发。
+  /**
+   * [session-cold-switch-perf §3.3-3 滚动位置保持] 基线在分区头部插入更早历史（全量精化
+   * 的常态形态：尾读窗口首条被全量更早首条替换）→ tick +1 通知 renderer 喂 virtua :shift
+   * 保位。判定 = 分区非空 + 变长 + 首条文件侧身份变化：keptEarlier 路径（窗口合并）头部
+   * 原样保留天然不触发；hydrate 首次填充（分区空）与等长刷新（重连对账）不触发。
+   */
+  function bumpBaselinePrependTickIfNeeded(sessionId: string, cur: Message[], next: Message[]): void {
     if (
       cur.length > 0 &&
       next.length > cur.length &&
-      (next[0]!.piEntryId ?? next[0]!.id) !== (cur[0]!.piEntryId ?? cur[0]!.id)
+      fileSideId(next[0]!) !== fileSideId(cur[0]!)
     ) {
       baselinePrependTicks.value = new Map(baselinePrependTicks.value).set(
         sessionId,
         (baselinePrependTicks.value.get(sessionId) ?? 0) + 1,
       )
     }
+  }
+
+  function reconcileHistory(sessionId: string, history: Message[], window?: HistoryWindow): void {
+    if (!hydrated.value.has(sessionId)) {
+      hydrate(sessionId, history, window)
+      return
+    }
+    const cur = messages.value.get(sessionId)?.value ?? []
+    // [u6] 窗口合并切分：切分锚之前的分区消息属「已加载的更早历史」——保留不动，仅锚及
+    // 之后被响应刷新。锚 ≤0（分区无更早历史 / 窗口首条不在分区 / 非窗口响应）→ 走整体
+    // 合并：窗口已覆盖分区全部文件侧内容，无更早历史可保留。
+    const splitIdx = windowedBaselineSplitIdx(cur, history, window)
+    if (splitIdx > 0) {
+      const merged = mergeBaselineWithLive(history, cur.slice(splitIdx))
+      commitMessages(messages, sessionId, [
+        ...cur.slice(0, splitIdx),
+        ...truncateToolOutputBatch(merged),
+      ])
+      if (window) setHistoryWindow(sessionId, window)
+      lruTouch(sessionId)
+      return
+    }
+    const merged = mergeBaselineWithLive(history, cur)
+    const next = truncateToolOutputBatch(merged)
+    bumpBaselinePrependTickIfNeeded(sessionId, cur, next)
     commitMessages(messages, sessionId, next)
     if (window) setHistoryWindow(sessionId, window)
     lruTouch(sessionId) // W3: LRU recency（切入刷新视同活跃访问）
