@@ -19,7 +19,7 @@
  *    四节链上门面其余域真成员保留（quota/extension 等），原砍成员版未触的域不受影响。
  *  - transport/api：subagent 中部砍成员 {on} 与 list-load 砍成员 {on,dispatchSession,
  *    dispatchGlobal,onGlobalType} → 统一并集工厂。经 grep 核实链上仅 stores/subagent.ts
- *    消费该模块（events.on），四成员覆盖全部消费面。
+ *    消费该模块（events.on），四成员覆盖全部消费场景。
  *  - useToast（fileTree 节）：砍成员 error spy——subagent/workflow/list-load 节与
  *    store 链经 grep 核实无 useToast 消费（error 成员在场兜底）。
  *  - 各文件级 beforeEach 已下沉进各自 describe（subagent/workflow/list-load 含
@@ -41,7 +41,7 @@ import type { NormalizedQuotaRow } from '@taiji/shared'
 import type { ServerMessageMap, WorkflowRunRecord, SubagentRecord } from '@taiji/shared'
 import { agentCallVirtualId } from '@taiji/shared'
 
-// ── 共享 mock 替身（正文引用面 hoisted）──
+// ── 共享 mock 替身（供正文引用，vi.hoisted 提升）──
 const listMock = vi.hoisted(() => vi.fn(() => Promise.resolve([])))
 const getWorkflowsMock = vi.hoisted(
   () =>

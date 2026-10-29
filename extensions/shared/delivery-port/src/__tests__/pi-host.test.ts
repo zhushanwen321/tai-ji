@@ -1,5 +1,5 @@
 // createPiDeliveryPortHost 接线行为锁：八个端口的透传语义逐成员断言（pi-host.ts 头注
-// 接线纪律的行为面）——原样透传不加工、订阅面返回 pi 退订函数、事件回调只裁剪事件体、
+// 接线纪律的行为集）——原样透传不加工、订阅返回 pi 退订函数、事件回调只裁剪事件体、
 // sendMessage 恒 { triggerTurn: true }。fake pi/ctx 全内存，无 fs。
 import { describe, expect, it } from "vitest";
 
@@ -62,7 +62,7 @@ describe("createPiDeliveryPortHost 接线（七端口逐成员）", () => {
 		expect(host.readSessionEntries()).toBe(entries);
 		expect(host.isIdle()).toBe(false);
 		// [subagent-observability §3.3.7③] hasRunningBackground 已随攒批窗退役删除，
-		// 接线面不再含该成员（结构断言：host 对象无此键）。
+		// 接线结果不再含该成员（结构断言：host 对象无此键）。
 		expect("hasRunningBackground" in host).toBe(false);
 	});
 
@@ -81,7 +81,7 @@ describe("createPiDeliveryPortHost 接线（七端口逐成员）", () => {
 		expect(sent[0].options).toEqual({ triggerTurn: true, deliverAs: "steer" });
 	});
 
-	it("订阅面注册到 pi.on 对应事件、handler 只收事件体、退订兑现 pi 退订函数", () => {
+	it("订阅类端口注册到 pi.on 对应事件、handler 只收事件体、退订兑现 pi 退订函数", () => {
 		const { pi, registered, unsubscribed } = makePi();
 		const host = createPiDeliveryPortHost(
 			pi as never,
@@ -113,7 +113,7 @@ describe("createPiDeliveryPortHost 接线（七端口逐成员）", () => {
 		messageEndHandler({ message: { role: "custom" } });
 		expect(received).toEqual({ role: "custom" });
 
-		// 退订函数 = pi.on 返回的退订（port dispose 时兑现的契约面）
+		// 退订函数 = pi.on 返回的退订（port dispose 时兑现的契约）
 		offMessageEnd();
 		expect(unsubscribed).toEqual(["message_end"]);
 	});
