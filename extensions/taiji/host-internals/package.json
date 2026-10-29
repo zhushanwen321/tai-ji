@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-host-internals",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "description": "taiji extension for Pi — internal host protocol facilities: host commands (system prompt fetch, session tree nav) and client UUID ↔ user entry ID mapping",
   "type": "module",
   "main": "src/index.ts",

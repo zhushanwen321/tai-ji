@@ -1,5 +1,11 @@
 # @zhushanwen/pi-scheduler
 
+## 0.12.2
+
+### Patch Changes
+
+- 701143b67: chore: refresh dependency range (triggered by @zhushanwen/extension-protocol@0.25.0 → @zhushanwen/extension-protocol@0.26.0)
+
 ## 0.12.1
 
 ### Patch Changes

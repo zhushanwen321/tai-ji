@@ -1,5 +1,11 @@
 # @zhushanwen/zcode-subagent-cli
 
+## 0.8.5
+
+### Patch Changes
+
+- 701143b67: chore: refresh dependency range (triggered by @zhushanwen/subagent-engine-sdk@0.12.0 → @zhushanwen/subagent-engine-sdk@0.12.1)
+
 ## 0.8.4
 
 ### Patch Changes

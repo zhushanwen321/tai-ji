@@ -1,5 +1,15 @@
 # @zhushanwen/subagent-core
 
+## 2.1.2
+
+### Patch Changes
+
+- 701143b67: review-fix-loop 的 suggestion 进入问题台账：aggregator 返回 suggestion_ids，R1/R2+ 与 must-fix 同源追踪；suggestion>0 但 suggestion_ids 缺失/条数不足视为聚合缺陷（重试一次后 aggregator-failure，不再只 WARN 放行）；fixer 任务文档覆盖 suggestion、ES3 覆盖校验对未处理的 active suggestion 判 fix-failure、R2 对账与终态残留清单覆盖 suggestion——修复 suggestion 只在 markdown 表中、漏修仍可达 clean 终态的问题。
+
+- 701143b67: structured-output 工具名 snake_case 化配套：结构化返回提示词与失败诊断改用 `structured_output`，读侧（resume / 结果补收的重放路径）同时识别旧连字符名 `structured-output`，旧 run 记录不失效。
+
+- 701143b67: 修复冷启动扫描崩溃：索引命中腿不再对象展开索引条目（`{ ...hit }` 会把 number 型 turns/totalTokens 等统计字段泄漏进身份基底，collectRecords 迭代即抛 TypeError），改为显式逐字段装配；泄漏形态再出现时按轻量基底降级并 warn（含恢复动作提示）。
+
 ## 2.1.1
 
 ### Patch Changes

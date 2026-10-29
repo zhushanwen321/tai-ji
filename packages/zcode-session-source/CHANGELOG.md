@@ -1,5 +1,11 @@
 # @zhushanwen/zcode-session-source
 
+## 0.2.9
+
+### Patch Changes
+
+- 701143b67: chore: refresh dependency range (triggered by @zhushanwen/subagent-engine-sdk@0.12.0 → @zhushanwen/subagent-engine-sdk@0.12.1)
+
 ## 0.2.8
 
 ### Patch Changes
