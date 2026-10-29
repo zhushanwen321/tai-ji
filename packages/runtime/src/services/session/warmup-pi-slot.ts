@@ -111,7 +111,7 @@ export interface WarmupPiSlotDeps { // oe-exempt:20261029:framework:依赖注入
  * 同一；**非 switch 消费点直传更准**：restore 链的其余消费入口（手动 session.restore RPC /
  * startup-reattach / pi 崩溃 respawn 编排，均经 facade.restoreSession 恢复内核）不写
  * markSessionViewed，lastViewedAt 最新条目可能属另一个活跃会话，直传消费目标为更准候选。
- * 不另设跨模块读取器（避免为候选解析触碰 session-service 领地）。崩溃恢复启动的行为面：
+ * 不另设跨模块读取器（避免为候选解析触碰 session-service 领地）。崩溃恢复启动的扩展行为：
  * startup-reattach 恢复链消费即触发补位（让位推迟至 reattach 完成后 fill，参数 = 最后
  * 恢复候选）——消费驱动的自然延伸（无独立启动期接线），槽进程有 idle 自杀兜底。
  */
