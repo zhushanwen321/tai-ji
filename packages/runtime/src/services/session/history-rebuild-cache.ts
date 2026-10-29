@@ -31,6 +31,7 @@ import { HISTORY_BUDGET } from '@taiji/shared'
 // paths.ts 是 Node-only 模块，刻意不从 shared barrel 导出（见 shared/src/index.ts L32 注释），
 // Node 端从子路径 import
 import { getAttachmentsDir } from '@taiji/shared/paths'
+import { isPiSessionId } from '@taiji/shared/session-store-paths'
 import type { IProcessManager } from '../ports/pi-engine.js'
 import type { ISessionStore } from '../ports/session.js'
 import { getHistoryTailFromFile, tailReadHistory, type HistoryWindowQuery, type HistoryWindowResult, type TailReadSidecarOpts } from '../session-history.js'
@@ -1005,8 +1006,14 @@ export class SessionHistoryReader {
  * 文件缺失/损坏（JSON parse 失败 / entries 非数组）→ 返回 null（rebuildHistoryFromEntries 据此
  * 全降级为占位文本，非硬错误）。异步读：与周围 getEntries RPC / readFile 一致，sidecar 是小文件
  * （每条 user message 一条 entry）但统一走异步避免事件循环阻塞。
+ *
+ * 非法 pi sessionId（如 subagent 三段式虚拟 id `subagent:<main>:<sub>`）同样按「无 sidecar」
+ * 返 null：getAttachmentsDir 对非法 id 会 assertPiSessionId fail-fast（路径穿越防线），而本函数
+ * 所在的尾读链对这类 id 的语义是通用链空页静默降级——sidecar 缺失（null）恰是该降级的
+ * 一部分，不是可 fail-fast 的异常。
  */
 async function readSegmentsMetadataFile(sessionId: string): Promise<SegmentsMetadataFile | null> {
+  if (!isPiSessionId(sessionId)) return null
   const filePath = join(getAttachmentsDir(sessionId), 'segments.json')
   try {
     if (!existsSync(filePath)) return null

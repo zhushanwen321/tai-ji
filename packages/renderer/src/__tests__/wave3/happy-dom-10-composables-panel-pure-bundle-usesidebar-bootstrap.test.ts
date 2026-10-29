@@ -37,7 +37,10 @@ const apiCtrl = vi.hoisted(() => ({
     load: vi.fn(() => Promise.resolve({ projects: [], activeProjectId: '' })),
   },
   chat: {
-    getHistory: vi.fn(() => Promise.resolve([])),
+    // [session-cold-switch-perf §3.3-4] selectSession 并行切口把 getHistory 提前到
+    // switchSession 之前发出，reply 契约 = HistoryResult 对象（u4b 双预算窗口）——
+    // 数组形态 mock 已过时，reconcileFromReply 读 reply.messages 会得 undefined
+    getHistory: vi.fn(() => Promise.resolve({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 })),
     streamSubscribe: vi.fn(() => () => {}),
   },
   session: {

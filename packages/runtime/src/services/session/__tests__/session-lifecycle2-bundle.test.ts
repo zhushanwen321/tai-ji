@@ -187,6 +187,20 @@ describe('SessionLifecycle.delete 生成中拒绝门（U8）', () => {
 // ← src/services/session/__tests__/session-lifecycle-preset-fallback-disclosure.test.ts
 // ======================================================================
 
+// [session-cold-switch-perf §3.3-2] restoreSession 消费预热槽：槽空回退现状 spawn 链时
+// 「顺带补位」会经同一构造链再调一次 pm.createSession（后台），干扰本文件 restore 主链的
+// spawn 计数断言。槽本体由 src/__tests__/warmup-pi-slot.test.ts 覆盖，此处 mock 恒空槽
+//（take 恒 empty、零补位）。
+vi.mock('../warmup-pi-slot.js', () => {
+  return {
+    WARMUP_SLOT_SESSION_ID: 'warmup-pi-slot',
+    WarmupPiSlot: class {
+      take(): { kind: 'empty' } { return { kind: 'empty' } }
+      warm(): void {}
+    },
+  }
+})
+
 // getSessionsDir 指向测试 tmp（会话文件真实写入；不碰真实数据目录）
 const sessionsDirMock = vi.hoisted(() => ({ value: '/mock/not-yet-initialized' }))
 

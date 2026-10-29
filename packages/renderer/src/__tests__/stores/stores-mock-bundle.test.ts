@@ -99,6 +99,9 @@ vi.mock('@taiji/core/transport/api', () => ({
   dispatchSession: vi.fn(),
   dispatchGlobal: vi.fn(),
   onGlobalType: vi.fn(() => () => {}),
+  // [session-cold-switch-perf §3.3-3] historyCacheReady 订阅经 crossSession 通道
+  // （session-api-port.onHistoryCacheReady 消费），mock 须提供
+  onCrossSession: vi.fn(() => () => {}),
 }))
 
 vi.mock('@/composables/useToast', () => ({

@@ -477,7 +477,10 @@ describe('btw 线离线尾读（btw 面解析路径；W4a 判别器 = 注册表�
       const { reader, resolve, sessionStore } = makeOfflineReader(undefined)
       const result = await reader.getHistory('unknown-line')
       expect(result.messages).toEqual([])
-      expect(resolve).toHaveBeenCalledTimes(1) // 判别器即成员查询——调用一次、返 undefined
+      // 判别器即成员查询，[session-cold-switch-perf §3.3-1 态 3] 后双调：一次在
+      // getTailFirstOfflineWindow（登记排除判据）、一次在 tailReadOffline（读路径分支），
+      // 两处均为纯查询（设计允许的同源双判定）
+      expect(resolve).toHaveBeenCalledTimes(2)
       expect(sessionStore.scanSessions).toHaveBeenCalledWith({ force: true }) // 落通用链
     } finally {
       warnSpy.mockRestore()
@@ -562,10 +565,11 @@ describe('附着 btw 线 RPC 失败降级的中断判定门禁（U8 tailReadOffl
 })
 describe('非 btw 线回归路径（原行为不变）', () => {
   it('普通 sid 离线尾读：判别器未命中即走通用链（scanSessions miss → 静默空）', async () => {
-    // 生产注入语义：非线 id 查注册表 miss → undefined → 通用链（判别器调用一次）
+    // 生产注入语义：非线 id 查注册表 miss → undefined → 通用链；[session-cold-switch-perf
+    // §3.3-1 态 3] 后判别器双调（登记排除判据 + 尾读分支各一次，纯查询）
     const { reader, resolve, sessionStore } = makeOfflineReader(() => undefined)
     const result = await reader.getHistory('plain-session-id')
-    expect(resolve).toHaveBeenCalledTimes(1)
+    expect(resolve).toHaveBeenCalledTimes(2)
     expect(sessionStore.scanSessions).toHaveBeenCalledWith({ force: true })
     expect(result).toEqual({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 })
   })

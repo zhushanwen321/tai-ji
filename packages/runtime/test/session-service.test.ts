@@ -73,7 +73,9 @@ const mocks = vi.hoisted(() => ({
   rebuildHistoryFromEntriesMock: vi.fn((entries: unknown[]): { messages: unknown[]; clientUuidMap: Map<string, string>; orphanToolResults?: unknown[] } => ({ messages: entries as unknown[], clientUuidMap: new Map<string, string>() })),
   getHistoryFromFileMock: vi.fn().mockResolvedValue([]),
   getHistoryFromFilePathMock: vi.fn().mockResolvedValue([]),
-  getHistoryTailFromFileMock: vi.fn().mockResolvedValue({ messages: [], truncated: false }),
+  // [session-cold-switch-perf §3.3-1] 尾读 mock 默认返回对齐 HistoryWindowResult 契约
+  // （u4b 双预算窗口字段齐全——态 2/态 3 首屏直返尾读结果）
+  getHistoryTailFromFileMock: vi.fn().mockResolvedValue({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 }),
 }))
 
 const { mockScannedSessions } = mocks
@@ -119,6 +121,21 @@ vi.mock('../src/services/session-history.js', () => ({
   getHistoryFromFilePath: mocks.getHistoryFromFilePathMock,
   getHistoryTailFromFile: mocks.getHistoryTailFromFileMock,
 }))
+
+// [session-cold-switch-perf §3.3-2] restoreSession 经 acquireRestoreClient 消费预热槽：
+// 槽空回退现状 spawn 链时会「顺带补位」——补位 spawn 经同一构造链再调一次 pm.createSession
+//（后台 fire-and-forget），会吃掉 stubNextCreatedClient 的 mockResolvedValueOnce 槽位并
+// 使 spawn 计数 +1。本文件钉的是 restore 主链语义；槽本体（三道检查/补位/让位）由
+// src/__tests__/warmup-pi-slot.test.ts 覆盖，此处 mock 为恒空槽（take 恒 empty、零补位）。
+vi.mock('../src/services/session/warmup-pi-slot.js', () => {
+  return {
+    WARMUP_SLOT_SESSION_ID: 'warmup-pi-slot',
+    WarmupPiSlot: class {
+      take(): { kind: 'empty' } { return { kind: 'empty' } }
+      warm(): void {}
+    },
+  }
+})
 
 // ── Mock 之后再 import 被测对象 ─────────────────────────────────────
 
@@ -506,6 +523,17 @@ function stubNextCreatedClient(
   if (opts?.persistent) mocked.mockResolvedValue(client as unknown as IPiEngine)
   else mocked.mockResolvedValueOnce(client as unknown as IPiEngine)
   if (opts?.clientMapId !== undefined) target.clientMap.set(opts.clientMapId, client)
+}
+
+/**
+ * [session-cold-switch-perf §3.3-1] 等待态 2 后台全量重建任务跑完（runRebuildJob 经
+ * getEntries RPC + 多个 setImmediate 让出段后写缓存/发帧）。flush 足够轮次保证
+ * 「后台任务终态已落定」后再断言 rebuild mock / 缓存行为。
+ */
+async function flushBackgroundRebuild(rounds = 10): Promise<void> {
+  for (let i = 0; i < rounds; i++) {
+    await new Promise<void>((resolve) => setImmediate(resolve))
+  }
 }
 
 /**
@@ -1525,23 +1553,34 @@ describe('SessionService · Facade', () => {
       const client = setup.mountClient('sid-hist')
       client.getEntries.mockResolvedValueOnce({ data: { entries: fakeEntries, leafId: 'e1' } })
       mocks.rebuildHistoryFromEntriesMock.mockReturnValueOnce({ messages: ['rebuilt' as unknown as Message], clientUuidMap: new Map() })
+      // [session-cold-switch-perf §3.3-1 态 2] 缓存 miss + 进程在场：尾读首屏立即返回
+      //（getHistoryTailFromFile），全量重建转后台（fire-and-forget，不阻塞首屏）
       const result = await setup.service.getHistory('sid-hist')
-      // rebuildHistoryFromEntries 收到原始 entries（getEntries 路径，取代旧 get_messages + convertPiHistory）
+      expect(result).toEqual({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 })
+      // 后台任务用在场进程 get_entries 全量重建（rebuildHistoryFromEntries 收到原始 entries，
+      // 取代旧 get_messages + convertPiHistory）
+      await flushBackgroundRebuild()
       expect(mocks.rebuildHistoryFromEntriesMock).toHaveBeenCalledWith(fakeEntries, null)
-      // getEntries 路径返回双预算窗口（u4b：mock 消息无 role 字段 → 病态兜底视为单 turn 完整放行）
-      expect(result).toEqual({ messages: ['rebuilt'], truncated: false, loadedTurns: 1, totalTurnsEstimate: 1 })
     })
 
     it('R-12: returns empty array (short-circuit) when getEntries returns empty and session is idle', async () => {
       const { id } = await setup.seedSession()
       const client = setup.clientMap.get(id)!
       client.getEntries.mockResolvedValueOnce({ data: { entries: [], leafId: null } })
-      // wave:perf-w20（R-12）：pi RPC 是活跃 session 的权威视图，空 entries 短路返回空列表，
-      // 不走尾读 fallback（尾读会给最多 20 turn 的文件尾部视图，与 RPC 视图闪变不一致）。
-      // 尾读降级仅在 getEntries 抛错时触发（见下方 throws 用例）。
+      // [session-cold-switch-perf §3.3-1 态 2] 缓存 miss + 进程在场：首屏 = 尾读先行（四态
+      // 分派只看缓存×进程，get_entries 空的权威空视图由后台任务解析且不写缓存——R-12
+      // 空短路语义保留在缓存命中的增量分支，见下方浅拷贝用例）
       const result = await setup.service.getHistory(id)
       expect(result).toEqual({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 })
-      expect(mocks.getHistoryTailFromFileMock).not.toHaveBeenCalled()
+      expect(mocks.getHistoryTailFromFileMock).toHaveBeenCalledWith(
+        id, expect.anything(), expect.anything(),
+        { cursor: undefined, maxBytes: HISTORY_BUDGET.MAX_BYTES }, { segmentsMetadata: null },
+      )
+      // 后台 R-12 同语义：get_entries 空视图不写缓存 → 下一次派单仍尾读先行
+      await flushBackgroundRebuild()
+      client.getEntries.mockResolvedValueOnce({ data: { entries: [], leafId: null } })
+      await setup.service.getHistory(id)
+      expect(mocks.getHistoryTailFromFileMock).toHaveBeenCalledTimes(2)
     })
 
     it('returns empty array when getEntries empty and session is generating', async () => {
@@ -1550,20 +1589,27 @@ describe('SessionService · Facade', () => {
       await setup.service.sendMessage(id, 'x')
       client.getEntries.mockResolvedValueOnce({ data: { entries: [], leafId: null } })
       const result = await setup.service.getHistory(id)
-      // generating session getEntries 空 → 直接返回空（不走 fallback 尾读）
+      // [session-cold-switch-perf §3.3-1] generating 不参与四态分派（只看缓存×进程）——
+      // 缓存 miss + 进程在场即尾读首屏，后台任务解析空权威视图
       expect(result).toEqual({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 })
-      expect(mocks.getHistoryTailFromFileMock).not.toHaveBeenCalled()
+      expect(mocks.getHistoryTailFromFileMock).toHaveBeenCalledWith(
+        id, expect.anything(), expect.anything(),
+        { cursor: undefined, maxBytes: HISTORY_BUDGET.MAX_BYTES }, { segmentsMetadata: null },
+      )
     })
 
-    it('falls back to file read when getEntries throws', async () => {
+    it('态 2 首屏走尾读——getEntries 失败不在首屏路径（D4 尾读带字节预算缺省 + sidecar）', async () => {
       const { id, client } = await setup.seedSession()
       client.getEntries.mockRejectedValueOnce(new Error('rpc boom'))
       mocks.getHistoryTailFromFileMock.mockResolvedValueOnce({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 })
-      await setup.service.getHistory(id)
-      // [D4] 尾读降级带字节预算缺省（与游标分支同源 HISTORY_BUDGET.MAX_BYTES——原样透传
-      // undefined 会退化为仅 turn 数截取，20 大 turn 的 reply 超 32MB 被 payload_too_large 拒绝）
+      const result = await setup.service.getHistory(id)
+      expect(result).toEqual({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 })
+      // [D4] 尾读带字节预算缺省（与游标分支同源 HISTORY_BUDGET.MAX_BYTES——原样透传
+      // undefined 会退化为仅 turn 数截取，20 大 turn 的 reply 超 32MB 被 payload_too_large 拒绝）；
+      // [§3.3-1 实现项①] 第 5 参 = segments sidecar（读缺失 → null 全降级）
       expect(mocks.getHistoryTailFromFileMock).toHaveBeenCalledWith(
-        id, expect.anything(), expect.anything(), { maxBytes: HISTORY_BUDGET.MAX_BYTES },
+        id, expect.anything(), expect.anything(),
+        { cursor: undefined, maxBytes: HISTORY_BUDGET.MAX_BYTES }, { segmentsMetadata: null },
       )
     })
 
@@ -1573,14 +1619,16 @@ describe('SessionService · Facade', () => {
       const m1 = { id: 'm1', role: 'user', content: 'q1', piEntryId: 'e1' } as unknown as Message
       client.getEntries.mockResolvedValueOnce({ data: { entries: [e1], leafId: 'e1' } })
       mocks.rebuildHistoryFromEntriesMock.mockReturnValueOnce({ messages: [m1], clientUuidMap: new Map() })
-      await setup.service.getHistory('sid-inc-fallback') // 写缓存（leafId='e1'）
+      await setup.service.getHistory('sid-inc-fallback') // 尾读首屏；后台全量写缓存（leafId='e1'）
+      await flushBackgroundRebuild() // 等后台重建写缓存完成，下一次派单走态 1 增量
 
       // 增量拉取抛非 EntryNotFound 错误 → 降级尾读（缓存不动）
       client.getEntries.mockRejectedValueOnce(new Error('rpc boom'))
       mocks.getHistoryTailFromFileMock.mockResolvedValueOnce({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 })
       await setup.service.getHistory('sid-inc-fallback')
       expect(mocks.getHistoryTailFromFileMock).toHaveBeenCalledWith(
-        'sid-inc-fallback', expect.anything(), expect.anything(), { maxBytes: HISTORY_BUDGET.MAX_BYTES },
+        'sid-inc-fallback', expect.anything(), expect.anything(),
+        { cursor: undefined, maxBytes: HISTORY_BUDGET.MAX_BYTES }, { segmentsMetadata: null },
       )
     })
 
@@ -1592,15 +1640,15 @@ describe('SessionService · Facade', () => {
       client.getEntries.mockResolvedValueOnce({ data: { entries: [e1], leafId: 'e1' } })
       mocks.rebuildHistoryFromEntriesMock.mockReturnValueOnce({ messages: [m1], clientUuidMap: new Map() })
       const first = await setup.service.getHistory('sid-alias')
-      expect(first.messages).toHaveLength(1)
+      await flushBackgroundRebuild() // [§3.3-1] 全量重建转后台；等缓存写入完成
+      expect(first.messages).toHaveLength(0) // 首屏 = 尾读先行（mock 默认空窗）
 
-      // 调用方就地污染全量重建的返回数组（模拟未来消费方就地 sort/splice/push）
-      first.messages.push({ id: 'polluted' } as unknown as Message)
-
-      // 缓存新鲜路径（空增量 = R-12 短路）：返回缓存副本，不受上面 push 影响
+      // 后台重建写缓存后（态 1）：返回缓存副本；调用方就地污染返回数组
+      //（模拟未来消费方就地 sort/splice/push）
       client.getEntries.mockResolvedValueOnce({ data: { entries: [], leafId: 'e1' } })
       const second = await setup.service.getHistory('sid-alias')
       expect(second.messages).toHaveLength(1)
+      second.messages.push({ id: 'polluted' } as unknown as Message)
       // 且 second 与缓存本体分离：就地清空后第三次读取仍干净
       second.messages.length = 0
       client.getEntries.mockResolvedValueOnce({ data: { entries: [], leafId: 'e1' } })
@@ -1614,7 +1662,8 @@ describe('SessionService · Facade', () => {
       const m1 = { id: 'm1', role: 'user', content: 'q1', piEntryId: 'e1' } as unknown as Message
       client.getEntries.mockResolvedValueOnce({ data: { entries: [{ type: 'message', id: 'e1' }], leafId: 'e1' } })
       mocks.rebuildHistoryFromEntriesMock.mockReturnValueOnce({ messages: [m1], clientUuidMap: new Map() })
-      await setup.service.getHistory('sid-alias-inc') // 写缓存（leafId='e1'）
+      await setup.service.getHistory('sid-alias-inc') // 尾读首屏；后台全量写缓存（leafId='e1'）
+      await flushBackgroundRebuild() // 等缓存写入完成，后续派单走态 1 增量
 
       // 增量路径：delta 首条 parentId === cached.leafId → merge → 写缓存 → 返回 merged 副本
       const m2 = { id: 'm2', role: 'assistant', content: 'a1', piEntryId: 'e2' } as unknown as Message
@@ -1636,9 +1685,11 @@ describe('SessionService · Facade', () => {
     it('reads from file directly when no active client', async () => {
       mocks.getHistoryTailFromFileMock.mockResolvedValueOnce({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 })
       await setup.service.getHistory('no-client')
-      // [D4] 离线尾读带字节预算缺省（与游标分支同源——原样透传 undefined 时仅按 turn 数截取）
+      // [D4] 离线尾读带字节预算缺省（与游标分支同源——原样透传 undefined 时仅按 turn 数截取）；
+      // [§3.3-1 实现项①] 第 5 参 = segments sidecar
       expect(mocks.getHistoryTailFromFileMock).toHaveBeenCalledWith(
-        'no-client', expect.anything(), expect.anything(), { maxBytes: HISTORY_BUDGET.MAX_BYTES },
+        'no-client', expect.anything(), expect.anything(),
+        { cursor: undefined, maxBytes: HISTORY_BUDGET.MAX_BYTES }, { segmentsMetadata: null },
       )
     })
   })

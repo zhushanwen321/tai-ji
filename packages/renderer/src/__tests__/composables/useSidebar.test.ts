@@ -61,6 +61,9 @@ vi.mock('@taiji/core/transport/api/domains/chat', () => ({
 vi.mock('@taiji/core/transport/api', () => ({
   on: vi.fn(() => () => {}),
   onGlobalType: vi.fn(() => () => {}),
+  // [session-cold-switch-perf §3.3-3] historyCacheReady 订阅经 crossSession 通道
+  // （session-api-port.onHistoryCacheReady 消费），mock 须提供
+  onCrossSession: vi.fn(() => () => {}),
   dispatchSession: vi.fn(),
 }))
 vi.mock('@taiji/core/transport/api/domains/file', () => ({ tree: vi.fn().mockResolvedValue({}) }))

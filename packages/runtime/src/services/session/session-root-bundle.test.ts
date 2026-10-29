@@ -21,6 +21,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // 机械合并产物（同目录合并，vi.mock 相对路径不变）；源文件见各节横幅。重名顶层标识符已加 _mN 后缀。
 
+// [session-cold-switch-perf §3.3-2] restoreSession 消费预热槽：槽空回退现状 spawn 链时
+// 「顺带补位」会经同一构造链再调一次 pm.createSession（后台），干扰本文件 restore 主链的
+// spawn 计数断言（gate pending 放行后应为 1 次）。槽本体由
+// src/__tests__/warmup-pi-slot.test.ts 覆盖，此处 mock 恒空槽（take 恒 empty、零补位）。
+vi.mock('./warmup-pi-slot.js', () => {
+  return {
+    WARMUP_SLOT_SESSION_ID: 'warmup-pi-slot',
+    WarmupPiSlot: class {
+      take(): { kind: 'empty' } { return { kind: 'empty' } }
+      warm(): void {}
+    },
+  }
+})
+
 // ======================================================================
 // ← src/services/session/completion-backflow.test.ts
 // ======================================================================
