@@ -69,7 +69,7 @@ function makeFixture(): Fixture {
   const store = scope.run(() => createSessionStore())!
   const chatStore = scope.run(() => createChatStore())!
 
-  let cacheReadyHandler: ((sessionId: string, payload: { snapshotLeafId: string; error?: string }) => void) | null = null
+  let cacheReadyHandler: ((sessionId: string, payload: { sessionId: string; snapshotLeafId: string; error?: string }) => void) | null = null
 
   const api = {
     list: vi.fn().mockResolvedValue([] as SessionGroup[]),

@@ -74,13 +74,17 @@ const drawerMock = vi.hoisted(() => {
   return state
 })
 
-vi.mock('@taiji/core/domain/drawer', async () => {
+vi.mock('@taiji/core/domain/drawer', async (importOriginal) => {
+  // spread actual：overlay/content-slots.ts 模块级求值消费本 barrel 的 OVERLAY_REGISTRY，
+  // 真值透传（本文件不断言注册表内容）；覆写仅控制态通道（openDrawerTab spy + isOpen 受控 ref）
+  const actual = await importOriginal<typeof import('@taiji/core/domain/drawer')>()
   const { ref } = await import('vue')
   const isOpen = ref(false)
   drawerMock.setIsOpen = (v: boolean) => {
     isOpen.value = v
   }
   return {
+    ...actual,
     openDrawerTab: drawerMock.openDrawerTab,
     useDrawerControl: () => ({ isOpen }),
   }

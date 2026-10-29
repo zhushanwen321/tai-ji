@@ -5,36 +5,8 @@
 // 来源：
 //   - src/domain/overlay/__tests__/coordination.test.ts（15 用例，skip 0）
 //   - src/domain/overlay/__tests__/state.test.ts（10 用例，skip 0）
+//   - 容器扩展点统一追加：openOverlayContent / closeOverlayForSession 两段（9 用例）
 
-import { describe, it, expect, beforeEach } from 'vitest'
-import { openBrowser, openCanvasOverlay, openSchedulerOverlay, openOverlay, closeBrowserOverlayForSession, closeCanvasOverlayForSession, closeOverlay, _resetOverlayForTest } from '../coordination'
-import { getOverlayControlState, useOverlayControl } from '../state'
-import { type OverlayContent } from '../types'
-
-// ======== 来源：coordination.test.ts ========
-describe("coordination", () => {
-  beforeEach(() => {
-    _resetOverlayForTest()
-
-/**
- * overlay 协调层单测 —— u-w2-browser-mount：openBrowser URL 注入链 + 会话删除级联。
- *
- * 覆盖（display-containers §7.4/§5.3 + 容器扩展点统一 §6.4/§6.8/§11.1-2）：
- * - openBrowser(url, sessionId)：开浮层 browser 内容（URL 注入链核心落点）；已开态换 URL/换会话 = 单例换内容
- * - 无效载荷 no-op（url / sessionId 空白）
- * - closeBrowserOverlayForSession（§7.4 发起会话删除的浮层终态）：**仅发起会话被删才关**
- *   ——删非发起会话浮层不动（S5 反向断言，防过宽清场）；browser 换 workflow 内容后同为不动
- * - openOverlayContent(contentId, sessionId)（§6.4 浮层落点协调函数）：内置 kind 走既有
- *   payload 组装（scheduler）/ 专属参数 kind 走专属入口（warn + no-op）/ 插件声明 id 走
- *   §6.8 {kind:'plugin'} 载体；无效载荷 no-op
- * - closeOverlayForSession（§6.8/§11.1-2 级联判据统一）：判据唯一 = payload.sessionId
- *   （kind 不参与）——删归属会话 → 浮层关闭；删其他会话 → 不关闭；对插件内容同样生效
- *
- * 三视角：构建者白盒（载荷校验 + 条件式关闭）、使用者黑盒（「点 localhost 链接浮层开浏览器页、
- * 删掉别的会话浮层照常开着」的用户可见语义）、观察者形态（开合态读出形状）。
- *
- * 运行：cd packages/core && npx vitest run src/domain/overlay/__tests__/coordination.test.ts
- */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import {
   openBrowser,
@@ -48,7 +20,8 @@ import {
   closeOverlay,
   _resetOverlayForTest,
 } from '../coordination'
-import { getOverlayControlState } from '../state'
+import { getOverlayControlState, useOverlayControl } from '../state'
+import { type OverlayContent } from '../types'
 
 beforeEach(() => {
   _resetOverlayForTest()
@@ -58,14 +31,8 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('openBrowser URL 注入链（§7.4：localhost 链接点击 → 浮层 BrowserPane）', () => {
-  it('openBrowser 开浮层：isOpen=true + current=browser 载荷（url + 发起会话）', () => {
-    openBrowser('http://localhost:1420/', 'sess-a')
-    const state = getOverlayControlState()
-    expect(state.isOpen).toBe(true)
-    expect(state.current).toEqual({ kind: 'browser', payload: { url: 'http://localhost:1420/', sessionId: 'sess-a' } })
-  })
-
+// ======== 来源：coordination.test.ts ========
+describe("coordination", () => {
   describe('openBrowser URL 注入链（§7.4：localhost 链接点击 → 浮层 BrowserPane）', () => {
     it('openBrowser 开浮层：isOpen=true + current=browser 载荷（url + 发起会话）', () => {
       openBrowser('http://localhost:1420/', 'sess-a')
@@ -292,14 +259,7 @@ describe("state", () => {
   })
 });
 
-
-  it('浮层已关时调用 = no-op（幂等，不抛错）', () => {
-    closeBrowserOverlayForSession('sess-a')
-    expect(getOverlayControlState().isOpen).toBe(false)
-    expect(getOverlayControlState().current).toBeNull()
-  })
-})
-
+// ======== 容器扩展点统一：openOverlayContent / closeOverlayForSession 协调函数 ========
 describe('openOverlayContent（容器扩展点统一 §6.4 浮层落点：contentId 全局寻址）', () => {
   it('内置 kind scheduler：走既有 payload 组装（openSchedulerOverlay 同载荷——归属会话）', () => {
     openOverlayContent('scheduler', 'sess-a')
