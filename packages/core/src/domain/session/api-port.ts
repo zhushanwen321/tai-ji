@@ -124,7 +124,7 @@ export interface PanelOrchestrationPort {
 }
 
 /**
- * sessionEntry 端口束（renderer-deepening D3）——selectSession 完整 12 步切入链的跨域
+ * sessionEntry 端口束（renderer-deepening D3）——selectSession 完整 13 步切入链的跨域
  * 步骤注入口。链本体在 use-session.selectSession 单点编排（唯一载体：改时序只改那一处），
  * 跨域动作（chat 订阅/LRU、new-task flow、壳未读标记/文件树）经本端口注入，core 零跨域
  * import（不开 domain 间直接 import 的先例，包拓扑铁律）。

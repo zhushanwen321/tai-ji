@@ -9,9 +9,9 @@
  * 关键裁决：
  * - C-W5-1 → [HISTORICAL]（renderer-deepening D3/D4 推翻，u5.2）：selectSession 曾壳重编排
  *   （理由「core.selectSession 是自包含函数，renderer 步骤无法插入」）——u5.1 起 core 持完整
- *   12 步切入链 + sessionEntry 端口束，renderer 专属步骤（取消 flow/清未读/流订阅/LRU/文件树）
+ *   13 步切入链 + sessionEntry 端口束，renderer 专属步骤（取消 flow/清未读/流订阅/LRU/文件树）
  *   经端口注入。壳 selectSession 现为一行代理 core.selectSession，链唯一载体在
- *   core domain/session/use-session.ts（改时序只改那一处，12 步顺序有接口级断言）。
+ *   core domain/session/use-session.ts（改时序只改那一处，13 步顺序有接口级断言）。
  *   deleteSession/deleteFolder 的 wasActive 回退原「缺 ensureStreamSubscription」接缝债随之清偿
  *   （回退路径经同一 core 链，端口已接线；main 侧曾以 selectSessionFallback 端口注入壳版
  *   selectSession 清偿同一债务——D3 路线下 core 链即完整链，壳不再注入该端口）。
@@ -260,7 +260,7 @@ export function useSidebar() {
     currentSession: () => useNewTaskFlow().currentSession.value,
   }
 
-  // ── sessionEntry 端口束接线（D3，u5.2）：切入链跨域步骤注入 core 12 步链 ──
+  // ── sessionEntry 端口束接线（D3，u5.2）：切入链跨域步骤注入 core 13 步链 ──
   // 时序不变量（含 C-W3-4「订阅先于 panel 载入」）由 core 链本体保证，实现侧无需关心顺序；
   // 适配映射：cancelActiveFlow←useNewTaskFlow / clearUnread←clearSessionUnread（两源同点：
   // useSessionMarkers + useForkBranchNotify 分支角标，D9 合流） /
@@ -298,7 +298,7 @@ export function useSidebar() {
   // 访问（getActiveId/setActiveId/getList），方法闭包持原始 ref，pinia/raw 双模式下都正常工作。
   const sessionStore = useSessionStore() as unknown as ReturnType<typeof createSessionStore>
 
-  // ── core createUseSession（12 步切入链唯一载体；sessionEntry 接线后全链生效）──
+  // ── core createUseSession（13 步切入链唯一载体；sessionEntry 接线后全链生效）──
   const core = createUseSession({
     store: sessionStore,
     api,
@@ -326,10 +326,11 @@ export function useSidebar() {
   /**
    * selectSession —— 一行代理 core.selectSession（D3/D4，u5.2）。
    *
-   * 完整 12 步切入链在 core domain/session/use-session.ts 单点编排（唯一载体）：
+   * 完整 13 步切入链在 core domain/session/use-session.ts 单点编排（唯一载体）：
    * cancelActiveFlow → switchSession → setActiveId → clearUnread → ensureStreamSubscription →
    * touchRecency → syncSessionToPanel → navigation.push → hydrate/reconcile → preloadFileTree →
-   * touchRecency(panel 绑定 session) → evictLru。renderer 专属步骤经上方 sessionEntry 端口注入；
+   * touchRecency(panel 绑定 session) → evictLru → refreshLiveState（步 13 异步不阻塞链）。
+   * renderer 专属步骤经上方 sessionEntry 端口注入；
    * C-W3-4 时序前提（订阅先于 panel 载入，防 snapshot 回放丢失）由 core 链步 5→7 顺序保证。
    */
   const selectSession = core.selectSession
@@ -337,7 +338,7 @@ export function useSidebar() {
   /**
    * refreshLiveState —— 代理 core（[W2 权威拉取与冷读] 状态层拉取对账入口）。
    *
-   * 主路径触发点 = core 12 步切入链步 13（打开视图时机）与本文件 onConnected（重连
+   * 主路径触发点 = core 13 步切入链步 13（打开视图时机）与本文件 onConnected（重连
    * 时机）；btw 线视图激活点（BtwPanel 选中线）经本出口复用同一入口——线不走
    * selectSession 切入链（drawer 旁路呈现，主会话焦点不变），两件事（缓存缺失门控 +
    * fire-and-forget 语义）由 core 单点保证，壳不另造第二套。
@@ -348,7 +349,7 @@ export function useSidebar() {
    * restoreSession —— 显式重开 dead session（重新 spawn pi）。
    * 编排对齐 selectSession，但切入 RPC 用 sessionApi.restoreSession（显式重新 spawn，区别于
    * switchSession 的「内存已有则纯切换」语义）替代。壳侧职责收缩为：restore RPC 前置取消 flow
-   * （保持取消先于 RPC 的原时序）+ 成功后经 core 12 步链切入 + revive（dead→idle 统一收尾）。
+   * （保持取消先于 RPC 的原时序）+ 成功后经 core 13 步链切入 + revive（dead→idle 统一收尾）。
    *
    * 与壳版链的两处已知等价偏差（u5.2 记录）：① core 链步 1 的 cancelActiveFlow 对本路径是
    * no-op 冗余（壳已在 RPC 前取消）；② core 链步 2 会补发一次 switchSession RPC——runtime 对
@@ -423,7 +424,7 @@ export function useSidebar() {
 
   // ── 代理 core 方法（deleteSession/deleteFolder/retryHistory/renameSession/loadSessions）──
   // [D3 接缝债已清偿] deleteSession/deleteFolder 的 wasActive 回退走 core.selectSession——
-  // sessionEntry 端口接线后回退路径执行完整 12 步链（含 ensureStreamSubscription），
+  // sessionEntry 端口接线后回退路径执行完整 13 步链（含 ensureStreamSubscription），
   // 原「回退后新 session 无流订阅」债务消除。
   const retryHistory = core.retryHistory
   const renameSession = core.renameSession

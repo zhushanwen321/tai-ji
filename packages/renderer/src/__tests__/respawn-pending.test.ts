@@ -309,7 +309,7 @@ describe('respawn 过渡态（T4 回流修复）', () => {
     injectExited()
     expect(chatStore.isRespawnPending('s-respawn')).toBe(true)
 
-    // spy restore RPC；后续 core 12 步切入链在本测试环境无 transport 会失败——壳侧
+    // spy restore RPC；后续 core 13 步切入链在本测试环境无 transport 会失败——壳侧
     // catch 降级（toast + warn，不重抛），revive 不被切入失败阻断照常执行
     vi.spyOn(sessionApiMod.session, 'restoreSession').mockResolvedValue({ id: 's-respawn', label: 'test', cwd: '/repo' })
     const { useSidebar } = await import('@/composables/features/sidebar/useSidebar')

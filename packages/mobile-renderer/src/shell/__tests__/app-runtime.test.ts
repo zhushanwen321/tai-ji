@@ -1,7 +1,7 @@
 // sessionEntry 端口束装配断言（remote-use D2/U5）+ core toast 通道装配断言（remote-use
 // A7/U14）+ [W2] 状态层拉取装配断言（sessionApiPort.getState + createUseSession liveState deps）。
 //
-// 锁定移动壳切入链装配对齐桌面的三件事（验收口径 = 装配面，非 12 步链本体——链编排在
+// 锁定移动壳切入链装配对齐桌面的三件事（验收口径 = 装配面，非 13 步链本体——链编排在
 // core use-session.test.ts 既有覆盖）：
 //   1. 三成员（ensureStreamSubscription/touchRecency/evictLru）非 no-op——以行为证明：
 //      no-op 调用零可观测效果，真实接线各有确定的可观测派生视图（events 订阅 / LRU recency

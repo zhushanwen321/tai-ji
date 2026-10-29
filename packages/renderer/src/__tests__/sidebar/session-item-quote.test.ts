@@ -12,7 +12,7 @@
  *   - '@/stores/session' 原窄替换（仅 active/list/applySnapshot 三键）改为 spread
  *     actual 全成员：quote 节显式控制 active 时（sessionState.active !== undefined）
  *     返回真实 store 快照 + active 覆写（对 quote 节等价原窄替换形态）；未控制时
- *     直通真实 store（hydrate 节真实 useSidebar 12 步切入链要 groups/list/activeId
+ *     直通真实 store（hydrate 节真实 useSidebar 13 步切入链要 groups/list/activeId
  *     全成员与响应性，零影响）。quote 节 afterEach 复位 sessionState.active。
  *
  * 剔出：effects/tool-status-flip.test.ts（6 例，清单既定剔出——useChat/useChatViewDeps

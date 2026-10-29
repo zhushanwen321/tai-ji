@@ -276,7 +276,7 @@ const useSessionInstance = createUseSession({
     // [W1 会话架构四层分离] 状态层条目显式清退（只挂真删除；归档不挂——同 core 契约）
     clearLiveState: (sid) => liveStateStore.removeLiveState(sid),
   },
-  // D2/U5：sessionEntry 端口束注入——切入链 12 步的订阅/LRU 步在移动壳生效（对齐桌面）
+  // D2/U5：sessionEntry 端口束注入——切入链 13 步的订阅/LRU 步在移动壳生效（对齐桌面）
   sessionEntry,
   // [W2 权威拉取与冷读] 状态层：session.getState reply 的唯一落点（与状态消息 /
   // 操作回执共用 applyLiveState 这一个 reducer，设计 §7 验收项 8）。缺省不注入时
@@ -474,7 +474,7 @@ export function loadSessions(): Promise<void> {
   return useSessionInstance.loadSessions()
 }
 
-/** 切换当前 session（useSession 12 步切入链 headless 形态：switch → hydrate → 激活） */
+/** 切换当前 session（useSession 13 步切入链 headless 形态：switch → hydrate → 激活） */
 export function selectSession(id: string): Promise<void> {
   return useSessionInstance.selectSession(id)
 }
@@ -503,7 +503,7 @@ export function deleteSession(id: string): Promise<void> {
  * dead 会话恢复三步编排（remote-use A3/U12，与桌面 useSidebar.restoreSession 同构——
  * 三步均为既有原语，编排短小不上收 core）：
  * ① restore RPC（session.restore 显式重新 spawn pi；失败上抛由调用方呈现）；
- * ② 12 步切入链（失败不阻断 revive：restore 成功 = runtime 侧 spawn+attach 已完成，
+ * ② 13 步切入链（失败不阻断 revive：restore 成功 = runtime 侧 spawn+attach 已完成，
  *   revive 是 UI 死态清除，与切入成败解耦——不 revive 会留「进程已恢复、列表仍置灰」
  *   半完成窗口；降级出声对齐桌面 restoreSession 的 catch 分支）；
  * ③ revive（dead→idle 统一收尾；非 dead 真态不被本地覆盖——core store.revive guard）。

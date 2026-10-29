@@ -8,7 +8,7 @@
 // hasBlockingOverlay 输入经 sessions-runtime 注册口（registerOverlayPendingReader）喂入，
 // 分区数据接线已由 companion-bridge 落位（form/planReview 分区 + dialog 计数）——waiting 态可达。
 //
-// 交互：点击行 → markSessionVisited（点入即清）→ core selectSession 12 步切入链 →
+// 交互：点击行 → markSessionVisited（点入即清）→ core selectSession 13 步切入链 →
 // navigateRoute('chat')（路由状态机单点转移，dead 会话同样可入——F14 已退出历史只读 +
 // 动作 Sheet 重新打开链路）；长按 480ms 打开 SessionActionsSheet（移动 >8px 取消）；
 // 新建入口上抛 new-task 由 App 转 openSheet('newTask')（现 wiring 即终态：Sheet 槽位
