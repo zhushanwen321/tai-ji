@@ -187,6 +187,13 @@ export function useSidebar() {
     },
     clearHistoryError: (sid) => chat.clearHistoryError(sid),
     markHistoryFailed: (sid) => chat.markHistoryFailed(sid),
+    // [session-cold-switch-perf §3.3-3] historyCacheReady 编排的 chat store 读写映射
+    //（后台重建失败态分区 + 快照版本对账，SSOT 在 chat store）
+    historyCache: {
+      markCacheFailed: (sid) => chat.markHistoryCacheFailed(sid),
+      clearCacheFailed: (sid) => chat.clearHistoryCacheFailed(sid),
+      isSnapshotFresh: (sid, snapshotLeafId) => chat.isHistorySnapshotFresh(sid, snapshotLeafId),
+    },
   }
 
   const hooks: SessionCleanupHooks = {

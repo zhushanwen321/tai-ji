@@ -483,6 +483,20 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   /** getHistory 加载失败的 session（#2 AC-2.6：landing 重试出口，不永久卡住） */
   const failedHistory = ref<Set<string>>(new Set())
   /**
+   * [session-cold-switch-perf §3.3-3] 后台全量重建失败的 session（historyCacheReady 失败帧写入）。
+   *
+   * 语义 = 「尾读首屏可用的最新窗口之后，后台精化失败」——与 failedHistory（landing 重试
+   * 出口，未 hydrate 通路）不同位：本分区的会话已 hydrate（尾读数据在场），失败的是「加载
+   * 更早」背后的全量缓存铺设，呈现收敛 = 对话流顶部「加载更早失败 + 重试入口」（renderer
+   * useLoadMoreHistory.loadMoreError 合并本分区，复用手动翻页失败同一呈现形态）。与截断
+   * 窗口状态（historyWindows）**解耦**：失败不写 truncated（「还有更早历史」的事实不随后台
+   * 任务状态改变——窗口状态唯一写方仍是 history 响应）。清除点 = 任意一次该会话 history
+   * 拉取成功（重拉 / 手动翻页 / 切入刷新）；disposeSession 同点清理。
+   *
+   * Set 形态（布尔语义无载荷）对齐 failedHistory/respawnPending。
+   */
+  const historyCacheFailed = ref<Set<string>>(new Set())
+  /**
    * [u4d-truncated-ui] per-session 历史预算截断窗口状态（crash-resilience §3.3 D4）。
    *
    * // @data-owner #7 —— 权威源 = u4b session.history 响应（truncated/loadedTurns/totalTurnsEstimate，
@@ -645,6 +659,41 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     const next = new Set(failedHistory.value)
     next.delete(sessionId)
     failedHistory.value = next
+  }
+
+  /** [session-cold-switch-perf §3.3-3] 标记后台全量重建失败（historyCacheReady 失败帧写入） */
+  function markHistoryCacheFailed(sessionId: string): void {
+    historyCacheFailed.value = new Set(historyCacheFailed.value).add(sessionId)
+  }
+
+  /** [session-cold-switch-perf §3.3-3] 清除后台重建失败态（该会话任一次 history 拉取成功收敛） */
+  function clearHistoryCacheFailed(sessionId: string): void {
+    if (!historyCacheFailed.value.has(sessionId)) return
+    const next = new Set(historyCacheFailed.value)
+    next.delete(sessionId)
+    historyCacheFailed.value = next
+  }
+
+  /** 后台重建失败态读口（renderer 顶部失败重试行呈现判定；无记录 = 未失败） */
+  function isHistoryCacheFailed(sessionId: string): boolean {
+    return historyCacheFailed.value.has(sessionId)
+  }
+
+  /**
+   * [session-cold-switch-perf §3.3-3] 快照版本对账：分区尾消息的文件侧身份是否等于
+   * snapshotLeafId（重建快照末条 entry id）。
+   *
+   * 相等 = 快照覆盖到分区尾部（重建期间无新追加）→ 重拉安全；不等 = 快照基准不匹配
+   * （分区尾是快照外的新消息：用户发送过 / 流式中实体——pi entry 完成才落盘，快照必不含）
+   * → 过期不重拉，由尾部保护段继续衔接 live 数据。未 hydrate（无分区）= false（无对账
+   * 基准，调用方按「首屏加载由切入链承担」跳过）。
+   */
+  function isHistorySnapshotFresh(sessionId: string, snapshotLeafId: string): boolean {
+    if (!hydrated.value.has(sessionId)) return false
+    const cur = messages.value.get(sessionId)?.value ?? []
+    const tail = cur[cur.length - 1]
+    if (!tail) return false
+    return (tail.piEntryId ?? tail.id) === snapshotLeafId
   }
 
   /**
@@ -1206,7 +1255,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     // inflightCounts（[steer-bubble D4]）：disposeSession 同步清 inflight——确认基线随分区
     // 销毁作废（与 LRU 驱逐的刻意豁免不同，见 lruEvictDeps 处声明注释）。
     const mapRefs: { value: Map<string, unknown> }[] = [messages, retryStates, inflightCounts, compactingReasons, occupancies, historyWindows, submitSeqs]
-    const setRefs: { value: Set<string> }[] = [hydrated, pendingSend, failedHistory, respawnPending]
+    const setRefs: { value: Set<string> }[] = [hydrated, pendingSend, failedHistory, respawnPending, historyCacheFailed]
     for (const ref of mapRefs) {
       if (ref.value.has(sessionId)) {
         const next = new Map(ref.value)
@@ -1251,12 +1300,14 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     submitSeqs,
     changeSetStatuses,
     failedHistory,
+    historyCacheFailed,
     hydrated,
     getMessages,
     getRetryState,
     getChangeSetStatus, setChangeSetStatus,
     markChangeSetsSuperseded,
     isHydrated, markHistoryFailed, clearHistoryError,
+    markHistoryCacheFailed, clearHistoryCacheFailed, isHistoryCacheFailed, isHistorySnapshotFresh,
     hydrate, setMessages, reconcileHistory,
     // [u4d] 历史预算截断窗口状态（ref + 读/写/清，SSOT 见 truncated-window.ts）
     historyWindows, getHistoryWindow, setHistoryWindow, clearHistoryWindow,
@@ -1354,7 +1405,7 @@ export type ChatStoreReaders = Pick<
   ChatStoreInstance,
   | 'messages' | 'pendingSend'
   | 'retryStates' | 'changeSetStatuses'
-  | 'failedHistory' | 'hydrated' | 'inflightCounts'
+  | 'failedHistory' | 'historyCacheFailed' | 'hydrated' | 'inflightCounts'
   | 'occupancies'
   | 'historyWindows'
   | 'submitSeqs'
@@ -1363,6 +1414,8 @@ export type ChatStoreReaders = Pick<
   | 'isCompacting' | 'getCompactingReason' | 'isHandingOff'
   | 'sessionPhase' | 'isPendingSend'
   | 'isRespawnPending'
+  | 'isHistoryCacheFailed'
+  | 'isHistorySnapshotFresh'
   | 'getInflight'
   | 'getSubmitSeq'
   | 'getHistoryWindow'
@@ -1379,6 +1432,7 @@ export type ChatStoreReaders = Pick<
 export type ChatStoreOps = Pick<
   ChatStoreInstance,
   | 'setChangeSetStatus' | 'markChangeSetsSuperseded' | 'markHistoryFailed'
+  | 'markHistoryCacheFailed' | 'clearHistoryCacheFailed'
   | 'clearHistoryError' | 'hydrate' | 'setMessages' | 'reconcileHistory'
   | 'prependHistory' | 'applySubagentStreamDelta' | 'finalizeSubagentStream'
   | 'applySubagentStreamChunk' | 'applySubagentStreamState' | 'requestSubagentStreamState'

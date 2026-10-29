@@ -35,6 +35,7 @@
  */
 import { computed, nextTick, reactive, type ComputedRef, type Ref } from 'vue'
 import { useChat } from '@/composables/features/chat/useChat'
+import { useChatStore } from '@/stores/chat'
 import { useSessionScopedState } from '@/composables/useSessionScopedState'
 import { LOAD_MORE_RESERVED_HEIGHT } from './message-stream-layout'
 
@@ -118,7 +119,12 @@ export function useLoadMoreHistory(
   // 消费方 computed：读当前 sid 分区（切 sid 自动切视图，无需手动复位）
   const loadingMore = computed(() => state.current.value.loadingMore)
   const isPrepend = computed(() => state.current.value.isPrepend)
-  const loadMoreError = computed(() => state.current.value.loadMoreError)
+  // [session-cold-switch-perf §3.3-3] 合并后台重建失败态：historyCacheReady 失败帧把
+  // 「正在加载更早」指示收敛为同一失败重试行（复用 loadMore 失败态形态，与手动翻页失败
+  // 共用同一呈现）；重试动作（handleLoadMore 成功）或任意 history 重拉成功即清除。
+  const loadMoreError = computed(
+    () => state.current.value.loadMoreError || useChatStore().isHistoryCacheFailed(sessionId()),
+  )
   const slowLine = computed(() => state.current.value.slowLine)
 
   async function handleLoadMore(): Promise<void> {

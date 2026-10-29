@@ -870,6 +870,12 @@ function handleSessionFrame(
       handleSessionThinkingLevelSet(deps.liveState, msg)
       break
     }
+    // [session-cold-switch-perf §3.3-3] 有意 no-op 名单：后台重建完成通知经 crossSession
+    // 通道由 use-session 编排消费（session-cold-switch-perf 设计），本订阅侧不动作——
+    // 显式 case 防落 default 的 dev 未处理帧 warn。
+    case 'session.historyCacheReady': {
+      break
+    }
     default: {
       // [RD-1#9] 未列 session.* 类型的 no-op 观测（dev，一次/类型）：本分支对
       // session.exited / restored / restoreFailed / commands / stats_update 等帧是
@@ -1547,6 +1553,9 @@ export function createUseChat(deps: UseChatDeps) {
       if (reply.messages.length > 0) {
         chat.prependHistory(sessionId, reply.messages)
       }
+      // [session-cold-switch-perf §3.3-3] 翻页成功收敛后台重建失败态——「加载更早失败 +
+      // 重试入口」的重试动作成功即收敛（与后台重拉成功同一清除点语义）
+      chat.clearHistoryCacheFailed(sessionId)
       const prev = chat.getHistoryWindow(sessionId)
       const page = historyWindowFromReply(reply)
       chat.setHistoryWindow(sessionId, {

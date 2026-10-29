@@ -36,13 +36,13 @@ import * as chatApi from '@taiji/core/transport/api/domains/chat'
 import * as sessionApi from '@taiji/core/transport/api/domains/session'
 import * as modelApi from '@taiji/core/transport/api/domains/model'
 import * as projectApi from '@taiji/core/transport/api/domains/project'
-import { command, onGlobalType, RPC_BACKSTOP_TIMEOUT_MS } from '@taiji/core/transport/api'
+import { command, onCrossSession, onGlobalType, RPC_BACKSTOP_TIMEOUT_MS } from '@taiji/core/transport/api'
 import { registerSessionCleanup } from '@taiji/core/foundation/use-session-scoped-state'
 import { createComposerInjectionStore } from '@taiji/core/domain/composer/context'
 // 队列编辑锚定判定（chat-flow-consistency D6：单锚定不变式 core 下沉，桌面 composer-shell 同源）
 import { clearQueueEdit, startQueueEdit, type QueueEditAnchorPartition, type QueueEditStartOutcome } from '@taiji/core/domain/composer'
 import { showErrorBar } from './error-bar'
-import type { DeliveryCancelReply, DeliveryEditReply, DeliveryPeekReply, DeliveryResyncReply, ModelInfo, ProjectStoreState, ProviderId, Segment, SessionSummary, SubagentRecord } from '@taiji/shared'
+import type { DeliveryCancelReply, DeliveryEditReply, DeliveryPeekReply, DeliveryResyncReply, ModelInfo, ProjectStoreState, ProviderId, Segment, ServerMessageMap, SessionSummary, SubagentRecord } from '@taiji/shared'
 import { normalizeContent } from '@taiji/shared'
 import { i18n } from '../i18n'
 
@@ -96,6 +96,14 @@ const sessionApiPort: SessionApiPort = {
   migrateImage: (p) => sessionApi.migrateImage(p),
   onConfigSessions: (handler) =>
     onGlobalType('config.sessions', (msg) => handler(msg.payload.groups)),
+  // [session-cold-switch-perf §3.3-3] historyCacheReady 广播订阅（带 sid 帧走 crossSession
+  // 通道；按 type 过滤 + payload 窄化，对齐桌面 session-api-port 同名适配）
+  onHistoryCacheReady: (handler) =>
+    onCrossSession((msg) => {
+      if (msg.type !== 'session.historyCacheReady') return
+      const payload = msg.payload as ServerMessageMap['session.historyCacheReady']
+      handler(payload.sessionId, payload)
+    }),
   // [W2 权威拉取与冷读] session.getState 直发（对齐桌面 api/session-api-port.ts:51-54：
   // 不经 session 域代理，经 command 原语直发）。移动壳缺此成员时 core use-session 的
   // refreshLiveState 首行门控 `if (!liveState || !getState) return` 恒命中，三时机拉取
@@ -244,6 +252,13 @@ const useSessionInstance = createUseSession({
     },
     clearHistoryError: (sid) => chatStore.clearHistoryError(sid),
     markHistoryFailed: (sid) => chatStore.markHistoryFailed(sid),
+    // [session-cold-switch-perf §3.3-3] historyCacheReady 编排的 chat store 读写映射
+    //（后台重建失败态分区 + 快照版本对账，SSOT 在 chat store；对齐桌面 useSidebar 同名注入）
+    historyCache: {
+      markCacheFailed: (sid) => chatStore.markHistoryCacheFailed(sid),
+      clearCacheFailed: (sid) => chatStore.clearHistoryCacheFailed(sid),
+      isSnapshotFresh: (sid, snapshotLeafId) => chatStore.isHistorySnapshotFresh(sid, snapshotLeafId),
+    },
   },
   // 移动壳无 panel/subagent/workflow 等跨 store 清理面；chat 分区清理照常（内存治理同语义）
   hooks: {
