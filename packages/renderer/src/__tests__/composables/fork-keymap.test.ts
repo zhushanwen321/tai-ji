@@ -11,7 +11,7 @@
  * 策略：mount Sidebar（最小 stub 排除子组件）+ dispatchKey 派发，断言 mock 调用与
  * navigation store 状态迁移（行为契约）。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/fork-keymap.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=app-shell npx vitest run src/__tests__/composables/fork-keymap.test.ts（本文件登记在 domain-map.json app-shell 域，默认档被排除）
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'

@@ -26,7 +26,7 @@
  * setupSystemPageTest 生命周期在产物内写局部变体（函数体复制自 system-page-test-setup，
  * 不 import 该 helper——其 import 即注册 3 条 vi.mock，与产物内注册重复）。
  *
- * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/settings/settings-page-bundle.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=settings TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/settings/settings-page-bundle.test.ts（本文件登记在 domain-map.json settings 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, beforeAll, afterEach, vi } from 'vitest'
 import { flushPromises, type DOMWrapper, type VueWrapper } from '@vue/test-utils'

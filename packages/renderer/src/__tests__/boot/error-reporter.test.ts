@@ -8,8 +8,11 @@
  *   store / performance.memory guard 透传与缺失省略）
  * - 观察者形态：unhandledrejection 捕获（UI 不受影响——DOM 仍在）；三件套自身零抛错
  *   （electronAPI 同步抛 / invoke reject 均静默）
+ * - D5 聚合降噪：window-onerror + 无堆栈 + 固定 RO loop 告警文本 → 窗内聚合计数、窗尾一条
+ *   含次数的汇总（fake timers 驱动）；未命中 / 同文本带堆栈的真错误逐条转发不变
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/boot/error-reporter.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=app-shell npx vitest run src/__tests__/boot/error-reporter.test.ts
+ *（本文件登记在 domain-map.json app-shell 域，默认档被排除、须域档触发；整域入口：node scripts/run-domain-tests.mjs app-shell）
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createApp, defineComponent, h } from 'vue'
@@ -19,7 +22,8 @@ import type { RendererLogPayload } from '@taiji/shared'
 
 // [HISTORICAL] lib/ipc 顶层 `const api = window.electronAPI` 在模块加载期捕获——
 // 必须先注 electronAPI mock 再动态 import（vi.resetModules + await import），
-// 对齐 ipc-reveal-in-folder.test.ts 范式。
+// 对齐 __tests__/lib/ipc.test.ts 范式（其 resetModules + 动态 import + electronAPI
+// stub 脚手架即所述范式）。
 
 /** electronAPI.reportRendererLog 桩（beforeEach 注入）。 */
 let reportMock: ReturnType<typeof vi.fn>
@@ -254,5 +258,130 @@ describe('boot/error-reporter 三件套', () => {
       expect(messages.filter((m) => m === 'buffered-boom').length).toBeGreaterThanOrEqual(2)
       expect(messages).toContain('recovery-probe')
     }, { interval: 1 })
+  })
+})
+
+// ── D5 RO loop 告警聚合 ────────────────────────────────────────────
+
+/** D5 聚合判据锚点：与 error-reporter.ts 的 RO_LOOP_NOISE_TEXT 同源（生产串的测试镜像）。 */
+const RO_LOOP_TEXT = 'ResizeObserver loop completed with undelivered notifications'
+
+/** RO loop 告警的真实形态：无 Error 对象（无堆栈），仅 message 文本（尾句点为 Chromium 派发形态）。 */
+function dispatchRoLoopWarning(message: string = `${RO_LOOP_TEXT}.`): void {
+  window.dispatchEvent(new ErrorEvent('error', { error: null, message }))
+}
+
+/** 取基线起新增上报中的聚合汇总条目（窗尾汇总的 (aggregated summary) 标记）。 */
+function aggregateSummaries(fromIndex: number): RendererLogPayload[] {
+  return reportMock.mock.calls
+    .slice(fromIndex)
+    .map((c) => c[0] as RendererLogPayload)
+    .filter((p) => p.message.includes('(aggregated summary)'))
+}
+
+/** 指定 message 的落盘次数（既有 RD-3#8 回放竞态可能重复交付在途条目，断言按 message 精确计数）。 */
+function deliverCount(message: string): number {
+  return reportMock.mock.calls.filter((c) => (c[0] as RendererLogPayload).message === message)
+    .length
+}
+
+describe('D5 RO loop 告警聚合（window-onerror + 无堆栈 + 固定文本）', () => {
+  beforeEach(() => {
+    document.body.innerHTML = ''
+    delete (window as { electronAPI?: unknown }).electronAPI
+    reportMock = vi.fn().mockResolvedValue(undefined)
+    ;(window as { electronAPI?: unknown }).electronAPI = { reportRendererLog: reportMock }
+    // 窗口推进用 fake timers（确定性触发，无真实等待）
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    document.body.innerHTML = ''
+    delete (window as { electronAPI?: unknown }).electronAPI
+  })
+
+  it('命中 → 聚合计数：窗内多条不逐条转发（console 与落盘均静默），窗尾一条汇总含次数', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const container = await mountWithErrorReporting()
+      expectGoodChildAlive(container)
+      const baselineCalls = reportMock.mock.calls.length
+
+      // 窗内 3 条命中：规范化匹配覆盖浏览器派发形态（尾句点 / 无句点 / Uncaught 前缀）
+      dispatchRoLoopWarning()
+      dispatchRoLoopWarning(RO_LOOP_TEXT)
+      dispatchRoLoopWarning(`Uncaught ${RO_LOOP_TEXT}`)
+
+      // 窗内：零逐条转发——落盘无新增，console 无该文本输出
+      expect(reportMock.mock.calls.length).toBe(baselineCalls)
+      expect(
+        errorSpy.mock.calls.filter((c) =>
+          c.some((a) => typeof a === 'string' && a.includes(RO_LOOP_TEXT)),
+        ),
+      ).toHaveLength(0)
+
+      // 窗尾：恰一条汇总，含固定告警文本与窗内次数
+      await vi.advanceTimersByTimeAsync(60_000)
+      const summaries = aggregateSummaries(baselineCalls)
+      expect(summaries).toHaveLength(1)
+      expect(summaries[0]?.source).toBe('window-onerror')
+      expect(summaries[0]?.message).toContain('x3')
+      expect(summaries[0]?.message).toContain('(aggregated summary)')
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+
+  it('未命中 → 逐条转发行为完全不变：每条立即落盘，窗尾无聚合汇总', async () => {
+    const container = await mountWithErrorReporting()
+    expectGoodChildAlive(container)
+
+    dispatchWindowError(new Error('real-boom-1'), 'Uncaught Error: real-boom-1')
+    dispatchWindowError(new Error('real-boom-2'), 'Uncaught Error: real-boom-2')
+    // 逐条即时转发（不等窗尾）：每条各恰一次落盘
+    expect(deliverCount('real-boom-1')).toBe(1)
+    expect(deliverCount('real-boom-2')).toBe(1)
+
+    await vi.advanceTimersByTimeAsync(60_000)
+    // 未命中不产生聚合汇总。（既有 RD-3#8 回放竞态可能把在途条目重复交付一次，
+    // 断言按 message 计数 + 汇总标记过滤，与该既有行为解耦，不在此断言总调用数。）
+    expect(aggregateSummaries(0)).toHaveLength(0)
+  })
+
+  it('同文本但带堆栈的真错误不聚合 → 立即逐条转发（不吞真错误），窗尾无汇总', async () => {
+    const container = await mountWithErrorReporting()
+    expectGoodChildAlive(container)
+
+    // Error 对象形态（带堆栈）即便文本恰同也不命中聚合——聚合只针对无堆栈噪声条目
+    dispatchWindowError(new Error(RO_LOOP_TEXT), `Uncaught Error: ${RO_LOOP_TEXT}`)
+    expect(deliverCount(RO_LOOP_TEXT)).toBe(1)
+    const payload = lastReport()
+    expect(payload.source).toBe('window-onerror')
+    expect(payload.message).toBe(RO_LOOP_TEXT)
+    expect(typeof payload.stack).toBe('string')
+
+    await vi.advanceTimersByTimeAsync(60_000)
+    // 未入聚合窗：窗尾无聚合汇总（该错误保持逐条转发形态，未被吞）
+    expect(aggregateSummaries(0)).toHaveLength(0)
+  })
+
+  it('窗尾复位后下一窗独立计数：各窗各一条汇总（x1 / x2）', async () => {
+    const container = await mountWithErrorReporting()
+    expectGoodChildAlive(container)
+    const baselineCalls = reportMock.mock.calls.length
+
+    dispatchRoLoopWarning()
+    await vi.advanceTimersByTimeAsync(60_000)
+    let summaries = aggregateSummaries(baselineCalls)
+    expect(summaries).toHaveLength(1)
+    expect(summaries[0]?.message).toContain('x1')
+
+    dispatchRoLoopWarning()
+    dispatchRoLoopWarning()
+    await vi.advanceTimersByTimeAsync(60_000)
+    summaries = aggregateSummaries(baselineCalls)
+    expect(summaries).toHaveLength(2)
+    expect(summaries[1]?.message).toContain('x2')
   })
 })

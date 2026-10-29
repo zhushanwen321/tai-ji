@@ -24,7 +24,7 @@
  *
  * 已标注「已覆盖」的用例（E2E-L1-3 ⌘G/⌘⇧G、E2E-L1-4 Esc 退出、E2E-L1-6 血缘可见）此处不重复。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/fast-fork-e2e-journeys.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel npx vitest run src/__tests__/panel/fast-fork-e2e-journeys.test.ts（本文件登记在 domain-map.json panel 域，默认档被排除）
  *
  * 三视角规则（TEST-STRATEGY §3）：每条用例至少 1 个用户可见 DOM 断言（.exists()/.text()/.classes()），
  * 纯 toHaveBeenCalled 不计 DoD。
@@ -81,7 +81,7 @@ vi.mock('@/composables/features/settings/useProjectSkills', () => ({
 
 // ── mock useChat（流式依赖；fork 不走 send/steer，但 Composer setup 取这些引用）──
 // 注意：必须返回稳定对象（同 composer-fork-mode.test.ts），避免每帧新引用导致 watch 抖动。
-// ensureStreamSubscription 导出作 no-op stub：层 1 只验编排（fork RPC → send RPC），真实流式订阅由 useChat.test.ts 覆盖。
+// ensureStreamSubscription 导出作 no-op stub：层 1 只验编排（fork RPC → send RPC），真实流式订阅由 __tests__/chat-panel-bundle.test.ts 的 useChat 合并节覆盖。
 vi.mock('@/composables/features/chat/useChat', () => ({
   useChat: () => ({
     send: vi.fn(),

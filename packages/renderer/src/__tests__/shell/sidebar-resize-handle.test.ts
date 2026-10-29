@@ -13,7 +13,7 @@
  * Mock 策略与 app-shell-topology.test.ts 同款（挂 AppShell 走真实 handle + aside + store；
  * 重组件 stub）。jsdom 无布局：拖动换算 = clientX（aside 贴窗口 x0），无 rect 依赖，天然可测。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/shell/sidebar-resize-handle.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=sidebar npx vitest run src/__tests__/shell/sidebar-resize-handle.test.ts（本文件登记在 domain-map.json sidebar 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'

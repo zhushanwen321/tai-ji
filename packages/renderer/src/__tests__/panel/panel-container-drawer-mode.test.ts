@@ -42,7 +42,7 @@
  * 插件卸载后正选中 tab 回退内置默认项——ADR-0049 per-session 分区范式不退化）与 host/view
  * 分派用例；插件声明经注册表单例 loadExternal 注入、afterEach clearForPlugin 清理隔离。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/panel-container-drawer-mode.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel npx vitest run src/__tests__/panel/panel-container-drawer-mode.test.ts（本文件登记在 domain-map.json panel 域，默认档被排除）
  */
 import { describe, it, expect, beforeAll, beforeEach, vi, afterEach } from 'vitest'
 import { mount, enableAutoUnmount } from '@vue/test-utils'

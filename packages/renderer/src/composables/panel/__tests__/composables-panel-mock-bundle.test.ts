@@ -26,7 +26,7 @@
  *    useNewTaskFlow（shell-model）各自独占，无互斥。
  *  - 各文件级 beforeEach/enableAutoUnmount 已随正文包进各自 describe（mock 重置语义保留）。
  *
- * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/composables/panel/__tests__/composables-panel-mock-bundle.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel TAIJI_SKIP_REAL_PI=1 npx vitest run src/composables/panel/__tests__/composables-panel-mock-bundle.test.ts（本文件登记在 domain-map.json panel 域，默认档被排除）
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { computed, defineComponent, h, nextTick, ref } from 'vue'

@@ -205,7 +205,10 @@ describe('usePinBottomGuard（§4.4 护栏⑦ dev 断言）', () => {
     const msg = String(loopWarns()[0]?.[0])
     expect(msg).toContain('次数=61')
     expect(msg).toContain('P-no-loop')
-    expect(msg).toContain('降级路径')
+    // 文案反映新形态（数据通路帧内合并 + RO 兜底支 debounce 窗尾均不超限），不再指向
+    // 旧 RO 逐帧触发链的降级路径
+    expect(msg).toContain('帧内合并')
+    expect(msg).toContain('debounce 窗尾')
 
     for (let i = 0; i < 40; i += 1) api.followToBottom(true)
     expect(loopWarns()).toHaveLength(1) // 持续超限：沿触发不重复

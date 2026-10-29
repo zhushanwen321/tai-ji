@@ -478,7 +478,7 @@ describe('bg 分层方向（场景 1① 纯计算形态，§3.1 分层/镜像规
  *   已取消/已超时/部分成功）；「已取消」（主动）与「已超时」（预算超时）禁混用锚 =
  *   显示名两两互异。
  *
- * 运行：cd packages/renderer && pnpm vitest run src/__tests__/state-tone-lock.test.ts
+ * 运行：cd packages/renderer && pnpm vitest run src/__tests__/root-node.test.ts（state-tone-lock 节）
  */
 import { WORKFLOW_RUN_OUTCOME_LABELS } from '@taiji/shared'
 
@@ -512,7 +512,7 @@ describe('中文显示名词表单源（[W2 D8] WORKFLOW_RUN_OUTCOME_LABELS 消�
  * - countThinking/countToolCalls/hasFailedTool：badge 统计 + 失败检测
  * - chat store：thinking/tool_call 流式块追加、hydrate 历史注入、error 块
  *
- * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/fg5-message-stream.test.ts
+ * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/root-node.test.ts（fg5-message-stream 节）
  */
 import {
   toRenderItems,
@@ -855,9 +855,11 @@ describe('FG5 chat store 块类型扩展', () => {
    *   countDrained/drainN）；
    * - 投递入流改由「送达回执（message_end(user) 裸标记 id 精确匹配）+ reducer 通路」承担
    *   （替代计数 FIFO 文本匹配——重复文本/跨类型误配面从机制上消除）。
-   * 覆盖去向：core chat __tests__/effects-delivery-receipt.test.ts（回执命中/幂等/direct 豁免）
-   * + __tests__/useChat.test.ts（session.delivery 帧消费与 morph）+ renderer 队列区新用例
-   * （__tests__/panel/queue-bubble-s8.test.ts / __tests__/composables/panel/use-queue-rows.test.ts）。
+   * 覆盖去向：core chat __tests__/effect-types.test.ts 的 effects-delivery-receipt 合并节
+   * （回执命中/幂等/direct 豁免）+ core chat __tests__/store-merged-merged.test.ts 的 useChat
+   * 合并节（session.delivery 帧消费与 morph）+ renderer 队列区新用例（__tests__/panel/
+   * session-trace/trace-inspector.test.ts 的 queue-bubble-s8 合并节 / __tests__/composables/
+   * queue-detail-bundle.test.ts 的 use-queue-rows 合并节）。
    */
   it('queue_update 不再写 store（帧降级为内核内部回执：零快照、零 pendingBuffer 消费）', () => {
     const store = useChatStore()
@@ -1187,7 +1189,7 @@ describe('extension domain setAutoUpgrade', () => {
  * 真用 useSessionStore（验证 applySnapshot 落点）+ useChat（被测入口）。
  * 注：useChat streamSubscriptions 是模块级单例，同文件各用例 sid 必须唯一。
  *
- * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/session-renamed-sync.test.ts
+ * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/root-node.test.ts（session-renamed-sync 节）
  */
 // '@/api' mock 工厂解引用的 helper import 必须先于触发工厂执行的 import（useChat 链）求值
 // mock 实例（工厂内创建）的清除入口：经 mock 后的 '@/api' 取引用（同 settings quota 域范式）
@@ -1444,7 +1446,7 @@ describe('session.thinkingLevelSet 事件 → 状态层 thinkingLevel 同步', (
  * session-api——mock 正交（本节 mock '@/api' 门面；session-api 节不 mock @/api，
  * 只 mock core ws-client 与 core pending 相对路径，core domains/session 真实实现
  * 不经门面），零冲突。各节以裸块隔离。
- * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/new-task/workspace-store.test.ts
+ * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/root-node.test.ts（workspace-store 节）
  */
 
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -1466,7 +1468,7 @@ import { workspace } from '@/api'
  * （直接测 domains/session 真实实现）。request 已下沉 core（tc u1），mock 目标须与
  * core 内相对 import 同一模块 ID 才能拦截。
  *
- * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/new-task/session-api.test.ts
+ * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/root-node.test.ts（session-api 节）
  */
 
 import { create } from '@taiji/core/transport/api/domains/session'

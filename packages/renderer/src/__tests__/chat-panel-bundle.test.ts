@@ -30,7 +30,7 @@
  *    follow-triggers / derive-status / tray-order / model-picker-data / panel.store 各节
  *    不挂这些组件、不消费 useGitStatus，无泄漏危害。
  *
- * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/chat-panel-bundle.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=chat TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/chat-panel-bundle.test.ts（本文件登记在 domain-map.json chat 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, enableAutoUnmount, type VueWrapper } from '@vue/test-utils'
@@ -62,7 +62,8 @@ import {
   type KVStorage,
   type PlatformPort,
 } from '@taiji/core/platform/port'
-import { useMessageStreamFollowTriggers } from '@/composables/panel/useMessageStreamFollowTriggers'
+import { useMessageStreamFollowTriggers, RO_FOLLOW_DEBOUNCE_MS } from '@/composables/panel/useMessageStreamFollowTriggers'
+import type { RenderItem } from '@/composables/logic/messageTurns'
 import { ManualResizeObserverStub } from './effects/_virtua-mock-helper'
 import { TRAY_WIDGET_KNOWN_ORDER, orderTrayWidgetIds } from '@/components/panel/tray/tray-order'
 import { canonicalizeModelRef } from '../components/panel/model-picker-data'
@@ -728,9 +729,28 @@ describe('useChat（useChat 合并节）', () => {
 // ══════════ 来源节：effects/use-message-stream-follow-triggers（节内 hook 原样；
 // 跨目录自 effects/ 搬入，_virtua-mock-helper 相对路径已改写）══════════
 
-describe('useMessageStreamFollowTriggers（RO 回调双 rAF，P-timing 降级预案）', () => {
+describe('useMessageStreamFollowTriggers（数据信号主触发 + wrap RO 测量留守 / 触发支 debounce 兜底）', () => {
   function msg(id: string, content: string, role: Message['role'] = 'user'): Message {
     return { id, role, content, status: 'complete' }
+  }
+
+  /** turn 渲染项（isStreaming = 回合工作态；assistants 各条文本求和构成数据通路观察对象） */
+  function turnItem(id: string, text: string, isStreaming: boolean): RenderItem {
+    return {
+      kind: 'turn',
+      turn: {
+        index: 0,
+        user: msg(`${id}-u`, '问'),
+        assistants: [msg(`${id}-a`, text, 'assistant')],
+        isStreaming,
+        hasFoldable: false,
+      },
+    }
+  }
+
+  /** bashExecution 渲染项（双工作态窗口内 append 到末位的 system item 形态） */
+  function bashItem(id: string): RenderItem {
+    return { kind: 'bashExecution', message: msg(id, 'bash 输出', 'system') }
   }
 
   beforeEach(() => {
@@ -739,14 +759,14 @@ describe('useMessageStreamFollowTriggers（RO 回调双 rAF，P-timing 降级预
   })
 
   afterEach(() => {
+    vi.restoreAllMocks()
     vi.useRealTimers()
     ManualResizeObserverStub.uninstall()
   })
 
   /** 挂载 harness：composable 依赖全部可断言注入，返回 wrapper + 依赖句柄 */
   function mountTriggers() {
-    const messages = ref<Message[]>([])
-    const lastRenderTurn = ref<{ isStreaming: boolean } | null>(null)
+    const renderItems = ref<RenderItem[]>([])
     const scrollEl = ref<HTMLElement | null>(document.createElement('div'))
     const followIfStuck = vi.fn()
     const followToBottomForce = vi.fn()
@@ -758,9 +778,8 @@ describe('useMessageStreamFollowTriggers（RO 回调双 rAF，P-timing 降级预
     const Harness = defineComponent({
       setup() {
         api = useMessageStreamFollowTriggers({
-          messages: computed(() => messages.value),
+          renderItems: computed(() => renderItems.value),
           submitSeq: () => submitSeq.value,
-          lastRenderTurn: computed(() => lastRenderTurn.value),
           scrollEl,
           followIfStuck,
           followToBottomForce,
@@ -778,8 +797,7 @@ describe('useMessageStreamFollowTriggers（RO 回调双 rAF，P-timing 降级预
     return {
       wrapper,
       api,
-      messages,
-      lastRenderTurn,
+      renderItems,
       followIfStuck,
       followToBottomForce,
       refreshDistanceSnapshot,
@@ -797,12 +815,18 @@ describe('useMessageStreamFollowTriggers（RO 回调双 rAF，P-timing 降级预
     Object.defineProperty(el, 'offsetHeight', { value: height, configurable: true })
   }
 
+  /** 高度变化投递（wrap 分量变化；触发支进 debounce 窗） */
+  function dispatchWrapHeightChange(wrapRo: ManualResizeObserverStub, height: number): void {
+    wrapRo.dispatch([{ contentRect: { height } as DOMRectReadOnly }])
+  }
+
   it('双 rAF 核心：scrollEl RO 触发后 follow 不立即执行，flush 一帧后才调 followIfStuck()', async () => {
     const { scrollRo, followIfStuck, notifyRoActivity } = mountTriggers()
 
     scrollRo.dispatch()
 
-    // 外层 rAF pending 期间：follow 未触发（RO 回调 → 外层 rAF → followIfStuck 内层 rAF）
+    // 外层 rAF pending 期间：follow 未触发（RO 回调 → 外层 rAF → followIfStuck 内层 rAF）。
+    // 视口 resize 通路不经 debounce 门（触发矩阵 4 行：视口变化必有跟随需要且低频）。
     expect(followIfStuck).not.toHaveBeenCalled()
     // notifyRoActivity 在首次 RO 回调即喂信号（不因双 rAF 拖延）
     expect(notifyRoActivity).toHaveBeenCalledTimes(1)
@@ -824,35 +848,39 @@ describe('useMessageStreamFollowTriggers（RO 回调双 rAF，P-timing 降级预
     expect(followIfStuck).toHaveBeenCalledWith()
   })
 
-  it('同帧 wrap RO（tail 增高）后跟视口 resize → cancel 合并只调一次 followIfStuck', async () => {
-    const { api, wrapRo, scrollRo, followIfStuck } = mountTriggers()
+  it('视口 resize 即时触发，wrap 高度投递窗尾独立执行（两通路不互相吞并）', async () => {
+    const { wrapRo, scrollRo, followIfStuck } = mountTriggers()
 
-    stubTailHeight(api, 30) // 基线 0 → 30：tail 高度变化
-    wrapRo.dispatch([{ contentRect: { height: 0 } as DOMRectReadOnly }]) // wrap 高度未变，纯 tail 分量
-    scrollRo.dispatch() // 后到：cancel 合并
-
+    scrollRo.dispatch() // resize 通路：立即排外层 rAF
+    dispatchWrapHeightChange(wrapRo, 500) // wrap 通路：进 debounce 窗（250ms）
     await vi.advanceTimersByTimeAsync(16)
+    expect(followIfStuck).toHaveBeenCalledTimes(1) // resize 即时已执行
+
+    await vi.advanceTimersByTimeAsync(RO_FOLLOW_DEBOUNCE_MS + 16) // 窗尾到期 + flush rAF
+    expect(followIfStuck).toHaveBeenCalledTimes(2) // wrap 窗尾独立补一次
+  })
+
+  it('wrap RO 高度变化 → 窗内静默（不立即跟随），窗尾到期才跟随一次', async () => {
+    const { wrapRo, followIfStuck } = mountTriggers()
+
+    dispatchWrapHeightChange(wrapRo, 500) // wrap 高度变、tail 未变
+
+    await vi.advanceTimersByTimeAsync(16) // 即使 flush 外层 rAF 也不触发（触发支在 debounce 窗内）
+    expect(followIfStuck).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(RO_FOLLOW_DEBOUNCE_MS + 16) // 窗尾到期 + flush rAF
     expect(followIfStuck).toHaveBeenCalledTimes(1)
     expect(followIfStuck).toHaveBeenCalledWith()
   })
 
-  it('wrap RO spacer 变化（tail 高度不变）→ 跟随一次', async () => {
-    const { api, wrapRo, followIfStuck } = mountTriggers()
+  it('store watch 通路保持直调（不套外层 rAF）：renderItems 条数变化 nextTick 内即触发', async () => {
+    const { renderItems, followIfStuck } = mountTriggers()
 
-    wrapRo.dispatch([{ contentRect: { height: 500 } as DOMRectReadOnly }]) // wrap 高度变、tail 未变
-
-    await vi.advanceTimersByTimeAsync(16)
-    expect(followIfStuck).toHaveBeenCalledTimes(1)
-    expect(followIfStuck).toHaveBeenCalledWith()
-  })
-
-  it('store watch 通路保持直调（不套外层 rAF）：messages.length 变化 nextTick 内即触发', async () => {
-    const { messages, followIfStuck } = mountTriggers()
-
-    messages.value.push(msg('m1', '你好'))
+    renderItems.value = [turnItem('m1', '你好', false)]
     await nextTick()
 
-    // 未 flush 任何 rAF：watch 通路不经外层 rAF（D3 矩阵前两行时序语义不变）。
+    // 未 flush 任何 rAF：条数 watch 通路不经外层 rAF 也不经 debounce 门（append / 前插 /
+    // bash append 同型，估算高度误差由 wrap 触发支窗尾兜底收敛）。
     // 无参调用形态：脱离态不滚的 guard 语义在 useVirtuaFollow 原语内部。
     expect(followIfStuck).toHaveBeenCalledTimes(1)
     expect(followIfStuck).toHaveBeenCalledWith()
@@ -867,6 +895,125 @@ describe('useMessageStreamFollowTriggers（RO 回调双 rAF，P-timing 降级预
     wrapper.unmount()
     await vi.advanceTimersByTimeAsync(32)
     expect(followIfStuck).not.toHaveBeenCalled()
+  })
+
+  it('dispose 清 debounce 计时器：wrap 投递后卸载，窗尾到期不产生幽灵 follow', async () => {
+    const { wrapper, wrapRo, followIfStuck } = mountTriggers()
+
+    dispatchWrapHeightChange(wrapRo, 500)
+    expect(followIfStuck).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+    await vi.advanceTimersByTimeAsync(RO_FOLLOW_DEBOUNCE_MS + 32)
+    expect(followIfStuck).not.toHaveBeenCalled() // 计时器随 dispose 清理，窗尾不补滚
+  })
+
+  // ── 流式跟随主触发（数据信号通路）：观察对象 = 全部 streaming 回合文本总长 ──
+  it('数据通路双 rAF：streaming 回合文本增长 → 不立即执行，flush 一帧后 followIfStuck 一次', async () => {
+    const { renderItems, followIfStuck } = mountTriggers()
+
+    renderItems.value = [turnItem('t1', '回答开头', true)]
+    await nextTick() // 基线：首次赋值建立 getter 基线（0 → 长度，触发一次）
+    const baseline = followIfStuck.mock.calls.length
+
+    renderItems.value = [turnItem('t1', '回答开头 + 流式增量', true)]
+    await nextTick() // watch 回调 → followFromRo 排外层 rAF（不直调）
+    expect(followIfStuck.mock.calls.length).toBe(baseline) // 外层 rAF pending，尚未执行
+
+    await vi.advanceTimersByTimeAsync(16) // flush 外层 rAF（内层 rAF 在 followIfStuck 原语内）
+    expect(followIfStuck.mock.calls.length).toBe(baseline + 1)
+  })
+
+  it('数据通路 cancel 合并：同帧两次文本增长（同 turn 不可变替换）只产生一次 followIfStuck', async () => {
+    const { renderItems, followIfStuck } = mountTriggers()
+
+    renderItems.value = [turnItem('t1', '基线', true)]
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(16) // 首次赋值（0 → 总长）的基线触发 flush 完毕，再清计数
+    followIfStuck.mockClear()
+
+    renderItems.value = [turnItem('t1', '基线+增量一', true)]
+    await nextTick()
+    renderItems.value = [turnItem('t1', '基线+增量一二', true)]
+    await nextTick() // 同帧第二次：cancel 旧外层 rAF 重排
+
+    await vi.advanceTimersByTimeAsync(16)
+    expect(followIfStuck).toHaveBeenCalledTimes(1)
+  })
+
+  it('非 streaming 回合文本变化不触发数据通路（getter 内聚 isStreaming 判定）', async () => {
+    const { renderItems, followIfStuck } = mountTriggers()
+
+    renderItems.value = [turnItem('t1', '已完成回答', false)]
+    await nextTick()
+    followIfStuck.mockClear()
+
+    renderItems.value = [turnItem('t1', '已完成回答（编辑改写）', false)]
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(RO_FOLLOW_DEBOUNCE_MS + 16)
+
+    expect(followIfStuck).not.toHaveBeenCalled()
+  })
+
+  it('双工作态窗口：streaming 回合退居非末位（bash 项 append 到末位）其文本增长仍触发', async () => {
+    const { renderItems, followIfStuck } = mountTriggers()
+
+    // bash 系统消息 append 后末位是 bashExecution 项，streaming turn 退居倒数第二
+    renderItems.value = [turnItem('t1', '回答开头', true), bashItem('b1')]
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(16) // 场景建立期的触发 flush 完毕，再清计数
+    followIfStuck.mockClear()
+
+    renderItems.value = [turnItem('t1', '回答开头 + 退居非末位仍增长', true), bashItem('b1')]
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(16)
+
+    expect(followIfStuck).toHaveBeenCalledTimes(1) // 旧「末条」getter 对该形态失明，新观察对象覆盖
+  })
+
+  // ── debounce 静默窗两态（D2：流式期间触发支零执行 / 窗外投递窗尾触发）──
+  it('debounce 静默窗·态一：流式期间高频投递（间隔 < 窗口值）触发支零执行，测量支每投递照常喂', async () => {
+    const { wrapRo, followIfStuck, refreshDistanceSnapshot } = mountTriggers()
+
+    // 模拟流式渲染：每 50ms 一轮高度投递（< 250ms 窗口值，计时器不断被重置）
+    for (let i = 1; i <= 10; i += 1) {
+      dispatchWrapHeightChange(wrapRo, i * 100)
+      await vi.advanceTimersByTimeAsync(50)
+      expect(followIfStuck).not.toHaveBeenCalled() // 触发支整个「流式期间」零执行
+    }
+
+    expect(refreshDistanceSnapshot).toHaveBeenCalledTimes(10) // 测量支不受门：每投递喂快照（胶囊浮现即时性）
+    expect(followIfStuck).not.toHaveBeenCalled()
+  })
+
+  it('debounce 静默窗·态二：窗外投递（静默窗到期后）经 followFromRo 双 rAF 触发一次', async () => {
+    const { wrapRo, followIfStuck } = mountTriggers()
+
+    dispatchWrapHeightChange(wrapRo, 500) // 最后一轮投递
+    await vi.advanceTimersByTimeAsync(RO_FOLLOW_DEBOUNCE_MS) // 静默窗到期（流停 / 间隙超窗）
+    expect(followIfStuck).not.toHaveBeenCalled() // 到期走 followFromRo：外层 rAF 先 pending
+
+    await vi.advanceTimersByTimeAsync(16) // flush 外层 rAF
+    expect(followIfStuck).toHaveBeenCalledTimes(1)
+    expect(followIfStuck).toHaveBeenCalledWith()
+  })
+
+  it('S7 载体：dev 构建窗尾到期输出一条含本窗重置次数的汇总（不逐投递刷屏）', async () => {
+    if (!import.meta.env.DEV) throw new Error('本用例依赖 dev 构建（vitest 默认 DEV=true）')
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {})
+    const { wrapRo, followIfStuck } = mountTriggers()
+
+    // 高频投递 3 轮（首投递建窗 + 2 次重置），随后静默到期
+    for (let i = 1; i <= 3; i += 1) {
+      dispatchWrapHeightChange(wrapRo, i * 100)
+      await vi.advanceTimersByTimeAsync(50)
+    }
+    expect(infoSpy).not.toHaveBeenCalled() // 流式期间零输出（防刷屏）
+
+    await vi.advanceTimersByTimeAsync(RO_FOLLOW_DEBOUNCE_MS + 16)
+    expect(followIfStuck).toHaveBeenCalledTimes(1) // 窗尾确实执行
+    expect(infoSpy).toHaveBeenCalledTimes(1) // 汇总只输出一条
+    expect(String(infoSpy.mock.calls[0]?.[0])).toMatch(/重置 2 次/) // 含本窗重置次数
   })
 
   // ── 用户主动发送 → 强制回底重锚定（feat-new-message-to-bottom，触发矩阵末行）──
@@ -886,13 +1033,13 @@ describe('useMessageStreamFollowTriggers（RO 回调双 rAF，P-timing 降级预
   })
 
   it('morph 回执重建（user 消息尾插但提交序号不动）→ 不 force（旧 watch 的误拉回底形态已消除）', async () => {
-    const { messages, submitSeq, followToBottomForce } = mountTriggers()
+    const { renderItems, submitSeq, followToBottomForce } = mountTriggers()
 
     // 验收形态（impl-plan U4「morph 回执不再强拉回底」）：用户上翻阅读中，steer 插话
     // 注入回执到达——user-delivery 复用原 clientUuid 尾插 user 消息，submitSeq 不变。
-    messages.value = [msg('u1', '第一问'), msg('a1', '回答中', 'assistant')]
+    renderItems.value = [turnItem('u1', '第一问回答', false)]
     await nextTick()
-    messages.value = [...messages.value, msg('u2', '插话回执重建', 'user')] // 尾插 user 消息
+    renderItems.value = [...renderItems.value, turnItem('u2', '插话回执重建', false)] // 尾插新 turn
     await nextTick()
 
     expect(submitSeq.value).toBe(0)
@@ -914,30 +1061,29 @@ describe('useMessageStreamFollowTriggers（RO 回调双 rAF，P-timing 降级预
   })
 
   // ── [chat-flow-consistency F2] 脱离态几何快照刷新调用点接线 ──
-  it('F2: wrap RO 高度变化 → refreshDistanceSnapshot 与 follow 同点触发', async () => {
-    const { api, wrapRo, followIfStuck, refreshDistanceSnapshot } = mountTriggers()
+  it('F2: wrap RO 高度变化 → 测量支即时喂快照刷新，触发支窗尾跟随', async () => {
+    const { wrapRo, followIfStuck, refreshDistanceSnapshot } = mountTriggers()
 
-    stubTailHeight(api, 30)
-    wrapRo.dispatch([{ contentRect: { height: 0 } as DOMRectReadOnly }]) // tail 分量高度变化
-    await vi.advanceTimersByTimeAsync(16)
+    dispatchWrapHeightChange(wrapRo, 500) // wrap 分量高度变化
+    expect(refreshDistanceSnapshot).toHaveBeenCalledTimes(1) // 测量支同步喂（脱离态胶囊即时浮现）
 
-    expect(refreshDistanceSnapshot).toHaveBeenCalledTimes(1)
-    expect(followIfStuck).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(RO_FOLLOW_DEBOUNCE_MS + 16)
+    expect(followIfStuck).toHaveBeenCalledTimes(1) // 触发支窗尾跟随
   })
 
-  it('F2: 纯宽度变化（高度未变）→ 不喂快照刷新（与跟随 no-op 同门）', async () => {
+  it('F2: 纯宽度变化（高度未变）→ 不喂快照刷新（测量支 no-op 门，与跟随同门）', async () => {
     const { wrapRo, refreshDistanceSnapshot } = mountTriggers()
 
     wrapRo.dispatch([{ contentRect: { height: 0 } as DOMRectReadOnly }])
-    await vi.advanceTimersByTimeAsync(16)
+    await vi.advanceTimersByTimeAsync(RO_FOLLOW_DEBOUNCE_MS + 16)
 
     expect(refreshDistanceSnapshot).not.toHaveBeenCalled()
   })
 
-  it('F2: messages.length watch → refreshDistanceSnapshot 与 followIfStuck 同点触发', async () => {
-    const { messages, followIfStuck, refreshDistanceSnapshot } = mountTriggers()
+  it('F2: renderItems 条数 watch → refreshDistanceSnapshot 与 followIfStuck 同点触发', async () => {
+    const { renderItems, followIfStuck, refreshDistanceSnapshot } = mountTriggers()
 
-    messages.value.push(msg('m1', '你好'))
+    renderItems.value = [turnItem('m1', '你好', false)]
     await nextTick()
 
     expect(refreshDistanceSnapshot).toHaveBeenCalledTimes(1)

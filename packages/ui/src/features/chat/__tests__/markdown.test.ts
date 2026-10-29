@@ -18,7 +18,7 @@
  * codeToHtml 调用计数兼作「占位期零高亮」探针）；各节 helper 以 resetModules + doMock
  * 每用例取干净 markdown 模块（cachedMarkdown/highlighter/codec 单例每用例重建）。
  *
- * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/markdown.test.ts
+ * 运行：cd packages/ui && TAIJI_TEST_DOMAIN=chat npx vitest run src/features/chat/__tests__/markdown.test.ts（本文件登记在 domain-map.json chat 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { readFileSync } from 'fs'
@@ -58,7 +58,7 @@ describe('markdown', () => {
  * [D10 渲染链下沉] 自 renderer src/__tests__/composables/markdown.test.ts 随渲染链迁入 ui
  * （import 改相对路径）；新增 copyLabel 注入族：宿主壳文案注入渲染产物等价断言。
  *
- * 运行：pnpm --filter @taiji/ui run test -- src/features/chat/__tests__/markdown.test.ts
+ * 运行：cd packages/ui && TAIJI_TEST_DOMAIN=chat npx vitest run src/features/chat/__tests__/markdown.test.ts（本文件登记在 domain-map.json chat 域，默认档被排除）
  */
 // renderMarkdown 内部缓存了 markdown-it 实例（cachedMarkdown）+ highlighter 单例。
 // 各用例需独立实例 → 动态 import 后重置模块，或在 beforeEach vi.resetModules + 重新 import。
@@ -502,7 +502,7 @@ describe('markdown-base64', () => {
  * freshModule（highlighter/markdown-it/codec 单例每用例重建）。
  *
  * [D10 渲染链下沉] 自 renderer 随渲染链迁入 ui（import 改相对路径）。
- * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/markdown-base64.test.ts
+ * 运行：cd packages/ui && TAIJI_TEST_DOMAIN=chat npx vitest run src/features/chat/__tests__/markdown.test.ts（本文件登记在 domain-map.json chat 域，默认档被排除）
  */
 // stub shiki：避免真实语法加载，测试聚焦 fence 的 base64 链路（fine-grained 后入口是 shiki/core）
 // （stub shiki 由产品级单份 const fakeCodeToHtml + vi.mock 提供，见文件头）
@@ -665,7 +665,7 @@ describe('markdown-filepath', () => {
  *
  * 测试框架：vitest（从 vitest 导入 describe/it/expect）。禁止 node:test。
  * [D10 渲染链下沉] 自 renderer 随渲染链迁入 ui（import 改相对路径）。
- * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/markdown-filepath.test.ts
+ * 运行：cd packages/ui && TAIJI_TEST_DOMAIN=chat npx vitest run src/features/chat/__tests__/markdown.test.ts（本文件登记在 domain-map.json chat 域，默认档被排除）
  */
 // stub shiki：避免真实语法加载，测试聚焦路径识别逻辑（fine-grained 后入口是 shiki/core）
 // （stub shiki 由产品级单份 const fakeCodeToHtml + vi.mock 提供，见文件头）
@@ -860,7 +860,7 @@ describe('markdown-katex', () => {
  * CSS import 在 vitest 中是空模块（不报错但也不生效），一旦被删，双壳公式节点将裸排破相
  * 且无运行时断言可抓（S2/S7 流程不含公式消息），故用源码结构断言兜底。
  *
- * 运行：pnpm --filter @taiji/ui run test -- src/features/chat/__tests__/markdown-katex.test.ts
+ * 运行：cd packages/ui && TAIJI_TEST_DOMAIN=chat npx vitest run src/features/chat/__tests__/markdown.test.ts（本文件登记在 domain-map.json chat 域，默认档被排除）
  */
 async function freshRender(content: string): Promise<string> {
   vi.resetModules()
@@ -1398,7 +1398,7 @@ describe('markdown-renderer-incremental', () => {
  *
  * [D10 渲染链下沉] 自 renderer 随渲染链迁入 ui（渲染模块 import 改相对路径；
  * createMockChatDeps 用 ui 侧 helpers.ts 的 createMockDeps 别名）。
- * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/markdown-renderer-incremental.test.ts
+ * 运行：cd packages/ui && TAIJI_TEST_DOMAIN=chat npx vitest run src/features/chat/__tests__/markdown.test.ts（本文件登记在 domain-map.json chat 域，默认档被排除）
  */
 // stub shiki：避免真实语法加载；codeToHtml 计数用作「占位期零高亮」探针
 // （fine-grained 后 markdown.ts 从 shiki/core import，mock 入口同步为 shiki/core）

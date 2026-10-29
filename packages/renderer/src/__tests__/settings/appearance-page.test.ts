@@ -15,7 +15,7 @@
  *  - i18n 经 vitest-i18n-setup 全局 mock useI18n，t() 从 zh-CN locale 解析。
  *  - GroupCard / useTaijiThemes 真实模块（纯展示 + 纯数据）。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/settings/appearance-page.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=settings npx vitest run src/__tests__/settings/appearance-page.test.ts（本文件登记在 domain-map.json settings 域，默认档被排除）
  */
 import { describe, it, expect, vi } from 'vitest'
 import { mount, flushPromises, DOMWrapper } from '@vue/test-utils'

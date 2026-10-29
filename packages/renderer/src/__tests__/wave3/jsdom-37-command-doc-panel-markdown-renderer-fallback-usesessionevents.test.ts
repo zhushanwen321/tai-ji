@@ -35,7 +35,7 @@ vi.mock('@taiji/core/transport/api/domains/file', () => ({
 }))
 
 // [RD-2#3] revealInFolder mock（失败态「打开所在目录」动作）：IPC 边界归
-// ipc-reveal-in-folder.test.ts，本文件只验组件层接线（调用参数 + ~ 路径不出动作）
+// __tests__/lib/ipc.test.ts，本文件只验组件层接线（调用参数 + ~ 路径不出动作）
 const revealMock = vi.hoisted(() => vi.fn())
 vi.mock('@/lib/ipc', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/ipc')>()

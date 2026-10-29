@@ -14,7 +14,7 @@
  *
  * dag/gantt 子目录成员的相对 import 已按产物目录归一（'../layout' → '../dag/layout' 等）。
  *
- * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/components/panel/workflow-viz/__tests__/workflow-viz-pure-bundle.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=subagent TAIJI_SKIP_REAL_PI=1 npx vitest run src/components/panel/workflow-viz/__tests__/workflow-viz-pure-bundle.test.ts（本文件登记在 domain-map.json subagent 域，默认档被排除）
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { nextTick } from 'vue'

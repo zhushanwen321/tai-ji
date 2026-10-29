@@ -24,7 +24,7 @@
  * 可控；chat/session/panel store 与 trace store 用真实实现（消息 hydrate / markDead /
  * setTraceView 走真实状态；trace 分区键经 bindTraceSessionId 重绑到当前 pinia）。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/panel-view.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel npx vitest run src/__tests__/panel/panel-view.test.ts（本文件登记在 domain-map.json panel 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { computed } from 'vue'

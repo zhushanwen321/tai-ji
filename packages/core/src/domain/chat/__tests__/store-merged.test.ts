@@ -218,7 +218,7 @@ describe("invalidate-stream-subscription", () => {
     ensure: (sid: string) => void
     streamSubscribe: ReturnType<typeof vi.fn>
     subscribeRpc: ReturnType<typeof vi.fn>
-    /** effectScope.stop（对齐 useChat.test.ts fixture dispose 先例） */
+    /** effectScope.stop（对齐 store-merged-merged.test.ts useChat 合并节 fixture dispose 先例） */
     dispose: () => void
   }
 

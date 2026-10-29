@@ -9,7 +9,7 @@
  *    降级 banner / 现取当前值 / 当前值非历史 / 打开所在目录）。
  * 4. 组件渲染：mount 后 DOM 断言四类边界文案可见（zh-CN，vitest-i18n-setup mock）。
  *
- * 运行（A51 验收命令）：pnpm --filter @taiji/frontend exec vitest run trace-i18n
+ * 运行（A51 验收命令）：TAIJI_TEST_DOMAIN=subagent pnpm --filter @taiji/frontend exec vitest run trace-i18n（本文件登记在 domain-map.json subagent 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { readFileSync } from 'node:fs'

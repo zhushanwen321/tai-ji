@@ -223,7 +223,8 @@ describe("truncated-window", () => {
       getHistory: vi.fn().mockResolvedValue({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 }),
       streamSubscribe: vi.fn(() => vi.fn()),
       // [U5 消息撤回] ChatApiPort 新增必选成员（revokeMessage/cancelDelivery）——本套件不触达
-      // 撤回链，mock 补协议合法最小响应（类型完备；行为断言在 useChat.test.ts）
+      // 撤回链，mock 补协议合法最小响应（类型完备；行为断言在本文件 useChat 合并节，见
+      // describe('[U5] useChat.revokeMessage（统一撤回编排）'）
       revokeMessage: vi.fn().mockResolvedValue({ sessionId: 's1', revoked: false, error: 'no-mapping' }),
       cancelDelivery: vi.fn().mockResolvedValue({ clientUuid: 'u-x', cancelled: false }),
     }
@@ -420,7 +421,7 @@ describe("use-chat-disposition", () => {
     }
   }
 
-  /** session.delivery 帧工厂（useChat.test.ts morph 用例同款形态） */
+  /** session.delivery 帧工厂（本文件 useChat 合并节「session.delivery 帧消费与气泡 morph」组同款形态） */
   function deliveryFrame(
     sid: string,
     entries: Array<{ clientUuid: string; state: string; lane: string }>,

@@ -29,7 +29,7 @@
  * 不直接 import '@/api'，与 quota 节 @/api 全量 mock 无交互）；block 节经 mockChatProvide
  * 注入，不经模块 mock。各节以裸块隔离节内 helper。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/context-capacity-quota.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel npx vitest run src/__tests__/panel/context-capacity-quota.test.ts（本文件登记在 domain-map.json panel 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'

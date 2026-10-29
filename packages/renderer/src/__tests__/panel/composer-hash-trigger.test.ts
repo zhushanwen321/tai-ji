@@ -18,7 +18,7 @@
  *
  * happy-dom 光标支持：el.focus() + Range.setStart/setEnd + Selection.addRange 可定位光标。
  *
- * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/panel/composer-hash-trigger.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel npx vitest run src/__tests__/panel/composer-hash-trigger.test.ts（本文件登记在 domain-map.json panel 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'

@@ -34,7 +34,7 @@
  * hook 处理：各源顶层 beforeEach 均为幂等重置（pinia 重建 + clearAllMocks + 输入捕获
  * 清空），保留在各节裸块内叠加执行（重复执行无副作用差异），未收敛文件级公共 hook。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-fork-mode.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel npx vitest run src/__tests__/panel/composer-fork-mode.test.ts（本文件登记在 domain-map.json panel 域，默认档被排除）
  */
 // helper import 必须先于一切项目内模块（@/stores 等会在模块图加载期触发 @/api mock
 // factory，factory 引用的 helper 绑定彼时必须已初始化，否则 TDZ——vi.mock hoisting 约束）

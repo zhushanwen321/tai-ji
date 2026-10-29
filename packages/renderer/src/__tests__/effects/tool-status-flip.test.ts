@@ -7,7 +7,7 @@
  * - 方案 b：mount Turn，改 turn.assistants[0].toolCalls[0].status（单 turn 链路回归）
  * - 方案 c：mount MessageStream（真 store + 真虚拟滚动层），applyMessageEvent 走 tool_call_end 路径
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/effects/tool-status-flip.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=chat npx vitest run src/__tests__/effects/tool-status-flip.test.ts（本文件登记在 domain-map.json chat 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { chatViewDepsModule } from '@/__tests__/helpers/chat-stream-mount'

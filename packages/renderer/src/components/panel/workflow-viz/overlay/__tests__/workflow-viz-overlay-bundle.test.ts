@@ -18,7 +18,7 @@
  *  - host 节 mockGetWorkflows / mockGetDag 经统一 session domain 工厂实例取
  *    vi.mocked 锚点；overlay-shell 节零 mock 依赖保持。
  *
- * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/components/panel/workflow-viz/overlay/__tests__/workflow-viz-overlay-bundle.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=subagent TAIJI_SKIP_REAL_PI=1 npx vitest run src/components/panel/workflow-viz/overlay/__tests__/workflow-viz-overlay-bundle.test.ts（本文件登记在 domain-map.json subagent 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'

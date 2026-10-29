@@ -108,7 +108,7 @@ export function convertSinglePiMessage(
  * entries into their parent assistant message's matching toolCall.
  *
  * [W20] 实现 = liftHistoryToEntries（wire lift）+ replayEntries（core reducer fold）。
- * 签名与行为契约不变（等价性由 apply-entry-equivalence.test 对 legacy 断言锁定）：
+ * 签名与行为契约不变（等价性由 apply-entry-merged.test.ts 的 apply-entry-equivalence 合并节对 legacy 断言锁定）：
  *
  * 签名收 unknown[]：pi 的历史结构（PiHistoryMessage/PiHistoryToolResult）是 pi 协议类型，
  * 只在此 infra 文件内部断言，不暴露给 service。service 传 RPC/文件读到的原始 JSON 即可。

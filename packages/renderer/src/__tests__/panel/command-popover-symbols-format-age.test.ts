@@ -25,7 +25,7 @@
  * getCommands，保留其余真实导出——合并后其他节组件可能消费 @/api 其他成员，整模块
  * 替换会断链）、@/lib/ipc（browser 系列捕获），三者互不相交。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/command-popover-symbols-format-age.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel npx vitest run src/__tests__/panel/command-popover-symbols-format-age.test.ts（本文件登记在 domain-map.json panel 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'

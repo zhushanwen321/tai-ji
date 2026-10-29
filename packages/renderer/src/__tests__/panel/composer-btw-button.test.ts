@@ -18,7 +18,7 @@
  * （badge 未读计数从 setMessages 真实分区增长）+ 真实 core drawer 域（入口点击 / 视口判定）。
  * i18n 由 vitest-i18n-setup 全局提供（t 取 zh-CN 真实文案，断言中文无需另行 mock）。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-btw-button.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=btw npx vitest run src/__tests__/panel/composer-btw-button.test.ts（本文件登记在 domain-map.json btw 域，默认档被排除）
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'

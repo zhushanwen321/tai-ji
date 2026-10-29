@@ -1234,3 +1234,14 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 **迁移映射**：文件尾读 → 保留为索引 worker 的首次导入/按需向前补索引算法，不再是独立首屏数据源；预热单槽 → 保留为执行就绪加速（定位同 ADR-0179），与查看无关；后台全量重建 → 仅首次导入/读模型损坏修复；`session.historyCacheReady` 广播事件 → 取消（游标、索引覆盖状态、递增版本分别表达，不再有「等全量」语义）；尾读/全量双路径合并 → 取消（持久历史只从读模型读取）；多层整会话 LRU → 降级为可选页面缓存，不再决定历史能否快速读取。
 
+### ADR-0181 消息流滚动跟随信号源重构：跟随触发权从 RO 布局观察移交流式数据信号，RO 触发支 debounce 尾沿兜底盲区；error-reporter 聚合 RO loop 告警（2026-10-28 设计裁决，stream-follow-reshape）
+
+**决策**：P0 域「对话发送与流式渲染」的贴底跟随触发机制重构（设计包 stream-follow-reshape，tech-design-wf 三审 3 轮收敛 must-fix 5→3→0）。三条 A/B 级拍板：**D1**——跟随触发权从 wrap ResizeObserver（观察自己刚写入的布局效果）移交数据信号通路：streaming 回合文本总长 watch（getter 锚 renderItems 派生链，内聚 isStreaming 判定）升主触发，复用 followFromRo 双 rAF 对齐 virtua 测量时机；**D2**——wrap RO 职责收窄为测量留守（tailHeight / 距底快照），触发支加 debounce 尾沿（250ms 初值，导出常量 `RO_FOLLOW_DEBOUNCE_MS`）兜底无数据信号的高度变化源（shiki/图片/显隐/折叠），scroll RO 不受门约束；**D5**——error-reporter 对「window-onerror ∧ 无堆栈 ∧ 文本规范化全等」三条件的 RO loop 告警聚合计数（60s 窗尾 1 条汇总含次数），非命中条目逐条转发不变。随批退役零消费方接口成员（`onStickChange` / `useStreamingPin.sessionId` / `onVirtuaScrollEnd`）。
+
+**落地实况（2026-10-28 D3 真机验收）**：设计前提 P1（移除应用层 RO→follow 边后告警归零）**证伪**——底层 RO loop 事件仍以 ~2.5 条/s 发生（60s 窗 148 次，virtua 内部测量回路自持触发每帧广播上限，与回写边无关），设计登记的 PR1 降级路径按备案激活：D5 聚合兜底生效（console 148→1 条/60s 窗、renderer-error 日志增量 1 行，目标 1 替代形式「不随流式持续累积」达成、日志可诊断性恢复）；行为等价面全绿——贴底跟随+收缩窗口 15/15、盲区收敛 16/16、S9 形态四观察窗零半截、P6 成立（15.2s trace forced reflow=0，测量支单次布局读不构成强制重排，后备演进不触发）。残余告警源归因与 debounce 窗口值重审登记为后续项（实测 wrap RO 投递 ~489ms/批 > 窗口值，触发支窗尾幂等执行、重置 0 次——P2 预案形态，gap 钉住 0-30.5px 证明无视觉扰动）。
+
+**不采用**：维持 RO 主触发仅消级联（治标）；virtua 反向滚动（上游 issue #261 高度差异闪烁正中消息流雷区 + 全域语义反转）；纯数据驱动胶囊浮现（距底是布局事实）；事件顺序精确门（RO entry 无因果来源字段，时间邻近性是唯一归属判别）。
+
+**依据**：触发信号选在效果层而非原因层是根因（效果信号必然晚一帧、与布局系统耦合、随内容频率线性放大）；数据通路已存在且消息级直达（真机 242 delta 批大小恒 1）；覆盖盲区源无数据信号（「补 N 个 watch 无解」），debounce 时间尾沿是唯一可行的归属判别；聚合三条件带无堆栈限定使同文本带堆栈真错误不吞（不吞错纪律）。
+
+**登记**：实装（commit f146f14aa / dc069ba51 / 69fa5df95，分支 fix-ro-follow-loop）——`packages/renderer/src/composables/panel/useMessageStreamFollowTriggers.ts`（主体重构 + dev 窗尾重置计数）、`packages/renderer/src/components/panel/MessageStream.vue`（deps 注入位 + 空挂点/实参清理）、`packages/renderer/src/composables/panel/useVirtuaFollow.ts` 与 `useStreamingPin.ts`（接口退役）、`packages/renderer/src/boot/error-reporter.ts`（D5 聚合 + emitPayload 单点化）、`packages/renderer/src/composables/panel/usePinBottomGuard.ts`（文案）。验收剧本入库：`.agents/skills/verify-taiji/scenarios/follow-{stream-quiet,stick-shrink,detach-interactions,blindzone-converge}.mjs`（覆盖矩阵同步补行）。验收终态与降级处置：`~/.agents/skill-data/dev-flow/fix-ro-follow-loop-1dc70637/`（stream-follow-reshape.ledger.md）。

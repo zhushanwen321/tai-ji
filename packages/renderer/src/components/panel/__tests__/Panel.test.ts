@@ -18,7 +18,7 @@
  * 由 helpers/panel-mount-mocks 导入即注册（置于 Panel import 之前，注册早于其导入链
  * 加载）；真实 Pinia。
  *
- * 运行：cd packages/renderer && npx vitest run src/components/panel/__tests__/Panel.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel npx vitest run src/components/panel/__tests__/Panel.test.ts（本文件登记在 domain-map.json panel 域，默认档被排除）
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'

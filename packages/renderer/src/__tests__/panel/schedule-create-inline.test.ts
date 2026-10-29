@@ -13,7 +13,7 @@
  * 未并入同簇的 composer-btw-button / session-active-state：其与这两源在 @/stores/session、
  * useNewTaskFlow、useChat 上 mock 形态互为相反（实质冲突），保持独立文件。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/schedule-create-inline.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel npx vitest run src/__tests__/panel/schedule-create-inline.test.ts（本文件登记在 domain-map.json panel 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'

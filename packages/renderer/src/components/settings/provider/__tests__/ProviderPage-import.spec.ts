@@ -13,7 +13,7 @@
  * 那是随仓库规模增长的静态扫描、不验证运行时行为，已由 `scripts/check-wool-retirement.mjs`
  * 承接（pre-commit / 手动 `node scripts/check-wool-retirement.mjs` 均可跑）。
  *
- * 运行：cd packages/renderer && npx vitest run src/components/settings/provider/__tests__/ProviderPage-import.spec.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=settings npx vitest run src/components/settings/provider/__tests__/ProviderPage-import.spec.ts（本文件登记在 domain-map.json settings 域，默认档被排除）
  */
 
 import {

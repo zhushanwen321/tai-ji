@@ -32,7 +32,7 @@
  *    formFilter / planReviewFilter）——已核 Composer.vue / ActivityStrip 不消费该模块，
  *    对 Composer 两节无泄漏。
  *
- * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/panel/composer-send-button-states.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/panel/composer-send-button-states.test.ts（本文件登记在 domain-map.json panel 域，默认档被排除）
  */
 // helper import 必须先于项目内模块（@/api mock factory 在模块图加载期执行，TDZ 约束）；
 // mock 注册工厂全部引用 composer-mount 导出（vi.hoisted 单例与 spy 转发单源）

@@ -609,7 +609,7 @@ describe('SessionList 项目分组区三形态呈现（§6.7）+ 编辑入口禁
  * （renameProject/removeProject 行为断言随命令化重写并入节 1「编辑动作命令化」。）
  *
  * mock 策略：mock @/api 门面的 project 域（store 走门面，同 project-store.test.ts）。
- * 运行：cd packages/renderer && npx vitest run src/__tests__/sidebar/project-store.test.ts
+ * 运行：cd packages/renderer && npx vitest run src/__tests__/sidebar/project-store.test.ts（project-ordering 节）
  */
 
 
@@ -840,7 +840,7 @@ describe('composer-injection store（W2）', () => {
  * （gen-stats-display.ts）仍被 GenStatsTtftCard（hover 指标聚合页）消费，断言迁至本文件
  * 直连模块（SFC 再导出层随之消亡）。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/gen-stats-display.test.ts
+ * 运行：cd packages/renderer && npx vitest run src/__tests__/sidebar/project-store.test.ts（gen-stats-display 节）
  */
 
 describe('cacheTierOf 缓存命中率档位（demo ComposerBar cacheCls 对齐：≥80 success / ≥50 neutral / <50 warn）', () => {
@@ -903,7 +903,7 @@ describe('TTFT 纯函数：formatTtftDuration / ttftTier', () => {
  * 覆盖验收场景：
  * - W3-A8-type-guard-suggestion: UpdateErrorPayload 和 ProxyTestResult 类型存在且包含 suggestion 字段
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/types/w3-type-guard.test.ts
+ * 运行：cd packages/renderer && npx vitest run src/__tests__/sidebar/project-store.test.ts（w3-type-guard 节）
  */
 
 describe('W3-A8-type-guard-suggestion', () => {
@@ -972,7 +972,7 @@ describe('W3-A8-type-guard-suggestion', () => {
  *
  * 自证不空转（防「扫描根写错 → 空集合恒绿」）：扫到的引用 key 数量有下界断言。
  *
- * 测试框架：vitest。运行：cd packages/renderer && npx vitest run src/__tests__/i18n/panel-context-key-existence.test.ts
+ * 测试框架：vitest。运行：cd packages/renderer && npx vitest run src/__tests__/sidebar/project-store.test.ts（panel-context-key-existence 节）
  */
 
 const REPO_ROOT = resolve(__dirname, '../../../../..')
@@ -1061,7 +1061,7 @@ describe('panel.context i18n key 存在性机器门禁', () => {
  *  4. desktop 侧定稿值锚定（防止双侧一起漂移成镜像一致的错值；demo 终态青玉 #7fb89c 族）
  *  5. :root 玄块 --neutral-fg-2 次级正文档（Tailwind text-neutral-fg-2 映射链依赖的镜像令牌）
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/mobile-token-mirror-parity.test.ts
+ * 运行：cd packages/renderer && npx vitest run src/__tests__/sidebar/project-store.test.ts（mobile-token-mirror-parity 节）
  */
 
 const desktopSource = readFileSync(resolve(import.meta.dirname, '../../style.css'), 'utf-8')
@@ -1133,7 +1133,7 @@ describe('mobile tokens.css ↔ renderer style.css 令牌镜像逐字一致（D3
  * 分档阈值回归无锚。阈值常量未导出（模块内私有），用例以字面量数值锁定行为边界——
  * 常量改名/调档时本测试显式红灯，防静默漂移。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/context-usage-display.test.ts
+ * 运行：cd packages/renderer && npx vitest run src/__tests__/sidebar/project-store.test.ts（context-usage-display 节）
  */
 
 describe('usageBarClass 分档边界（严格大于）', () => {

@@ -26,7 +26,7 @@
  * document.body.querySelector 查询（对齐 OAuthDialog.test.ts 模式）。
  * ModelListSection 不 stub（真实渲染）：B-2 徽章行 + 混合列表联动由本测试连带覆盖。
  *
- * 运行：cd packages/ui && npx vitest run src/features/settings/__tests__/provider-edit-body.test.ts
+ * 运行：cd packages/ui && TAIJI_TEST_DOMAIN=settings npx vitest run src/features/settings/__tests__/provider-edit-body.test.ts（本文件登记在 domain-map.json settings 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'

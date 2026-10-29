@@ -41,7 +41,7 @@
  * `composer-overflow-menu` / `composer-capacity-merged` / `composer-model-merged` testid、
  * 合流发丝分隔（separatorsInBar）已随三步聚合击败的旧语义删除。
  *
- * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/panel/composer-bar-density-wiring.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/panel/composer-bar-density-wiring.test.ts（本文件登记在 domain-map.json panel 域，默认档被排除）
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'

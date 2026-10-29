@@ -183,7 +183,8 @@ describe('chat store message.complete 多 assistant 气泡收尾', () => {
   // 只收尾最后一条，前面的 toolCall 气泡永远 streaming——内部状态机不一致，影响后续定位逻辑。
   // 修复后 message.complete 收尾所有 status==='streaming' 的 assistant。usage 不由 complete
   // 回填（chat-flow-consistency D3 规则 5 退役回合级覆盖），per-message usage 由
-  // message_end(assistant) 帧载荷承担（同款锚见 fg5-message-stream.test.ts）。
+  // message_end(assistant) 帧载荷承担（同款锚见 __tests__/root-node.test.ts 的
+  // fg5-message-stream 合并节「FG5 chat store 块类型扩展」）。
   it('message.complete 收尾所有 streaming assistant 气泡（不只最后一条）', () => {
     const store = useChatStore()
     const sid = 'multi'
@@ -418,7 +419,8 @@ describe('chat store 瞬态状态收尾（W3：finalizeAllStreaming 应全收尾
     // 读写 API 本身），本用例前提（queue_update 能置 queueStates）结构性不成立。
     // 断言范围保留「帧到达不产生任何瞬态」：messages 与 retry 分区零写入。
     // 替代覆盖：内核派生视图随 session 销毁/disposeSession 清理（core clearDeliveryProjection，
-    // 见 core chat __tests__/effects-delivery-receipt.test.ts）+ 本文件其余瞬态收尾用例。
+    // 见 core chat __tests__/store-merged-merged.test.ts 的 useChat 合并节「disposeSession 清派生
+    // 视图」用例）+ 本文件其余瞬态收尾用例。
     const store = useChatStore()
     const sid = 's-queue'
     store.applyMessageEvent(sid, {
@@ -498,7 +500,7 @@ describe('chat store 瞬态状态收尾（W3：finalizeAllStreaming 应全收尾
  * 修复：tool_call_end/update 用 findToolCallOwner（按 toolCallId 全局查找）锚定；
  * message.complete 把残留 running 收尾为 end_not_received（正常 stop）/ error（error stop）。
  *
- * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/stores/toolcall-anchor.test.ts
+ * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/chat-store-reset.test.ts（toolcall-anchor 节）
  */
 
 describe('findToolCallOwner — ID 锚定查找', () => {
@@ -725,7 +727,7 @@ describe('W1: isActive 作为 UI 层 SSOT — deriveStatus 消费 isActive（含
  * scope.stop() 触发 onScopeDispose 退订。beforeEach 重建 scope + afterEach stop 兜底清干净
  * （events.ts 的 globalTypeHandlers 是模块级 Map，scope.stop 经 onScopeDispose 从中删除 handler）。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/useHandoffEffect.test.ts
+ * 运行：cd packages/renderer && npx vitest run src/__tests__/chat-store-reset.test.ts（useHandoffEffect 节）
  */
 
 
@@ -1043,7 +1045,7 @@ describe('M7 FR-5: deleteSession 时序 evict 在 dispose 前', () => {
  * - invalidateStatusCache() 无参清除全部
  * - deleteSession 集成：disposeSession 后调 invalidate 清理
  *
- * 运行：npx vitest run src/__tests__/composables/status-cache.test.ts
+ * 运行：npx vitest run src/__tests__/chat-store-reset.test.ts（status-cache 节）
  */
 
 describe('W3: derivedStatus 缓存复用（AC-2）', () => {
@@ -1126,7 +1128,7 @@ describe('W3: invalidateStatusCache', () => {
  * executingBash）——W1T3b 的「streaming bash 消息」种子改为手动 setMessages 注入
  * （防御场景：entry 化后正常流转不产生 streaming bash 消息，仅手动种子可触发该路径）。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/stores/chat-bash-effects.test.ts
+ * 运行：cd packages/renderer && npx vitest run src/__tests__/chat-store-reset.test.ts（chat-bash-effects 节）
  */
 
 /** 手动种子：streaming bash 消息（entry 化后正常流转不产生，仅手动注入可达） */
@@ -1233,7 +1235,7 @@ describe('w1 bash 收尾链（entry 化 + markBashError 兜底，bash timer 契�
  * 渲染数据，经 customStart effect 构造的 system Message 时，details 字段被原样保留，
  * 前端可据此路由到 GuiComponentRenderer。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/effects/custom-start-details.test.ts
+ * 运行：cd packages/renderer && npx vitest run src/__tests__/chat-store-reset.test.ts（custom-start-details 节）
  */
 
 describe('customStart details 保留（审计项 A）', () => {

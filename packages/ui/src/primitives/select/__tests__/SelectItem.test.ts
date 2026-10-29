@@ -8,7 +8,7 @@
  * 装配 Select+SelectContent(+SelectTrigger) 整树才能测）。零 vi.mock；mount attachTo
  * body + flushPromises 后 document.body.querySelector 查询，事件用原生 dispatchEvent。
  *
- * 运行：cd packages/ui && npx vitest run src/primitives/select/__tests__/SelectItem.test.ts
+ * 运行：cd packages/ui && TAIJI_TEST_DOMAIN=shell npx vitest run src/primitives/select/__tests__/SelectItem.test.ts（本文件登记在 domain-map.json shell 域，默认档被排除）
  */
 import { describe, it, expect } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -31,7 +31,7 @@ describe('SelectItem', () => {
  * 测试模式：reka Select 经 Portal teleport 到 document.body，mount attachTo body +
  * flushPromises 后用 document.body.querySelector 查询；事件用原生 dispatchEvent。
  *
- * 运行：cd packages/ui && npx vitest run src/primitives/select/__tests__/SelectItem.test.ts
+ * 运行：cd packages/ui && TAIJI_TEST_DOMAIN=shell npx vitest run src/primitives/select/__tests__/SelectItem.test.ts（本文件登记在 domain-map.json shell 域，默认档被排除）
  */
 
 /** 挂载 Select（强制 open），可配置 SelectItem 是否带 #action slot */
@@ -151,7 +151,7 @@ describe('SelectValue', () => {
  * 测试模式同 SelectItem.test.ts：reka Select 经 Portal teleport 到 document.body，
  * mount attachTo body + flushPromises 后用 document.body.querySelector 查询。
  *
- * 运行：cd packages/ui && npx vitest run src/primitives/select/__tests__/SelectValue.test.ts
+ * 运行：cd packages/ui && TAIJI_TEST_DOMAIN=shell npx vitest run src/primitives/select/__tests__/SelectItem.test.ts（本文件登记在 domain-map.json shell 域，默认档被排除）
  */
 
 const LONG_NAME = 'BigModel Individual Coding Plan · GLM-5.3-Flash'

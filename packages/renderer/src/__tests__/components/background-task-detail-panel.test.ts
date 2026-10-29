@@ -25,7 +25,7 @@
  * 中文文案断言（「已归档」「用户摘要」「评论」「修订中」等），依赖真实 i18n setup，
  * 与主体的 vue-i18n mock 实质冲突。两文件保持原样。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/components/background-task-detail-panel.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=tray npx vitest run src/__tests__/components/background-task-detail-panel.test.ts（本文件登记在 domain-map.json tray 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'

@@ -9,7 +9,7 @@
  * **成功**结果跨用例缓存（失败不缓存、重 import 重跑），同文件第二个用例的失败注入会被
  * 上一用例的成功缓存吞掉。本文件 detail 持续失败（穷尽 + 重开新一轮），不注入成功。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/panel-container-lazy-retry-detail.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel npx vitest run src/__tests__/panel/panel-container-lazy-retry-detail.test.ts（本文件登记在 domain-map.json panel 域，默认档被排除）
  */
 import { describe, it, expect, beforeAll, beforeEach, vi, afterEach } from 'vitest'
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'

@@ -36,7 +36,7 @@
  * hook 处理：各源顶层 beforeEach/afterEach 均保留在各节裸块内叠加执行（pinia 重建 /
  * clearAllMocks / 节私有 mock 状态复位均为幂等操作，重复执行无副作用差异）。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-file-popover.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel npx vitest run src/__tests__/panel/composer-file-popover.test.ts（本文件登记在 domain-map.json panel 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, enableAutoUnmount, type VueWrapper } from '@vue/test-utils'

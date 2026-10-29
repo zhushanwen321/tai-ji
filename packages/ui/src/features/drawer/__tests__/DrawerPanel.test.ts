@@ -17,7 +17,7 @@
  * useI18n（t 返回 key，断言 DOM 结构不依赖文案）；slot 注入用 template #default
  * 放 testid 占位 div。
  *
- * 运行：cd packages/ui && npx vitest run src/features/drawer/
+ * 运行：cd packages/ui && TAIJI_TEST_DOMAIN=shell npx vitest run src/features/drawer/__tests__/DrawerPanel.test.ts（本文件登记在 domain-map.json shell 域，默认档被排除）
  */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'

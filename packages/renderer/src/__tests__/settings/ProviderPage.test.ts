@@ -10,7 +10,7 @@
  * mock 策略：
  *  - vi.mock('@/api') 替换 config 门面。
  *
- * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/settings/provider-page.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=settings npx vitest run src/__tests__/settings/ProviderPage.test.ts（本文件登记在 domain-map.json settings 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'

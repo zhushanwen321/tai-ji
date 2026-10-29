@@ -82,7 +82,7 @@ vi.mock('@/api', () => apiCtrl)
 // __testing 零消费 grep 断言（D9②）：扫描本包 src 生产文件（排除测试与出口定义点），
 // 出现 __testing 标识符即违规。与移动壳测试同构，扫描根/注释提及白名单按包各自声明。
 //
-// 运行：cd packages/renderer && npx vitest run src/__tests__/assembly-check.test.ts
+// 运行：cd packages/renderer && npx vitest run src/__tests__/wave3/happy-dom-10-composables-panel-pure-bundle-usesidebar-bootstrap.test.ts（assembly-check 节）
 
 
 // vitest 运行时 cwd 即包根（ac1 同款锚定）
@@ -183,7 +183,7 @@ beforeEach(() => {
  * 本测试反转原断言：验证 getCommands 不再被 selectSession 调用（R4：保留 RPC handler，
  * 其他独立场景仍可调用；sessionApi.getCommands RPC 客户端函数保留）。
  *
- * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/useSidebar-get-commands.test.ts
+ * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/wave3/happy-dom-10-composables-panel-pure-bundle-usesidebar-bootstrap.test.ts（useSidebar-get-commands 节）
  */
 
 

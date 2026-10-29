@@ -16,7 +16,7 @@
  * beforeEach 接线在 @/__tests__/helpers/preset-page-mock（import 即注册，settings 版同
  * 组件测试共享）；工厂 / 默认 impl / promptPreset fixture 在 @/__tests__/helpers/preset-page-mount。
  *
- * 运行：cd packages/renderer && npx vitest run src/components/settings/preset/__tests__/pi-presets-page.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=settings npx vitest run src/components/settings/preset/__tests__/pi-presets-page.test.ts（本文件登记在 domain-map.json settings 域，默认档被排除）
  */
 import { describe, it, expect, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'

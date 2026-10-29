@@ -23,7 +23,7 @@
  * - vue-i18n 走全局 setup（从 zh-CN locale 取值）：断言真实中文文案 + 插值形态
  * - 时间：vi.useFakeTimers({ now: FIXED_NOW })——bash running 行耗时确定性
  *
- * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/panel/tray/tray-native-bundle.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=tray TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/panel/tray/tray-native-bundle.test.ts（本文件登记在 domain-map.json tray 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'

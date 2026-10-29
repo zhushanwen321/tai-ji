@@ -22,7 +22,7 @@
  * composer-smoke.test.ts：其 useToast mock（无 toasts 字段）与本文件真实 useToast 断言
  * 构成同模块实质冲突，保持独立。
  *
- * 运行：cd packages/renderer && pnpm vitest run src/__tests__/panel/skill-notice-stream.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel pnpm vitest run src/__tests__/panel/skill-notice-stream.test.ts（本文件登记在 domain-map.json panel 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 // 必须置于 MessageStream import 之前：壳 deps 三连（useChatViewDeps / useChat / useSidebar）

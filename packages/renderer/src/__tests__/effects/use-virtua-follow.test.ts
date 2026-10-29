@@ -38,7 +38,6 @@
  * 派发 stub 定稿在 _virtua-mock-helper.ts 的 ManualResizeObserverStub（本文件含其契约用例）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import type { Mock } from 'vitest'
 import { ref, type Ref } from 'vue'
 import type { VirtualizerHandle } from 'virtua/vue'
 import { useVirtuaFollow } from '@/composables/panel/useVirtuaFollow'
@@ -48,27 +47,25 @@ import { createMockVlist, ManualResizeObserverStub } from './_virtua-mock-helper
 describe('useVirtuaFollow', () => {
   let vlistRef: Ref<VirtualizerHandle | null>
   let mock: ReturnType<typeof createMockVlist>
-  let onStickChange: Mock<(stuck: boolean) => void>
 
   beforeEach(() => {
     vi.useFakeTimers()
     mock = createMockVlist()
     vlistRef = ref(null)
-    onStickChange = vi.fn<(stuck: boolean) => void>()
   })
 
   afterEach(() => {
     vi.useRealTimers()
   })
 
-  /** U1 便捷装配：造 mock + 注入 vlistRef + 创建 composable（itemCount/endOffset 可选注入） */
+  /** U1 便捷装配：造 mock + 注入 vlistRef + 创建 composable（itemCount/endOffset/smoothAllowed 可选注入） */
   function setupFollow(
-    followOpts: { itemCount?: () => number; endOffset?: () => number } = {},
+    followOpts: { itemCount?: () => number; endOffset?: () => number; smoothAllowed?: () => boolean } = {},
     mockOverrides?: Parameters<typeof createMockVlist>[0],
   ) {
     mock = createMockVlist(mockOverrides)
     vlistRef.value = mock
-    return useVirtuaFollow({ vlistRef, onStickChange, ...followOpts })
+    return useVirtuaFollow({ vlistRef, ...followOpts })
   }
 
   describe('cw wave w1 回归（W1TC1-W1TC9，U1 适配 D1/D7 语义）', () => {
@@ -80,7 +77,6 @@ describe('useVirtuaFollow', () => {
       onWheel({ deltaY: -100 } as WheelEvent)
 
       expect(stickToBottom.value).toBe(false)
-      expect(onStickChange).toHaveBeenCalledWith(false)
     })
 
     it('W1TC2 onScroll distance≤40 → 恢复分支翻 stickToBottom=true（不受抑制窗影响）', () => {
@@ -96,7 +92,6 @@ describe('useVirtuaFollow', () => {
       onScroll(480)
 
       expect(stickToBottom.value).toBe(true)
-      expect(onStickChange).toHaveBeenCalledWith(true)
     })
 
     it('W1TC3 onScroll 程序性写入回声（offset 递增 + distance>40）不改 stickToBottom', () => {
@@ -112,7 +107,6 @@ describe('useVirtuaFollow', () => {
       onScroll(150)
 
       expect(stickToBottom.value).toBe(false)
-      expect(onStickChange).not.toHaveBeenCalled()
     })
 
     it('W1TC5 followIfStuck 贴底 → scrollToIndex(itemCount-1, {align:"end", offset:0})（D1 索引直取）', async () => {
@@ -166,7 +160,6 @@ describe('useVirtuaFollow', () => {
       expect(stickToBottom.value).toBe(true)
       expect(mock.scrollToIndex).toHaveBeenCalledWith(4, { align: 'end', offset: 0, smooth: false })
       expect(mock.findItemIndex).not.toHaveBeenCalled()
-      expect(onStickChange).toHaveBeenCalledWith(true)
     })
 
     it('W1TC8b followToBottom(force=true, smooth=true)（胶囊点击路径，决策 12「点击平滑回底」）→ scrollToIndex 带 smooth: true；胶囊即时消失不等动画', () => {
@@ -182,6 +175,56 @@ describe('useVirtuaFollow', () => {
       expect(mock.scrollToIndex).toHaveBeenCalledWith(4, { align: 'end', offset: 0, smooth: true })
       // 胶囊即时消失不等动画：距底快照同步清零 → showJumpButton 立即翻 false
       expect(showJumpButton.value).toBe(false)
+    })
+
+    // [fix-ro-follow-loop 缺陷①] smooth 通行门：流式增长期胶囊点击降级即时跳。
+    // 根因（真机插桩定案）：virtua smooth 路径的 jump 相位（case 8 置 w 目标窗 + case 7 置
+    // $=1）会把原生动画扫过条目的「估算→实测」差记账进 h 坐标移位，而流式期逐 delta 的
+    // follow 直写（1）打断动画（2）使 scroll 永不静默 150ms、case 2 冲销分支饿死——h 恒久
+    // 折减后续全部 scrollToIndex 目标，视口停滞在距底 ≈h 处（停滞值 run-to-run 随机 =
+    // 打断时点不同）。即时跳不进 jump 相位，无此缺陷。
+    describe('缺陷①修复：followToBottom smooth 通行门（smoothAllowed）', () => {
+      it('smoothAllowed=()=>false（流式增长期）：followToBottom(true, true) 降级 → scrollToIndex smooth:false', () => {
+        const { followToBottom } = setupFollow({
+          itemCount: () => 5,
+          smoothAllowed: () => false,
+        })
+
+        followToBottom(true, true)
+
+        expect(mock.scrollToIndex).toHaveBeenCalledTimes(1)
+        expect(mock.scrollToIndex).toHaveBeenCalledWith(4, { align: 'end', offset: 0, smooth: false })
+      })
+
+      it('smoothAllowed=()=>true（内容静止期）：smooth 请求原样透传 → scrollToIndex smooth:true', () => {
+        const { followToBottom } = setupFollow({
+          itemCount: () => 5,
+          smoothAllowed: () => true,
+        })
+
+        followToBottom(true, true)
+
+        expect(mock.scrollToIndex).toHaveBeenCalledWith(4, { align: 'end', offset: 0, smooth: true })
+      })
+
+      it('未注入 smoothAllowed：默认放行（向后兼容，W1TC8b 语义不变）', () => {
+        const { followToBottom } = setupFollow({ itemCount: () => 5 })
+
+        followToBottom(true, true)
+
+        expect(mock.scrollToIndex).toHaveBeenCalledWith(4, { align: 'end', offset: 0, smooth: true })
+      })
+
+      it('通行门只影响 smooth 通道：smooth=false 请求（发送即回底 force）不受门状态影响', () => {
+        const { followToBottom } = setupFollow({
+          itemCount: () => 5,
+          smoothAllowed: () => false,
+        })
+
+        followToBottom(true)
+
+        expect(mock.scrollToIndex).toHaveBeenCalledWith(4, { align: 'end', offset: 0, smooth: false })
+      })
     })
 
     describe('W1TC9 showJumpButton 派生 = 离底超过一屏（决策 12 距底几何判定）', () => {
@@ -248,7 +291,6 @@ describe('useVirtuaFollow', () => {
 
       expect(mock.scrollToIndex).not.toHaveBeenCalled()
       expect(stickToBottom.value).toBe(true)
-      expect(onStickChange).toHaveBeenCalledWith(true)
     })
   })
 
@@ -265,7 +307,6 @@ describe('useVirtuaFollow', () => {
       onScroll(300)
 
       expect(stickToBottom.value).toBe(true)
-      expect(onStickChange).not.toHaveBeenCalled()
     })
 
     it('clamp 回声（offset 递减 + distance≤0）→ 不脱离且翻 true（恢复分支）', () => {
@@ -282,7 +323,6 @@ describe('useVirtuaFollow', () => {
       onScroll(550)
 
       expect(stickToBottom.value).toBe(true)
-      expect(onStickChange).toHaveBeenCalledWith(true)
     })
 
     it('用户拖拽（offset 递减 + distance>40）→ 脱离，后续 followIfStuck 不滚屏（guard）', async () => {
@@ -294,7 +334,6 @@ describe('useVirtuaFollow', () => {
       // 滚动条拖拽 / 键盘 PageUp·Home 的 scroll 回声：递减 200<400 ∧ distance=300>40 → 脱离
       onScroll(200)
       expect(stickToBottom.value).toBe(false)
-      expect(onStickChange).toHaveBeenCalledWith(false)
 
       // 脱离后 RO 兜底网再触发 followIfStuck：rAF 内重读 guard 拦截 → 不把用户扯回
       followIfStuck()
@@ -321,7 +360,6 @@ describe('useVirtuaFollow', () => {
       // 快照已建（400）→ 复合判据正常判定：200<400 ∧ distance=300>40 → 脱离
       onScroll(200)
       expect(stickToBottom.value).toBe(false)
-      expect(onStickChange).toHaveBeenLastCalledWith(false)
     })
 
     it('边界2：scrollSize=0（空数据回声）→ 不建快照不判定（恢复分支也不触发）', () => {
@@ -335,7 +373,6 @@ describe('useVirtuaFollow', () => {
       onScroll(0)
 
       expect(stickToBottom.value).toBe(false)
-      expect(onStickChange).not.toHaveBeenCalled()
     })
   })
 
@@ -351,7 +388,6 @@ describe('useVirtuaFollow', () => {
       onScroll(200)
 
       expect(stickToBottom.value).toBe(true)
-      expect(onStickChange).not.toHaveBeenCalledWith(false)
     })
 
     it('RO 静默 120ms 关窗（不调 notifyRoActivity）→ 关窗后同型回声可脱离', async () => {
@@ -370,7 +406,6 @@ describe('useVirtuaFollow', () => {
       await vi.advanceTimersByTimeAsync(1) // t=120 → RO 静默计时器触发 → 关窗
       onScroll(200) // 同型回声 → 脱离
       expect(stickToBottom.value).toBe(false)
-      expect(onStickChange).toHaveBeenCalledWith(false)
     })
 
     it('窗内 onWheel 恒即时脱离（不受抑制窗约束）', () => {
@@ -382,7 +417,6 @@ describe('useVirtuaFollow', () => {
       onWheel({ deltaY: -100 } as WheelEvent)
 
       expect(stickToBottom.value).toBe(false)
-      expect(onStickChange).toHaveBeenCalledWith(false)
     })
 
     it('RO 持续活跃下 1500ms 硬上限关窗（静默计时被反复重置也不续窗）', async () => {
@@ -405,7 +439,6 @@ describe('useVirtuaFollow', () => {
       await vi.advanceTimersByTimeAsync(100) // t=1500 → 硬上限触发 → 关窗
       onScroll(200)
       expect(stickToBottom.value).toBe(false)
-      expect(onStickChange).toHaveBeenCalledWith(false)
     })
 
     it('窗内 notifyRoActivity 重置静默计时：115ms 喂活动 → 再 115ms 窗仍开、再 120ms 关窗', async () => {
@@ -592,7 +625,6 @@ describe('useVirtuaFollow', () => {
       onTouchMove({ touches: [{ clientY: 260 }] } as unknown as TouchEvent)
 
       expect(stickToBottom.value).toBe(false)
-      expect(onStickChange).toHaveBeenCalledWith(false)
     })
 
     it('F3: 下滑 touchmove 不改变贴底态（回底由 onScroll 恢复分支处理，与 wheel 同语义）', () => {
@@ -600,7 +632,6 @@ describe('useVirtuaFollow', () => {
       onTouchStart({ touches: [{ clientY: 300 }] } as unknown as TouchEvent)
       onTouchMove({ touches: [{ clientY: 340 }] } as unknown as TouchEvent)
       expect(stickToBottom.value).toBe(true)
-      expect(onStickChange).not.toHaveBeenCalled()
     })
 
     it('F3: 收敛抑制窗内上滑 touchmove 恒即时脱离（同 wheel 免抑制窗）', () => {
