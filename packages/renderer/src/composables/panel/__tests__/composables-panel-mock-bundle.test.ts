@@ -136,7 +136,26 @@ vi.mock('@/api', () => {
     },
   }
 })
-vi.mock('@/stores/chat', () => composerChatStoreModule())
+// ── useLoadMoreHistory 基线前置 watch / 失败态合并的可控源：helper 恒值（tick=0、failed=false）
+//    驱不动 watch 正向路径（gate-suite round2 文件级覆盖缺口）。必须是真 vue ref——
+//    普通对象值变化不产生响应式依赖，watch/computed 不会重算；默认值与恒值一致，其余节不变 ──
+const { baselinePrependTickRef, historyCacheFailedRef } = await vi.hoisted(async () => {
+  const { ref } = await import('vue')
+  return {
+    baselinePrependTickRef: ref(0),
+    historyCacheFailedRef: ref(false),
+  }
+})
+vi.mock('@/stores/chat', () => {
+  const module = composerChatStoreModule()
+  return {
+    useChatStore: () => ({
+      ...module.useChatStore(),
+      getBaselinePrependTick: () => baselinePrependTickRef.value,
+      isHistoryCacheFailed: () => historyCacheFailedRef.value,
+    }),
+  }
+})
 // ── '@/stores/session' 统一工厂：composerSessionStoreModule + revive 并集 ──
 vi.mock('@/stores/session', () => ({
   useSessionStore: () => ({ active: undefined, list: [], applySnapshot: vi.fn(), revive: reviveMock }),
@@ -335,6 +354,65 @@ describe('handleLoadMore（载荷与 isPrepend 生命周期）', () => {
     sessionId.value = 's1'
     await nextTick()
     expect(loadMore.loadMoreError.value).toBe(true) // s1 自己的失败仍在（顶部条可重试）
+  })
+})
+
+describe('基线前置 watch + 失败态合并（session-cold-switch-perf §3.3-3 / RD-1#4）', () => {
+  beforeEach(() => {
+    loadMoreHistoryMock.mockReset()
+    loadMoreHistoryMock.mockResolvedValue(true)
+    hasMoreRef.value = true
+    baselinePrependTickRef.value = 0
+    historyCacheFailedRef.value = false
+  })
+
+  it('store tick 跳变（基线前置替换）→ isPrepend 一拍置位，nextTick 后复位', async () => {
+    const loadMore = setup()
+    expect(loadMore.isPrepend.value).toBe(false)
+
+    baselinePrependTickRef.value = 3
+    await nextTick() // watch flush：updateFor 置位（:shift 保位窗口）
+    expect(loadMore.isPrepend.value).toBe(true)
+
+    await nextTick() // 回调内 nextTick().then：无在途加载，复位
+    await Promise.resolve()
+    expect(loadMore.isPrepend.value).toBe(false)
+  })
+
+  it('手动翻页在途时 tick 复位不抢（保位窗口完整，finally 收敛）', async () => {
+    const d = deferred()
+    loadMoreHistoryMock.mockReturnValueOnce(d.promise)
+    const loadMore = setup()
+
+    void loadMore.handleLoadMore()
+    expect(loadMore.isPrepend.value).toBe(true) // 手动翻页置位
+
+    baselinePrependTickRef.value = 2
+    await nextTick()
+    await Promise.resolve() // watch 的复位回调落地（被 loadingMore guard 挡住）
+    expect(loadMore.isPrepend.value).toBe(true) // 在途不复位
+
+    d.resolve()
+    await d.promise
+    await Promise.resolve() // handleLoadMore finally 落地
+    expect(loadMore.isPrepend.value).toBe(false)
+  })
+
+  it('tick 非正（≤0）不置位——key 数值段 guard', async () => {
+    const loadMore = setup()
+    baselinePrependTickRef.value = -1 // 数值变化触发回调，tick 段非正即 return
+    await nextTick()
+    await Promise.resolve()
+    expect(loadMore.isPrepend.value).toBe(false)
+  })
+
+  it('loadMoreError 合并 store 后台重建失败态（isHistoryCacheFailed）', async () => {
+    const loadMore = setup()
+    expect(loadMore.loadMoreError.value).toBe(false)
+
+    historyCacheFailedRef.value = true
+    await nextTick() // computed 重算：分区失败 || store 失败
+    expect(loadMore.loadMoreError.value).toBe(true)
   })
 })
 })
