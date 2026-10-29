@@ -4,15 +4,25 @@ import { configDefaults } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'path'
 
+// coverage 运行（--coverage CLI 标记，config 主进程加载时 argv 可见）测量全量档：
+// 阈值 68/66/56/60 的校准基线是全量实测（见下方 coverage 块注释），挂载重型文件若被
+// 排除，测量域就与阈值基线脱钩（默认档收缩后实测跌破阈值的实例：lines 48.86% < 68%）。
+// 因此 coverage 运行不套挂载排除——文件清单仍走 domain-map 单一权威源（同一份排除表
+// 整体退出生效，不另抄清单）；日常档（pnpm test）与域触发档（TAIJI_TEST_DOMAIN）不受影响。
+const isCoverageRun = process.argv.includes('--coverage')
+
 export default taijiTestConfig({
   test: {
     environment: 'happy-dom',
     // 默认档排除挂载渲染重型测试（round6 Wave2 范围收缩）：清单来自
     // docs/testing/domain-map.json 单一权威源（本模块只派生，不持清单），
     // 域触发档（TAIJI_TEST_DOMAIN 由 scripts/run-domain-tests.mjs 设置）不排除，
-    // 由 run 脚本按域传显式文件清单。必须与 configDefaults.exclude 合并，
+    // 由 run 脚本按域传显式文件清单；coverage 运行同样不排除（测全量档，见
+    // isCoverageRun 注释）。必须与 configDefaults.exclude 合并，
     // 禁止整体替换（否则放开 node_modules/dist 默认排除）。
-    exclude: [...configDefaults.exclude, ...loadDomainExclusions(__dirname, 'packages/renderer/')],
+    exclude: isCoverageRun
+      ? [...configDefaults.exclude]
+      : [...configDefaults.exclude, ...loadDomainExclusions(__dirname, 'packages/renderer/')],
     setupFiles: ['./src/__tests__/vitest-i18n-setup.ts', './src/__tests__/vitest-settings-transport-setup.ts'],
     // 单用例超时预算 = vitest 默认 5s。历史上曾放宽到 15s 兜 mount 族重负载（3-14s 实测），
     // 2026-10 单测层整治后全包 junit 最慢单条 <1s（模块图预热共享 / mountSection 直挂），
@@ -24,6 +34,7 @@ export default taijiTestConfig({
       VITE_MOCK: 'true',
     },
     // coverage gate（方法论见 docs/TEST-STRATEGY.md §7「覆盖率与 coverage gate」）。
+    // 测量域 = 全量档（--coverage 运行不套挂载排除，见 isCoverageRun 注释）。
     // 2026-08-20 重校准：PR #185 大量重构扩大全量分母，旧基线（2026-06 S3-W1：Stmts72.34/Branch61.79/
     // Funcs69.15/Lines74.84 → 阈值 72/70/59/67）失效，实测跌破必红。当前工作区全量实测
     // Lines70.57/Stmts68.38/Branch58.95/Funcs63.37，按基线-2~3% 设阈留 flake 缓冲。
