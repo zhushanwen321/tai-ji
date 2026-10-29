@@ -20,7 +20,7 @@
  * [renderer-deepening D3/D4] 原 w5 壳组合项（ensureStreamSubscription / chat.touchLru /
  * evictIfNeeded / clearUnread / fileTree 预加载 / flow.cancelFlow，原 C-W3-4「壳补齐时序」
  * 立场）已升级为 sessionEntry 端口束（SessionEntryPort，api-port.ts）注入 selectSession
- * 完整 12 步切入链——链本体在本文件单点编排（唯一载体），原三份实现（core/壳新/壳旧）的
+ * 完整 13 步切入链——链本体在本文件单点编排（唯一载体），原三份实现（core/壳新/壳旧）的
  * 时序漂移由此收敛。时序采壳版 panel-first（D4 行为纠正：panel/navigation 先于 hydrate）。
  *
  * 命名说明：IF4 字面签名写 useSession；core 内 factory 统一 create* 前缀
@@ -315,7 +315,8 @@ export function resetHistoryCacheSubForTest(): void {
  * createUseSession factory —— session 管理编排（IF4 落地）。
  *
  * 使用方式：壳（w5）注入六端口 + 可选 flow，包装为 renderer composable（useSidebar）；
- * 测试注入 mock 端口断言编排（见 __tests__/use-session.test.ts）。
+ * 测试注入 mock 端口断言编排（见 __tests__/store.test.ts 的 selectSession describe 与
+ * __tests__/use-session-history-cache.test.ts——原 use-session.test.ts 已并入 store.test.ts）。
  */
 export function createUseSession(deps: UseSessionDeps) {
   const { store, api, panel, navigation, chat, hooks } = deps
@@ -496,8 +497,11 @@ export function createUseSession(deps: UseSessionDeps) {
    * 通过后重拉 getHistory（此时命中缓存，毫秒级）→ reconcileFromReply → 现有
    * reconcileHistory 合并上屏（基线替换 + 尾部 live 保护段承载「全量精化不打扰用户当前
    * 阅读与在途消息」）。await 窗口后二次核对活跃态：用户切走则放弃落库（切回时切入链
-   * 重新拉取），per-session 分区本身无串话。滚动位置保持由合并语义构造性承接（更早段
-   * 原样保留 = turn id 集合稳定，virtua scrollTop 不变）。
+   * 重新拉取），per-session 分区本身无串话。滚动位置保持：贴底场景由 follow 机制承载；
+   * 用户已上滑时基线替换在分区头部插入更早历史，chat store 记基线前置事件计数
+   * （getBaselinePrependTick）→ renderer useLoadMoreHistory 转一拍 isPrepend 喂
+   * virtua :shift 保位（shift=false 时 virtua 对头部插入无补偿，scrollTop 不变 +
+   * 前方插入 = 视口内容前移跳变）。
    */
   async function handleHistoryCacheReady(
     sessionId: string,
@@ -527,7 +531,7 @@ export function createUseSession(deps: UseSessionDeps) {
   }
 
   /**
-   * 切入链主体（原壳 useSidebar.postLoadSession，D3 入 core）：统一链步 4-12。
+   * 切入链主体（原壳 useSidebar.postLoadSession，D3 入 core）：统一链步 4-13。
    * 前置：switchSession 已成功 + activeId 已置——ensureStreamSubscription /
    * syncSessionToPanel 依赖当前 activeId 路由到正确 session 分区（ADR-0049 + 架构约定 #7）。
    *
@@ -563,10 +567,11 @@ export function createUseSession(deps: UseSessionDeps) {
   }
 
   /**
-   * 选择 session：完整 12 步切入链（D3/D4，renderer-deepening）——链的唯一载体，改时序只改这里。
+   * 选择 session：完整 13 步切入链（D3/D4，renderer-deepening）——链的唯一载体，改时序只改这里。
    * 1 cancelActiveFlow → 2 switchSession → 3 setActiveId → 4 clearUnread →
    * 5 ensureStreamSubscription → 6 touchRecency → 7 syncSessionToPanel → 8 navigation.push →
-   * 9 hydrate/reconcile → 10 preloadFileTree → 11 touchRecency(panel 绑定 session) → 12 evictLru。
+   * 9 hydrate/reconcile → 10 preloadFileTree → 11 touchRecency(panel 绑定 session) → 12 evictLru →
+   * 13 refreshLiveState。
    *
    * 时序采壳版（D4 行为纠正）：panel/navigation 先于 hydrate——panel 立即挂载、历史异步
    * 回填；旧 core hydrate-first 让 panel 载入等历史 RPC 返回，切换感知延迟长（UX 回退）。
@@ -587,7 +592,7 @@ export function createUseSession(deps: UseSessionDeps) {
     await api.switchSession(id)
     // 3. activeId（步 5/7 依赖 activeId 路由到正确 session 分区）
     store.setActiveId(id)
-    // 4-12（步 9 消费并行 pull）
+    // 4-13（步 9 消费并行 pull）
     await runEntryChain(id, historyPull)
   }
 

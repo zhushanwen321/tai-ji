@@ -1682,7 +1682,7 @@ function readPartitionKeys(chat: ChatStoreInstance): Set<string> {
  *   标记失效）。不退订的后果（D2 采用段）：被驱逐会话订阅仍在，后续消息经 commitMessages
  *   重建分区——驱逐白做；且订阅数量随打开会话数线性增长（LAN 流量 + 锁屏探活电量同增）。
  * ② session.unsubscribe RPC（fire-and-forget）——服务端停发该会话 live push。
- * 切回被驱逐会话重走 12 步切入链（步 5 订阅 + 步 9 基线合并清洗），既有重复防御就位。
+ * 切回被驱逐会话重走 13 步切入链（步 5 订阅 + 步 9 基线合并清洗），既有重复防御就位。
  *
  * 「谁被驱逐」的观测 = 驱逐前后分区 keys 差集：evictIfNeeded 是同步函数（阈值判定 +
  * 逐个删除全同步），单线程同步执行内无并发窗口，差集即被驱逐集合（含联动驱逐的派生键）。
