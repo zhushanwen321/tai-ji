@@ -16,11 +16,14 @@
  *
  * 补位 = 失败即空槽 + 消费驱动（无自动重试状态机，否决记录见设计 §3.3-2 不采用栏）：
  * 补位 spawn 失败槽保持空，下次消费经检查①天然重试；无补位自动重试即无空转重试风暴。
- * 冷启动恒空：本模块无任何启动期发火点（构造零副作用，补位只由消费驱动）——lastViewedAt
- * 空表的冷启动无消费即无补位，槽恒空（§3.3-5 不预热）；预热的首次发火 = 首次冷切消费后
- * 的补位。startup-reattach 因此构造性不消耗槽（恢复发生时槽必为空）。
- * 补位候选（§3.3-5）以「本次消费的目标会话参数」承载：markSessionViewed 在 switch 处理器
- * 入口先于恢复链执行，冷切消费时「最新查看条目」恒等于「本次消费目标」，语义逐点等价
+ * 冷启动（正常退出后启动/首装）恒空：本模块无独立启动期发火点（构造零副作用，补位只由
+ * 消费驱动），正常冷启动无消费即无补位，槽恒空（§3.3-5 不预热）；预热的首次发火 = 首次
+ * 消费（冷切或崩溃恢复）后的补位。startup-reattach 的恢复消费不消耗槽实体（take 时槽空
+ * → 回退现场 spawn 链；崩溃恢复形态下该次消费触发的补位经让位推迟至 reattach 完成，
+ * §3.3-6）。补位候选（§3.3-5）以「本次消费的目标会话参数」直传承载，不读
+ * lastViewedAtBySession：switch 主路径等价（markSessionViewed 在 switch 处理器入口先于
+ * 恢复链执行，「最新查看条目」与本次消费目标同一）；restore RPC / startup-reattach /
+ * 崩溃 respawn 等非 switch 消费点不写 markSessionViewed，直传消费目标是更准候选
  * （详见下方前缀注释块）。
  *
  * reattach 让位（§3.3-6）：补位 spawn 与 startup-reattach 编排期（孤儿收割/高水位轮询/
@@ -53,8 +56,9 @@ import { toErrorMessage } from '../../utils/errors.js'
 /**
  * 槽进程在进程表中的保留 sessionId。单例槽配单例 id：tee 树（`<root>/<id>/logs/`）跨
  * 补位复用不残留；形态过 isPiSessionId（合法树内目录）→ tee 落会话树、消费 rekey 时
- * migratePiSessionLogTree 正常迁树；进程死亡时上层 exit 收敛链按「未知 sessionId」
- * 构造性早退（lifecycle.get 无条目即 return），零误伤。
+ * migratePiSessionLogTree 正常迁树；进程死亡时上层 exit 收敛链对槽 id 无害：组合根站
+ * speakSessionDeath 的 settle 空转（槽 id 无债权记录、非父进程）后返回，SessionService
+ * exit 清理路径 lifecycle.get 判空早退——零误伤。
  */
 export const WARMUP_SLOT_SESSION_ID = 'warmup-pi-slot'
 
@@ -101,12 +105,15 @@ export interface WarmupPiSlotDeps { // oe-exempt:20261029:framework:依赖注入
 }
 
 /**
- * 补位候选（§3.3-5）以「本次消费的目标会话参数」承载：lastViewedAtBySession 的唯一写入点
- * = session.switch 处理器入口（markSessionViewed 先于 ensureActive/restore 链执行），冷切
- * 消费时「最新查看条目」恒等于「本次消费目标」——两者语义逐点等价，本模块直接取消费参数，
- * 不另设跨模块读取器（避免为候选解析触碰 session-service 领地）。任务书原文「候选 =
- * lastViewedAtBySession 最新条目」的等价性论证：唯一不等价场景是「无消费的独立发火」，
- * 本模块无该形态（补位只由消费驱动，冷启动无消费 = 槽恒空 = §3.3-5 无启动期接线）。
+ * 补位候选（§3.3-5）以「本次消费的目标会话参数」直传承载，不读 lastViewedAtBySession：
+ * lastViewedAtBySession 的唯一写入点 = session.switch 处理器入口（markSessionViewed 先于
+ * ensureActive/restore 链执行）——**switch 主路径等价**：「最新查看条目」与本次消费目标
+ * 同一；**非 switch 消费点直传更准**：restore 链的其余消费入口（手动 session.restore RPC /
+ * startup-reattach / pi 崩溃 respawn 编排，均经 facade.restoreSession 恢复内核）不写
+ * markSessionViewed，lastViewedAt 最新条目可能属另一个活跃会话，直传消费目标为更准候选。
+ * 不另设跨模块读取器（避免为候选解析触碰 session-service 领地）。崩溃恢复启动的行为面：
+ * startup-reattach 恢复链消费即触发补位（让位推迟至 reattach 完成后 fill，参数 = 最后
+ * 恢复候选）——消费驱动的自然延伸（无独立启动期接线），槽进程有 idle 自杀兜底。
  */
 
 /** reattach 让位轮询间隔：busy 解除后至多一个间隔内发火（纯增益时序，无需更细）。 */

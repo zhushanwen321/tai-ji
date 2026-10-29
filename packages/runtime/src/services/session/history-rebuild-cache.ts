@@ -584,6 +584,9 @@ export class SessionHistoryReader {
    * getHistory 派单按四态重新决策）。
    */
   private async runRebuildJob(sessionId: string, job: RebuildJob): Promise<void> {
+    // 成功终态日志（设计 §3.3-1 重审触发线①的可观测前提：同一会话单日全量重建次数按
+    // 「background full rebuild ok」前缀可数）；耗时供触发线②干扰窗口口径对照。
+    const startedAt = Date.now()
     try {
       const client = this.deps.pm.getClient(sessionId)
       if (!client) throw new Error('pi client unavailable for background full rebuild')
@@ -599,6 +602,7 @@ export class SessionHistoryReader {
         // R-12 同语义：活跃 session 权威空视图（get_entries 空响应）。不写缓存（与同步
         // 全量路径现状一致），成功帧照发（空快照基线）。
         this.publishCacheReady(sessionId, '')
+        console.log(`[session-service] background full rebuild ok for ${sessionId}: snapshotLeafId= (empty authoritative view), took ${Date.now() - startedAt}ms`)
         job.resolve({ ok: true, snapshotLeafId: '', messages: [] })
         return
       }
@@ -611,6 +615,7 @@ export class SessionHistoryReader {
         this.historyCache.set(sessionId, { leafId: full.leafId, messages: full.messages, truncated: false })
       }
       this.publishCacheReady(sessionId, full.leafId ?? '')
+      console.log(`[session-service] background full rebuild ok for ${sessionId}: snapshotLeafId=${full.leafId ?? ''}, took ${Date.now() - startedAt}ms`)
       job.resolve({ ok: true, snapshotLeafId: full.leafId ?? '', messages: full.messages })
     } catch (e) {
       const error = toErrorMessage(e)

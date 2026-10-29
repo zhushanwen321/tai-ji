@@ -1719,8 +1719,10 @@ export type ServerMessageType =
   | 'session.state_changed'
   // session.historyCacheReady（session-cold-switch-perf §3.3-1）：后台全量重建任务完成的
   // 轻通知广播（一次性事件，非 last-value 快照——同 session.deliveryHandled 不登记
-  // message-bus TOPIC_TABLE / STATE_TYPE_KEY_MAP，miss fallback 'stream'；WS 断连期间
-  // 丢失不补发，收敛由下一次 getHistory 拉取承接，ADR-0097 拉为主推补充）。
+  // message-bus TOPIC_TABLE / STATE_TYPE_KEY_MAP，miss fallback 'stream'——按 stream 语义
+  // 入 per-session ring，断连重连/重订阅在 ring 容量与字节预算内经回放补见（session.restored
+  // 同款既有通路），断连窗口内发出的帧多数会补达 renderer；回放缺席（ring 逐出/分区已清）
+  // 时收敛由下一次 getHistory 拉取承接，ADR-0097 拉为主推补充）。
   // 成功/失败都推，失败带 error（renderer 收失败帧不重拉，收敛为既有 loadMore 失败态）；
   // snapshotLeafId = 重建快照末条 entry id，renderer 做快照版本对账（过期不重拉）。
   // runtime 构造点与 renderer 监听点引用同一类型定义，帧名对账由类型层承载。

@@ -347,9 +347,11 @@ export class SessionLifecycle implements ISessionRegistry {
   /**
    * 预热空 pi 单槽（session-cold-switch-perf §3.3-2）。实例在本构造器内组装（组合根零
    * 改动）：spawn 侧闭包走 spawnPresetClient 同一构造链（§3.3-5 参数签名同源），让位检查
-   * 直连 startup-reattach 活跃标记（§3.3-6）；补位候选 = 消费目标参数（markSessionViewed
-   * 在 switch 入口先于本链执行，最新查看条目 ≡ 消费目标，免跨模块读取器）。摘除 = 本组装
-   * + acquireRestoreClient 接线点两处（均在本文件）。
+   * 直连 startup-reattach 活跃标记（§3.3-6）；补位候选 = 消费目标参数直传（switch 主路径
+   * 与最新查看条目同一；本文件 acquireRestoreClient 承载的 restore RPC/startup-reattach/
+   * respawn 等非 switch 消费点不写 markSessionViewed，直传消费目标更准，免跨模块读取器
+   * ——完整边界见 warmup-pi-slot 模块头注释）。摘除 = 本组装 + acquireRestoreClient
+   * 接线点两处（均在本文件）。
    */
   private readonly warmupSlot: WarmupPiSlot
 
