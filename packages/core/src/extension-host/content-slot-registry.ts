@@ -595,12 +595,12 @@ export class ContentSlotRegistry {
   }
 
   /**
-   * 右抽屉标签数组（§6.1：内置 8 项 ∪ 声明项，排序后）。内置侧 = registerBuiltin 登记
-   * 的 drawer.tab 内置声明（装配方经 builtinDrawerSlots 从 RIGHT_DRAWER_REGISTRY 转换注入），
-   * 声明侧 = placement='drawer.tab' 的插件声明。
+   * 位置族派生视图的共用前奏（抽屉/侧栏/设置页三容器同构）：内置/插件分桶投影 +
+   * mergeAndSort 合并排序。浮层（deriveOverlayContentTypes）视图类型与 order 回查
+   * 不同，不共用本前奏。
    */
-  deriveDrawerTabs(): ContentSlotView[] {
-    const available = this.availableByPlacement('drawer.tab')
+  private deriveViewsByPlacement(placement: ContentSlotPlacement): ContentSlotView[] {
+    const available = this.availableByPlacement(placement)
     const builtinViews = available
       .filter((d) => d.pluginId === HOST_PLUGIN_ID)
       .map((d) => this.toView(d, 'builtin'))
@@ -608,6 +608,15 @@ export class ContentSlotRegistry {
       .filter((d) => d.pluginId !== HOST_PLUGIN_ID)
       .map((d) => this.toView(d, 'plugin'))
     return this.mergeAndSort(builtinViews, externalViews)
+  }
+
+  /**
+   * 右抽屉标签数组（§6.1：内置 8 项 ∪ 声明项，排序后）。内置侧 = registerBuiltin 登记
+   * 的 drawer.tab 内置声明（装配方经 builtinDrawerSlots 从 RIGHT_DRAWER_REGISTRY 转换注入），
+   * 声明侧 = placement='drawer.tab' 的插件声明。
+   */
+  deriveDrawerTabs(): ContentSlotView[] {
+    return this.deriveViewsByPlacement('drawer.tab')
   }
 
   /**
@@ -657,14 +666,7 @@ export class ContentSlotRegistry {
    *（placement='sidebar.tab'、pluginId=taiji-host——core 无侧栏静态表，消费单元登记）。
    */
   deriveSidebarTabs(): ContentSlotView[] {
-    const available = this.availableByPlacement('sidebar.tab')
-    const builtinViews = available
-      .filter((d) => d.pluginId === HOST_PLUGIN_ID)
-      .map((d) => this.toView(d, 'builtin'))
-    const externalViews = available
-      .filter((d) => d.pluginId !== HOST_PLUGIN_ID)
-      .map((d) => this.toView(d, 'plugin'))
-    return this.mergeAndSort(builtinViews, externalViews)
+    return this.deriveViewsByPlacement('sidebar.tab')
   }
 
   /**
@@ -672,14 +674,7 @@ export class ContentSlotRegistry {
    * undefined 组——消费端呈现为「其他」）。合并排序后按 group 分桶（桶序 = 首现序）。
    */
   deriveSettingsSections(): SettingsSectionGroupView[] {
-    const available = this.availableByPlacement('settings.section')
-    const builtinViews = available
-      .filter((d) => d.pluginId === HOST_PLUGIN_ID)
-      .map((d) => this.toView(d, 'builtin'))
-    const externalViews = available
-      .filter((d) => d.pluginId !== HOST_PLUGIN_ID)
-      .map((d) => this.toView(d, 'plugin'))
-    const sorted = this.mergeAndSort(builtinViews, externalViews)
+    const sorted = this.deriveViewsByPlacement('settings.section')
     const groups = new Map<string | undefined, ContentSlotView[]>()
     for (const view of sorted) {
       const bucket = groups.get(view.group)

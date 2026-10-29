@@ -1422,8 +1422,11 @@ export function createSessionDeliveryRegistry(
     warn('outbox replay: record requeued, sid=', sessionId, 'id=', id)
   }
 
-  /** 重放提交载荷（磁盘记录 → submitToKernel args：幂等键不丢——id/lane/intent/凭据申报/images/meta）。 */
-  function replaySubmitArgsOf(record: DeliveryStoreRecord, id: string, text: string): {
+  /**
+   * 内核提交载荷形状（submitToKernel 的 args 入参；重放通路 replaySubmitArgsOf 的
+   * 返回值即本形状——两处共用同一类型保证幂等键不丢：id/lane/intent/凭据申报/images/meta）。
+   */
+  interface KernelSubmitArgs {
     id: string
     text: string
     lane: DeliveryLane
@@ -1432,7 +1435,10 @@ export function createSessionDeliveryRegistry(
     receiptAnchor?: DeliveryReceiptAnchor
     images?: Array<{ data: string; mimeType: string }>
     meta?: DeliveryMeta
-  } {
+  }
+
+  /** 重放提交载荷（磁盘记录 → submitToKernel args：幂等键不丢——id/lane/intent/凭据申报/images/meta）。 */
+  function replaySubmitArgsOf(record: DeliveryStoreRecord, id: string, text: string): KernelSubmitArgs {
     return {
       id,
       text,
@@ -1502,16 +1508,7 @@ export function createSessionDeliveryRegistry(
   async function submitToKernel(
     sessionId: string,
     rt: SessionRuntime,
-    args: {
-      id: string
-      text: string
-      lane: DeliveryLane
-      intent?: DeliveryIntent
-      unmarked?: boolean
-      receiptAnchor?: DeliveryReceiptAnchor
-      images?: Array<{ data: string; mimeType: string }>
-      meta?: DeliveryMeta
-    },
+    args: KernelSubmitArgs,
   ): Promise<void> {
     rt.submitted.set(bareMarkerId(args.id), { id: args.id, text: args.text })
     const message: DeliveryMessage = {
