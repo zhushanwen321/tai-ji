@@ -494,6 +494,108 @@ describe('mimoFetcher', () => {
   })
 })
 
+// ── Set-Cookie 续期透传（cookie 滑动续期，方案①）：引擎只捕获透传，回写归
+// quota-service（按凭证形态裁决）——此处锁定「捕获到的原始行原样出现在 outcome.setCookies」。──
+
+describe('mimoFetcher — Set-Cookie 透传', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW_MS)
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  /** 构造带多个 Set-Cookie 行的 JSON Response（append 逐条添加，getSetCookie 逐条返回）。 */
+  function responseWithCookies(body: unknown, setCookieLines: string[], status = 200): Response {
+    const headers = new Headers({ 'content-type': 'application/json' })
+    for (const line of setCookieLines) headers.append('set-cookie', line)
+    return new Response(body === null ? null : JSON.stringify(body), { status, headers })
+  }
+
+  it('成功响应带多行 Set-Cookie → outcome.setCookies 透传原始行（含属性段）', async () => {
+    setupFetch((input) => {
+      // mimo 的 /detail 辅助请求分流到无 Set-Cookie 响应——本用例锁主请求的透传形态
+      if (String(input).includes('/detail')) {
+        return responseWithCookies({ code: 0, message: 'ok', data: { planCode: 'standard' } }, [])
+      }
+      return responseWithCookies(
+        { code: 0, message: 'ok', data: { monthUsage: { percent: 0.25, items: [] }, usage: { percent: 0.1, items: [] } } },
+        ['sid=new; Path=/; HttpOnly', 'csrf=tok'],
+      )
+    })
+    const out = await mimoFetcher.fetchQuota('sid=1', 'cookie')
+    expect(out).toEqual({
+      ok: true,
+      data: {
+        label: 'MiMo Coding',
+        wins: [
+          { pct: null, resetSec: null },
+          { pct: null, resetSec: null },
+          { pct: 25, resetSec: null },
+        ],
+      },
+      setCookies: ['sid=new; Path=/; HttpOnly', 'csrf=tok'],
+    })
+  })
+
+  it('3xx redirect（redirect:manual 不跟随 → unauthorized）带 Set-Cookie 同样透传（滑动续期常伴随会话刷新出现）', async () => {
+    setupFetch(() => responseWithCookies(null, ['sid=refreshed; Path=/'], 302))
+    expect(await mimoFetcher.fetchQuota('sid=1', 'cookie')).toEqual({
+      ok: false,
+      reason: 'unauthorized',
+      setCookies: ['sid=refreshed; Path=/'],
+    })
+  })
+
+  it('401 带 Set-Cookie → unauthorized + setCookies 透传', async () => {
+    setupFetch(() => responseWithCookies({}, ['sid=rotated'], 401))
+    expect(await mimoFetcher.fetchQuota('sid=1', 'cookie')).toEqual({
+      ok: false,
+      reason: 'unauthorized',
+      setCookies: ['sid=rotated'],
+    })
+  })
+
+  it('辅助请求（/detail）的 Set-Cookie 合并进同一数组（主请求在前）', async () => {
+    setupFetch((input) => {
+      if (String(input).includes('/detail')) {
+        return responseWithCookies(
+          { code: 0, message: 'ok', data: { planCode: 'standard', currentPeriodEnd: '2026-08-24 00:00:00' } },
+          ['d=aux'],
+        )
+      }
+      return responseWithCookies(
+        { code: 0, message: 'ok', data: { monthUsage: { percent: 0.25, items: [] }, usage: { percent: 0.1, items: [] } } },
+        ['m=main'],
+      )
+    })
+    const out = await mimoFetcher.fetchQuota('sid=1', 'cookie')
+    expect(out.ok).toBe(true)
+    if (out.ok) expect(out.setCookies).toEqual(['m=main', 'd=aux'])
+  })
+
+  it('在体业务码失败（code=401 → unauthorized）的 Set-Cookie 同样透传', async () => {
+    setupFetch((input) => {
+      if (String(input).includes('/detail')) return responseWithCookies({ code: 0, message: 'ok', data: {} }, [])
+      return responseWithCookies({ code: 401, message: 'login required' }, ['sid=x'])
+    })
+    expect(await mimoFetcher.fetchQuota('sid=1', 'cookie')).toEqual({
+      ok: false,
+      reason: 'unauthorized',
+      setCookies: ['sid=x'],
+    })
+  })
+
+  it('响应无 Set-Cookie → outcome 不带 setCookies 键（非 cookie 类请求路径零扰动）', async () => {
+    setupFetch(() => jsonResponse({ code: 0, message: 'ok', data: { usage: { percent: 0.1, items: [] } } }))
+    const out = await mimoFetcher.fetchQuota('sid=1', 'cookie')
+    expect(out.ok).toBe(true)
+    if (out.ok) expect('setCookies' in out).toBe(false)
+  })
+})
+
 describe('minimaxFetcher', () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => {
@@ -1116,7 +1218,7 @@ const VALID_FETCHER = {
 function validPreset(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     fetcher: 'zhipu',
-    label: '智谱 GLM Coding Plan',
+    label: 'Zhipu Coding Plan',
     auth: ['api-key'],
     match: { baseUrlPattern: 'bigmodel.cn', namePattern: 'zhipu' },
     ...overrides,

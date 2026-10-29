@@ -1075,8 +1075,8 @@ function mountContainer(source?: PluginViewsSource, sessionId = 's1') {
  * core builtinContributions 的 pluginId 集合（tasks 在集内 → 不可关闭）。
  */
 const TASKS_VIEWS: PluginViewSummary[] = [
-  { viewId: 'todo', title: '任务', initialVisibility: 'visible', pluginId: 'tasks' },
-  { viewId: 'goal', title: '目标', initialVisibility: 'visible', pluginId: 'tasks' },
+  { viewId: 'todo', title: '任务', pluginId: 'tasks' },
+  { viewId: 'goal', title: '目标', pluginId: 'tasks' },
 ]
 
 describe('PluginViewContainer', () => {
@@ -1122,7 +1122,7 @@ describe('PluginViewContainer', () => {
   it('TC3: builtin（tasks pluginId）tab 无 close 按钮；非 builtin tab 有 close（DOM 断言）', async () => {
     const mixed: PluginViewSummary[] = [
       ...TASKS_VIEWS,
-      { viewId: 'ext-view', title: '外部视图', initialVisibility: 'hidden', pluginId: 'other' },
+      { viewId: 'ext-view', title: '外部视图', pluginId: 'other' },
     ]
     const source = makeSource(mixed)
     const wrapper = mountContainer(source)
@@ -1139,7 +1139,7 @@ describe('PluginViewContainer', () => {
   it('TC3b: close 事件对非 builtin 生效——本地移除该 tab，不持久化', async () => {
     const mixed: PluginViewSummary[] = [
       ...TASKS_VIEWS,
-      { viewId: 'ext-view', title: '外部视图', initialVisibility: 'visible', pluginId: 'other' },
+      { viewId: 'ext-view', title: '外部视图', pluginId: 'other' },
     ]
     const source = makeSource(mixed)
     const wrapper = mountContainer(source)

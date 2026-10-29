@@ -469,94 +469,20 @@ describe('bg 分层方向（场景 1① 纯计算形态，§3.1 分层/镜像规
  * state-tone-lock —— 状态→色档映射全集锁测试（[W2 D8] UI 全集锁）。
  *
  * 锁的分工（锁本体在源码，本文件是全集锚 + 行为锚）：
- * - **编译层锁**：WORKFLOW_TONE_BY_OUTCOME / SUBAGENT_DOT_RULES 的 `satisfies
- *   Record<词表, …>`（词表扩值漏配 = 源码行编译红）。本文件下方 @ts-expect-error
- *   锚为「锁存在」的活性证明：
- *   词表外键索引必须编译红，映射锁被拆（键型放宽成索引签名）后该行变为
- *   「未使用的 @ts-expect-error」→ 类型检查红。
- * - **运行层锚（本文件，普通 vitest run 即验证）**：映射键域 ⊆ 词表快照（下方
- *   OUTCOME_SNAPSHOT——词表扩值而映射漏配时权威拦截是 satisfies 编译红，本文件
- *   快照比对为第二道）；四值 tone 三分行为（completed 绿 / failed 红 /
- *   cancelled+interrupted 同中性——用词区分由 shared WORKFLOW_RUN_OUTCOME_LABELS
- *   承载，文案断言段见「中文显示名词表单源」describe）；reopened 中性色修正锚。
+ * - **编译层锁**：shared WORKFLOW_RUN_OUTCOME_LABELS 常量的词表键域（消费方零翻译——
+ *   显示名取名单点在 shared，宿主/插件两域共用同一词表）。
+ *   [容器扩展点统一 §6.6/U9+U10] 托盘宿主侧的 SUBAGENT_DOT_RULES 与 WORKFLOW_TONE_BY_OUTCOME
+ *   全集锁已随托盘 subagent / workflow 两件迁移一并退役（宿主托盘行删，插件侧 widget 树
+ *   承载状态表达）。
+ * - **运行层锚（本文件，普通 vitest run 即验证）**：中文显示名词表逐值断言（成功/失败/
+ *   已取消/已超时/部分成功）；「已取消」（主动）与「已超时」（预算超时）禁混用锚 =
+ *   显示名两两互异。
  *
- * 运行：cd packages/renderer && pnpm vitest run src/__tests__/state-tone-lock.test.ts
+ * 运行：cd packages/renderer && pnpm vitest run src/__tests__/root-node.test.ts（state-tone-lock 节）
  */
-import {
-  SUBAGENT_STATUS_ALL,
-  WORKFLOW_RUN_OUTCOME_LABELS,
-  type SubagentRecord,
-  type WorkflowRunOutcome,
-  type WorkflowRunRecord,
-} from '@taiji/shared'
-import { SUBAGENT_DOT_RULES, subagentDotClass } from '@/lib/subagent-bucket'
-import { WORKFLOW_TONE_BY_OUTCOME, workflowStatusLabel, workflowToneClass } from '@/components/panel/tray/tray-tone'
-
-/**
- * WorkflowRunOutcome 词表快照（与 shared/src/workflow.ts 词表联合同步的本地锚）：
- * 词表真扩值时 satisfies 编译红先行；此处快照同步扩值后与映射键域比对即恢复双向覆盖。
- * [subagent-observability §3.3.8] partially_succeeded 第五值（u-foundation 落词表，
- * u8 同批同步本快照——u4 场景 2 GUI 呈现核对项承接独立档视觉定稿）。
- */
-const OUTCOME_SNAPSHOT = ['done', 'failed', 'cancelled', 'time_limited', 'partially_succeeded'] as const satisfies readonly WorkflowRunOutcome[]
+import { WORKFLOW_RUN_OUTCOME_LABELS } from '@taiji/shared'
 
 const sorted = (values: readonly string[]): string[] => [...values].sort()
-
-function subagent(overrides: Partial<SubagentRecord> & { subagentId: string }): SubagentRecord {
-  return {
-    sessionFile: null,
-    agent: 'reviewer',
-    slug: 'rv',
-    task: 'review it',
-    status: 'idle',
-    ...overrides,
-  }
-}
-
-function workflowRecord(outcome: WorkflowRunOutcome | undefined, status: 'running' | 'done' = 'done'): WorkflowRunRecord {
-  return {
-    runId: 'wf-1',
-    scriptName: 'flow',
-    status,
-    startedAt: new Date(0).toISOString(),
-    agentCalls: [],
-    stateFilePath: '',
-    outcome,
-  }
-}
-
-describe('WORKFLOW_TONE_BY_OUTCOME 全集锁（[W2 D8] workflow tone 三分）', () => {
-  it('映射键域 ≡ outcome 词表快照（词表扩值漏配 → satisfies 编译红；快照比对为第二道）', () => {
-    expect(sorted(Object.keys(WORKFLOW_TONE_BY_OUTCOME))).toEqual(sorted(OUTCOME_SNAPSHOT))
-  })
-
-  it('四值三分行为（[D2] 后）：done 绿 / failed 红 / cancelled 与 time_limited 同落中性暗；[subagent-observability §3.3.8] partially_succeeded 独立档初值 = 中性暗（视觉定稿归 u4）', () => {
-    expect(WORKFLOW_TONE_BY_OUTCOME.done).toBe('bg-success')
-    expect(WORKFLOW_TONE_BY_OUTCOME.failed).toBe('bg-danger')
-    expect(WORKFLOW_TONE_BY_OUTCOME.cancelled).toBe('bg-neutral-dim opacity-50')
-    expect(WORKFLOW_TONE_BY_OUTCOME.time_limited).toBe('bg-neutral-dim opacity-50')
-    expect(WORKFLOW_TONE_BY_OUTCOME.partially_succeeded).toBe('bg-neutral-dim opacity-50')
-  })
-
-  it('workflowToneClass：done 读 outcome 四值驱动，running 恒 accent（不读 reason）；[D2] interrupted 暂停态走中性暗专属条目', () => {
-    expect(workflowToneClass(workflowRecord('done'))).toBe('bg-success')
-    expect(workflowToneClass(workflowRecord('failed'))).toBe('bg-danger')
-    expect(workflowToneClass(workflowRecord('cancelled'))).toBe('bg-neutral-dim opacity-50')
-    expect(workflowToneClass(workflowRecord('time_limited'))).toBe('bg-neutral-dim opacity-50')
-    expect(workflowToneClass(workflowRecord('failed', 'running'))).toBe('bg-accent')
-    // [D2] status 三态 interrupted（暂停态，非终局）：中性暗（不占 accent / 不作成败断言）
-    expect(workflowToneClass(workflowRecord(undefined, 'interrupted'))).toBe('bg-neutral-dim opacity-50')
-  })
-
-  it('workflowToneClass：done + outcome 缺省（v1 存量快照）→ 中性暗（数据缺口不作成败断言）', () => {
-    expect(workflowToneClass(workflowRecord(undefined))).toBe('bg-neutral-dim opacity-50')
-  })
-
-  it('词表外键索引 = 编译红（全集锁活性锚；运行层无该键）', () => {
-    // @ts-expect-error 词表外键不在映射键域（satisfies Record 锁——词表扩值漏配即此形态的编译红）
-    expect(WORKFLOW_TONE_BY_OUTCOME['phantom' as string]).toBeUndefined()
-  })
-})
 
 describe('中文显示名词表单源（[W2 D8] WORKFLOW_RUN_OUTCOME_LABELS 消费接线）', () => {
   it('逐值显示名断言（[D2] 后：成功/失败/已取消/已超时/部分成功——shared 常量为唯一权威，消费方零翻译）', () => {
@@ -572,55 +498,6 @@ describe('中文显示名词表单源（[W2 D8] WORKFLOW_RUN_OUTCOME_LABELS 消�
     expect(sorted(labels)).toEqual(sorted(['成功', '失败', '已取消', '已超时', '部分成功']))
     expect(new Set(labels).size).toBe(labels.length)
   })
-
-  it('workflowStatusLabel：done+outcome → 词表取名；running / interrupted / outcome 缺省 → undefined（不出 hover 文案）', () => {
-    expect(workflowStatusLabel(workflowRecord('done'))).toBe('成功')
-    expect(workflowStatusLabel(workflowRecord('failed'))).toBe('失败')
-    expect(workflowStatusLabel(workflowRecord('cancelled'))).toBe('已取消')
-    expect(workflowStatusLabel(workflowRecord('time_limited'))).toBe('已超时')
-    expect(workflowStatusLabel(workflowRecord('failed', 'running'))).toBeUndefined()
-    expect(workflowStatusLabel(workflowRecord(undefined))).toBeUndefined()
-    // [D2] interrupted 暂停态非终局——不出终局 hover 文案（「已中断（可续跑）」显示归 status 徽标面）
-    expect(workflowStatusLabel(workflowRecord(undefined, 'interrupted'))).toBeUndefined()
-  })
-})
-
-describe('SUBAGENT_DOT_RULES 全集锁（[W2 D8] 状态点规则按 status 分组）', () => {
-  it('分组键域 ≡ SubagentStatus 词表全集（词表扩值漏配 → 本断言红 + satisfies 编译红）', () => {
-    expect(sorted(Object.keys(SUBAGENT_DOT_RULES))).toEqual(sorted(SUBAGENT_STATUS_ALL))
-  })
-
-  it('失败红先于完成绿兜底：running+failed 与 idle+failed 均红点（[subagent-observability u8] 迁移期回落分支——旧推断存储值 + legacy closed 注入族，新判据主锚在 subagent-bucket.test.ts 四形态）', () => {
-    expect(subagentDotClass(subagent({ subagentId: 'r1', status: 'running', stopReason: 'failed' }))).toBe('bg-danger')
-    expect(subagentDotClass(subagent({ subagentId: 'r2', status: 'idle', stopReason: 'failed' }))).toBe('bg-danger')
-  })
-
-  it('[subagent-observability u8] 失败红点新判据锚：lastRound.failure 主导（failure 非空且非 user.cancelled → 红；user.cancelled / 被接管 → 中性暗；stop 停因无失败分类 → 绿兜底）', () => {
-    expect(subagentDotClass(subagent({ subagentId: 'n1', status: 'idle', lastRound: { engineStopReason: 'error', failure: { class: 'provider', kind: 'rate_limited', retryable: 'conditional', raw: 'rpm 101/100' } } }))).toBe('bg-danger')
-    expect(subagentDotClass(subagent({ subagentId: 'n2', status: 'idle', lastRound: { engineStopReason: 'aborted', failure: { class: 'user', kind: 'cancelled', retryable: false, raw: 'user aborted' } } }))).toBe('bg-neutral-dim opacity-50')
-    expect(subagentDotClass(subagent({ subagentId: 'n3', status: 'idle', lastRound: { promptDisposition: 'handled' } }))).toBe('bg-neutral-dim opacity-50')
-    expect(subagentDotClass(subagent({ subagentId: 'n4', status: 'idle', lastRound: { engineStopReason: 'stop', result: 'ok' } }))).toBe('bg-success')
-  })
-
-  it('中断族中性暗：cancelled / interrupted / interrupted-by-restart / interrupted-by-parent', () => {
-    for (const stopReason of ['cancelled', 'interrupted', 'interrupted-by-restart', 'interrupted-by-parent']) {
-      expect(subagentDotClass(subagent({ subagentId: `i-${stopReason}`, status: 'idle', stopReason }))).toBe('bg-neutral-dim opacity-50')
-    }
-  })
-
-  it('[W2 D8] reopened 中性色修正：idle+reopened 是「已重开待续」非成功 → 中性暗（原绿点兜底退役）', () => {
-    expect(subagentDotClass(subagent({ subagentId: 'r3', status: 'idle', stopReason: 'reopened' }))).toBe('bg-neutral-dim opacity-50')
-  })
-
-  it('正常收尾绿兜底与 running 非死亡组合 accent 兜底', () => {
-    expect(subagentDotClass(subagent({ subagentId: 'r4', status: 'idle' }))).toBe('bg-success')
-    expect(subagentDotClass(subagent({ subagentId: 'r5', status: 'running', stopReason: 'cancelled' }))).toBe('bg-accent')
-  })
-
-  it('词表外 status 分组索引 = 编译红（全集锁活性锚；运行层无该组）', () => {
-    // @ts-expect-error 词表外键不在规则表键域（satisfies Record 锁——词表扩值漏配即此形态的编译红）
-    expect(SUBAGENT_DOT_RULES['phantom' as string]).toBeUndefined()
-  })
 })
 
 
@@ -635,7 +512,7 @@ describe('SUBAGENT_DOT_RULES 全集锁（[W2 D8] 状态点规则按 status 分�
  * - countThinking/countToolCalls/hasFailedTool：badge 统计 + 失败检测
  * - chat store：thinking/tool_call 流式块追加、hydrate 历史注入、error 块
  *
- * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/fg5-message-stream.test.ts
+ * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/root-node.test.ts（fg5-message-stream 节）
  */
 import {
   toRenderItems,
@@ -978,9 +855,11 @@ describe('FG5 chat store 块类型扩展', () => {
    *   countDrained/drainN）；
    * - 投递入流改由「送达回执（message_end(user) 裸标记 id 精确匹配）+ reducer 通路」承担
    *   （替代计数 FIFO 文本匹配——重复文本/跨类型误配面从机制上消除）。
-   * 覆盖去向：core chat __tests__/effects-delivery-receipt.test.ts（回执命中/幂等/direct 豁免）
-   * + __tests__/useChat.test.ts（session.delivery 帧消费与 morph）+ renderer 队列区新用例
-   * （__tests__/panel/queue-bubble-s8.test.ts / __tests__/composables/panel/use-queue-rows.test.ts）。
+   * 覆盖去向：core chat __tests__/effect-types.test.ts 的 effects-delivery-receipt 合并节
+   * （回执命中/幂等/direct 豁免）+ core chat __tests__/store-merged-merged.test.ts 的 useChat
+   * 合并节（session.delivery 帧消费与 morph）+ renderer 队列区新用例（__tests__/panel/
+   * session-trace/trace-inspector.test.ts 的 queue-bubble-s8 合并节 / __tests__/composables/
+   * queue-detail-bundle.test.ts 的 use-queue-rows 合并节）。
    */
   it('queue_update 不再写 store（帧降级为内核内部回执：零快照、零 pendingBuffer 消费）', () => {
     const store = useChatStore()
@@ -1310,7 +1189,7 @@ describe('extension domain setAutoUpgrade', () => {
  * 真用 useSessionStore（验证 applySnapshot 落点）+ useChat（被测入口）。
  * 注：useChat streamSubscriptions 是模块级单例，同文件各用例 sid 必须唯一。
  *
- * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/session-renamed-sync.test.ts
+ * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/root-node.test.ts（session-renamed-sync 节）
  */
 // '@/api' mock 工厂解引用的 helper import 必须先于触发工厂执行的 import（useChat 链）求值
 // mock 实例（工厂内创建）的清除入口：经 mock 后的 '@/api' 取引用（同 settings quota 域范式）
@@ -1559,7 +1438,7 @@ describe('session.thinkingLevelSet 事件 → 状态层 thinkingLevel 同步', (
  * 覆盖：
  * - T3.1: defaultCwd = records[0]?.cwd
  * - T3.2: records 空 → defaultCwd undefined
- * - T3.4: RPC reject 降级（records 置 [] 不抛）
+ * - T3.4: RPC reject 降级（保留旧 records 不抛；§6.4 降级型显式行为改进——原置空口径已废）
  *
  * mock 策略：mock workspaceApi.listRecent 返回值。
  *
@@ -1567,7 +1446,7 @@ describe('session.thinkingLevelSet 事件 → 状态层 thinkingLevel 同步', (
  * session-api——mock 正交（本节 mock '@/api' 门面；session-api 节不 mock @/api，
  * 只 mock core ws-client 与 core pending 相对路径，core domains/session 真实实现
  * 不经门面），零冲突。各节以裸块隔离。
- * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/new-task/workspace-store.test.ts
+ * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/root-node.test.ts（workspace-store 节）
  */
 
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -1589,7 +1468,7 @@ import { workspace } from '@/api'
  * （直接测 domains/session 真实实现）。request 已下沉 core（tc u1），mock 目标须与
  * core 内相对 import 同一模块 ID 才能拦截。
  *
- * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/new-task/session-api.test.ts
+ * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/root-node.test.ts（session-api 节）
  */
 
 import { create } from '@taiji/core/transport/api/domains/session'
@@ -1646,23 +1525,28 @@ describe('workspaceStore.load（T3.1 / T3.2）', () => {
 })
 
 describe('workspaceStore.load 降级（T3.4）', () => {
-  it('RPC reject → records 置 [] 不抛', async () => {
-    mockListRecent.mockRejectedValue(new Error('RPC timeout'))
+  it('RPC reject → 保留旧 records 不抛（§6.4 降级型显式行为改进：断连重拉失败不闪空列表）', async () => {
+    mockListRecent.mockResolvedValueOnce([mkRecord('/repo-a', 300)])
     const store = useWorkspaceStore()
-    // 不抛
     await store.load()
-    expect(store.records).toEqual([])
-    expect(store.defaultCwd).toBeUndefined()
+    // 重拉失败（断连重拉形态）
+    mockListRecent.mockRejectedValue(new Error('RPC timeout'))
+    await store.load()
+    // 保留旧值（不置空）+ defaultCwd 跟随旧值
+    expect(store.records).toEqual([mkRecord('/repo-a', 300)])
+    expect(store.defaultCwd).toBe('/repo-a')
   })
 
   it('RD-3#4: RPC reject → 补 console.warn + loadError 标记（读失败 ≠ 无历史，可观测）', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
-      mockListRecent.mockRejectedValue(new Error('RPC timeout'))
+      mockListRecent.mockResolvedValueOnce([mkRecord('/repo-a', 300)])
       const store = useWorkspaceStore()
       await store.load()
-      // AC-4.5 口径不变：records 置 [] 不抛、不阻断启动（不加错误条/重试）
-      expect(store.records).toEqual([])
+      mockListRecent.mockRejectedValue(new Error('RPC timeout'))
+      await store.load()
+      // 保留旧值不置空（§6.4 降级型）
+      expect(store.records).toEqual([mkRecord('/repo-a', 300)])
       // RD-3#4：留痕 + 标记，让「读失败」与「真无历史」在观测范围可分
       expect(store.loadError).toBe('RPC timeout')
       expect(warnSpy).toHaveBeenCalledWith(

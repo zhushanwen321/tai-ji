@@ -83,7 +83,7 @@ const MAX_TASKS = 50
 const SCHEDULE_COMMAND_NAME = 'schedule'
 
 /**
- * 撤回失效信号 customType（双侧同构字面量：与 agent-ext navigateTree 的 LabelEntry
+ * 撤回失效信号 customType（双侧同构字面量：与 host-internals navigateTree 的 LabelEntry
  * label 'taiji:revoked'、runtime revoke-orchestrator REVOKED_SIGNAL_CUSTOM_TYPE 三侧
  * 同串——插件不能 import runtime 包，按 CLIENT_MSG_ID_TYPE 双侧同构先例自持）。
  * 语义 = 该会话发生过树回退（消息撤回），累计镜像按活跃路径权威态重建。

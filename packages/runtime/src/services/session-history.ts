@@ -26,13 +26,14 @@
 
 import { readFile } from 'node:fs/promises'
 import { statSync } from 'node:fs'
-import type { Message } from '@taiji/shared'
+import type { Message, SegmentsMetadataFile } from '@taiji/shared'
 import { HISTORY_BUDGET, READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
 import type { ISessionStore } from './ports/session.js'
 import { isEnoent } from '../utils/errors.js'
 import { parseJsonl, type JsonlParseOptions } from '../utils/jsonl.js'
 import { warnOnce } from '../utils/warn-once.js'
 import { applyEntryEndTimes, mapSessionEntries, isInterruptedTail, computeActivePathEntries } from '../infra/pi/session-entry-mapper.js'
+import { backfillConvertedSegments } from '../infra/pi/entry-tree-builder.js'
 import type { PiSessionEntry } from '../infra/pi/pi-protocol.js'
 import { forEachReversedLineChunk } from '../utils/history-reverse-read.js'
 
@@ -98,6 +99,17 @@ export interface HistoryWindowQuery {
 }
 
 /**
+ * 文件读链的 sidecar 注入（session-cold-switch-perf 尾读快路径）：segments.json 元数据
+ * 由调用方（SessionHistoryReader 尾读编排，持 sessionId）读好后传入，convertWindowEntries
+ * 据此对 user message 回填结构化 Segment[]（图片/文件/技能 chip）——对齐全量重建路径
+ *（rebuildHistoryFromEntries backfillSegments）的消息内容。null/缺省 = 不回填（现状
+ * 纯文本降级，行为等价）。
+ */
+export interface TailReadSidecarOpts {
+  segmentsMetadata?: SegmentsMetadataFile | null
+}
+
+/**
  * W1 H4：从 .jsonl session 文件**尾读**最近 maxTurns 个 turn 的历史。
  *
  * 尾读走预算窗口（分块扩窗，D5②），避免大 session 文件全量读取。返回 TailReadResult
@@ -106,19 +118,23 @@ export interface HistoryWindowQuery {
  * [u6] query.cursor 存在时切游标窗口（锚点之前的最近 N turns，见
  * collectRecentTurnEntriesFromTail 的 cursorId 定位）；cursor 未命中（已清理/超扫描域）→
  * 空页 + truncated=false（翻页到头语义，不报错）。
+ *
+ * [session-cold-switch-perf] sidecar.segmentsMetadata 传入时尾读窗口做 segments 回填
+ *（与全量重建路径同一判定链，见 TailReadSidecarOpts）。
  */
 export async function getHistoryTailFromFile(
   sessionId: string,
   sessionStore: ISessionStore,
   maxTurns: number = HISTORY_BUDGET.RECENT_TURNS,
   query?: HistoryWindowQuery,
+  sidecar?: TailReadSidecarOpts,
 ): Promise<TailReadResult> {
   // wave:perf-w26（D9-1 消费方分层，plan M-3）：路径解析 force 旁路目录 TTL 缓存——
   // pi 是外部进程写文件（首个 assistant 后落盘），刚落盘 session 在 TTL 窗口内也必须
   // 解析到文件路径；离线 session 的尾读 fallback 不受 TTL 窗口陈旧影响。
   const target = sessionStore.scanSessions({ force: true }).find(s => s.id === sessionId)
   if (!target) return { messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 }
-  return tailReadHistory(target.filePath, sessionStore, maxTurns, query)
+  return tailReadHistory(target.filePath, sessionStore, maxTurns, query, sidecar)
 }
 
 /** ①档文件直读结果（crash-resilience §3.3 D5①：超预检阈值时 truncated=true）。 */
@@ -442,7 +458,11 @@ function collectRecentTurnEntriesFromTail(
  * pi 落盘于 message_end → ≈ 该消息产出结束）；turn 聚合口径（「已工作」时长/时刻区间）
  * 依赖它，且该数据只在持久化 entry 上有（live 链路走自己的时钟，见 shared Message.endedAt 注释）。
  */
-function convertWindowEntries(entries: PiSessionEntry[], sessionStore: ISessionStore): Message[] {
+function convertWindowEntries(
+  entries: PiSessionEntry[],
+  sessionStore: ISessionStore,
+  segmentsMetadata?: SegmentsMetadataFile | null,
+): Message[] {
   // 文件路径喂入前剥 session header 行：pi getEntries() RPC 已滤除（dist/core/
   // session-manager.js getEntries 的 `e.type !== "session"`，0.84.4 实锚），而 parseJsonl
   // 文件直读原样含 header——header 有 id 无 parentId，会与真根 entry 一起把
@@ -456,8 +476,15 @@ function convertWindowEntries(entries: PiSessionEntry[], sessionStore: ISessionS
   const scoped = entries.filter((e) => (e as { type?: unknown }).type !== 'session')
   const last = scoped[scoped.length - 1]
   const leafId = last !== undefined && typeof last.id === 'string' ? last.id : undefined
-  const { messages, entryIds } = mapSessionEntries(scoped, leafId)
+  const { messages, entryIds, customDataEntries } = mapSessionEntries(scoped, leafId)
   const converted = sessionStore.convertHistory(messages, entryIds)
+  // [session-cold-switch-perf] segments.json sidecar 回填（尾读窗口对齐全量路径的消息
+  // 内容——图片/文件/技能 chip）：与 rebuildHistoryFromEntries 第 2-4 步同一判定链
+  //（backfillConvertedSegments 单源复用）。回填先于 endedAt 回填，顺序对齐全量路径
+  //（convert → backfill → endTimes）。metadata 缺省 null = 不回填（现状纯文本降级）。
+  if (segmentsMetadata) {
+    backfillConvertedSegments(converted, customDataEntries, scoped, segmentsMetadata)
+  }
   applyEntryEndTimes(converted, scoped)
   return converted
 }
@@ -491,12 +518,16 @@ function activePathEntriesOf(entries: PiSessionEntry[]): PiSessionEntry[] {
  *
  * 规则 #6：文件不存在返回空结果不抛（pi 延迟写入）。
  * AC-12：末行损坏由逆序读的残行丢弃语义承接（INVAR-tail-3 同源）。
+ *
+ * [session-cold-switch-perf] sidecar.segmentsMetadata 传入时尾读窗口做 segments 回填
+ *（与全量重建路径同一判定链，见 TailReadSidecarOpts）。
  */
 export async function tailReadHistory(
   filePath: string,
   sessionStore: ISessionStore,
   maxTurns: number = HISTORY_BUDGET.RECENT_TURNS,
   query?: HistoryWindowQuery,
+  sidecar?: TailReadSidecarOpts,
 ): Promise<TailReadResult> {
   const emptyPage: TailReadResult = { messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 }
   // 规则 #6：文件不存在（ENOENT，pi 延迟落盘常态）空页 + warn；其余 stat 失败
@@ -533,7 +564,7 @@ export async function tailReadHistory(
   // 幂等；窗口尺寸有限，重复回溯成本可忽略）。
   const interrupted = query?.cursor === undefined ? isInterruptedTail(activePathEntriesOf(loaded.entries)) : undefined
   return {
-    messages: convertWindowEntries(loaded.entries, sessionStore),
+    messages: convertWindowEntries(loaded.entries, sessionStore, sidecar?.segmentsMetadata ?? null),
     truncated: loaded.truncated,
     loadedTurns: loaded.loadedTurns,
     totalTurnsEstimate: loaded.totalTurnsEstimate,

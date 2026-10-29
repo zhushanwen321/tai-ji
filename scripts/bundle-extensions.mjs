@@ -308,7 +308,11 @@ async function copyManifestResourceDirs(pkg, srcDir, outDir) {
 			}
 			await cp(src, dest, {
 				recursive: true,
-				filter: (s) => !s.includes(`${sep}node_modules${sep}`),
+				// 排除 node_modules 与 *.ts：staged 是 build 产物（dev/build 加载路径分流，
+				// 见 prepare-builtin-extensions.sh 头注——dev 走源码 .ts、build 只认 bundle .js），
+				// 残留 .ts 会让 extension-resolver fallback 旁路 bundle（R3 校验 fail-fast 的防护对象）
+				filter: (s) =>
+					!s.includes(`${sep}node_modules${sep}`) && !s.endsWith(".ts"),
 			});
 			copiedManifestDirs.push(`${field}:${rel}`);
 		}

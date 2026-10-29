@@ -3,19 +3,37 @@
  *
  * 依赖方向：command（类型化原语，统一 pending.createCommandId + register + transport.send）。
  *
- * 与 workspace 域同模式：load 全量拉取，save 全量写入（前端 store 是权威内存，
- * deep watch 变化后全量 save；runtime WriteBackCache debounce 落盘）。
+ * 写通道唯一入口 = 命令通道（connection-datasync-ssot §6.6）：
+ * createProject / renameProject / removeProject / setActiveProject——请求携带期望
+ * revision（最近一次读到的，load 回执或上一条命令回执），runtime 校验一致才执行、
+ * 执行后 +1；回执 = 完整新状态 + revision 新值；失败走 error envelope reject（调用方
+ * 保持命令前状态 + toast）。legacy 整表写封装已随命令化拆除（§6.6③）。
  */
-import type { ProjectStoreState } from '@taiji/shared'
+import type { ProjectCommandReply, ProjectLoadReply } from '@taiji/shared'
 import { RPC_BACKSTOP_TIMEOUT_MS } from '../pending'
 import { command } from '../request'
 
-/** 全量加载 project 列表（runtime project.load → project.loaded reply）。 */
-export async function load(): Promise<ProjectStoreState> {
+/** 全量加载 project 列表（runtime project.load → project.loaded reply，含 revision 水位）。 */
+export async function load(): Promise<ProjectLoadReply> {
   return command('project.load', {}, RPC_BACKSTOP_TIMEOUT_MS)
 }
 
-/** 全量保存（runtime project.save → project.loaded reply；ack 语义，前端不读 reply 数据）。 */
-export async function save(state: ProjectStoreState): Promise<void> {
-  await command('project.save', state, RPC_BACKSTOP_TIMEOUT_MS)
+/** 新建 project（runtime 生成 id、追加、设为活跃）。 */
+export async function createProject(name: string, revision: number): Promise<ProjectCommandReply> {
+  return command('project.createProject', { name, revision }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/** 重命名 project（默认项目不可改名，runtime 侧拒绝）。 */
+export async function renameProject(projectId: string, name: string, revision: number): Promise<ProjectCommandReply> {
+  return command('project.renameProject', { projectId, name, revision }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/** 删除 project（默认项目不可删；删活跃项则锚定回落默认项目）。 */
+export async function removeProject(projectId: string, revision: number): Promise<ProjectCommandReply> {
+  return command('project.removeProject', { projectId, revision }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/** 锚定切换（不更新 lastUsedAt——排序键仅创建时写入）。 */
+export async function setActiveProject(projectId: string, revision: number): Promise<ProjectCommandReply> {
+  return command('project.setActiveProject', { projectId, revision }, RPC_BACKSTOP_TIMEOUT_MS)
 }

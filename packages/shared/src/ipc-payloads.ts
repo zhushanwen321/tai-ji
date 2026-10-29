@@ -280,13 +280,14 @@ export interface ShieldsFacesPayload {
 // ── browser:overlay-state 浮层开合/内容上报（display-containers §7.4）──
 
 /**
- * 浮层内容种类闭集（browser 网页 / workflow 工作流图 / scheduler 定时任务 tab /
- * canvas 问题解决画布 tab），`browser:overlay-state` IPC payload 契约的词表单源：
+ * 浮层内容种类词表（browser 网页 / workflow 工作流图 / scheduler 定时任务 tab /
+ * canvas 问题解决画布 tab / plugin 插件声明内容——容器扩展点统一 §6.8 插件内容载体），
+ * `browser:overlay-state` IPC payload 契约的词表单源：
  * core overlay 域（OverlayKind 派生别名）、main display-gate 校验解析、preload
  * ElectronAPI 签名、renderer ipc 封装四方共用同一形态声明，防漂移——renderer 侧收窄
  * 为子集时 TS 结构可赋值性会使手抄词表漂移静默通过，main 侧只剩运行时 throw 兜底。
  */
-export type OverlayContentKind = 'browser' | 'workflow' | 'scheduler' | 'canvas'
+export type OverlayContentKind = 'browser' | 'workflow' | 'scheduler' | 'canvas' | 'plugin'
 
 // ── browser:state view 状态推送（display-containers W2）──
 
@@ -362,3 +363,29 @@ export type LocalFileReadReason = LocalFileServableReason | 'read_failed'
 export type LocalFileReadResult =
   | { ok: true; content: string; truncated: boolean }
   | { ok: false; reason: LocalFileReadReason }
+
+// ── cookie 登录态刷新（QUOTA_REFRESH_COOKIE = 'quota:refresh-cookie' invoke 通道）
+//    [quota cookie 刷新器] ──────────────────────────────────────────────────
+
+/**
+ * quota:refresh-cookie 请求 payload。fetcherId 必须在 QUOTA_REFRESH_TARGETS 在册
+ * （main handler 校验，不在册 reject）；providerId 决定 persist partition 与 secrets
+ * 文件名（`<providerId>-cookie.txt`）。
+ */
+export interface QuotaRefreshCookiePayload {
+  fetcherId: string
+  providerId: string
+}
+
+/**
+ * quota:refresh-cookie 返回。ok=false 时 error 携带可展示原因（超时 / 页面加载失败 /
+ * 未知 fetcher）；ok=true 时 cookie 携带导出的目标域 cookie 串（`name=value; name2=value2`
+ * 手贴格式）。main 刷新器不落盘——secrets 文件的唯一写方进程 = runtime QuotaService，
+ * 导出串经 IPC 回 renderer 后由续期链走 quota.configure 保存链单点落盘
+ * （跨进程单写方裁决，data-source-registry #66）。
+ */
+export interface QuotaRefreshCookieResult {
+  ok: boolean
+  cookie?: string
+  error?: string
+}

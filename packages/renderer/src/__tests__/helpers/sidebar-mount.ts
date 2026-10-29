@@ -54,10 +54,14 @@ export function useSidebarModule() {
   }
 }
 
-/** '@/stores/sidebar' mock 工厂。 */
+/** '@/stores/sidebar' mock 工厂（U8 终态：tab 值域 = 注册表 id 'ui.*'；三常量供
+ * Sidebar.vue VIEW_ORDER 消费——mock 缺导出让组件 setup 即抛，整文件用例连带红）。 */
 export function sidebarStoreModule() {
   return {
-    useSidebarStore: () => ({ collapsed: false, activeTab: 'sessions', toggleCollapsed: vi.fn() }),
+    SIDEBAR_TAB_SESSIONS: 'ui.sessions',
+    SIDEBAR_TAB_FILES: 'ui.files',
+    SIDEBAR_TAB_PLUGINS: 'ui.plugins',
+    useSidebarStore: () => ({ collapsed: false, activeTab: 'ui.sessions', toggleCollapsed: vi.fn() }),
   }
 }
 

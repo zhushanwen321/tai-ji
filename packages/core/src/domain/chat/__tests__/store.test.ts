@@ -161,6 +161,38 @@ describe('createChatStore factory', () => {
         expect(sut.store.getMessages(sid)[0]!.content).toBe('更早')
       })
 
+      // ── [session-cold-switch-perf §3.3-3 滚动位置保持]
+      //    全量精化（historyCacheReady 重拉）走整体合并路径时，基线相对尾读窗口在分区
+      //    头部插入更早历史——virtua 仅 shift=true 时对该形态补偿滚动，store 侧记事件
+      //    计数交 renderer 转一拍 isPrepend。触发面 = 「分区非空 + 变长 + 首条文件侧身份
+      //    变化」三条件同时成立，其余刷新形态一律不触发。──
+      describe('基线前置替换信号（getBaselinePrependTick）', () => {
+        it('全量基线替换头部插入更早历史 → tick 递增', () => {
+          const sid = 's1'
+          // 冷切入形态：hydrate 尾读窗口（最近 2 条）→ 后台全量到达重拉（基线多出更早 e0）
+          sut.store.hydrate(sid, [baselineUser('e1'), baselineUser('e2')])
+          expect(sut.store.getBaselinePrependTick(sid)).toBe(0)
+          sut.store.reconcileHistory(sid, [baselineUser('e0'), baselineUser('e1'), baselineUser('e2')])
+          expect(sut.store.getBaselinePrependTick(sid)).toBe(1)
+          // 分区头部确为插入的更早历史（形态自证：不是等长刷新）
+          expect(sut.store.getMessages(sid)[0]!.id).toBe('e0')
+        })
+
+        it('hydrate 首次填充 / keptEarlier 窗口合并 / 等长刷新均不触发', () => {
+          const sid = 's2'
+          // ① 首次 hydrate（分区空 → 非空）：无前置插入语义（列表初次填充，virtua :key=session 重建）
+          sut.store.hydrate(sid, [baselineUser('e1'), baselineUser('e2')])
+          expect(sut.store.getBaselinePrependTick(sid)).toBe(0)
+          // ② 翻页前插后窗口 reconcile（truncated=true，keptEarlier 保留路径）：头部原样保留
+          sut.store.prependHistory(sid, [baselineUser('e0')])
+          sut.store.reconcileHistory(sid, [baselineUser('e1'), baselineUser('e2')], { truncated: true, loadedTurns: 2, totalTurnsEstimate: 5 })
+          expect(sut.store.getBaselinePrependTick(sid)).toBe(0)
+          // ③ 等长刷新（重连对账形态：同基线整体合并，长度不变）
+          sut.store.reconcileHistory(sid, [baselineUser('e0'), baselineUser('e1'), baselineUser('e2')])
+          expect(sut.store.getBaselinePrependTick(sid)).toBe(0)
+        })
+      })
+
       // ── [steer-bubble u3 / D3]
       //    两步合并快照序列：①尾部保护段收集（streaming assistant ∨ 未确认 user）
       //    ②user 正序-尾窗对齐去重（a=min(n,k)，保护段正数 1..a ↔ 基线尾部 k−a+1..k
@@ -494,7 +526,7 @@ describe('createChatStore factory', () => {
 
     it('clientUuid 形态契约：返回 id 匹配 extension TAG 正则 u-[0-9a-fA-F-]{36}', () => {
       const id = sut.store.appendUser('s-w2-uuid', textToSegments('x'))
-      // @zhushanwen/pi-msg-id-mapper TAG_MATCH 锚定该形态——重开 badge 回填链的硬约束
+      // @zhushanwen/pi-host-internals（msg-id-mapper 模块）TAG_MATCH 锚定该形态——重开 badge 回填链的硬约束
       expect(id).toMatch(/^u-[0-9a-fA-F-]{36}$/)
     })
 
@@ -558,8 +590,9 @@ describe('createChatStore factory', () => {
     // 且 segments 完整（用户可见行为）」已迁移：queue_update 帧降级为内核内部回执，不再直驱
     // 对话流（D7 队列区数据源 = session.delivery 状态帧单一源），其显示链（submit 乐观气泡 →
     // session.delivery 帧 morph → message_end 标记按原段回填）编排在 useChat 层——用户可见
-    // 行为断言（skill 段引用恒等 + segmentsToText 保真，原判据原样保留）迁至 useChat.test.ts
-    // 「送达回执 → 按序入流」用例；等价性维度见 apply-entry-equivalence.test.ts E5a/E5c。
+    // 行为断言（skill 段引用恒等 + segmentsToText 保真，原判据原样保留）迁至
+    // store-merged-merged.test.ts useChat 合并节「送达回执 → 按序入流」用例；
+    // 等价性维度见 apply-entry-merged.test.ts 的 apply-entry-equivalence 合并节 E5a/E5c。
     // 原退役锁断言（构造 queue_update 帧断言不产生 ref 气泡）已删除：u5a/R1-A5 已把
     // message.queue_update 条目从 ServerMessageType 整体删除（shared/protocol.ts），
     // 「防无设计依据地复活该驱动链」现由协议类型删除承担（tsc 层锁，强于运行时断言）。
@@ -1183,6 +1216,24 @@ describe('createChatStore factory', () => {
       expect(sut.store.getChangeSetStatus('s0', 'a0')).toBeUndefined()
       // 保留 session 的条目不受影响
       expect(sut.store.getChangeSetStatus('s8', 'a8')).toBe('ready')
+    })
+
+    it('LRU 驱逐同步清基线前置 tick 分区（[session-cold-switch-perf §3.3-3] 与 messages 分区同生共死）', () => {
+      // 9 个 session 全部 hydrate（时间戳递增 touch），s0 最旧被驱逐；s0 已产生基线前置 tick
+      for (let i = 0; i < 9; i++) {
+        const sid = `s${i}`
+        sut.store.hydrate(sid, [baselineUser(`e1-${i}`), baselineUser(`e2-${i}`)])
+        sut.store.touchLru(sid)
+      }
+      sut.store.reconcileHistory('s0', [baselineUser('e0-0'), baselineUser('e1-0'), baselineUser('e2-0')])
+      expect(sut.store.getBaselinePrependTick('s0')).toBe(1) // 前置：tick 已写入（头部插入更早 e0-0）
+
+      sut.store.evictIfNeeded()
+      expect(sut.store.getMessages('s0')).toHaveLength(0) // 前置：s0 被驱逐
+      // 驱逐同步清该 sid 的 tick 分区（微泄漏防线，对齐 changeSetStatuses / historyWindows 清理）
+      expect(sut.store.getBaselinePrependTick('s0')).toBe(0)
+      // 保留 session 的 tick 不受影响（s8 无 tick 记录，读口缺省 0）
+      expect(sut.store.getBaselinePrependTick('s8')).toBe(0)
     })
 
     it('streaming session 豁免驱逐（isLruExempt）', () => {

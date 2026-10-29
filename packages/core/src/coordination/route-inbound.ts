@@ -384,6 +384,12 @@ export const ROUTE_TABLE: Record<string, RouteTableEntry> = {
   // sessionId——按 payload 形状进 session 通道，漏声明则模块级单订阅
   // （use-canvas-sync onCrossSession）永收不到：托盘计数不刷新 / 创建后自动唤起死亡。
   'canvas.updated': { crossSession: true },
+  // session-cold-switch-perf §3.3-3：后台全量重建完成轻通知（成功/失败都推，失败带 error）。
+  // 消费方 = use-session 的通知编排（经 SessionApiPort.onHistoryCacheReady 的壳适配订阅
+  // crossSession 通道；factory 内 refCount 单飞 = 全局单消费面）——非活跃会话/btw 线分区
+  // 的帧由编排内 activeId 匹配判定静默忽略（不串显示）。一次性事件非 last-value 快照，
+  // 同 session.deliveryHandled 不登记 message-bus（shared protocol 注释同源）。
+  'session.historyCacheReady': { crossSession: true },
 }
 
 // ── configureRouteInbound（IF4） ───────────────────────────────────

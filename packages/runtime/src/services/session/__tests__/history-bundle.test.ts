@@ -286,6 +286,17 @@ function makeReader(rebuildImpl?: (entries: Array<Record<string, unknown>>) => M
   return { reader, client, rebuild, sessionStore }
 }
 
+/**
+ * [session-cold-switch-perf §3.3-1 态 2] 等待后台全量重建任务完成写缓存（写缓存无外部
+ * 句柄）。确定性锚：rebuild mock 是 fetchAndRebuildFull 的末端同步段，rebuild 之后到
+ * runRebuildJob 写缓存之间的唯一中间 await 是 yieldToEventLoop（setImmediate）——
+ * rebuild 达标次数 + 一次 setImmediate 排空后，写缓存必已落定。
+ */
+async function waitForBackgroundRebuild(rebuild: ReturnType<typeof vi.fn>, times = 1): Promise<void> {
+  await vi.waitFor(() => expect(rebuild).toHaveBeenCalledTimes(times))
+  await new Promise((resolve) => setImmediate(resolve))
+}
+
 // wave3 包装：本段原文件顶层语句收进 describe 作用域（顶层 hook 不再外溢到同文件其他来源的用例）
 describe('history-rebuild', () => {
 // session-history 模块级 mock：调用计数跨用例累积，前置清零（r1-S16 尾读用例引入后
@@ -293,27 +304,32 @@ describe('history-rebuild', () => {
 beforeEach(() => {
   vi.mocked(getHistoryTailFromFile).mockClear()
 })
-describe('分支 3：全量重建（无缓存）', () => {
-  it('client 活跃：getEntries 全量 → rebuild → 写缓存并返回浅拷贝', async () => {
-    const { reader, client } = makeReader()
+// [session-cold-switch-perf §3.3-1] 四态分派后「无缓存 + client 在场」= 态 2：尾读首屏
+// 立即返回 + 后台全量任务重建写缓存（fire-and-forget 单例）。原「分支 3 同步全量」仅存于
+// 缓存命中后的增量丢失重整（getLatestWindow fall-through）与游标翻页无缓存路径。
+describe('态 2：尾读首屏 + 后台全量重建（无缓存 + client 在场）', () => {
+  it('尾读首屏立即返回，后台全量重建写缓存，后续走缓存且浅拷贝隔离', async () => {
+    const { reader, client, rebuild } = makeReader()
     client.getEntries.mockResolvedValue({ data: { entries: [entry('e1', null)], leafId: 'e1' } })
     const result = await reader.getHistory('s1')
-    expect(client.getEntries).toHaveBeenCalledWith()
-    expect(result.messages.map((m) => m.id)).toEqual(['m-e1'])
-    expect(result.truncated).toBe(false)
-    // 返回浅拷贝：就地 push 不打穿缓存基底
-    result.messages.push(msg('intruder'))
+    expect(result.messages.map((m) => m.id)).toEqual(['tail-1']) // 首屏 = 尾读窗口
+    await waitForBackgroundRebuild(rebuild) // 后台任务：getEntries 全量 → rebuild → 写缓存
+    expect(client.getEntries).toHaveBeenCalledWith() // 全量调用（无 since 参数）
     const again = await reader.getHistory('s1')
-    // 第二次走缓存增量（空增量 = 新鲜短路），内容仍是原两条基线 + 无 intruder
-    expect(again.messages.some((m) => m.id === 'intruder')).toBe(false)
+    expect(again.messages.map((m) => m.id)).toEqual(['m-e1']) // 缓存基线（空增量短路）
+    // 返回浅拷贝：就地 push 不打穿缓存基底
+    again.messages.push(msg('intruder'))
+    const third = await reader.getHistory('s1')
+    expect(third.messages.some((m) => m.id === 'intruder')).toBe(false)
   })
 
   it('边界（r1-S16）：缓存存在但 leafId 为 null → 跳过增量直接全量重建（分支 1/2 与 3 交界）', async () => {
     const { reader, client, rebuild } = makeReader()
-    // 首轮建缓存：leafId null（pi 未给叶子 id）但 messages 非空 → 缓存条目 leafId=null
+    // 首轮态 2：尾读首屏 + 后台重建落 leafId null 的缓存条目（pi 未给叶子 id）
     client.getEntries.mockResolvedValueOnce({ data: { entries: [entry('e1', null)], leafId: null } })
     await reader.getHistory('s1')
-    // 第二轮：cached 存在但 leafId null → 不走 since 增量，重新全量拉取重建
+    await waitForBackgroundRebuild(rebuild)
+    // 第二轮：cached 存在但 leafId null → 不走 since 增量，同步全量拉取重建
     client.getEntries.mockResolvedValueOnce({ data: { entries: [entry('e1', null), entry('e2', 'e1')], leafId: 'e2' } })
     const result = await reader.getHistory('s1')
     expect(client.getEntries).toHaveBeenLastCalledWith() // 全量调用（无 since 参数）
@@ -321,39 +337,52 @@ describe('分支 3：全量重建（无缓存）', () => {
     expect(result.messages.map((m) => m.id)).toEqual(['m-e1', 'm-e2'])
   })
 
-  it('R-12：RPC entries 空 → 短路返回空列表（不走尾读）', async () => {
+  it('R-12（后台形态）：RPC entries 空 → 后台重建不写缓存（权威空视图），首屏与后续仍尾读', async () => {
     const { reader, client } = makeReader()
     client.getEntries.mockResolvedValue({ data: { entries: [], leafId: null } })
     const result = await reader.getHistory('s1')
-    expect(result).toEqual({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 })
-    expect(getHistoryTailFromFile).not.toHaveBeenCalled()
+    expect(result.messages.map((m) => m.id)).toEqual(['tail-1']) // 态 2 尾读首屏
+    // 后台全量任务在首屏返回前已同步发起（ensureRebuildJob 于返回路径同步调用）
+    expect(client.getEntries).toHaveBeenCalledTimes(1)
+    // 空权威视图不写缓存（R-12 语义在后台形态的承载）：缓存恒 miss，后续请求仍尾读
+    const again = await reader.getHistory('s1')
+    expect(again.messages.map((m) => m.id)).toEqual(['tail-1'])
   })
 
-  it('全量 getEntries 抛错（分支 3 catch，r1-S16）→ 尾读降级', async () => {
+  it('后台全量 getEntries 抛错（r1-S16）：首屏仍尾读返回，重建失败不写缓存', async () => {
     const { reader, client } = makeReader()
     client.getEntries.mockRejectedValue(new Error('pi internal error'))
     const degraded = await reader.getHistory('s1')
     expect(degraded.truncated).toBe(true)
-    expect(degraded.messages.map((m) => m.id)).toEqual(['tail-1'])
+    expect(degraded.messages.map((m) => m.id)).toEqual(['tail-1']) // 首屏 = 尾读窗口（不被后台失败阻塞）
+    // 后台任务失败不写缓存（首败即停，不自动重起）：缓存恒 miss，后续请求仍尾读
+    expect(client.getEntries).toHaveBeenCalled() // 后台任务已拉取并失败
+    const again = await reader.getHistory('s1')
+    expect(again.messages.map((m) => m.id)).toEqual(['tail-1'])
   })
 })
 describe('分支 1/2：缓存命中 → since 增量', () => {
   it('空增量 = 缓存新鲜：R-12 短路返回缓存，零重建零尾读', async () => {
     const { reader, client, rebuild } = makeReader()
     client.getEntries.mockResolvedValueOnce({ data: { entries: [entry('e1', null), entry('e2', 'e1')], leafId: 'e2' } })
-    await reader.getHistory('s1') // 建缓存
+    await reader.getHistory('s1') // 态 2：尾读首屏 + 后台全量重建建缓存
+    await waitForBackgroundRebuild(rebuild)
+    client.getEntries.mockClear()
+    vi.mocked(getHistoryTailFromFile).mockClear()
     client.getEntries.mockResolvedValueOnce({ data: { entries: [], leafId: 'e2' } })
     const result = await reader.getHistory('s1')
-    expect(client.getEntries).toHaveBeenLastCalledWith('e2')
+    expect(client.getEntries).toHaveBeenCalledTimes(1)
+    expect(client.getEntries).toHaveBeenCalledWith('e2')
     expect(result.messages.map((m) => m.id)).toEqual(['m-e1', 'm-e2'])
     expect(rebuild).toHaveBeenCalledTimes(1) // 增量窗口未重建
-    expect(getHistoryTailFromFile).not.toHaveBeenCalled()
+    expect(getHistoryTailFromFile).not.toHaveBeenCalled() // 零尾读（缓存命中路径）
   })
 
   it('增量非空且 parentId 不变量成立：merge 合并入缓存并推进 leafId', async () => {
-    const { reader, client } = makeReader()
+    const { reader, client, rebuild } = makeReader()
     client.getEntries.mockResolvedValueOnce({ data: { entries: [entry('e1', null)], leafId: 'e1' } })
-    await reader.getHistory('s1')
+    await reader.getHistory('s1') // 态 2 建缓存
+    await waitForBackgroundRebuild(rebuild)
     client.getEntries.mockResolvedValueOnce({ data: { entries: [entry('e2', 'e1')], leafId: 'e2' } })
     const result = await reader.getHistory('s1')
     expect(result.messages.map((m) => m.id)).toEqual(['m-e1', 'm-e2'])
@@ -365,9 +394,10 @@ describe('分支 1/2：缓存命中 → since 增量', () => {
   })
 
   it('增量消息与缓存 piEntryId 重复时去重（D6-3，mergeIncrementalMessages 真跑）', async () => {
-    const { reader, client } = makeReader()
+    const { reader, client, rebuild } = makeReader()
     client.getEntries.mockResolvedValueOnce({ data: { entries: [entry('e1', null), entry('e2', 'e1')], leafId: 'e2' } })
-    await reader.getHistory('s1')
+    await reader.getHistory('s1') // 态 2 建缓存
+    await waitForBackgroundRebuild(rebuild)
     // 增量窗口首条 parent 匹配缓存 leafId，窗口尾部混入已缓存的 e2（pi slice 异常时序防御）
     client.getEntries.mockResolvedValueOnce({ data: { entries: [entry('e3', 'e2'), entry('e2', 'e1')], leafId: 'e3' } })
     const result = await reader.getHistory('s1')
@@ -375,9 +405,10 @@ describe('分支 1/2：缓存命中 → since 增量', () => {
   })
 
   it('parentId 不变量违反（branch/rewrite）：丢缓存 fall-through 全量重建', async () => {
-    const { reader, client } = makeReader()
+    const { reader, client, rebuild } = makeReader()
     client.getEntries.mockResolvedValueOnce({ data: { entries: [entry('e1', null)], leafId: 'e1' } })
-    await reader.getHistory('s1')
+    await reader.getHistory('s1') // 态 2 建缓存
+    await waitForBackgroundRebuild(rebuild)
     // delta 首条 parent ≠ 缓存 leafId → 丢缓存 → 同次调用内全量重建
     client.getEntries.mockImplementation(async (since?: string) => {
       if (since !== undefined) return { data: { entries: [entry('branch-head', 'old-point')], leafId: 'branch-head' } } as GetEntriesResult
@@ -389,9 +420,10 @@ describe('分支 1/2：缓存命中 → since 增量', () => {
   })
 
   it('增量 Entry not found：丢缓存 → 全量重新拉取（D6-4 自愈）', async () => {
-    const { reader, client } = makeReader()
+    const { reader, client, rebuild } = makeReader()
     client.getEntries.mockResolvedValueOnce({ data: { entries: [entry('e1', null)], leafId: 'e1' } })
-    await reader.getHistory('s1')
+    await reader.getHistory('s1') // 态 2 建缓存
+    await waitForBackgroundRebuild(rebuild)
     client.getEntries.mockImplementation(async (since?: string) => {
       if (since !== undefined) throw new Error('Entry not found: e1')
       return { data: { entries: [entry('f1', null)], leafId: 'f1' } } as GetEntriesResult
@@ -401,9 +433,10 @@ describe('分支 1/2：缓存命中 → since 增量', () => {
   })
 
   it('增量其他错误：尾读降级 + 缓存保留（下次重试仍走 since）', async () => {
-    const { reader, client } = makeReader()
+    const { reader, client, rebuild } = makeReader()
     client.getEntries.mockResolvedValueOnce({ data: { entries: [entry('e1', null)], leafId: 'e1' } })
-    await reader.getHistory('s1')
+    await reader.getHistory('s1') // 态 2 建缓存
+    await waitForBackgroundRebuild(rebuild)
     client.getEntries.mockRejectedValueOnce(new Error('rpc timeout'))
     const degraded = await reader.getHistory('s1')
     expect(degraded.truncated).toBe(true)
@@ -429,12 +462,13 @@ describe('无 client（离线 session）与全量文件读', () => {
   // ── [u6] 游标翻页（crash-resilience §3.3 D4 中期；必测断言①⑥）──
 
   it('游标翻页：缓存命中 → 全量基线切前缀，返回锚点前最近 limitTurns turns（零 RPC）', async () => {
-    const { reader, client } = makeReader()
+    const { reader, client, rebuild } = makeReader()
     // 5 turn 基线（rebuild mock 每 entry 产一条 user 消息 = 每 entry 一个 turn）
     client.getEntries.mockResolvedValue({
       data: { entries: [entry('e1', null), entry('e2', 'e1'), entry('e3', 'e2'), entry('e4', 'e3'), entry('e5', 'e4')], leafId: 'e5' },
     })
-    await reader.getHistory('s1') // 建缓存（全量基线）
+    await reader.getHistory('s1') // 态 2：尾读首屏 + 后台全量重建建缓存
+    await waitForBackgroundRebuild(rebuild) // 确保缓存基线已落定（零 RPC 断言的前提）
     client.getEntries.mockClear()
     const page = await reader.getHistory('s1', { cursor: 'e5', limitTurns: 2 })
     // 缓存基线直读，零 RPC（锚前内容 append-only，对基线新鲜度不敏感）
@@ -447,11 +481,12 @@ describe('无 client（离线 session）与全量文件读', () => {
   })
 
   it('游标翻页：翻页到头（锚点为最早 turn）→ 前缀空 → 空页 + truncated=false', async () => {
-    const { reader, client } = makeReader()
+    const { reader, client, rebuild } = makeReader()
     client.getEntries.mockResolvedValue({
       data: { entries: [entry('e1', null), entry('e2', 'e1')], leafId: 'e2' },
     })
     await reader.getHistory('s1')
+    await waitForBackgroundRebuild(rebuild) // 缓存基线路径（锚点切前缀）的前提
     const page = await reader.getHistory('s1', { cursor: 'e1' })
     expect(page.messages).toEqual([])
     expect(page.truncated).toBe(false)
@@ -476,7 +511,7 @@ describe('无 client（离线 session）与全量文件读', () => {
     expect(page.messages.map((m) => m.id)).toEqual(['m-e2'])
     expect(page.truncated).toBe(true)
 
-    // RPC 失败（无缓存）→ 文件游标读降级（cursor/maxBytes 透传）
+    // RPC 失败（无缓存）→ 文件游标读降级（cursor/maxBytes 透传 + sidecar 注入）
     const { reader: reader2, client: client2 } = makeReader()
     client2.getEntries.mockRejectedValue(new Error('rpc down'))
     await reader2.getHistory('s1', { cursor: 'e9', maxBytes: 123 })
@@ -485,6 +520,7 @@ describe('无 client（离线 session）与全量文件读', () => {
       expect.anything(),
       20, // limitTurns 缺省回落 HISTORY_BUDGET.RECENT_TURNS
       { cursor: 'e9', maxBytes: 123 },
+      expect.anything(), // [§3.3-1 实现项①] 尾读路径 segments sidecar 注入对象（第 5 参）
     )
   })
 
@@ -494,30 +530,33 @@ describe('无 client（离线 session）与全量文件读', () => {
       sessionStore: {} as unknown as ISessionStore,
     })
     await reader.getHistory('s1', { cursor: 'e2' })
-    expect(getHistoryTailFromFile).toHaveBeenCalledWith('s1', expect.anything(), 20, { cursor: 'e2', maxBytes: expect.any(Number) })
+    expect(getHistoryTailFromFile).toHaveBeenCalledWith('s1', expect.anything(), 20, { cursor: 'e2', maxBytes: expect.any(Number) }, expect.anything())
   })
 })
 describe('inflight 合并与 onSessionDisposed', () => {
-  it('并发 getHistory 同 session 共享一次 RPC（W20 Fix-5）', async () => {
+  it('并发 getHistory 同 session 共享一次请求（W20 Fix-5）：inflight 复用尾读 + 后台任务单例', async () => {
     const { reader, client } = makeReader()
     let release!: (v: GetEntriesResult) => void
     client.getEntries.mockImplementation(async () => new Promise<GetEntriesResult>((resolve) => { release = resolve }))
     const p1 = reader.getHistory('s1')
     const p2 = reader.getHistory('s1')
+    await vi.waitFor(() => expect(release).toBeDefined()) // 后台任务（单例）已发起全量 RPC
     release({ data: { entries: [entry('e1', null)], leafId: 'e1' } })
     const [r1, r2] = await Promise.all([p1, p2])
-    expect(client.getEntries).toHaveBeenCalledTimes(1)
+    expect(client.getEntries).toHaveBeenCalledTimes(1) // 后台任务单例：一次全量 RPC（不重复重建）
     expect(r1).toEqual(r2)
+    expect(r1.messages.map((m) => m.id)).toEqual(['tail-1']) // 首屏 = 尾读窗口（态 2）
   })
 
-  it('onSessionDisposed：清缓存（后续 getHistory 走全量而非增量）', async () => {
-    const { reader, client } = makeReader()
+  it('onSessionDisposed：清缓存 + 在途任务置 disposed（后续 getHistory 重新尾读 + 后台全量重建）', async () => {
+    const { reader, client, rebuild } = makeReader()
     client.getEntries.mockResolvedValue({ data: { entries: [entry('e1', null)], leafId: 'e1' } })
     await reader.getHistory('s1')
+    await waitForBackgroundRebuild(rebuild) // 后台重建建缓存
     reader.onSessionDisposed('s1')
     client.getEntries.mockClear()
-    await reader.getHistory('s1')
-    expect(client.getEntries).toHaveBeenCalledWith() // 无缓存 → 全量（无参调用）
+    await reader.getHistory('s1') // 缓存已清 → 再次态 2：尾读首屏 + 后台全量重建
+    expect(client.getEntries).toHaveBeenCalledWith() // 全量（无参调用）
   })
 
   it('onSessionDisposed：未缓存 session 幂等 no-op', () => {
@@ -540,11 +579,14 @@ describe('活跃路径裁剪接入（message-revoke U6a）', () => {
       data: { entries: [entry('e1', null), entry('e2', 'e1'), entry('b1', 'e1'), entry('b2', 'b1')], leafId: 'b2' },
     })
     const result = await reader.getHistory('s1')
-
-    // rebuild（port 直通 mock）收到的是裁剪后活跃路径子集（e2 旧分支被滤）
+    expect(result.messages.map((m) => m.id)).toEqual(['tail-1']) // 首屏 = 尾读窗口（态 2）
+    // rebuild（port 直通 mock）在后台任务中收到的是裁剪后活跃路径子集（e2 旧分支被滤）
+    await waitForBackgroundRebuild(rebuild)
     expect(rebuild).toHaveBeenCalledTimes(1)
     expect(rebuild).toHaveBeenCalledWith([entry('e1', null), entry('b1', 'e1'), entry('b2', 'b1')], null)
-    expect(result.messages.map((m) => m.id)).toEqual(['m-e1', 'm-b1', 'm-b2'])
+    // 缓存基线 = 裁剪后活跃路径（后续 getHistory 走缓存增量返回基线）
+    const again = await reader.getHistory('s1')
+    expect(again.messages.map((m) => m.id)).toEqual(['m-e1', 'm-b1', 'm-b2'])
   })
 
   it('全量重建调用点：leafId null（缺省）→ rebuild 收到全量 entries（现行为回归）', async () => {
@@ -552,6 +594,7 @@ describe('活跃路径裁剪接入（message-revoke U6a）', () => {
     const full = [entry('e1', null), entry('e2', 'e1')]
     client.getEntries.mockResolvedValue({ data: { entries: full, leafId: null } })
     await reader.getHistory('s1')
+    await waitForBackgroundRebuild(rebuild) // 后台任务中的 rebuild 收到全量（leafId null 不裁剪）
     expect(rebuild).toHaveBeenCalledWith(full, null)
   })
 
@@ -561,9 +604,10 @@ describe('活跃路径裁剪接入（message-revoke U6a）', () => {
     // 执行会把窗口边界误当树边界。canary 构造：delta 内混一条 parent 指向集合外的条目
     // （d2.parent=missing）——若增量被误接 leafId 裁剪，d2 的回溯链在窗口内断裂会把 d1
     // 误滤（链 missing→d2 只含 d2）；不裁剪时 d1/d2 全部进入合并。
-    const { reader, client } = makeReader()
+    const { reader, client, rebuild } = makeReader()
     client.getEntries.mockResolvedValueOnce({ data: { entries: [entry('e1', null), entry('e2', 'e1')], leafId: 'e2' } })
-    await reader.getHistory('s1') // 建缓存 {leafId: e2}
+    await reader.getHistory('s1') // 态 2：尾读首屏 + 后台重建建缓存 {leafId: e2}
+    await waitForBackgroundRebuild(rebuild)
     client.getEntries.mockResolvedValueOnce({ data: { entries: [entry('d1', 'e2'), entry('d2', 'missing')], leafId: 'd2' } })
     const second = await reader.getHistory('s1')
     // 增量条目全量并入（d1 不因窗口内回溯断裂被滤）

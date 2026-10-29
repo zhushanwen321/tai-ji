@@ -20,10 +20,11 @@
  * 数据源经 inject 注入（VIEW_HOST_SOURCE_KEY），壳 provide 真实实现，单测
  * global.provide mock；无注入时静默空态不崩（design-review R3）。
  */
-import { computed, inject, onMounted } from 'vue'
+import { computed, inject, onMounted, provide } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { PluginViewScope } from '@taiji/shared'
 import { VIEW_HOST_SOURCE_KEY } from './view-host-source'
+import { VIEW_SCOPE_SESSION_KEY } from '../rendering-protocol/container-navigation-key'
 import GuiComponentRenderer from '../rendering-protocol/GuiComponentRenderer.vue'
 
 const props = withDefaults(
@@ -42,6 +43,11 @@ const props = withDefaults(
 
 const { t } = useI18n()
 const source = inject(VIEW_HOST_SOURCE_KEY, null)
+
+// 容器导航的会话注入第一档（§6.4）：把组件树所属视图的会话 provide 给树内交互原语
+// （action-bar / list-tree 点击透传给导航执行器）；global scope 无会话 → undefined，
+// 执行器回退焦点会话（第二档）。provide 值是纯值非 ref——scope prop 挂载后不变。
+provide(VIEW_SCOPE_SESSION_KEY, props.scope.kind === 'session' ? props.scope.sessionId : undefined)
 
 /** 当前 scope + viewId 的 GuiComponent 树缓存条目（无则 undefined → 空态）。
  *  会话域走既有三法（托盘同源读路径），全局域走 scope 联合法（壳未提供时 undefined → 空态）。 */

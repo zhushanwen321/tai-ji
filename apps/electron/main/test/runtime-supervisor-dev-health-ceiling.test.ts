@@ -33,6 +33,7 @@ vi.mock('../supervisor/process-control.js', () => ({
   spawnRuntimeProcess: vi.fn(() => ({
     child: { exitCode: null, killed: false, pid: 12345, on: vi.fn(), kill: vi.fn() },
     token: 'test-token',
+    runtimeId: 'test-runtime-id',
   })),
   stopRuntimeProcess: vi.fn(async () => undefined),
 }))

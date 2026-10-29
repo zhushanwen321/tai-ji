@@ -8,8 +8,13 @@
  *
  * W2 已落位（u-w2-browser-mount）：coordination.ts 增 openBrowser(url, sessionId) +
  * closeBrowserOverlayForSession（会话删除级联 UI 关闭编排）。
+ * 容器扩展点统一（§6.4/§6.8）：openOverlayContent（通用寻址入口）+
+ * closeOverlayForSession（级联统一判据 payload.sessionId）；content-slots =
+ * workflow 壳标签条分段 / 壳承载 kind 集的注册表派生视图消费侧（与 drawer 域
+ * content-slots 同构，renderer 壳只消费不派生）。
  */
 export * from './types'
+export * from './content-slots'
 export {
   getOverlayControlState,
   useOverlayControl,
@@ -22,6 +27,8 @@ export {
   openBrowser,
   openSchedulerOverlay,
   openCanvasOverlay,
+  openOverlayContent,
+  closeOverlayForSession,
   closeBrowserOverlayForSession,
   closeCanvasOverlayForSession,
   _resetOverlayForTest,

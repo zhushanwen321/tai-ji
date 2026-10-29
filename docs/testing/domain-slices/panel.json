@@ -21,6 +21,12 @@
     ]
   },
   "tests": [
+    "packages/core/src/domain/composer/**",
+    "packages/core/src/domain/session-trace/**",
+    "packages/renderer/src/__tests__/composables/use-command-sync.test.ts",
+    "packages/renderer/src/__tests__/composables/useCommandPopoverTrigger.mutual-exclusion.test.ts",
+    "packages/renderer/src/__tests__/composables/useCommandPopoverTrigger.session-subagent.test.ts",
+    "packages/renderer/src/__tests__/composables/useCopy.test.ts",
     "packages/renderer/src/__tests__/panel/BrowserPane.test.ts",
     "packages/renderer/src/__tests__/panel/command-popover-landing.test.ts",
     "packages/renderer/src/__tests__/panel/command-popover-symbols-format-age.test.ts",
@@ -51,16 +57,11 @@
     "packages/renderer/src/__tests__/panel/session-file-format.test.ts",
     "packages/renderer/src/__tests__/panel/skill-notice-stream.test.ts",
     "packages/renderer/src/__tests__/panel/turn-working.test.ts",
-    "packages/renderer/src/components/panel/__tests__/Panel.test.ts",
+    "packages/renderer/src/__tests__/panel/workflow-viz-overlay-derivation.test.ts",
     "packages/renderer/src/components/panel/__tests__/Panel.dead-diagnostics-export.test.ts",
+    "packages/renderer/src/components/panel/__tests__/Panel.test.ts",
     "packages/renderer/src/components/panel/detail-renderers/__tests__/DiffView.seq-guard.test.ts",
-    "packages/renderer/src/composables/panel/__tests__/composables-panel-mock-bundle.test.ts",
-    "packages/renderer/src/__tests__/composables/useCommandPopoverTrigger.mutual-exclusion.test.ts",
-    "packages/renderer/src/__tests__/composables/useCommandPopoverTrigger.session-subagent.test.ts",
-    "packages/renderer/src/__tests__/composables/use-command-sync.test.ts",
-    "packages/renderer/src/__tests__/composables/useCopy.test.ts",
-    "packages/core/src/domain/composer/**",
-    "packages/core/src/domain/session-trace/**"
+    "packages/renderer/src/composables/panel/__tests__/composables-panel-mock-bundle.test.ts"
   ],
   "sharedBy": {
     "packages/renderer/src/__tests__/composables/useCommandPopoverTrigger.session-subagent.test.ts": [

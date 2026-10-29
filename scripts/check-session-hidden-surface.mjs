@@ -181,15 +181,14 @@ export const HIDDEN_ALLOWLIST = new Map([
   ['packages/core/src/extension-host/header-action-store.ts:27', '插件 headerAction 运行时条目 hidden（HeaderActionEntry 声明，入口整体不渲染）'],
   ['packages/core/src/extension-host/header-action-store.ts:38', '插件 headerAction 声明侧静态形状 hidden（ContributionRegistry 侧）'],
   ['packages/core/src/extension-host/header-action-store.ts:78', '插件 headerAction 帧载荷 hidden 透传（set 写入）'],
-  ['packages/core/src/extension-host/message-bus-bridge.ts:251', '插件 headerActionUpdate 帧 hidden 解析透传（241→251 随插件化分支合并漂移）'],
-  ['packages/plugin-sdk/src/types.ts:754', 'plugin-sdk HeaderActionOptions.hidden 声明（插件 API 面）'],
-  ['packages/plugin-sdk/src/types.ts:854', 'plugin-sdk updateHeaderAction opts.hidden 声明（provider-plugin-access D9 新增方法，与 754 行同族）'],
+  ['packages/core/src/extension-host/message-bus-bridge.ts:251', '插件 headerActionUpdate 帧 hidden 解析透传（241→251 两次分支合并行号漂移同号收口）'],
+  ['packages/plugin-sdk/src/types.ts:905', 'plugin-sdk updateHeaderAction opts.hidden 声明（wire 契约 HeaderActionUpdatePayload.hidden，入口整体不渲染；884→892 随 refactor-plugin-implement opts 字段注释扩写漂移、892→905 随并入 dev-0.12.1 漂移；原 HeaderActionOptions.hidden 独立声明行随 refactor-plugin-implement 声明收敛删除）'],
   ['packages/runtime/src/services/plugin-service/api/ui-api.ts:254', '插件 ui.updateHeaderAction 入参 hidden 校验'],
   ['packages/runtime/src/services/plugin-service/api/ui-api.ts:256', '插件 ui.updateHeaderAction hidden 校验错误文案'],
   ['packages/runtime/src/services/plugin-service/api/ui-api.ts:271', '插件 ui.updateHeaderAction hidden 透传'],
   ['packages/runtime/src/services/plugin-service/api/ui-api.ts:331', '插件 ui.updateHeaderAction 方法签名 hidden 形参（跨行断言的声明行）'],
-  ['packages/runtime/src/services/plugin-service/api/ui-api.ts:352', '插件 ui.updateHeaderAction 实现签名 hidden 形参（346→352 随插件化分支合并改内联签名漂移）'],
-  ['packages/shared/src/protocol.ts:642', '协议 plugin headerAction 条目 hidden 字段声明（HeaderActionUpdatePayload；611→624 随 fix-chat-flow-order、624→642 随插件化分支合并加字段漂移）'],
+  ['packages/runtime/src/services/plugin-service/api/ui-api.ts:352', '插件 ui.updateHeaderAction 实现签名 hidden 形参（346→352 两次分支合并行号漂移同号收口）'],
+  ['packages/shared/src/protocol.ts:703', '协议 plugin headerAction 条目 hidden 字段声明（HeaderActionUpdatePayload；611→624 随 fix-chat-flow-order、624→642 随插件化分支合并加字段漂移、642→703 随 connection-datasync-ssot 协议新增类型漂移）'],
   // document.hidden（浏览器 API）
   ['packages/renderer/src/composables/features/settings/use-app-update-autocheck.ts:166', 'document.hidden（浏览器 API：页面可见性）'],
   ['packages/ui/src/features/chat/composables/useTurnElapsed.ts:123', 'document.hidden（浏览器 API：页面可见性，计时器暂停判据）'],
@@ -198,11 +197,13 @@ export const HIDDEN_ALLOWLIST = new Map([
   ['packages/renderer/src/components/canvas/canvas-display.ts:229', 'canvas 布局 opts.hidden 形参声明'],
   ['packages/renderer/src/components/canvas/canvas-display.ts:232', 'canvas 布局 opts.hidden 属性访问'],
   // renderer 扩展宿主桥的插件条目 hidden（帧面透传）
-  ['packages/renderer/src/composables/shell/useExtensionHostBridge.ts:267', '插件 headerAction 运行时镜像 hidden（扩展宿主桥透传；256→267 随插件化分支合并漂移）'],
-  // locale 键（设置页「注册但不可达」开关的字面键名；dev 登记 1394/1393、main 登记 1392/1390，
-  // 合并后实测 1393/1391——dev 插件化分支漂移与 main stepfun i18n 键替换/genstats locale 编辑漂移叠加）
-  ['packages/ui/src/locale/en-US/settings.ts:1393', 'locale 键 hidden（设置项字面键名，非会话语义）'],
-  ['packages/ui/src/locale/zh-CN/settings.ts:1391', 'locale 键 hidden（设置项字面键名，非会话语义）'],
+  ['packages/renderer/src/composables/shell/useExtensionHostBridge.ts:341', '插件 headerAction hidden 开关读取（isVisibleHeaderAction 谓词：显式推送 hidden 即隐藏，两类入口一视同仁；256→267 随插件化分支合并漂移、267→341 随 refactor-plugin-implement isVisibleHeaderAction 注释扩写漂移）'],
+  // locale 键（设置页「注册但不可达」开关的字面键名；1393/1392→1394/1393 随插件化分支合并漂移；
+  // 1394/1393→1399/1398 随 feat-quota-cookie-refresh 在 quota 段加 5 行漂移；
+  // 1399/1398→1398/1396 随 main 合并（stepfun i18n 键 + genstats locale 编辑）漂移；
+  // 1398/1396→1400/1398 随 refactor-plugin-implement 并入 dev-0.12.1 漂移）
+  ['packages/ui/src/locale/en-US/settings.ts:1400', 'locale 键 hidden（设置项字面键名，非会话语义）'],
+  ['packages/ui/src/locale/zh-CN/settings.ts:1398', 'locale 键 hidden（设置项字面键名，非会话语义）'],
 ])
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -240,6 +241,7 @@ export const SURFACE_SAME_NAME_EXCLUDE = new Map([
   ['packages/renderer/src/components/ui/AsyncErrorFallback.vue', '界面 surface id（async-error-fallback-overlay）'],
   ['packages/renderer/src/components/ui/RollingRestartBanner.vue', '界面 surface id（rolling-restart）'],
   ['packages/renderer/src/components/ui/ToastContainer.vue', '界面 surface id（toast-container）'],
+  ['packages/renderer/src/components/panel/workflow-viz/panel/AgentStreamDrawer.vue', '界面 surface id（modal-surface-registry 族 agent-stream-drawer；dev-0.11.16 合并引入该检查脚本时未登记）'],
   ['packages/renderer/src/composables/features/app/modal-surface-registry/registry.ts', 'modal-surface-registry 本体（界面 surface 注册表）'],
   ['packages/shared/src/tailwind-preset.ts', 'tailwind token 名 surface（设计系统 token，非会话语义）'],
   ['packages/ui/src/extension-host/CompanionBand.vue', '界面 surface id（companion-band）'],
@@ -269,12 +271,14 @@ export const SURFACE_READ_POINTS = new Map([
   // 用途①：导航过滤（两处过滤点，surface === 'sidebar' 正向谓词）
   ['packages/runtime/src/services/session/session-scanner.ts:59', 'nav-filter'],
   ['packages/renderer/src/components/panel/command-popover-symbols.ts:69', 'nav-filter'],
+  // 用途①：导航过滤（移动壳 NewTaskSheet 会话聚合：btw 旁路线不进项目 chip 主列表）
+  ['packages/mobile-renderer/src/features/project-chips.ts:37', 'nav-filter'],
   // 用途①：工作区历史判据（读注册后记录 lifecycle.get(id).surface，不读 options）
   ['packages/runtime/src/services/session/session-lifecycle.ts:676', 'workspace-history'],
   // 用途②：抑制类只读判别（W4b 收编后判别器 = session.list {surface:'btw'} 拉取缓存，
   // 入口 = btw-line-membership 模块；原 session.surfaces 派生表已按协议收缩删除）
   ['packages/renderer/src/composables/effects/useCompletionNotify.ts:59', 'suppression'],
-  ['packages/renderer/src/components/panel/tray/useTrayCounts.ts:231', 'suppression'],
+  ['packages/renderer/src/components/panel/tray/useTrayCounts.ts:182', 'suppression'],
   ['packages/renderer/src/composables/effects/useForkNoticeEffect.ts:93', 'suppression'],
   ['packages/renderer/src/composables/effects/useForkNoticeEffect.ts:230', 'suppression'],
   ['packages/renderer/src/composables/panel/useBtwTabData.ts:193', 'suppression'],

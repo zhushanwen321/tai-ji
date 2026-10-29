@@ -768,10 +768,55 @@ describe("mock-domains", () => {
       expect(await quota.configure({ providerId: 'p', enabled: true })).toEqual({ ok: true })
     })
 
-    it('project：load 空态 + save ack（[G4 锚定] 对齐 real void 契约，原返回透传偏差已收尾）', async () => {
-      expect(await project.load()).toEqual({ projects: [], activeProjectId: '' })
-      const state = { projects: [], activeProjectId: 'p1' }
-      await expect(project.save(state)).resolves.toBeUndefined()
+    it('project：load 默认项基态 + 命令通道内存运转（connection-datasync-ssot u6a 对齐 real）', async () => {
+      // load 基态 = 默认项兜底 + revision 水位（real 的 runtime ProjectStore 读时归一化同语义）
+      expect(await project.load()).toEqual({
+        projects: [{ id: 'proj-default', name: '', lastUsedAt: 0 }],
+        activeProjectId: 'proj-default',
+        revision: 0,
+      })
+      // 命令通道（§6.6）：revision 校验 + 执行后 +1，回执完整新状态
+      const created = await project.createProject('mock-proj', 0)
+      expect(created.revision).toBe(1)
+      expect(created.state.projects.some((p) => p.name === 'mock-proj')).toBe(true)
+      await expect(project.createProject('x', 0)).rejects.toMatchObject({ code: 'project_revision_mismatch' })
+    })
+
+    it('project：rename/remove/setActive 命令通道 + 保护分支（connection-datasync-ssot u6a 对齐 real）', async () => {
+      // 自包含建项（不依赖上一用例副作用，it.only 单跑亦稳）
+      const base = await project.load()
+      const created = await project.createProject('proj-cmd-target', base.revision)
+      const target = created.state.projects.find((p) => p.name === 'proj-cmd-target')!
+      expect(target.id).not.toBe('proj-default')
+
+      // rename 成功臂：改名生效 + revision 前进
+      let st = await project.load()
+      const renamed = await project.renameProject(target.id, 'proj-renamed', st.revision)
+      expect(renamed.state.projects.find((p) => p.id === target.id)?.name).toBe('proj-renamed')
+      expect(renamed.revision).toBe(st.revision + 1)
+      // rename 错误臂：revision 失配 / 空名 / 不存在 / 默认项目保护（错误码对齐 real ProjectStore）
+      await expect(project.renameProject(target.id, 'x', st.revision + 99)).rejects.toMatchObject({ code: 'project_revision_mismatch' })
+      st = await project.load()
+      await expect(project.renameProject(target.id, '   ', st.revision)).rejects.toMatchObject({ code: 'project_invalid_name' })
+      await expect(project.renameProject('proj-nope', 'x', st.revision)).rejects.toMatchObject({ code: 'project_not_found' })
+      await expect(project.renameProject('proj-default', 'x', st.revision)).rejects.toMatchObject({ code: 'project_default_protected' })
+
+      // setActive 成功臂 + 不存在臂
+      st = await project.load()
+      const activated = await project.setActiveProject('proj-default', st.revision)
+      expect(activated.state.activeProjectId).toBe('proj-default')
+      await expect(project.setActiveProject('proj-nope', activated.revision)).rejects.toMatchObject({ code: 'project_not_found' })
+
+      // remove 错误臂：默认项目保护 + 不存在
+      st = await project.load()
+      await expect(project.removeProject('proj-default', st.revision)).rejects.toMatchObject({ code: 'project_default_protected' })
+      await expect(project.removeProject('proj-nope', st.revision)).rejects.toMatchObject({ code: 'project_not_found' })
+      // remove 成功臂：删除 active 项目 → active 回落默认（先切回 target 再删，覆盖回落分支）
+      await project.setActiveProject(target.id, st.revision)
+      st = await project.load()
+      const removed = await project.removeProject(target.id, st.revision)
+      expect(removed.state.projects.some((p) => p.id === target.id)).toBe(false)
+      expect(removed.state.activeProjectId).toBe('proj-default')
     })
 
     it('preset：内置目录非空 + CRUD + default', async () => {

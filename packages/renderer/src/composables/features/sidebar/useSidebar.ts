@@ -9,9 +9,9 @@
  * 关键裁决：
  * - C-W5-1 → [HISTORICAL]（renderer-deepening D3/D4 推翻，u5.2）：selectSession 曾壳重编排
  *   （理由「core.selectSession 是自包含函数，renderer 步骤无法插入」）——u5.1 起 core 持完整
- *   12 步切入链 + sessionEntry 端口束，renderer 专属步骤（取消 flow/清未读/流订阅/LRU/文件树）
+ *   13 步切入链 + sessionEntry 端口束，renderer 专属步骤（取消 flow/清未读/流订阅/LRU/文件树）
  *   经端口注入。壳 selectSession 现为一行代理 core.selectSession，链唯一载体在
- *   core domain/session/use-session.ts（改时序只改那一处，12 步顺序有接口级断言）。
+ *   core domain/session/use-session.ts（改时序只改那一处，13 步顺序有接口级断言）。
  *   deleteSession/deleteFolder 的 wasActive 回退原「缺 ensureStreamSubscription」接缝债随之清偿
  *   （回退路径经同一 core 链，端口已接线；main 侧曾以 selectSessionFallback 端口注入壳版
  *   selectSession 清偿同一债务——D3 路线下 core 链即完整链，壳不再注入该端口）。
@@ -37,7 +37,14 @@ import {
   createUseSession,
   evictLruWithUnsubscribe,
   resetSessionListSubForTest,
+  registerDataDomain,
+  registerAuxiliaryRefresh,
+  ensureConnectionEdgeSync,
+  requestDomainSync,
+  whenSettled,
+  resetConnectionEdgeSyncForTest,
 } from '@taiji/core'
+import * as transportEvents from '@taiji/core/transport/api'
 import type {
   ChatStoreInstance,
   SessionApiPort,
@@ -90,12 +97,20 @@ import type { NavEntry } from '@/types'
 
 // ── App 启动编排幂等检查 ──
 let appBootstrapped = false
-let hasConnectedBefore = false
 
-/** 测试隔离：重置启动编排检查 + session.list 订阅计数（beforeEach 调）。 */
+/**
+ * project.changed 失效信号的消费动作（connection-datasync-ssot §6.6）：触发 project 域
+ * 重新拉取。模块级稳定引用——useSidebar 多实例重复注册时 onGlobalType 底层 Set 按引用
+ * 去重（见装配段注释）；域未登记时 requestDomainSync 自行 warn（装配缺失留痕排障）。
+ */
+function onProjectChanged(): void {
+  requestDomainSync('project')
+}
+
+/** 测试隔离：重置启动编排检查 + 域同步器登记/代次 + session.list 订阅计数（beforeEach 调）。 */
 export function resetAppBootstrap(): void {
   appBootstrapped = false
-  hasConnectedBefore = false
+  resetConnectionEdgeSyncForTest()
   resetSessionListSubForTest()
 }
 
@@ -172,6 +187,13 @@ export function useSidebar() {
     },
     clearHistoryError: (sid) => chat.clearHistoryError(sid),
     markHistoryFailed: (sid) => chat.markHistoryFailed(sid),
+    // [session-cold-switch-perf §3.3-3] historyCacheReady 编排的 chat store 读写映射
+    //（后台重建失败态分区 + 快照版本对账，SSOT 在 chat store）
+    historyCache: {
+      markCacheFailed: (sid) => chat.markHistoryCacheFailed(sid),
+      clearCacheFailed: (sid) => chat.clearHistoryCacheFailed(sid),
+      isSnapshotFresh: (sid, snapshotLeafId) => chat.isHistorySnapshotFresh(sid, snapshotLeafId),
+    },
   }
 
   const hooks: SessionCleanupHooks = {
@@ -238,7 +260,7 @@ export function useSidebar() {
     currentSession: () => useNewTaskFlow().currentSession.value,
   }
 
-  // ── sessionEntry 端口束接线（D3，u5.2）：切入链跨域步骤注入 core 12 步链 ──
+  // ── sessionEntry 端口束接线（D3，u5.2）：切入链跨域步骤注入 core 13 步链 ──
   // 时序不变量（含 C-W3-4「订阅先于 panel 载入」）由 core 链本体保证，实现侧无需关心顺序；
   // 适配映射：cancelActiveFlow←useNewTaskFlow / clearUnread←clearSessionUnread（两源同点：
   // useSessionMarkers + useForkBranchNotify 分支角标，D9 合流） /
@@ -276,7 +298,7 @@ export function useSidebar() {
   // 访问（getActiveId/setActiveId/getList），方法闭包持原始 ref，pinia/raw 双模式下都正常工作。
   const sessionStore = useSessionStore() as unknown as ReturnType<typeof createSessionStore>
 
-  // ── core createUseSession（12 步切入链唯一载体；sessionEntry 接线后全链生效）──
+  // ── core createUseSession（13 步切入链唯一载体；sessionEntry 接线后全链生效）──
   const core = createUseSession({
     store: sessionStore,
     api,
@@ -304,10 +326,11 @@ export function useSidebar() {
   /**
    * selectSession —— 一行代理 core.selectSession（D3/D4，u5.2）。
    *
-   * 完整 12 步切入链在 core domain/session/use-session.ts 单点编排（唯一载体）：
+   * 完整 13 步切入链在 core domain/session/use-session.ts 单点编排（唯一载体）：
    * cancelActiveFlow → switchSession → setActiveId → clearUnread → ensureStreamSubscription →
    * touchRecency → syncSessionToPanel → navigation.push → hydrate/reconcile → preloadFileTree →
-   * touchRecency(panel 绑定 session) → evictLru。renderer 专属步骤经上方 sessionEntry 端口注入；
+   * touchRecency(panel 绑定 session) → evictLru → refreshLiveState（步 13 异步不阻塞链）。
+   * renderer 专属步骤经上方 sessionEntry 端口注入；
    * C-W3-4 时序前提（订阅先于 panel 载入，防 snapshot 回放丢失）由 core 链步 5→7 顺序保证。
    */
   const selectSession = core.selectSession
@@ -315,7 +338,7 @@ export function useSidebar() {
   /**
    * refreshLiveState —— 代理 core（[W2 权威拉取与冷读] 状态层拉取对账入口）。
    *
-   * 主路径触发点 = core 12 步切入链步 13（打开视图时机）与本文件 onConnected（重连
+   * 主路径触发点 = core 13 步切入链步 13（打开视图时机）与本文件 onConnected（重连
    * 时机）；btw 线视图激活点（BtwPanel 选中线）经本出口复用同一入口——线不走
    * selectSession 切入链（drawer 旁路呈现，主会话焦点不变），两件事（缓存缺失门控 +
    * fire-and-forget 语义）由 core 单点保证，壳不另造第二套。
@@ -326,7 +349,7 @@ export function useSidebar() {
    * restoreSession —— 显式重开 dead session（重新 spawn pi）。
    * 编排对齐 selectSession，但切入 RPC 用 sessionApi.restoreSession（显式重新 spawn，区别于
    * switchSession 的「内存已有则纯切换」语义）替代。壳侧职责收缩为：restore RPC 前置取消 flow
-   * （保持取消先于 RPC 的原时序）+ 成功后经 core 12 步链切入 + revive（dead→idle 统一收尾）。
+   * （保持取消先于 RPC 的原时序）+ 成功后经 core 13 步链切入 + revive（dead→idle 统一收尾）。
    *
    * 与壳版链的两处已知等价偏差（u5.2 记录）：① core 链步 1 的 cancelActiveFlow 对本路径是
    * no-op 冗余（壳已在 RPC 前取消）；② core 链步 2 会补发一次 switchSession RPC——runtime 对
@@ -401,7 +424,7 @@ export function useSidebar() {
 
   // ── 代理 core 方法（deleteSession/deleteFolder/retryHistory/renameSession/loadSessions）──
   // [D3 接缝债已清偿] deleteSession/deleteFolder 的 wasActive 回退走 core.selectSession——
-  // sessionEntry 端口接线后回退路径执行完整 12 步链（含 ensureStreamSubscription），
+  // sessionEntry 端口接线后回退路径执行完整 13 步链（含 ensureStreamSubscription），
   // 原「回退后新 session 无流订阅」债务消除。
   const retryHistory = core.retryHistory
   const renameSession = core.renameSession
@@ -444,9 +467,12 @@ export function useSidebar() {
   }
 
   /**
-   * 应用启动编排（#1/#3 启动钩子）：永远进入新建任务落地页。
-   * 时序：registerAppCommands → projectStore.init（D14：create 归属读 activeProjectId，必须最前）
-   * → newSession（同步进 landing）→ loadSessions → workspaceStore.load → presetCwd。
+   * 应用启动编排（#1/#3 启动钩子，§6.4②③ 瘦身终态）。
+   * 时序：registerAppCommands → 等 project 域首次同步落定（成功或失败均落定——create 归属
+   * 读 activeProjectId 做归属预填的时序约束由落定 promise 承载）→ newSession（同步进
+   * landing）。recentCwd 预填挂 sessions+workspace 两域首次落定之后（消费内存态、不阻塞
+   * 落地页进入；landing 晚到回灌即现状设计形态）。域数据加载（project/sessions/workspace）
+   * 由域同步器在连接边沿触发，不在本编排内逐域 await。
    */
   async function initApp(): Promise<void> {
     if (appBootstrapped) return
@@ -456,29 +482,31 @@ export function useSidebar() {
       registerAppCommands({
         newSession: () => { void newSession() },
       })
-      // D14（2026-08-04）：project 列表迁 runtime 持久化。init 必须在 newSession 之前——
-      // createSessionFlow 读 activeProjectId 做归属透传，未 init 时 active 是默认项目（归属丢失）。
-      // init 内部 RPC 失败降级默认，不抛不阻断启动。
-      await useProjectStore().init()
-      // 同步进 landing（空 chip 态），必须先于 await loadSessions（消除 state=idle 启动窗口）
+      // project 域首次落定后进落地页（§6.4②）：首轮未发起时 whenSettled 即发起（编排先于
+      // 边沿 watch 消费的形态序收敛）；失败也落定（失败呈现走 project store 状态机）。
+      await whenSettled('project')
+      // 同步进 landing（空 chip 态）
       await newSession()
-      await loadSessions()
-      await workspaceStore.load()
-      // 默认会话目录（landing「默认会话」固定入口）：启动拉取（失败降级空串隐藏入口，不阻断）
-      void workspaceStore.loadDefaultSessionDir()
-      // 预填 cwd（G1.1「沿用最近 session 目录」）：取 sessionStore.list 中 lastActiveAt 最大者
-      const sessions = sessionStore.getList()
-      let recentCwd: string | undefined
-      if (sessions.length > 0) {
-        const latest = sessions.reduce((a, b) => (a.lastActiveAt >= b.lastActiveAt ? a : b))
-        recentCwd = latest.cwd
-      }
-      if (!recentCwd) recentCwd = workspaceStore.defaultCwd
-      if (recentCwd) newTaskFlow.presetCwd(recentCwd)
+      // 预填 cwd（G1.1「沿用最近 session 目录」）：取 sessionStore.list 中 lastActiveAt 最大
+      // 者，无会话时回退 workspaceStore.defaultCwd。挂 sessions+workspace 两域首次落定之后
+      // （§6.4③，与现状时序等价：现状即 loadSessions+workspace.load 完成后预填），不阻塞
+      // 落地页进入。两落定 promise 设计上永不 reject（失败也落定），allSettled 表达「独立
+      // 数据源各自等待」语义。
+      void Promise.allSettled([whenSettled('sessions'), whenSettled('workspace')]).then(() => {
+        const sessions = sessionStore.getList()
+        let recentCwd: string | undefined
+        if (sessions.length > 0) {
+          const latest = sessions.reduce((a, b) => (a.lastActiveAt >= b.lastActiveAt ? a : b))
+          recentCwd = latest.cwd
+        }
+        if (!recentCwd) recentCwd = workspaceStore.defaultCwd
+        if (recentCwd) newTaskFlow.presetCwd(recentCwd)
+      })
     } catch (e) {
       console.error('[useSidebar.initApp] bootstrap failed:', e)
-      // 复位 appBootstrapped 保留显式重试通道：重调 initApp（如启动失败重试入口）可重新编排；
-      // 生产常规路径首连失败后走 onConnected 重连刷新支，不会自动回到 initApp。
+      // 复位 appBootstrapped 保留显式重试通道：重调 initApp（如启动失败重试入口）可重新编排。
+      // 域数据失败不经此通道（各域失败语义呈现：project 状态条 / sessions 状态条 / workspace
+      // 留痕），catch 只兜 initApp 自身编排错误（注册命令、落地页进入）。
       appBootstrapped = false
       // 失败必须用户可见：无提示时用户看到空 landing 无法区分「加载中」与「失败」。
       // 恢复动作 = 刷新页面重试（无运行时内自动重试，符合任务级默认无超时/无自动重试约定）。
@@ -487,42 +515,98 @@ export function useSidebar() {
     }
   }
 
+  // ── 连接边沿域同步器登记（connection-datasync-ssot §6.4）──
+  // 数据域三元组 {同步函数, 何时需要同步, 失败语义} + 辅助刷新层，替代「initApp 一次性
+  // 编排 + onConnected 重连分支逐域手写刷新」两套编排。登记幂等（同 id 覆盖描述符、保留
+  // 同步进度），本段在 useSidebar() 装配时执行——早于首连 connected 边沿（App.vue setup 内
+  // useSidebar() 先于其 connectionState watch），首连边沿即可触发首轮同步。
+  registerDataDomain({
+    // project 域（阻断型，拦截型接线）：failed、实例变更、任何重连边沿都重拉（§6.4）——
+    // failed 恢复与实例变更必经连接边沿，恒真谓词即全量覆盖。sync 只拉取（状态机转移
+    // 在 store.syncLoad 内：进 loading、失败转 failed 后 rethrow 交本模块留痕）；apply
+    // 由本模块在代次/revision 两道裁决通过后调用（loading→loaded 提交回执）——「失败
+    // 保留旧值」「旧代/过时 revision 回执不提交」构造性成立（§6.4 命令×同步交错：
+    // 在途 load 期间命令回执先提交时，旧快照按 isStaleReceipt 判旧丢弃 + 丢弃点补发，
+    // 不回滚命令结果）。首次落定 promise 成功与失败均 settle（落地页只等落定不等成功）。
+    id: 'project',
+    sync: () => useProjectStore().syncLoad(),
+    apply: (receipt) => useProjectStore().applyLoadReceipt(receipt),
+    isStaleReceipt: (receipt) => useProjectStore().isStaleLoadReceipt(receipt),
+    whenToSync: () => true,
+    failure: 'blocking',
+  })
+  registerDataDomain({
+    // sessions 域（重试型）：每次连接边沿重拉；loadSessions 失败在 store 内 setListLoadError
+    //（侧栏「加载失败，点击重试」承载），不抛。
+    id: 'sessions',
+    sync: () => loadSessions(),
+    whenToSync: () => true,
+    failure: 'retryable',
+  })
+  registerDataDomain({
+    // workspace 域（降级型）：每次连接边沿重拉；load 失败保留旧 records（§6.4 降级型显式
+    // 行为改进，原置空口径已废）+ loadDefaultSessionDir 失败降级空串——两个数据源均不抛，
+    // 串行提交（幂等拉取，重连后默认目录可能刷新，§6.4③）。
+    id: 'workspace',
+    sync: async () => {
+      const ws = useWorkspaceStore()
+      await ws.load()
+      await ws.loadDefaultSessionDir()
+    },
+    whenToSync: () => true,
+    failure: 'degraded',
+  })
+  // project.changed 失效信号消费（§6.6：事件只作失效信号不带数据——各窗口收到后触发
+  // project 域重新拉取，拉为主、推补充 ADR-0097；重拉撞在途 load 由域同步器并发合流，
+  // 命令×同步交错由 isStaleReceipt 判据处置）。域同步器是模块级单例，本监听是全局单例
+  // 消费——handler 取模块级稳定引用，onGlobalType 底层 Set 按引用去重，多组件实例化
+  // useSidebar 重复注册幂等、不随组件卸载退订（与装配段域登记同生命周期）。
+  transportEvents.onGlobalType('project.changed', onProjectChanged)
+  // 辅助刷新 5 处（原 onConnected 重连分支零散调用）：纳入统一触发点，各自保留 catch 降级
+  // 语义。聚焦 session 四项在触发时读当前焦点（首连时无焦点 = null，跳过——与原 `if (sid)`
+  // 保护一致）。
+  registerAuxiliaryRefresh({
+    label: 'extension-scan',
+    refresh: () =>
+      extensionApi.scan().catch((e) => console.warn('[useSidebar] extension scan on reconnect failed:', e)),
+  })
+  registerAuxiliaryRefresh({
+    label: 'focused-subagents',
+    refresh: () => {
+      const sid = focusedSessionId.value
+      if (sid) void useSubagentStore().loadSubagents(sid)
+    },
+  })
+  registerAuxiliaryRefresh({
+    label: 'focused-workflows',
+    refresh: () => {
+      const sid = focusedSessionId.value
+      if (sid) void useWorkflowStore().loadWorkflows(sid)
+    },
+  })
+  registerAuxiliaryRefresh({
+    label: 'focused-live-state',
+    refresh: () => {
+      const sid = focusedSessionId.value
+      if (sid) void core.refreshLiveState(sid)
+    },
+  })
+  registerAuxiliaryRefresh({
+    label: 'focused-history',
+    refresh: () => {
+      const sid = focusedSessionId.value
+      if (sid) void core.refreshHistory(sid)
+    },
+  })
+  ensureConnectionEdgeSync()
+
   /**
-   * WS 连接建立/重连入口：首次 initApp；重连 fire-and-forget 刷新 workspace/extension +
-   * 聚焦 session 的 subagent/workflow 列表 + 对话流历史对账。
+   * WS 连接建立/重连入口：首连触发启动编排 initApp；重连边沿的数据刷新全部由域同步器
+   * 承载（§6.4：首连与重连同一路径，本入口收敛为启动编排的触发壳——App.vue connected
+   * watch 的消费点不变，重连时 initApp 幂等跳过）。
    */
   async function onConnected(): Promise<void> {
-    if (!hasConnectedBefore) {
-      hasConnectedBefore = true
-      await initApp()
-      return
-    }
-    void workspaceStore.load()
-    // 重连扩展扫描是辅助刷新（A 类降级），失败降级为 stale 数据——必须留痕，与「扫描成功」可区分
-    void extensionApi.scan().catch((e) => console.warn('[useSidebar] extension scan on reconnect failed:', e))
-    // 重连对账（residual-fixes 附录 A-3 闭环）：runtime 侧派生缓存的刷新以 entry_appended
-    // 事件为触发，重连后若无新 entry 写入（如断连前 subagent 已全部终态），侧栏将停留
-    // 断连前 stale 数据直到用户切 tab。对聚焦 session 显式重新拉取（getSubagents/getWorkflows
-    // RPC 直读磁盘，不依赖缓存事件）。load 内部 catch 降级（失败保留旧分区），
-    // fire-and-forget 与上面两条刷新一致。
-    const sid = focusedSessionId.value
-    if (sid) {
-      void useSubagentStore().loadSubagents(sid)
-      void useWorkflowStore().loadWorkflows(sid)
-      // [W2 权威拉取与冷读] 重连时机：状态层缓存缺失时补拉（缓存缺失门控 + fire-and-forget，
-      // 与打开视图时机同一入口）。断连期间丢的状态帧不由本次拉取收敛：状态层缓存跨重连不清
-      // （removeLiveState 只挂真删除路径），只要该 session 有过条目，门控（use-session.ts:368
-      // liveStateOf !== undefined 即 return）直接跳过。断连恢复的自愈通道是 state topic 的
-      // last-value 回放：session.state_changed 在 message-bus.ts:139 的 STATE_TYPE_KEY_MAP
-      // 登记为 'state'，subscription-state.ts:348 在重连应答里逐条回放 reply.stateSnapshot。
-      // 本 RPC 拉取只覆盖冷启动/无快照形态（条目从未被填过的会话）。
-      void core.refreshLiveState(sid)
-      // [U8 桌面重连对账] 对话流历史对账（对齐移动壳 App.vue connected 边沿既有模式）：
-      // 断连窗口内 ring 回放覆盖不足或失败时，桌面对话流缺内容且无自愈——core
-      // refreshHistory 单一编排点（未 hydrate no-op / 失败静默 warn，旧数据仍在）。
-      // 首连分支不挂（initApp → 切入链步 9 已承担首次回填），只补重连分支。
-      void core.refreshHistory(sid)
-    }
+    await initApp()
   }
 
   // ── fork/handoff：保持 useForkActions/useHandoffActions 组合（C-W5-4，正交职责内聚）──

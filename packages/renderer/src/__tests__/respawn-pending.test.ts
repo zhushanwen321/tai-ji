@@ -48,12 +48,19 @@ vi.mock('../../../core/src/transport/ws-client', () => ({
     return () => { mockHolder.routeHandler = null }
   }),
   onQueueDrop: vi.fn(() => () => {}),
+  // u3（connection-datasync-ssot）起 core use-connection init 链路新增的 ws-client 依赖，
+  // mock 工厂须补形状：auth 应答/拒绝单槽信号（返回取消函数）+ 抑制位读口/复位 + 等待态/探活
+  onAuthAccepted: vi.fn(() => () => {}),
+  onAuthRejected: vi.fn(() => () => {}),
+  isAuthRejectedSuppressed: vi.fn(() => false),
+  resetAuthRejectionSuppression: vi.fn(),
+  setWaitingRuntime: vi.fn(),
+  probeAlive: vi.fn(),
 }))
 
 vi.mock('@/lib/ipc', () => ({
-  getRuntimePort: vi.fn(async () => undefined),
-  getRuntimePortOffset: vi.fn(async () => undefined),
-  getRuntimeToken: vi.fn(async () => undefined),
+  // 连接控制器快照读口桩（connection-datasync-ssot §6.2：null = 不发起连接）
+  getRuntimeTargetSnapshot: vi.fn(async () => null),
   onRuntimePort: vi.fn(() => () => {}),
   onRuntimeRestarting: vi.fn(() => () => {}),
   onRuntimeFailed: vi.fn(() => () => {}),
@@ -302,7 +309,7 @@ describe('respawn 过渡态（T4 回流修复）', () => {
     injectExited()
     expect(chatStore.isRespawnPending('s-respawn')).toBe(true)
 
-    // spy restore RPC；后续 core 12 步切入链在本测试环境无 transport 会失败——壳侧
+    // spy restore RPC；后续 core 13 步切入链在本测试环境无 transport 会失败——壳侧
     // catch 降级（toast + warn，不重抛），revive 不被切入失败阻断照常执行
     vi.spyOn(sessionApiMod.session, 'restoreSession').mockResolvedValue({ id: 's-respawn', label: 'test', cwd: '/repo' })
     const { useSidebar } = await import('@/composables/features/sidebar/useSidebar')

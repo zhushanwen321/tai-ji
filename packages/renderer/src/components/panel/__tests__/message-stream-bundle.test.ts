@@ -18,7 +18,7 @@
  * 互斥登记（保留独立）：MessageStream-truncated-bar（jsdom 环境标注 + useChat/useSidebar
  * 内联定制工厂（loadMoreHistoryMock 闭包），与 shell-mount 通用工厂同 spec 多工厂互斥）。
  *
- * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/components/panel/__tests__/message-stream-bundle.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=chat TAIJI_SKIP_REAL_PI=1 npx vitest run src/components/panel/__tests__/message-stream-bundle.test.ts（本文件登记在 domain-map.json chat 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { chatViewDepsModule, virtuaVueMockModule, messageStreamStubs, resetMessageStreamEnv, makeStreamMessageFactory } from '@/__tests__/helpers/chat-stream-mount'

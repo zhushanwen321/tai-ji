@@ -7,7 +7,9 @@
   经壳透传挂入，显隐由 opacity 门控）。
 -->
 <template>
-  <!-- 正文 text 块：全 inline 统一正文样式（text-md/leading-[1.8]，D5 行类型定档 15px），颜色跟所属
+  <!-- 正文 text 块：全 inline 统一正文样式，行类型字号/行高随 density 切档（remote-use-mobile-v2
+       §6.2：desktop = text-md/1.8（D5 行类型定档 15px，与原静态类同位同类渲染串逐字一致）；mobile =
+       --m-text-body/--m-leading-body 16px/1.62 手机阅读档），颜色跟所属
        assistant 消息的文本活跃态（chat-flow-text-color D1：streaming→neutral-mid，定稿/缺省→
        neutral-fg）。streaming 由 Turn.unitBlockProps 按 textFinalized 逐消息派生（pi 回合级
        message.complete 才收口 mid-turn 气泡 status，直接跟 status 会让长工具回合中已写完
@@ -15,7 +17,7 @@
        streaming-tail 光标在 Turn.vue trace 容器末尾（跟在所有 block 后，不受 contentBlocks 时序影响）。
        [M2 形态统一] 唯一 error 形态 = 追加形态：content 崩溃前正文保持原色（可为空），
        msg.error 独立 danger 行（错误文本只住 error 字段，永不染红正文）。 -->
-  <div data-testid="block-text" class="group/text relative flex flex-col text-[length:var(--text-md)] leading-[1.8]" :class="textColorClass">
+  <div data-testid="block-text" class="group/text relative flex flex-col" :class="[bodyDensityClass, textColorClass]">
     <!-- 正文行（原行容器原样下沉一层；textColorClass 上提到外层列容器，继承不变） -->
     <div class="flex items-start gap-[8px]">
       <div class="min-w-0 flex-1">
@@ -55,6 +57,7 @@ import { AlertCircle } from '@lucide/vue'
 import type { MessageStatus } from '@taiji/shared'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import { formatClock } from './format-utils'
+import { useChatDensity } from './chat-view-deps'
 
 const props = defineProps<{
   /** 正文内容 */
@@ -81,6 +84,16 @@ const props = defineProps<{
 
 /** error 终态：msg.error 有值（收口侧兜底保证非空；!! 防御漏网产出点）→ 独立 danger 行。 */
 const isAppendError = computed(() => props.status === 'error' && !!props.error)
+
+/** 密度档（§6.2）：setup 期一次 inject；mobile = 16px/1.62 手机阅读档 */
+const density = useChatDensity()
+
+/** 正文行字号/行高（§6.2 密度维度）：desktop 档 = 原静态类原位（渲染串逐字一致）；mobile 升 16px/1.62 */
+const bodyDensityClass = computed(() =>
+  density === 'mobile'
+    ? 'text-[length:var(--m-text-body)] leading-[var(--m-leading-body)]'
+    : 'text-[length:var(--text-md)] leading-[1.8]',
+)
 
 /** text 分支颜色：正常正文 文本活跃（streaming 且未定稿）→neutral-mid、定稿/终态→neutral-fg（正文永不因 error 整条染红） */
 const textColorClass = computed(() => {

@@ -1,31 +1,42 @@
 /**
- * plugin-view-scope 单测（provider-plugin-access U2 分区键泛化）：scope 串形态单一事实源的
- * 两函数契约——pluginViewScopeKey 的两种分区键形态、pluginViewScopeFromWire 的二选一校验
- * 全臂（都给 / 都缺 / 非法值 / 全局域缺 pluginId → null）。
+ * plugin-view-scope 纯函数单测（provider-plugin-access U2 分区键泛化）。
  *
- * 运行：cd packages/shared && npx vitest run src/__tests__/plugin-view-scope.test.ts
+ * 用例口径 = 文件头注契约表：scope 串两形态（session / global）、wire 载荷二选一
+ * 解析（合法两态 + 都缺/都给/空串/非 string 逐字段拒绝）。纯函数零 IO。
  */
-import { describe, it, expect } from 'vitest'
-import { pluginViewScopeKey, pluginViewScopeFromWire } from '../plugin-view-scope'
+import { describe, expect, it } from 'vitest'
+import { pluginViewScopeFromWire, pluginViewScopeKey, pluginViewScopeMountPrefix } from '../plugin-view-scope.js'
 
-describe('pluginViewScopeKey', () => {
+describe('pluginViewScopeKey（scope 串形态单一事实源）', () => {
   it('会话域 → session:<sessionId>', () => {
-    expect(pluginViewScopeKey({ kind: 'session', sessionId: 's1' })).toBe('session:s1')
+    expect(pluginViewScopeKey({ kind: 'session', sessionId: 's-1' })).toBe('session:s-1')
   })
 
-  it('全局域 → global:<mountId>:<pluginId>（含插件维度，S25 互不可见）', () => {
+  it('全局域 → global:<mountId>:<pluginId>（键含插件维度：同挂载位多插件互不覆盖）', () => {
     expect(pluginViewScopeKey({ kind: 'global', mountId: 'provider.authorize', pluginId: 'wool-workbuddy' })).toBe(
       'global:provider.authorize:wool-workbuddy',
     )
   })
 })
 
-describe('pluginViewScopeFromWire', () => {
-  it('sessionId 形态 → 会话域 scope', () => {
-    expect(pluginViewScopeFromWire({ sessionId: 's1' })).toEqual({ kind: 'session', sessionId: 's1' })
+describe('pluginViewScopeMountPrefix（挂载位前缀原语：pluginId 缺省的收窄/清理场景）', () => {
+  it('挂载位前缀 → global:<mountId>:', () => {
+    expect(pluginViewScopeMountPrefix('provider.authorize')).toBe('global:provider.authorize:')
   })
 
-  it('mountId+pluginId 形态 → 全局域 scope', () => {
+  it('键形态对账：全局域精确键必然以挂载位前缀开头（前缀删除覆盖全部精确键写入的分区）', () => {
+    const prefix = pluginViewScopeMountPrefix('provider.authorize')
+    expect(pluginViewScopeKey({ kind: 'global', mountId: 'provider.authorize', pluginId: 'plug-a' }).startsWith(prefix)).toBe(true)
+    expect(pluginViewScopeKey({ kind: 'global', mountId: 'provider.authorize', pluginId: 'plug-b' }).startsWith(prefix)).toBe(true)
+  })
+})
+
+describe('pluginViewScopeFromWire（wire 载荷二选一窄化解析）', () => {
+  it('sessionId 形态 → 会话域 scope', () => {
+    expect(pluginViewScopeFromWire({ sessionId: 's-1' })).toEqual({ kind: 'session', sessionId: 's-1' })
+  })
+
+  it('mountId + pluginId 形态 → 全局域 scope', () => {
     expect(pluginViewScopeFromWire({ mountId: 'provider.authorize', pluginId: 'wool-workbuddy' })).toEqual({
       kind: 'global',
       mountId: 'provider.authorize',
@@ -33,28 +44,18 @@ describe('pluginViewScopeFromWire', () => {
     })
   })
 
-  it('都给 → null（二选一破坏）', () => {
-    expect(pluginViewScopeFromWire({ sessionId: 's1', mountId: 'm', pluginId: 'p' })).toBeNull()
-  })
-
-  it('都缺 → null', () => {
+  it('都缺或都给 → null（INVALID_VIEW_SCOPE 判据形态）', () => {
     expect(pluginViewScopeFromWire({})).toBeNull()
-    expect(pluginViewScopeFromWire({ pluginId: 'p' })).toBeNull()
+    expect(pluginViewScopeFromWire({ sessionId: 's-1', mountId: 'provider.authorize' })).toBeNull()
   })
 
-  it('sessionId 非非空 string → null', () => {
+  it('所选字段非非空 string → null（逐字段窄校验）', () => {
+    // 会话域：sessionId 空串 / 非 string
     expect(pluginViewScopeFromWire({ sessionId: '' })).toBeNull()
     expect(pluginViewScopeFromWire({ sessionId: 42 })).toBeNull()
-  })
-
-  it('mountId 非非空 string → null', () => {
-    expect(pluginViewScopeFromWire({ mountId: '' })).toBeNull()
-    expect(pluginViewScopeFromWire({ mountId: null })).toBeNull()
-  })
-
-  it('全局域缺 pluginId 或非法值 → null', () => {
-    expect(pluginViewScopeFromWire({ mountId: 'm' })).toBeNull()
-    expect(pluginViewScopeFromWire({ mountId: 'm', pluginId: '' })).toBeNull()
-    expect(pluginViewScopeFromWire({ mountId: 'm', pluginId: 7 })).toBeNull()
+    // 全局域：mountId / pluginId 任一空串或非 string
+    expect(pluginViewScopeFromWire({ mountId: '', pluginId: 'p' })).toBeNull()
+    expect(pluginViewScopeFromWire({ mountId: 'provider.authorize', pluginId: '' })).toBeNull()
+    expect(pluginViewScopeFromWire({ mountId: 'provider.authorize' })).toBeNull()
   })
 })

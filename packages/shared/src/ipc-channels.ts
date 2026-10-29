@@ -123,12 +123,10 @@ export const RUNTIME_ERROR = 'runtime-error' as const
 export const RUNTIME_RESTARTING = 'runtime-restarting' as const
 /** runtime 自动重启用尽推送（main → renderer；payload { attempts, message }）。 */
 export const RUNTIME_FAILED = 'runtime-failed' as const
-/** 读取 runtime 端口（invoke）。 */
-export const GET_RUNTIME_PORT = 'get-runtime-port' as const
-/** 读取端口偏移（invoke；dev 模式 +100）。 */
-export const GET_RUNTIME_PORT_OFFSET = 'get-runtime-port-offset' as const
-/** 读取 WS auth token（invoke；S1-W1）。 */
-export const GET_RUNTIME_TOKEN = 'get-runtime-token' as const
+/** 读取 runtime 目标快照（invoke；payload = RuntimeTargetSnapshot {seq, runtimeId, port, token}，
+ *  connection-datasync-ssot §6.1：连接目标单一权威读口——supervisor 每次 spawn 更新快照，
+ *  renderer 启动与重连前经此拉取 {seq, runtimeId, port, token} 并置目标）。 */
+export const GET_RUNTIME_TARGET_SNAPSHOT = 'get-runtime-target-snapshot' as const
 /** 读取最近一次启动失败真因（invoke；RD-3#2 boot 竞态拉取兜底）。 */
 export const GET_RUNTIME_START_ERROR = 'get-runtime-start-error' as const
 /** 请求手动重启 runtime（invoke；崩溃重启用尽后用户点重试触发）。 */
@@ -252,3 +250,18 @@ export const SET_REMOTE_ACCESS_ENABLED = 'set-remote-access-enabled' as const
 export const SOUND_LIST = 'sound:list' as const
 /** 播放系统提示音（invoke；win 返 wav base64）。 */
 export const SOUND_PLAY = 'sound:play' as const
+
+// ── quota:* 族（额度查询登录态刷新）──────────────────────────────────────────
+
+/**
+ * cookie 登录态刷新通道。
+ *
+ * invoke 通道：renderer（额度设置页「刷新登录态」入口）经此委托 main 打开隐藏
+ * BrowserWindow（独立 persist partition `persist:quota-<providerId>`）加载平台页，
+ * 轮询额度 API 直到 HTTP 200，导出该 session 的 cookie 以 0600 写回
+ * `<dataDir>/secrets/<providerId>-cookie.txt`（与 runtime quota-service 同一文件，
+ * cookie 查询每次直读无缓存，写盘即生效）。登录态失效时窗口转可见让用户完成登录
+ * （超时放宽），完成后回到隐藏轮询。选冒号式 `quota:*`：对齐 'browser:*' /
+ * 'image-cache:*' 领域族惯例。
+ */
+export const QUOTA_REFRESH_COOKIE = 'quota:refresh-cookie' as const

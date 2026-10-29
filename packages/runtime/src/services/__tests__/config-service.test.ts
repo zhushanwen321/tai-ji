@@ -202,7 +202,7 @@ const QUOTA_BODY = {
   presets: [
     {
       fetcher: 'zhipu-glm-coding',
-      label: '智谱 GLM Coding Plan（远程热更新）',
+      label: 'Zhipu Coding Plan（远程热更新）',
       auth: ['api-key'],
       match: { baseUrlPattern: 'bigmodel.cn' },
     },
@@ -274,7 +274,7 @@ describe('ConfigService.refreshRemoteProviders — 域 2（quota-fetchers）拉�
     const presets = listQuotaPresets()
     expect(presets).toHaveLength(1)
     expect(presets[0]?.fetcher).toBe('zhipu-glm-coding')
-    expect(presets[0]?.label).toBe('智谱 GLM Coding Plan（远程热更新）')
+    expect(presets[0]?.label).toBe('Zhipu Coding Plan（远程热更新）')
     expect(presets[0]?.match.baseUrlPattern).toBe('bigmodel.cn')
   })
 

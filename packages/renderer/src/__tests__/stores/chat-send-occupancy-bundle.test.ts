@@ -77,7 +77,6 @@ vi.mock('@/api', async (importActual) => {
     project: {
       ...actual.project,
       load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }),
-      save: vi.fn().mockResolvedValue(undefined),
     },
     chat: {
       ...actual.chat,

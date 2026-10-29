@@ -458,7 +458,7 @@ describe("markSettledOut 副作用矩阵", () => {
 //
 // [u-foundation / 永久会话模型] 新领域词汇的最小单测（设计
 // subagent-permanent-session-model.md §3.2.1-§3.2.7；类型与骨架先行，填肉归
-// U2-U7）。锁定面：
+// U2-U7）。锁定范围：
 //   ① TranscriptRef 判别联合收窄守卫（isPi/isZcodeTranscriptRef 运行时判别 +
 //      类型穷尽——else 分支不可达构造性验证）；
 //   ② StopReason 枚举完整性（旧 7 值 + 4 新展示值 = 11 无重复；outcome 词

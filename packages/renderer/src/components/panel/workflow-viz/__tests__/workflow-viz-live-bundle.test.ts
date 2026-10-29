@@ -15,10 +15,8 @@
  *  - '@/api'：importActual spread + session 指回 domain mock（两源逐字相同）
  *  - vue-i18n：t(key, named) → `key(k=v)`（两源逐字相同）
  *  - MessageStream.vue：marker stub（两源逐字相同）
- *  - modal-surface-registry（drawer 独占 partial，registerModalSurface 捕获）+
- *    drawerSurface hoisted
  *
- * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/components/panel/workflow-viz/__tests__/workflow-viz-live-bundle.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=subagent TAIJI_SKIP_REAL_PI=1 npx vitest run src/components/panel/workflow-viz/__tests__/workflow-viz-live-bundle.test.ts（本文件登记在 domain-map.json subagent 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -26,33 +24,11 @@ import { h, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import WorkflowLivePanel from '../panel/WorkflowLivePanel.vue'
 import AgentStreamDrawer from '../panel/AgentStreamDrawer.vue'
+import { openShieldingSurfaces, resetModalSurfaceRegistry } from '@/composables/features/app/modal-surface-registry/registry'
 import { useWorkflowStore } from '@/stores/workflow'
 import { WORKFLOW_FIXED_TAB_KEY, closeLiveTab, openLiveTab, phaseTabKey } from '../panel/panel-tabs'
 import type { WorkflowLiveTab } from '../panel/panel-tabs'
 import type { WorkflowAgentCall, WorkflowRunRecord } from '@taiji/shared'
-
-// ── mock：模态表面聚合注册捕获（§6.7 agent-stream-drawer 族接线的观察点）────────
-// 真实模块展开（其余导出保持原实现），仅替换 registerModalSurface 捕获注册对象——
-// isOpen/rect getter 是组件 setup 注册的闭包，测试直接调用即覆盖 drawerRect/isOpen 链。
-const drawerSurface = vi.hoisted(() => ({
-  registrations: [] as Array<{
-    surface: string
-    key: string
-    isOpen: () => boolean
-    rect?: () => { x: number; y: number; width: number; height: number } | null
-  }>,
-}))
-
-vi.mock('@/composables/features/app/modal-surface-registry', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/composables/features/app/modal-surface-registry')>()
-  return {
-    ...actual,
-    registerModalSurface: (registration: (typeof drawerSurface.registrations)[number]) => {
-      drawerSurface.registrations.push(registration)
-      return () => {}
-    },
-  }
-})
 
 vi.mock('@taiji/core/transport/api/domains/session', () => ({
   getWorkflows: vi.fn(),
@@ -974,7 +950,6 @@ async function mountDrawer(run = makeRun()) {
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
-  drawerSurface.registrations.length = 0
   loadSubagentDataMock.mockClear()
   loadErrorRef.value = null
 })
@@ -1127,31 +1102,35 @@ describe('AgentStreamDrawer · 快照刷新与错误态（AgentTabContent 链保
 })
 
 describe('AgentStreamDrawer · 模态表面聚合注册（§6.7 agent-stream-drawer 族）', () => {
-  it('挂载即注册 surface/key；isOpen 绑抽屉 open 本体（收起 = 表面关）；rect 读抽屉根元素实测（el 缺失 → null）', async () => {
+  beforeEach(() => {
+    // 注册表是模块级单例：本 describe 用例自持挂载实例，先复位防跨用例条目残留
+    resetModalSurfaceRegistry()
+  })
+
+  it('挂载即注册 view 遮蔽族（intersecting）：开合态直读 open 本体，rect 读抽屉根元素实测', async () => {
     const wrapper = await mountDrawer()
-    expect(drawerSurface.registrations).toHaveLength(1)
-    const reg = drawerSurface.registrations[0]
-    expect(reg.surface).toBe('agent-stream-drawer')
-    expect(reg.key).toBe('agent-stream-drawer')
-
-    // 初始收起 → isOpen false（编排器查询语义：收起 = 表面关，不入让位/遮蔽判定）
-    expect(reg.isOpen()).toBe(false)
-
-    // rect = 抽屉根元素 getBoundingClientRect 实测（stub 注入视口矩形，断言原样透传）
-    const drawerEl = wrapper.find('[data-testid="wf-viz-agent-drawer"]').element as HTMLElement
-    vi.spyOn(drawerEl, 'getBoundingClientRect').mockReturnValue({ x: 10, y: 20, width: 452, height: 800 } as DOMRect)
-    expect(reg.rect?.()).toEqual({ x: 10, y: 20, width: 452, height: 800 })
-
-    // 开合态绑 open 本体：openAgent 展开 → true；收起钮 → false
+    // 收起（open=false）：不在遮蔽报告内
+    expect(openShieldingSurfaces().some((s) => s.id === 'agent-stream-drawer')).toBe(false)
+    // 展开：intersecting 档 + rect 读点直读 DOM（jsdom 下 getBoundingClientRect 全 0，非 null 即读点接通）
     ;(wrapper.vm as unknown as DrawerVM).openAgent(makeCall({ id: 0 }))
     await flushPromises()
-    expect(reg.isOpen()).toBe(true)
+    const entry = openShieldingSurfaces().find((s) => s.id === 'agent-stream-drawer')
+    expect(entry).toBeDefined()
+    expect(entry?.mode).toBe('intersecting')
+    expect(entry?.rect).toEqual({ x: 0, y: 0, width: 0, height: 0 })
+    // 收起后恢复「不在报告内」（开合态与 open 本体绑定）
     await wrapper.find('[data-testid="wf-viz-agent-drawer-collapse"]').trigger('click')
-    expect(reg.isOpen()).toBe(false)
+    await flushPromises()
+    expect(openShieldingSurfaces().some((s) => s.id === 'agent-stream-drawer')).toBe(false)
+  })
 
-    // 卸载 → 模板 ref 置 null → rect null（无元素不上报几何，main 侧保守按相交处理）
+  it('卸载即注销（onBeforeUnmount dispose）：条目从注册表摘除', async () => {
+    const wrapper = await mountDrawer()
+    ;(wrapper.vm as unknown as DrawerVM).openAgent(makeCall({ id: 0 }))
+    await flushPromises()
+    expect(openShieldingSurfaces().some((s) => s.id === 'agent-stream-drawer')).toBe(true)
     wrapper.unmount()
-    expect(reg.rect?.()).toBeNull()
+    expect(openShieldingSurfaces().some((s) => s.id === 'agent-stream-drawer')).toBe(false)
   })
 })
 })

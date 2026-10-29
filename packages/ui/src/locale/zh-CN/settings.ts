@@ -11,6 +11,8 @@ export default {
     groupResources: '模型与资源',
     groupInputAppearance: '输入与外观',
     groupEnvSystem: '环境与系统',
+    // 插件声明分区未带 group 时的归组头（U8：无组归「其他」）
+    groupOther: '其他',
     provider: '供应商',
     providerDesc: '配置模型供应商与 API Key',
     skill: '技能',
@@ -545,6 +547,11 @@ export default {
     // 指引正确复制路径（DevTools → Network → 请求头 Cookie，不是 Application → Cookies 表格）。
     quotaCookieFormatInvalid: 'Cookie 格式无效：未解析出任何 name=value 对。请在 DevTools → Network 中选中任一请求，复制请求头里的 Cookie 整串（形如 name=value; name2=value2）后重试',
     quotaUpdateCookie: '更新 Cookie',
+    // cookie 自动续期（main 隐藏窗口刷新器）：按钮 / 进行中 / 成功 / 失败四态文案
+    quotaCookieAutoRefresh: '自动续期 Cookie',
+    quotaCookieAutoRefreshRunning: '正在续期…',
+    quotaCookieAutoRefreshOk: '已续期，正在重新查询',
+    quotaCookieAutoRefreshFail: '自动续期失败，请手动更新 Cookie',
     // 三窗口标签 + 时间格式化（CodingPlanSection 内联额度预览）
     quotaWindow5h: '5h',
     quotaWindowWeek: '本周',
@@ -931,7 +938,7 @@ export default {
     defaultOn: '默认启用',
     defaultOff: '默认禁用',
     noExtensions: '暂无扩展',
-    builtinExtensionHint: "提示：3 个内置扩展（{'@'}zhushanwen/pi-agent-ext / {'@'}zhushanwen/pi-system-prompt / {'@'}zhushanwen/pi-msg-id-mapper）始终加载，不受扩展策略影响。",
+    builtinExtensionHint: "提示：2 个内置扩展（{'@'}zhushanwen/pi-host-internals / {'@'}zhushanwen/pi-system-prompt）始终加载，不受扩展策略影响。",
     summaryAll: '全部可用',
     summaryNone: '全部禁用',
     summaryAllowlist: '白名单 {count} 项',

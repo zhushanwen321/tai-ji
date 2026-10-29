@@ -172,6 +172,9 @@ import { startRollingRestart, resolveRollingRestartConfig, shutdownStep } from '
 import type { RollingRestartHandle } from './services/session/rolling-restart.js'
 // u7c：滚动重启计划内退出码（D5 ④；SSOT 在 shared，main 侧 PLANNED_EXIT_CODE 是同值转发）。
 import { RUNTIME_PLANNED_EXIT_CODE } from '@taiji/shared'
+// connection-datasync-ssot §6.1：实例标识 env 名（TAIJI_RUNTIME_ID，supervisor spawn 时
+// 与 token 同点注入；env 名 SSOT 在 shared，禁字面量）。
+import { RUNTIME_ID_ENV } from '@taiji/shared'
 // u17（设计 §6.12）：spawn 清单读侧在 infra SSOT（读写同模块）；组合根注入给 services 层
 // （D6c port 纪律——reap/startup-background-init 不直接 import infra）。
 import { readSpawnMarkerList, sweepStaleSpawnMarkerTmpFiles } from './infra/pi/spawn-markers.js'
@@ -229,6 +232,20 @@ function resolveRuntimeToken(): string | null {
   }
   console.warn('[runtime] WS auth token unavailable (TAIJI_RUNTIME_TOKEN env / <dataDir>/runtime-token both missing) — fail-closed: ALL WebSocket connections will be rejected')
   return null
+}
+
+/**
+ * 解析实例标识（connection-datasync-ssot §6.1）：env TAIJI_RUNTIME_ID（supervisor
+ * spawn 时与 token 同点签发注入，env 名 SSOT = RUNTIME_ID_ENV）。auth 成功应答经
+ * ConnectionManager 回传给客户端（连接控制器与目标快照核对「连的是谁」）。
+ *
+ * 缺失容忍置 null——与 token 的 fail-closed 语义刻意相反：裸跑（脚本/测试直起
+ * runtime，无 supervisor spawn 链）时 env 缺失是常态形态，实例核对失败不拒连接
+ * （fail-fast 消费侧在 renderer 连接控制器）；token 缺失则拒绝全部连接。
+ */
+function resolveRuntimeId(): string | null {
+  const raw = process.env[RUNTIME_ID_ENV]
+  return raw && raw.trim().length > 0 ? raw.trim() : null
 }
 
 // ── u5b-runtime-forensics D6-②：runtime 内存水位定时器 ──────────────────
@@ -493,6 +510,9 @@ async function main(): Promise<void> {
     host: remoteAccess ? '0.0.0.0' : undefined,
     remoteTokenProvider: remoteAccess ? readRemoteAccessToken : undefined,
     mobileStaticHandler: mobileStaticRoot !== null ? createMobileStaticHandler(mobileStaticRoot) : undefined,
+    // 实例标识（connection-datasync-ssot §6.1）：auth 成功应答回传；env 缺失（裸跑）
+    // 容忍置 null，不 fail-closed——见 resolveRuntimeId。
+    runtimeId: resolveRuntimeId(),
   })
 
   // MessageBus 单例（wave:runtime-wiring）：per-session 消息广播核心。
@@ -1141,6 +1161,9 @@ async function main(): Promise<void> {
     // [A2 D-A2-2] skillNotice 广播通道（deliverText 注入的 notice 发布用）；组合根
     // messageBus 恒就绪，getter 形态与 SessionRecordsDeps 装配同款。
     getMessageBus: () => messageBus,
+    // [remote-use-mobile-v2 §6.3 fallback] prompt 受理写点补发整表广播（未读「新投递」
+    // 触发源）：与 handoffService 装配同款注入（server.broadcastSessionList 整表通道）。
+    broadcastSessionList: () => server.broadcastSessionList(),
     // notify-once D2 受理回执（P9 帧序：内核同栈于 port.send 受理回调触发，先于 settled 帧）。
     onSettledMessage: (_sid, msg, outcome) => {
       const meta = msg.meta
@@ -1415,7 +1438,9 @@ async function main(): Promise<void> {
       const cfg = getProviderConfig(providerId)
       const extras = readExtrasWithFallback(providerExtrasStore, configStore, providerId)
       if (!cfg && !extras?.quota) return undefined
-      return { baseUrl: cfg?.baseUrl, name: cfg?.name, quota: extras?.quota }
+      // pi 的 baseUrl 语义挂 model 级（catalog provider 顶层无 baseUrl）；preset 匹配
+      // 需要 baseUrl——顶层缺失时取首个 model 的 baseUrl 作代表（单 baseUrl provider 全覆盖）
+      return { baseUrl: cfg?.baseUrl ?? cfg?.models?.[0]?.baseUrl, name: cfg?.name, quota: extras?.quota }
     },
     providerExtrasStore,
     providerExists: (providerId) => configService.listProviders().some(p => p.id === providerId),
@@ -1484,13 +1509,17 @@ async function main(): Promise<void> {
     trashDirectory,
     // [M4-a / D9④ 单入口终结扇出] 线终结（级联 / 批内直删 / btw.remove 三路同经 closeLine）的
     // lifecycle 收尾：planned kill 抑制 exit 回调，Map 条目/总线分区/插件数据不自清——
-    // 在此镜像主会话 delete 的收尾序（detach → removeSessionEntry → 插件 sessionData 真删）。
-    // 冷线（从未注册）getSession 空 → 三步全幂等零动作；失效路径（闲置回收）不经过本回调。
+    // 在此镜像主会话 delete 的收尾序（detach → removeSessionEntry → 插件 sessionData 真删
+    // → seq 高水位回收）。冷线（从未注册）getSession 空 → 各步全幂等零动作；失效路径
+    // （闲置回收）不经过本回调。
     onLineTerminated: (sessionId) => {
       if (!sessionService.getSession(sessionId)) return
       sessionService.detachSession(sessionId)
       sessionService.removeSessionEntry(sessionId)
       clearRemovedSessionData(sessionId)
+      // seq 高水位回收（dmg-r1-6，镜像主会话 delete 收尾点）：线终结即该线 session id
+      // 永久退场，removeSessionEntry 内 clearSession 登记的高水位随之回收（幂等）。
+      messageBus.forgetSession(sessionId)
     },
     // [BU2] 交互中转 pending 快照（respond/expired/失效三终态共同落点，server 薄委托）。
     hasPendingUiRequests: (sessionId) => server.getPendingUiRequests(sessionId).length > 0,

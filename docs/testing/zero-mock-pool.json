@@ -160,6 +160,7 @@
       "src/domain/composer/dispatch/orphan-draft.test.ts",
       "src/domain/composer/dispatch/submit.test.ts",
       "src/domain/composer/dispatch/types.test.ts",
+      "src/domain/drawer/__tests__/content-slots.test.ts",
       "src/domain/drawer/__tests__/control.test.ts",
       "src/domain/drawer/__tests__/registry.test.ts",
       "src/domain/drawer/__tests__/terminal-write-queue.test.ts",
@@ -174,6 +175,7 @@
       "src/domain/session-trace/__tests__/trace-blocks.test.ts",
       "src/domain/session/__tests__/panel-view.test.ts",
       "src/domain/session/__tests__/store.test.ts",
+      "src/domain/session/__tests__/use-session-history-cache.test.ts",
       "src/domain/settings/__tests__/provider-edit-discover.test.ts",
       "src/domain/settings/__tests__/provider-edit-form.test.ts",
       "src/domain/settings/__tests__/provider-edit-models.test.ts",
@@ -183,6 +185,8 @@
       "src/domain/settings/__tests__/use-provider-edit.test.ts",
       "src/domain/usage/__tests__/usage.test.ts",
       "src/extension-host/__tests__/activation-manager.test.ts",
+      "src/extension-host/__tests__/container-navigation.test.ts",
+      "src/extension-host/__tests__/content-slot-registry.test.ts",
       "src/extension-host/__tests__/internal-event-bus.test.ts",
       "src/extension-host/__tests__/mount-point-registry.test.ts",
       "src/extension-host/__tests__/session-scoped-map.test.ts",
@@ -195,6 +199,7 @@
       "src/testing/__tests__/testing-stubs.test.ts",
       "src/transport/api/__tests__/events.test.ts",
       "src/transport/api/__tests__/pending.test.ts",
+      "src/transport/connection-edge-sync.test.ts",
       "src/transport/mock/__tests__/run-send-stream.test.ts"
     ],
     "zcode-subagent-cli": [
@@ -202,7 +207,8 @@
       "src/__tests__/parser.test.ts",
       "src/__tests__/reader.test.ts",
       "src/__tests__/registration.test.ts",
-      "src/__tests__/stderr-rotation.test.ts"
+      "src/__tests__/stderr-rotation.test.ts",
+      "src/__tests__/zcode-engine.harvest-grace.test.ts"
     ],
     "runtime": [
       "scripts/__tests__/gen-builtin-providers.test.ts",
@@ -217,13 +223,17 @@
       "src/infra/pi/__tests__/pi-semantics-bundle-3.test.ts",
       "src/infra/pi/__tests__/rpc-client-lf-framing.test.ts",
       "src/infra/pi/argv-redact.test.ts",
+      "src/services/__tests__/wool-provider-write-proxy.test.ts",
       "src/services/canvas/__tests__/canvas-invariants.test.ts",
       "src/services/message-bus/__tests__/message-bus-bundle.test.ts",
       "src/services/migration/parsers/__tests__/parsers-bundle.test.ts",
+      "src/services/plugin-service/__tests__/plugin-info-mapper.test.ts",
+      "src/services/project/project-store.test.ts",
       "src/services/remote-config/__tests__/remote-provider-templates.test.ts",
       "src/services/scanners/__tests__/scanner-degraded-warn.test.ts",
       "src/services/services-root-bundle.test.ts",
-      "src/services/session/session-root-bundle.test.ts",
+      "src/services/session/__tests__/broadcast-session-list-fanout.test.ts",
+      "src/services/session/__tests__/delivery-resync-crash-retry.test.ts",
       "src/transport/__tests__/server-vid-guard.test.ts",
       "src/transport/__tests__/transport-bundle-2.test.ts",
       "src/transport/handler-settings-bundle.test.ts",
@@ -241,6 +251,7 @@
       "src/__tests__/v6-visual/tokens.test.ts",
       "src/components/canvas/canvas-ops.test.ts",
       "src/components/panel/__tests__/terminal-instance-bar.test.ts",
+      "src/components/sidebar/__tests__/SegmentedTab.test.ts",
       "src/components/ui/__tests__/ToastContainer.transition.test.ts"
     ]
   }

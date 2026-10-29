@@ -60,7 +60,7 @@
             >
               <!-- 图标 16px 固定（demo .cbtn 图标规格；rem 类会随 --font-scale 视口档缩放偏离 demo 值）。
                    stroke-width 1.6 与全仓 lucide 图标统一细线口径（demo 同款）；b.icon 恒为 lucide
-                   组件（HEADER_ACTION_ICONS 映射表 + Puzzle fallback），插件不投递自带上色 SVG。 -->
+                   组件（§6.13 单一解析函数 contributionIconComponent），插件不投递自带上色 SVG。 -->
               <component :is="b.icon" class="size-[16px]" :stroke-width="1.6" />
               <!-- 角标形态 = TRAY_ITEM_COUNT_CLASS 同款（demo .cbtn .badge：-3px 外扩 / 14px 高 /
                    px 3px / 胶囊 / mono 10px / fw-mid），单点消费 tray-item-button.ts 共享常量防漂移；
@@ -82,8 +82,8 @@
 
 <script setup lang="ts">
 import { computed, inject, ref, watch } from 'vue'
-import { Clock, Puzzle } from '@lucide/vue'
 import type { Component } from 'vue'
+import { contributionIconComponent } from '@taiji/ui'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useI18n } from 'vue-i18n'
@@ -110,9 +110,11 @@ const source = inject(HEADER_ACTIONS_SOURCE_KEY, null)
 /** badge 最大字符数（AP-1：徽标位是 icon 按钮的一个角，超长截断全文进 tooltip） */
 const BADGE_MAX_CHARS = 4
 
-/** lucide 名 → 组件映射（宿主解析，插件不给 SVG）。未登记名 fallback 到通用插件图标。 */
-const HEADER_ACTION_ICONS: Record<string, Component> = {
-  clock: Clock,
+/** lucide 名解析（§6.13 单一解析函数的头部按钮消费侧）：resolveContributionIcon 归一化/
+ * 白名单/错名兜底 + 按去重键（pluginId::contributionId）warn 一次，组件换算在共享表
+ *（ui/lib/contribution-icons）——本组件零本地映射表，未声明/错名落统一兜底。 */
+function headerActionIcon(decl: ContributionRecord, icon: string): Component {
+  return contributionIconComponent({ pluginId: decl.pluginId, contributionId: decl.contributionId, icon })
 }
 
 /** E13 生效三态 = 判定三态 | 上次值兜底（unknown 且无上次值 = undefined → 首次缺省可点） */
@@ -237,7 +239,7 @@ function toHeaderActionButton(
     return {
       key: `${decl.pluginId}::${decl.contributionId}`,
       testid: actionTestId(decl.pluginId, decl.contributionId),
-      icon: HEADER_ACTION_ICONS[ha.icon] ?? Puzzle,
+      icon: headerActionIcon(decl, ha.icon),
       badge: badgeOf(entry),
       disabled: entry?.disabled === true,
       tooltip: headerActionTooltip(null, undefined, entry, ha.title),
@@ -253,7 +255,7 @@ function toHeaderActionButton(
   return {
     key: `${decl.pluginId}::${decl.contributionId}`,
     testid: actionTestId(decl.pluginId, decl.contributionId),
-    icon: HEADER_ACTION_ICONS[ha.icon] ?? Puzzle,
+    icon: headerActionIcon(decl, ha.icon),
     badge: badgeOf(entry),
     disabled: isHeaderActionDisabled(effective, missing, availability, entry),
     tooltip: headerActionTooltip(availability, effective, entry, ha.title),

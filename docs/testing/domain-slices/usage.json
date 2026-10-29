@@ -9,6 +9,7 @@
   ],
   "scope": {
     "runtime": [
+      "packages/runtime/src/services/quota-params.ts",
       "packages/runtime/src/services/usage/**",
       "packages/runtime/src/services/quota-service.ts",
       "packages/runtime/src/services/quota-cache.ts",
@@ -34,7 +35,8 @@
       "packages/shared/src/gen-stats.ts",
       "packages/shared/src/usage-stats.ts",
       "packages/shared/src/quota-presets.ts",
-      "packages/shared/src/quota-types.ts"
+      "packages/shared/src/quota-types.ts",
+      "packages/shared/src/quota-refresh-targets.ts"
     ]
   },
   "tests": [
@@ -47,13 +49,17 @@
     "packages/runtime/src/services/quota-providers/**",
     "packages/core/src/domain/usage/__tests__/usage.test.ts",
     "packages/renderer/src/__tests__/panel/gen-stats-composable.test.ts",
+    "packages/renderer/src/__tests__/composables/quota-cookie-auto-refresh.test.ts",
     "packages/renderer/src/__tests__/panel/context-capacity-card.test.ts",
     "packages/renderer/src/components/panel/__tests__/PlanQuotaFloatPanel.test.ts",
     "packages/shared/src/__tests__/gen-stats.test.ts",
+    "packages/shared/src/__tests__/quota-cookie-merge.test.ts",
     "packages/shared/src/__tests__/quota-cookie-normalize.test.ts",
     "packages/shared/src/__tests__/quota-credential-source.test.ts",
+    "packages/shared/src/__tests__/quota-fetcher-resolution.test.ts",
     "packages/shared/src/__tests__/quota-pct-format.test.ts",
     "packages/shared/src/__tests__/quota-presets.test.ts",
+    "packages/shared/src/__tests__/quota-refresh-targets.test.ts",
     "packages/shared/src/__tests__/quota-workspace.test.ts"
   ],
   "sharedBy": {},

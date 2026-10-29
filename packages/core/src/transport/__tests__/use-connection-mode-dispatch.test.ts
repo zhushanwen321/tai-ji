@@ -4,8 +4,9 @@
  * 锁定 init() 的三形态分支选择与各形态连接目标派生：
  * - 分支选择：mock = env.isMock（优先于 ipc 存在性——electron 装配恒注入 ipc（含
  *   VITE_MOCK 构建），mock 优先是桌面等价性要求）；本地 = ipc 有值；远程 = ipc 无值。
- * - electron 本地形态 URL 派生与收敛前逐字节等价：knownPort / onRuntimePort 推送 /
- *   fallback（含 dev offset）/ HMR 重连四条路径的 URL 字符串断言。
+ * - electron 本地形态：连接目标 = 目标快照单一权威源（connection-datasync-ssot §6.2）——
+ *   快照拉取 / 快照推送 / null 等待态 / HMR 重拉四条路径的 URL 与凭据断言（备用猜连
+ *   fallback 公式已删除）。
  * - 远程 profile 分支：连接目标经注入的 connectionProfile 解析（U1.3 移动壳消费点）；
  *   未注入时 init 显式失败（fail-fast + 恢复指引），不静默降级、不发起连接。
  *
@@ -22,7 +23,7 @@ import {
   type ConnectionProfilePort,
   type ResolvedConnectionProfile,
 } from '../use-connection'
-import { connect } from '../ws-client'
+import { connect, getState, setWaitingRuntime } from '../ws-client'
 
 // ── ws-client mock：捕获 connect/disconnect 调用 + 可控连接状态 ref（token-refresh 测试同款）──
 const mockStateRef = ref<ConnectionState>('disconnected')
@@ -44,6 +45,10 @@ vi.mock('../ws-client', () => ({
   // 与分支选择，信号路径由 use-connection-auth-rejection.test.ts 专项锁定
   onAuthRejected: vi.fn(() => () => {}),
   isAuthRejectedSuppressed: vi.fn(() => false),
+  // 连接控制器新消费面（connection-datasync-ssot §6.2/§6.3）
+  setWaitingRuntime: vi.fn(),
+  onAuthAccepted: vi.fn(() => () => {}),
+  resetAuthRejectionSuppression: vi.fn(),
 }))
 
 // ── 其余端口 mock（use-connection-token-refresh.test.ts 同款；D3 后三件套直连真实模块，
@@ -55,9 +60,8 @@ interface PortsSpec {
   /** false = 不注入 ipc（远程形态判别输入）；缺省 = 注入（electron 装配形态） */
   withIpc?: boolean
   withProfile?: boolean
-  knownPort?: number | undefined
-  offset?: number | undefined
-  token?: string | null
+  /** 快照拉取桩返回值；缺省 = null（runtime 未启动 → 等待态）。undefined 字段显式传入无效，统一归 null */
+  snapshot?: { seq: number; runtimeId: string; port: number; token: string } | null
   profileUrl?: string
   /** null = resolve 结果不带 token（无凭据路径） */
   profileToken?: string | null
@@ -65,9 +69,7 @@ interface PortsSpec {
 
 function buildIpc(spec: PortsSpec) {
   return {
-    getRuntimePort: vi.fn().mockResolvedValue(spec.knownPort),
-    getRuntimePortOffset: vi.fn().mockResolvedValue(spec.offset),
-    getRuntimeToken: vi.fn().mockResolvedValue(spec.token ?? null),
+    getRuntimeTargetSnapshot: vi.fn().mockResolvedValue(spec.snapshot ?? null),
     onRuntimePort: vi.fn().mockReturnValue(() => {}),
     onRuntimeRestarting: vi.fn().mockReturnValue(() => {}),
     onRuntimeFailed: vi.fn().mockReturnValue(() => {}),
@@ -126,12 +128,12 @@ afterEach(() => {
 
 describe('连接发现收敛：三形态分支选择（topology §2.4 / D4）', () => {
   it('TC-M1: mock 分支优先于 ipc 存在性（electron mock 构建形态：ipc 有值 + isMock）→ mock:// 且零 IPC 端口发现', async () => {
-    const { ports, ipc } = makePorts({ isMock: true, knownPort: 4000 })
+    const { ports, ipc } = makePorts({ isMock: true })
     await initFresh(ports)
     expect(connect).toHaveBeenCalledTimes(1)
     expect(connect).toHaveBeenCalledWith('mock://localhost', { auth: 'skip' })
-    // mock 分支不做端口发现、不注册 runtime 事件监听（现状行为）
-    expect(ipc?.getRuntimePort).not.toHaveBeenCalled()
+    // mock 分支不做快照拉取、不注册 runtime 事件监听（现状行为）
+    expect(ipc?.getRuntimeTargetSnapshot).not.toHaveBeenCalled()
     expect(ipc?.onRuntimePort).not.toHaveBeenCalled()
     // HMR 重复 init 亦不发起本地重连（现状行为）
     await useConnection().init()
@@ -146,38 +148,49 @@ describe('连接发现收敛：三形态分支选择（topology §2.4 / D4）', 
     expect(connect).toHaveBeenCalledTimes(1)
   })
 
-  it('TC-M3: 本地分支（ipc 有值 + 非 mock）→ knownPort 路径 connect ws://localhost:4000 + token（收敛前等价）', async () => {
-    const { ports, ipc } = makePorts({ knownPort: 4000, token: 'tok-1' })
+  it('TC-M3: 本地分支（ipc 有值 + 非 mock）→ 快照路径 connect ws://localhost:4000 + 快照 token', async () => {
+    const snapshot = { seq: 1, runtimeId: 'rt-1', port: 4000, token: 'tok-1' }
+    const { ports, ipc } = makePorts({ snapshot })
     await initFresh(ports)
-    // 本地分支完整装配：端口发现 + runtime 事件监听注册
-    expect(ipc?.getRuntimePort).toHaveBeenCalledTimes(1)
+    // 本地分支完整装配：快照拉取 + runtime 事件监听注册（连接目标 = 快照单一权威源）
+    expect(ipc?.getRuntimeTargetSnapshot).toHaveBeenCalledTimes(1)
     expect(ipc?.onRuntimePort).toHaveBeenCalledTimes(1)
     expect(connect).toHaveBeenCalledWith('ws://localhost:4000', { auth: 'token', token: 'tok-1' })
   })
 
-  it('TC-M4: 本地分支 fallback（getRuntimePort→undefined）→ ws://localhost:3210（BASE_PORT，收敛前等价）', async () => {
-    const { ports } = makePorts({ knownPort: undefined, offset: undefined, token: 'tok-2' })
+  it('TC-M4: 本地分支快照 null（runtime 未启动）→ 不发起连接、置 waiting-runtime（§6.2 权威目标确认前不连接）', async () => {
+    const { ports } = makePorts({ snapshot: null })
     await initFresh(ports)
-    expect(connect).toHaveBeenCalledWith('ws://localhost:3210', { auth: 'token', token: 'tok-2' })
+    expect(connect).not.toHaveBeenCalled()
+    expect(setWaitingRuntime).toHaveBeenCalledTimes(1)
   })
 
-  it('TC-M5: 本地分支 dev fallback（isDev + offset undefined）→ ws://localhost:3310（BASE_PORT+DEV_PORT_OFFSET，收敛前等价）', async () => {
-    const { ports } = makePorts({ isDev: true, offset: undefined, token: null })
+  it('TC-M5: 本地分支快照拉取抛错 → 同样落等待态（不猜连、不抛出）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { ports, ipc } = makePorts({ snapshot: null })
+    vi.mocked(ipc!.getRuntimeTargetSnapshot).mockRejectedValueOnce(new Error('ipc gone'))
     await initFresh(ports)
-    // IPC 拿不到 token（null）→ 降级空串 token 握手探测（S4 裁决：本地 runtime 恒配 token，
-    // skip 会在握手缺失下假 connected；探测必被拒走重连链，凭据恢复经 onRuntimePort 重新拉取）
-    expect(connect).toHaveBeenCalledWith('ws://localhost:3310', { auth: 'token', token: '' })
+    expect(connect).not.toHaveBeenCalled()
+    expect(setWaitingRuntime).toHaveBeenCalledTimes(1)
+    warnSpy.mockRestore()
   })
 
-  it('TC-M7: 本地分支 HMR 重连（重复 init）→ fallback URL ws://localhost:3210（收敛前等价）', async () => {
-    const { ports } = makePorts({ knownPort: 4000, token: 'tok-4' })
+  it('TC-M7: 本地分支 HMR 重连（重复 init）→ 重拉快照连接（快照即目标，非猜连公式）', async () => {
+    const snapshot = { seq: 1, runtimeId: 'rt-1', port: 4000, token: 'tok-4' }
+    const { ports } = makePorts({ snapshot })
     setConnectionPorts(ports)
     const conn = useConnection()
     await conn.init()
     expect(connect).toHaveBeenCalledWith('ws://localhost:4000', { auth: 'token', token: 'tok-4' })
-    // initialised=true → HMR 路径：仅按 fallback 端口重连，不重复端口发现
+    vi.mocked(connect).mockClear()
+    // initialised=true → HMR 路径：重拉快照（此时已 connected → 幂等不动作）
+    mockStateRef.value = 'connected'
     await conn.init()
-    expect(connect).toHaveBeenLastCalledWith('ws://localhost:3210', { auth: 'token', token: 'tok-4' })
+    expect(connect).not.toHaveBeenCalled()
+    // 断连后 HMR → 重拉快照连向快照目标
+    mockStateRef.value = 'disconnected'
+    await conn.init()
+    expect(connect).toHaveBeenLastCalledWith('ws://localhost:4000', { auth: 'token', token: 'tok-4' })
   })
 })
 

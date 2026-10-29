@@ -11,6 +11,8 @@ export default {
     groupResources: 'Models & Resources',
     groupInputAppearance: 'Input & Appearance',
     groupEnvSystem: 'Environment & System',
+    // Group head for plugin-declared sections without a group (U8: ungrouped falls into "Other")
+    groupOther: 'Other',
     provider: 'Provider',
     providerDesc: 'Configure model providers and API keys',
     skill: 'Skill',
@@ -547,6 +549,11 @@ export default {
     // points at the correct copy path (DevTools → Network → request-header Cookie, not the Application → Cookies table).
     quotaCookieFormatInvalid: 'Invalid Cookie format: no name=value pairs found. In DevTools → Network, select any request and copy the full Cookie from its request headers (like name=value; name2=value2), then retry',
     quotaUpdateCookie: 'Update Cookie',
+    // cookie auto-refresh (main hidden-window refresher): button / running / ok / fail copy
+    quotaCookieAutoRefresh: 'Auto-refresh Cookie',
+    quotaCookieAutoRefreshRunning: 'Refreshing…',
+    quotaCookieAutoRefreshOk: 'Cookie refreshed, re-querying',
+    quotaCookieAutoRefreshFail: 'Auto-refresh failed; update the Cookie manually',
     // window labels + time formatting (CodingPlanSection inline quota preview)
     quotaWindow5h: '5h',
     quotaWindowWeek: 'This week',
@@ -933,7 +940,7 @@ export default {
     defaultOn: 'Default On',
     defaultOff: 'Default Off',
     noExtensions: 'No extensions',
-    builtinExtensionHint: "Note: 3 built-in extensions ({'@'}zhushanwen/pi-agent-ext / {'@'}zhushanwen/pi-system-prompt / {'@'}zhushanwen/pi-msg-id-mapper) are always loaded and not affected by extension policies.",
+    builtinExtensionHint: "Note: 2 built-in extensions ({'@'}zhushanwen/pi-host-internals / {'@'}zhushanwen/pi-system-prompt) are always loaded and not affected by extension policies.",
     summaryAll: 'All available',
     summaryNone: 'All disabled',
     summaryAllowlist: 'Allowlist {count} item(s)',

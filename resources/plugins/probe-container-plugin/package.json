@@ -1,0 +1,57 @@
+{
+  "name": "probe-container-plugin",
+  "version": "0.0.1",
+  "private": true,
+  "taijiPlugin": {
+    "manifestVersion": 1,
+    "main": "index.js",
+    "activationEvents": [
+      "onStartupFinished"
+    ],
+    "trustLevel": "trusted",
+    "source": "built-in",
+    "permissions": [
+      "sessions.readState"
+    ],
+    "contributes": {
+      "views": [
+        {
+          "id": "probe-container-plugin.tab",
+          "placement": "drawer.tab",
+          "title": "探针面板",
+          "icon": "list-tree",
+          "order": 30,
+          "scope": "session",
+          "emptyState": {
+            "text": "还没有数据",
+            "hint": "等待插件推树"
+          }
+        },
+        {
+          "id": "probe-container-plugin.panel",
+          "placement": "overlay.content",
+          "title": "探针浮层",
+          "icon": "panel-right",
+          "scope": "session"
+        },
+        {
+          "id": "probe-container-plugin.bad",
+          "placement": "nonexistent.slot",
+          "title": "坏声明反例",
+          "scope": "session"
+        }
+      ],
+      "headerActions": [
+        {
+          "id": "probe.open",
+          "title": "探针",
+          "icon": "panel-right",
+          "activation": {
+            "kind": "overlay",
+            "tabId": "probe-container-plugin.panel"
+          }
+        }
+      ]
+    }
+  }
+}

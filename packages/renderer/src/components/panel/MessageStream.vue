@@ -78,7 +78,8 @@
            滚动容器经 :scroll-ref 显式指定为本 scrollEl（D3 / P-wrap 门，
            virtua 0.50.0 scrollRef prop 实装支持）——wrapper 加入后 parentElement 不再是 scrollEl。
            - :data 全量 renderItems（turn + system 穿插）
-           - :shift 顶部插入（load-more-history）时 true（virta 原生 reverse scroll adjustment，design §2.4）
+           - :shift 顶部插入时 true（驱动源两处：load-more-history 手动翻页 + historyCacheReady 全量精化的
+             基线前置 tick，均经 useLoadMoreHistory 的 isPrepend；virta 原生 reverse scroll adjustment，design §2.4）
            - :keepMounted streaming/editing turn 恒挂载（design §4.3，virta 仍挂 RO 不致测量断；
              [pin-identity D1] editing 项由 useStreamingPin 按 turnKey 反查当前 items 得出）
            - :startMargin load-more 占位高度（virta getItemOffset 已含 startMargin，design §4.11）
@@ -96,7 +97,6 @@
         :scroll-ref="scrollEl ?? undefined"
         :key="props.sessionId"
         @scroll="onVirtuaScroll"
-        @scroll-end="onVirtuaScrollEnd"
       >
         <!-- slot 内容注意：禁止在 <template #default> 内放任何注释/文本节点！
              virtua 的 item key 提取要求 slot 返回恰好 1 个 vnode（P(): e.length===1 才取 e[0].key），
@@ -219,7 +219,8 @@
     </div>
 
     <!-- 回到最新胶囊（N11/决策12）：滚动离底超过一屏即浮现（showJumpButton 距底几何判定），
-         点之平滑滚回并恢复锚定（force 同步清零距底快照 → 胶囊即时消失）。
+         点之回底并恢复锚定（流式增长期即时跳 / 静止期平滑——smooth 通行门见
+         useVirtuaFollow opts.smoothAllowed；force 同步清零距底快照 → 胶囊即时消失）。
          形态 = demo .to-latest：elevated 浮层底 + border-strong 边 + shadow-2 + 12px/600 字重 +
          0.02em 字距 + hover 提边框色（无底色反馈）；浮现 = opacity + 6px 上浮（demo .18s，
          取令牌 --duration）；图标 13px（demo .to-latest .sicon）= svg 普通尺寸类（Button 基类
@@ -458,7 +459,6 @@ function onEditStateChange(payload: { editing: boolean; turnKey: string }): void
 const { pinnedIndexes } = useStreamingPin({
   // [u5] streamItems 基准（keepMounted 下标空间 = :data，索引一致性硬约束见 streamItems 注释）
   items: streamItems,
-  sessionId: () => props.sessionId,
   editingTurnKey,
 })
 
@@ -467,12 +467,20 @@ const { pinnedIndexes } = useStreamingPin({
 // [U4 护栏⑦] dev-only 贴底跟随断言包装（生产透传零开销；spec 详见 usePinBottomGuard.ts 头注释）。
 // [D2 数学不变量] endOffset = tailEl 实测总高：纵向 padding 参与 viewportSize 扣除与落点
 // 公式，偏差由 BOTTOM_THRESHOLD 吸收（改任一纵向 padding 必复核 D2 推导并真机复验贴底）。
+// [缺陷①] smooth 通行门观察源 = 全部 renderItems 的 isStreaming（与 D1 主触发同口径：
+// bash↔streaming 双工作态下 streaming 回合退居非末位仍要拦 smooth，单点判定会漏）。
+const hasStreamingTurn = computed(() =>
+  renderItems.value.some((item) => item.kind === 'turn' && item.turn.isStreaming),
+)
+
 const { stickToBottom, showJumpButton, onScroll, onWheel, onTouchStart, onTouchMove, followIfStuck, followToBottom, onSessionRebuild, notifyRoActivity, refreshDistanceSnapshot } =
   usePinBottomGuard({
     follow: useVirtuaFollow({
       vlistRef,
       itemCount: () => streamItems.value.length, // [D1] 末项索引直取数据源（= :data 同一 streamItems 基准）
       endOffset: () => tailHeight.value,
+      // [缺陷①] 流式增长期禁 smooth：胶囊点击降级即时跳（根因链见 useVirtuaFollow opts 注释）
+      smoothAllowed: () => !hasStreamingTurn.value,
     }),
     scrollEl,
     isStreaming: () => lastRenderTurn.value?.isStreaming ?? false,
@@ -481,9 +489,8 @@ const { stickToBottom, showJumpButton, onScroll, onWheel, onTouchStart, onTouchM
 // [D3/D5] 跟随触发编排（触发语义见 useMessageStreamFollowTriggers 头注释）：[F1] 提交序号
 // 递增强制回底；[F2] RO/条数 watch 喂脱离态几何快照（guard 在原语内聚）。
 const { contentWrapEl, tailEl, tailHeight } = useMessageStreamFollowTriggers({
-  messages: currentMessages,
+  renderItems,
   submitSeq: () => chat.getSubmitSeq(props.sessionId),
-  lastRenderTurn,
   scrollEl,
   followIfStuck,
   notifyRoActivity,
@@ -512,9 +519,9 @@ provide(
 )
 
 /**
- * [cw wave w3] virta scroll 事件聚合 handler（IF7 @scrollEnd 用于 showJumpButton 稳定判定）。
+ * [cw wave w3] virtua scroll 事件聚合 handler。
  * - onScroll(offset) 复合判据维护 stickToBottom（INVAR-M4-2′：用户上滑翻 false，写入回声不误判）
- * - rail.updateActiveTurnIndex 用 virta findItemIndex(scrollOffset) 精确定位当前项
+ * - rail.updateActiveTurnIndex 用 virtua findItemIndex(scrollOffset) 精确定位当前项
  */
 function onVirtuaScroll(offset: number): void {
   onScroll(offset)
@@ -523,9 +530,6 @@ function onVirtuaScroll(offset: number): void {
   // 切 session 的 scrollTop clamp 回声（offset≈0）时长滚到底尚未落地，stickToBottom 仍为
   // true，不会白拉一页历史；isPrepend 保位把插入后的 offset 抬到阈值以上，天然节流。
   onScrollOffset(offset, !stickToBottom.value)
-}
-function onVirtuaScrollEnd(): void {
-  // design.md IF7 预留：showJumpButton 稳定判定（virta @scrollEnd 触发，目前 showJumpButton 已是 computed，留空 no-op）
 }
 
 // [D5 force 内联] 挂载即滚到底（force=true，不受 guard）；store watch / RO

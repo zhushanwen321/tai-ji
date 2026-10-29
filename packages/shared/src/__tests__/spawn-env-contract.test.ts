@@ -2,9 +2,9 @@
  * spawn-env-contract 单测：出站契约常量的结构不变量。
  *
  * 守护（设计文档 env-propagation-boundary.md §5-U1 完成条件）：
- * - deny 清单成员最小性 = 首版恰为 2 个实证害项（D3 决策：只增不减、增删过评审；
- *   [M3 relay-spawn-transport D4/D6] 增补第 3 项 TAIJI_ENGINE_RAW_MIRROR，评审证据
- *   = 该设计 env × spawn 点矩阵）；
+ * - deny 清单成员最小性 = 逐项带危害证据的登记制（D3 决策：只增不减、增删过评审）；
+ *   现役 4 项——2 实证害项 + TAIJI_ENGINE_RAW_MIRROR（[M3 D4/D6] env × spawn 点
+ *   矩阵评审）+ TAIJI_RUNTIME_ID（connection-datasync-ssot §6.1 生命周期标志族）；
  * - 成员无重复、全大写蛇形命名；
  * - forward 参考清单覆盖 B 组五项 + U0① 增补项，且每条带 pi 子树消费锚点。
  */
@@ -18,12 +18,13 @@ import {
 import { ENV_WHITELIST_PREFIXES } from '../constants'
 
 describe('SPAWN_ENV_OUTBOUND_DENY_LIST 出站剥除清单', () => {
-  it('成员清单锁定：首版 2 实证害项 + [M3 D4/D6] 增补 TAIJI_ENGINE_RAW_MIRROR（剥 task pi，引擎自身 L0 注入后收取不受影响）', () => {
-    expect(SPAWN_ENV_OUTBOUND_DENY_LIST).toHaveLength(3)
+  it('成员清单锁定：首版 2 实证害项 + [M3 D4/D6] TAIJI_ENGINE_RAW_MIRROR + [§6.1] TAIJI_RUNTIME_ID（runtime 实例标识，生命周期标志族）', () => {
+    expect(SPAWN_ENV_OUTBOUND_DENY_LIST).toHaveLength(4)
     expect([...SPAWN_ENV_OUTBOUND_DENY_LIST]).toEqual([
       'TAIJI_AGENT_PACKAGED',
       'TAIJI_RUNTIME_TOKEN',
       'TAIJI_ENGINE_RAW_MIRROR',
+      'TAIJI_RUNTIME_ID',
     ])
   })
 

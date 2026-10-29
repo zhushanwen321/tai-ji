@@ -33,6 +33,11 @@ vi.mock('../ws-client', () => ({
   },
   onMessage: vi.fn(() => () => {}),
   onQueueDrop: vi.fn(() => () => {}),
+  setWaitingRuntime: vi.fn(),
+  onAuthAccepted: vi.fn(() => () => {}),
+  onAuthRejected: vi.fn(() => () => {}),
+  resetAuthRejectionSuppression: vi.fn(),
+  isAuthRejectedSuppressed: vi.fn(() => false),
 }))
 
 let restartingCb: (() => void) | null = null
@@ -54,9 +59,7 @@ vi.mock('../api/pending', () => ({
 function makePorts(): ConnectionPorts {
   return {
     ipc: {
-      getRuntimePort: vi.fn().mockResolvedValue(undefined),
-      getRuntimePortOffset: vi.fn().mockResolvedValue(undefined),
-      getRuntimeToken: vi.fn().mockResolvedValue('tok'),
+      getRuntimeTargetSnapshot: vi.fn().mockResolvedValue(null),
       onRuntimePort: () => () => {},
       onRuntimeRestarting: (cb: () => void) => {
         restartingCb = cb

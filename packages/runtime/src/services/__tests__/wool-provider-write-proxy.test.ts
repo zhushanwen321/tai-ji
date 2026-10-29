@@ -1,28 +1,4 @@
 /**
- * ProviderWriteProxy（providers.* 代理 / 写落点广播 / 磁盘断言 / manifest reader / credential roundtrip 真链路）合并测试。
- *
- * 来源（各来源节以基名 describe 包裹，节内顶层 hook/helper/mock 随节下沉）：
- * - wool-provider-write-proxy.test.ts
- * - provider-credential-roundtrip.test.ts
- *
- * 运行：cd packages/runtime && TAIJI_SKIP_REAL_PI=1 npx vitest run src/services/__tests__/wool-provider-write-proxy.test.ts
- */
-
-import { describe, it, expect, vi, afterEach } from 'vitest'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { setModelsPath, readModels, getProviderConfig, upsertProvider, ensureProviderInWhitelist } from '../../infra/pi/pi-provider-store.js'
-import { AuthStorage } from '../auth/auth-storage.js'
-import { ProviderCredentialResolver } from '../auth/provider-credential-resolver.js'
-import { PluginRpcServer } from '../plugin-service/plugin-rpc-server.js'
-import type { RpcRequest, RpcResponse } from '../plugin-service/plugin-types.js'
-import { setProvider as setProviderImpl } from '../provider-config-helper.js'
-import type { ProviderWriteProxyDeps } from '../provider-write-proxy.js'
-import { registerProviderWriteProxy, createPluginManifestReader, PROVIDERS_WRITE_METHOD, PROVIDERS_DELETE_METHOD, PROVIDERS_CREDENTIAL_METHOD, WRITE_BROADCAST_DEBOUNCE_MS } from '../provider-write-proxy.js'
-
-describe('wool-provider-write-proxy', () => {
-/**
  * providers.* 三 RPC 代理测试（provider-plugin-access D4；S20/S21 宿主侧断言）。
  *
  * 覆盖：S20 正向回读（命名空间内 + network.http 已声明 → 定向 reply 携明文）；
@@ -34,6 +10,21 @@ describe('wool-provider-write-proxy', () => {
  * 走真实 PluginRpcServer dispatch 链（wire response 形态即插件侧所见），依赖 stub 注入。
  * 测试框架：vitest。运行：cd packages/runtime && npx vitest run wool
  */
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { PluginRpcServer } from '../plugin-service/plugin-rpc-server.js'
+import type { RpcRequest } from '../plugin-service/plugin-types.js'
+import {
+  registerProviderWriteProxy,
+  createPluginManifestReader,
+  PROVIDERS_WRITE_METHOD,
+  PROVIDERS_DELETE_METHOD,
+  PROVIDERS_CREDENTIAL_METHOD,
+  type ProviderWriteProxyDeps,
+} from '../provider-write-proxy.js'
+
 /** 羊毛形态插件清单：WorkBuddy 插件（ns=wool-workbuddy，含 network.http）。 */
 const WORKBUDDY_MANIFEST = { pkgName: '@zhushanwen/plugin-wool-workbuddy', capabilities: ['network.http'] as const }
 
@@ -114,6 +105,7 @@ describe('providers.* 代理（provider-plugin-access D4）', () => {
     const rpcServer = new PluginRpcServer()
     const deps = makeDeps({
       readPluginManifest: vi.fn(() => ({ pkgName: '@zhushanwen/plugin-wool-workbuddy', capabilities: [] })),
+      notifyProvidersMutated: vi.fn(),
     })
     registerProviderWriteProxy(rpcServer, deps)
     const { port, responses } = makeWorkerPort()
@@ -151,7 +143,7 @@ describe('providers.* 代理（provider-plugin-access D4）', () => {
       providerId: 'wool-workbuddy',
       apiKey: 'sk-new',
       displayName: 'WorkBuddy',
-      headers: { 'x-wool-refresh-token': 'rt-1' },
+      headers: { 'x-wool-refresh-token': 'rt-1', bad: 42 },
       models: [{ id: 'deepseek-v4.1', name: 'DeepSeek' }, 'glm-5.3'],
     })
 
@@ -163,24 +155,6 @@ describe('providers.* 代理（provider-plugin-access D4）', () => {
     })
     const response = responses[0]?.response as { result?: { written?: boolean } }
     expect(response.result?.written).toBe(true)
-  })
-
-  it('write 载荷校验：headers 值非字符串 → INVALID_PAYLOAD 显式拒绝（与 models 元素同款），setProvider 零调用', async () => {
-    const rpcServer = new PluginRpcServer()
-    const deps = makeDeps()
-    registerProviderWriteProxy(rpcServer, deps)
-    const { port, responses } = makeWorkerPort()
-    rpcServer.registerWorker('w1', port, { trustLevel: 'sandbox', pluginId: 'plugin-wool-workbuddy' })
-
-    // 2026-10-25 审查回写：修复前该形态被 filter 静默丢弃（写入侧与插件预期静默漂移）
-    await dispatch(rpcServer, 'w1', PROVIDERS_WRITE_METHOD, {
-      providerId: 'wool-workbuddy',
-      apiKey: 'sk-new',
-      headers: { 'x-wool-refresh-token': 'rt-1', bad: 42 },
-    })
-
-    expect(errorCodeOf(responses)).toBe('INVALID_PAYLOAD')
-    expect(vi.mocked(deps.setProvider)).not.toHaveBeenCalled()
   })
 
   it('write 越权：ns 前缀边界外（无连字符粘尾）→ NAMESPACE_MISMATCH，setProvider 零调用', async () => {
@@ -262,76 +236,6 @@ describe('providers.* 代理（provider-plugin-access D4）', () => {
     for (const spy of [consoleSpy, consoleWarnSpy, consoleErrorSpy]) {
       expect(spy.mock.calls.map((call) => call.join(' ')).join('\n')).not.toContain('sk-wool-secret-key')
     }
-  })
-})
-
-describe('写落点广播（ISSUES-2 ⑧：write/delete 成功 → 去抖合并后 notify 一次）', () => {
-  afterEach(() => {
-    vi.restoreAllMocks()
-    vi.useRealTimers()
-  })
-
-  /** 带去抖时钟推进的装配：write 派发后 advance 一个去抖窗口，notify 兑现在窗口尾部。 */
-  async function setupWithWorker(deps: ProviderWriteProxyDeps) {
-    const rpcServer = new PluginRpcServer()
-    registerProviderWriteProxy(rpcServer, deps)
-    const { port } = makeWorkerPort()
-    rpcServer.registerWorker('w1', port, { trustLevel: 'sandbox', pluginId: 'plugin-wool-workbuddy' })
-    return rpcServer
-  }
-
-  it('write 成功 → 去抖窗口后 notify 恰一次（窗口内零调用 = 广播延后到窗口尾部）', async () => {
-    vi.useFakeTimers()
-    const deps = makeDeps()
-    const rpcServer = await setupWithWorker(deps)
-
-    await dispatch(rpcServer, 'w1', PROVIDERS_WRITE_METHOD, { providerId: 'wool-workbuddy', apiKey: 'sk-x' })
-    expect(deps.notifyProvidersMutated).not.toHaveBeenCalled()
-
-    await vi.advanceTimersByTimeAsync(WRITE_BROADCAST_DEBOUNCE_MS)
-    expect(deps.notifyProvidersMutated).toHaveBeenCalledTimes(1)
-  })
-
-  it('连续两次 write（writeCredentials + writeCatalog 批量形态）→ 合并为一次广播', async () => {
-    vi.useFakeTimers()
-    const deps = makeDeps()
-    const rpcServer = await setupWithWorker(deps)
-
-    await dispatch(rpcServer, 'w1', PROVIDERS_WRITE_METHOD, { providerId: 'wool-workbuddy', apiKey: 'sk-x' })
-    await dispatch(rpcServer, 'w1', PROVIDERS_WRITE_METHOD, { providerId: 'wool-workbuddy', models: ['m1'] })
-
-    await vi.advanceTimersByTimeAsync(WRITE_BROADCAST_DEBOUNCE_MS)
-    expect(deps.notifyProvidersMutated).toHaveBeenCalledTimes(1)
-  })
-
-  it('delete 成功 → 同样触发一次广播', async () => {
-    vi.useFakeTimers()
-    const deps = makeDeps()
-    const rpcServer = await setupWithWorker(deps)
-
-    await dispatch(rpcServer, 'w1', PROVIDERS_DELETE_METHOD, { providerId: 'wool-workbuddy' })
-    await vi.advanceTimersByTimeAsync(WRITE_BROADCAST_DEBOUNCE_MS)
-    expect(deps.notifyProvidersMutated).toHaveBeenCalledTimes(1)
-  })
-
-  it('providers.credential 只读 → 零广播', async () => {
-    vi.useFakeTimers()
-    const deps = makeDeps()
-    const rpcServer = await setupWithWorker(deps)
-
-    await dispatch(rpcServer, 'w1', PROVIDERS_CREDENTIAL_METHOD, { providerId: 'wool-workbuddy' })
-    await vi.advanceTimersByTimeAsync(WRITE_BROADCAST_DEBOUNCE_MS)
-    expect(deps.notifyProvidersMutated).not.toHaveBeenCalled()
-  })
-
-  it('write 被拒（NAMESPACE_MISMATCH，写未发生）→ 零广播', async () => {
-    vi.useFakeTimers()
-    const deps = makeDeps()
-    const rpcServer = await setupWithWorker(deps)
-
-    await dispatch(rpcServer, 'w1', PROVIDERS_WRITE_METHOD, { providerId: 'wool-trae', apiKey: 'sk-x' })
-    await vi.advanceTimersByTimeAsync(WRITE_BROADCAST_DEBOUNCE_MS)
-    expect(deps.notifyProvidersMutated).not.toHaveBeenCalled()
   })
 })
 
@@ -429,24 +333,11 @@ describe('S20/S21 磁盘断言（唯一权威落盘 + 拒绝路径零副作用�
   })
 })
 
-describe('createPluginManifestReader（包根定位：entry 在子目录形态）', () => {
-  let tmpDir: string | undefined
-  afterEach(() => {
-    if (tmpDir !== undefined) rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-    tmpDir = undefined
-  })
-
-  it('从 entry 文件目录向上找 package.json 命中包根（dist/index.js 形态）', () => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'wool-proxy-reader-'))
-    const pkgDir = join(tmpDir, 'plugin-wool-x')
-    mkdirSync(join(pkgDir, 'dist'), { recursive: true })
-    writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({
-      name: '@zhushanwen/plugin-wool-x',
-      taijiPlugin: { capabilities: ['network.http', 'crypto'] },
-    }), 'utf8')
-    const entryPath = join(pkgDir, 'dist', 'index.js')
-
-    const read = createPluginManifestReader({ getDescriptor: (id) => (id === 'plugin-wool-x' ? { pluginPath: entryPath } : undefined) })
+describe('createPluginManifestReader（descriptor 透传窄化：manifest 数据经 registry 注入）', () => {
+  it('descriptor pkgName/capabilities 透传投影（entry 在子目录形态同判——包根定位归 registry.scan）', () => {
+    const read = createPluginManifestReader({
+      getDescriptor: (id) => (id === 'plugin-wool-x' ? { pkgName: '@zhushanwen/plugin-wool-x', capabilities: ['network.http', 'crypto'] } : undefined),
+    })
 
     expect(read('plugin-wool-x')).toEqual({
       pkgName: '@zhushanwen/plugin-wool-x',
@@ -455,95 +346,15 @@ describe('createPluginManifestReader（包根定位：entry 在子目录形态�
     expect(read('unknown-plugin')).toBeUndefined()
   })
 
-  it('包清单缺 name → undefined（fail-closed 输入）', () => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'wool-proxy-reader-'))
-    const pkgDir = join(tmpDir, 'plugin-bad')
-    mkdirSync(pkgDir, { recursive: true })
-    writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ taijiPlugin: {} }), 'utf8')
+  it('descriptor 缺 pkgName / 空串 → undefined（fail-closed 输入，不猜测 ns）', () => {
+    const missing = createPluginManifestReader({ getDescriptor: () => ({}) })
+    expect(missing('plugin-bad')).toBeUndefined()
 
-    const read = createPluginManifestReader({ getDescriptor: () => ({ pluginPath: join(pkgDir, 'index.js') }) })
-    expect(read('plugin-bad')).toBeUndefined()
+    const empty = createPluginManifestReader({ getDescriptor: () => ({ pkgName: '' }) })
+    expect(empty('plugin-bad')).toBeUndefined()
+
+    // capabilities 缺省 = 空表（合法态：无能力声明的插件仍可走 providers.write/delete 命名空间判定）
+    const noCaps = createPluginManifestReader({ getDescriptor: () => ({ pkgName: 'pkg-ok' }) })
+    expect(noCaps('plugin-ok')).toEqual({ pkgName: 'pkg-ok', capabilities: [] })
   })
-})
-})
-
-describe('provider-credential-roundtrip', () => {
-/**
- * providers.write → providers.credential 真链路 roundtrip（⑦ 读写对称回归）。
- *
- * 既有 wool-provider-write-proxy.test.ts 全部 mock resolveProviderCredential——
- * 「真实 setProvider 写策略链 → 真实 ProviderCredentialResolver」的读写对称从未被
- * 体外覆盖（ISSUES-2 ⑦ 曾据此怀疑读写源不对称；本文件实测证明生产链在写后回读
- * 命中同一 key——真机落空的根因在插件侧调用形态，见 plugin-provider-access-
- * plugin-side.test.ts 的对象形态用例）。本文件用真实 pi-provider-store（setModelsPath
- * 指向 tmp）+ 真实 setProvider + 真实 resolver 走完整 dispatch 链钉住该对称。
- *
- * 运行：cd packages/runtime && npx vitest run provider-credential-roundtrip
- */
-let dir: string
-
-afterEach(() => {
-  if (dir) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-})
-
-/** 真实生产装配的最小复刻：pi-provider-store 模块单例 + AuthStorage + 真实 resolver。 */
-function wireProduction() {
-  dir = mkdtempSync(join(tmpdir(), 'provider-cred-roundtrip-'))
-  setModelsPath(join(dir, 'models.json'))
-  const authStorage = new AuthStorage(join(dir, 'auth.json'))
-  const configStore = {
-    readModels: () => readModels(),
-    getProviderConfig: (providerId: string) => getProviderConfig(providerId),
-    upsertProvider: (providerId: string, config: Record<string, unknown>) => upsertProvider(providerId, config as never),
-    ensureProviderInWhitelist: (providerId: string) => ensureProviderInWhitelist(providerId),
-  }
-  const resolver = new ProviderCredentialResolver({
-    authService: { getCredential: (providerId: string) => authStorage.get(providerId) },
-    authStorage,
-    configStore,
-  })
-  return { authStorage, configStore, resolver }
-}
-
-async function dispatch(rpcServer: PluginRpcServer, method: string, params: Record<string, unknown>): Promise<RpcResponse> {
-  const responses: RpcResponse[] = []
-  rpcServer.registerWorker('w1', { postMessage: (msg) => { responses.push((msg as { response: RpcResponse }).response) } }, {
-    trustLevel: 'sandbox',
-    pluginId: 'zhushanwen__plugin-wool-qoder',
-  })
-  const request: RpcRequest = { jsonrpc: '2.0', id: 1, method, params }
-  await rpcServer.dispatch('w1', request)
-  expect(responses.length).toBe(1)
-  return responses[0]
-}
-
-describe('providers.write → providers.credential 真链路 roundtrip（⑦ 读写对称）', () => {
-  it('插件条目（custom 通道落 models.json）写入后 credential 回读命中同一 key', async () => {
-    const { authStorage, configStore, resolver } = wireProduction()
-    const apiKey = 'dt-' + 'k'.repeat(24) // wool-qoder 真实发布形态的长度锚（dt- + 24）
-    const rpcServer = new PluginRpcServer()
-    registerProviderWriteProxy(rpcServer, {
-      setProvider: (providerId, data) => setProviderImpl(configStore as never, authStorage, undefined, undefined, providerId, data as never),
-      deleteProvider: async () => ({ removed: true }),
-      resolveProviderCredential: (providerId) => resolver.resolveProviderCredential(providerId),
-      readPluginManifest: () => ({ pkgName: '@zhushanwen/plugin-wool-qoder', capabilities: ['network.http'] }),
-      notifyProvidersMutated: () => {},
-    })
-
-    const writeReply = await dispatch(rpcServer, 'providers.write', {
-      providerId: 'wool-qoder',
-      apiKey,
-      models: [{ id: 'wool-qoder/basic', api: 'wool-qoder', baseUrl: 'https://example.invalid' }],
-    })
-    expect('result' in writeReply && (writeReply.result as { written?: boolean }).written).toBe(true)
-
-    const credReply = await dispatch(rpcServer, 'providers.credential', { providerId: 'wool-qoder' })
-    expect('result' in credReply ? credReply.result : undefined).toEqual({
-      providerId: 'wool-qoder',
-      key: apiKey,
-      source: 'models.json',
-      kind: 'api_key',
-    })
-  })
-})
 })

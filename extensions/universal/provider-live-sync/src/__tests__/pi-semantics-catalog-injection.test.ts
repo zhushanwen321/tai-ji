@@ -1,7 +1,7 @@
 /**
  * pi 语义 guard 探针 —— 登记表 docs/pi-semantics.json 的 PS-82 ~ PS-85 + PS-87 + PS-88 断言。
  *
- * PS-82 ~ PS-85 四条是 provider-catalog-sync 设计（目录投喂）最重的 pi 私有语义依赖面，
+ * PS-82 ~ PS-85 四条是 provider-catalog-sync 设计（目录投喂）最重的 pi 私有语义依赖集，
  * 方案成立全部系于它们（设计 §2.5 前提 1-4）；PS-87 是 R7 规则的承重语义（refreshModels
  * 钩子 falsy 返回=保留注入集）；PS-88 是 D5 运行中注册对账的承重语义（扩展工厂返回后
  * registerProvider 直连注册表立即生效）。pi 升级时 `scripts/check-pi-semantics.mjs` 的四包

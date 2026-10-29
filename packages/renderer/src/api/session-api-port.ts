@@ -27,6 +27,7 @@
 import { session as sessionApi } from '@/api'
 import * as events from '@taiji/core/transport/api'
 import { command, RPC_BACKSTOP_TIMEOUT_MS } from '@taiji/core/transport/api'
+import type { ServerMessageMap } from '@taiji/shared'
 import type { SessionApiPort } from '@taiji/core'
 
 /**
@@ -48,6 +49,14 @@ export function buildSessionApiPort(): SessionApiPort {
       sessionApi.migrateImage(...args),
     onConfigSessions: (...args: Parameters<SessionApiPort['onConfigSessions']>) =>
       events.onGlobalType('config.sessions', (msg) => args[0](msg.payload.groups)),
+    // [session-cold-switch-perf §3.3-3] historyCacheReady 广播订阅（带 sid 帧走 crossSession
+    // 通道——不经 onGlobalType；按 type 过滤 + payload 窄化，use-canvas-sync 同款消费形态）
+    onHistoryCacheReady: (handler) =>
+      events.onCrossSession((msg) => {
+        if (msg.type !== 'session.historyCacheReady') return
+        const payload = msg.payload as ServerMessageMap['session.historyCacheReady']
+        handler(payload.sessionId, payload)
+      }),
     // [W2] session.getState 直发（不经 session 域代理，理由见文件头）。reply 与 request
     // 同名、payload 消费型；会话不存在 = SESSION_NOT_FOUND reject（core 侧显式未知）。
     getState: (id: string) =>

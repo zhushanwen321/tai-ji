@@ -1284,7 +1284,7 @@ describe("use-session", () => {
   }
 
   describe('selectSession', () => {
-    it('TC-1 成功：switchSession→activeId→panel 载入→push→hydrate（D4 panel-first；12 步全序断言见下方切入链 describe）', async () => {
+    it('TC-1 成功：switchSession→activeId→panel 载入→push→hydrate（D4 panel-first；13 步全序断言见下方切入链 describe）', async () => {
       const f = makeFixture()
       const msgs = [{ id: 'm1' } as never]
       f.chat.getHistory.mockResolvedValue({ messages: msgs, truncated: true, loadedTurns: 3, totalTurnsEstimate: 3 })
@@ -1307,7 +1307,7 @@ describe("use-session", () => {
       f.dispose()
     })
 
-    it('TC-2 失败：switchSession reject → activeId 不更新 + 异常上抛 + 后续编排短路', async () => {
+    it('TC-2 失败：switchSession reject → activeId 不更新 + 异常上抛 + 显示编排短路（并行 getHistory 数据仍落库，session-cold-switch-perf §3.3-4）', async () => {
       const f = makeFixture()
       f.api.switchSession.mockRejectedValue(new Error('not found'))
       seed(f.store, [{ cwd: '/a', sessions: [summary('other')] }])
@@ -1315,7 +1315,11 @@ describe("use-session", () => {
 
       await expect(f.session.selectSession('ghost')).rejects.toThrow('not found')
       expect(f.store.activeId.value).toBe('other')
-      expect(f.chat.reconcileHistory).not.toHaveBeenCalled()
+      // [session-cold-switch-perf §3.3-4] 并行发出的 getHistory reply 处理独立于链短路：
+      // switch 失败短路后续步骤（panel/navigation 不动），但已发出的 history 请求结果仍
+      // 正常落库（pi 不可用时查看数据仍可得——场景 6 数据层断言的载体；显示层无载体
+      // panel 不挂载 = 现状失败语义）
+      expect(f.chat.reconcileHistory).toHaveBeenCalledTimes(1)
       expect(f.panel.loadSession).not.toHaveBeenCalled()
       expect(f.navigation.push).not.toHaveBeenCalled()
       f.dispose()
@@ -1370,7 +1374,7 @@ describe("use-session", () => {
     })
   })
 
-  describe('selectSession 12 步切入链（D3 端口束 / D4 壳版时序）', () => {
+  describe('selectSession 13 步切入链（D3 端口束 / D4 壳版时序）', () => {
     /**
    * 记录型 sessionEntry fake（D3 接口级断言）：每端口一个 push 到数组的 spy。
    * touchRecency 被链内两步消费（步 6 切入 session / 步 11 panel 绑定 session），
@@ -1388,12 +1392,13 @@ describe("use-session", () => {
       }
     }
 
-    it('12 步精确顺序：cancelActiveFlow→switch→setActiveId→clearUnread→ensureStream→touch→sync→push→hydrate→preload→touch(panel)→evict', async () => {
+    it('13 步精确顺序（session-cold-switch-perf §3.3-4 并行切口后）：cancelActiveFlow→switch→hydrate落库→setActiveId→clearUnread→ensureStream→touch→sync→push→preload→touch(panel)→evict（步 13 异步不阻塞链）', async () => {
       const order: string[] = []
       const entry = makeEntrySpies(order)
       const f = makeFixture({ sessionEntry: entry })
       // 非 sessionEntry 步骤（api/store/panel/navigation/chat 端口）记录到同一数组，
-      // 步骤号对齐统一链注释（use-session.selectSession 的 1-12 步）
+      // 步骤号对齐统一链注释（use-session.selectSession 的 1-13 步；步 13 refreshLiveState
+      // 为 fire-and-forget 不进 order 数组，独立用例见上方 refreshLiveState describe）
       f.api.switchSession.mockImplementation(async (id: string) => { order.push(`2.switchSession(${id})`) })
       const origSetActiveId = f.store.setActiveId.bind(f.store)
       f.store.setActiveId = (id: string | null) => { order.push(`3.setActiveId(${id})`); origSetActiveId(id) }
@@ -1410,16 +1415,21 @@ describe("use-session", () => {
 
       await f.session.selectSession('sid-1')
 
+      // [session-cold-switch-perf §3.3-4] 步 9 提前与步 2 并行发出：mock 端口均立即
+      // resolve，getHistory 的落库回调（先注册的 microtask）在 switch await 恢复之前
+      // 执行——9 位居 2 与 3 之间是并行切口的确定性时序；4-12 相对顺序与旧链一致
+      //（步 9 await 同一 promise，链内后续步骤时序不变；步 13 refreshLiveState 为
+      // fire-and-forget void 调用，不进 order 数组、不阻塞链尾）。
       expect(order).toEqual([
         '1.cancelActiveFlow',
         '2.switchSession(sid-1)',
+        '9.hydrateReconcile(sid-1)',
         '3.setActiveId(sid-1)',
         '4.clearUnread(sid-1)',
         '5.ensureStreamSubscription(sid-1)',
         '6/11.touchRecency#1(sid-1)',
         '7.syncSessionToPanel(p1<-sid-1)',
         '8.navigation.push(chat)',
-        '9.hydrateReconcile(sid-1)',
         '10.preloadFileTree(sid-1)',
         '6/11.touchRecency#2(sid-1)',
         '12.evictLru(sid-1)',

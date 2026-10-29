@@ -11,10 +11,9 @@
  *   marker 参数覆盖「内核裸标记 / 无标记（落 ② 纯计数兜底）」双形态）
  *
  * 有意不收敛（本地版有语义差异，保留各文件实现；此处登记差异防误合并）：
- * - effects-delivery-receipt.test.ts makeCtx：inflight 键是真实计数语义（读写真实
- *   Map，非 vi.fn）且返回类型扩展 inflightOf()/addInflight()——命中回收断言读数值而非调用记录
- * - pending-drain-fifo.test.ts queueUpdate：store 编排内联帧构造（固定 type + sut 闭包），
- *   非通用 msg 形态
+ * - __tests__/effect-types.test.ts（effects-delivery-receipt 合并节）makeCtx：inflight 键是
+ *   真实计数语义（读写真实 Map，非 vi.fn）且返回类型扩展 inflightOf()/addInflight()——
+ *   命中回收断言读数值而非调用记录
  * - Message 实体构造器（store.test.ts 的 userMsg/streamingAssistant/completeAssistant/
  *   baselineUser、chunk-processor.test.ts 的 msg(role)、truncate-tool-output.test.ts 的
  *   makeMessage）：各文件默认值不同（timestamp 0/1/1000、随机 id、toolCalls 预置），

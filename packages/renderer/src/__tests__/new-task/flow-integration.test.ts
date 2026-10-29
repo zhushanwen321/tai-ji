@@ -61,7 +61,7 @@ const migrateCtrl = vi.hoisted(() => ({
   migrateSessionImage: vi.fn().mockResolvedValue(undefined),
 }))
 
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }) },
   session: {
     create: createCtrl.create,
     remove: createCtrl.remove,

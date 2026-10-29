@@ -17,8 +17,10 @@
  * 拆开即断链）由消费方承担，见 TrayWidgetButton.vue 头注「依赖追踪契约」。
  */
 
-/** 托盘 widget 区前置顺序（裁决记录①：todo/goal 为默认 widget，恒排在未知 key 之前）。 */
-export const TRAY_WIDGET_KNOWN_ORDER = ['todo', 'goal'] as const
+/** 托盘 widget 区前置顺序（裁决记录①：todo/goal 为默认 widget，恒排在未知 key 之前）。
+ * [容器扩展点统一 §6.6/U9+U10] 'subagent' / 'workflow' 加入 known-order：托盘两件已迁
+ * 插件推 widget 树，作为常用件与 todo/goal 同档恒排未知 key 之前。 */
+export const TRAY_WIDGET_KNOWN_ORDER = ['todo', 'goal', 'subagent', 'workflow'] as const
 
 /**
  * 托盘 widget 区排序：known-order 优先，其余按传入数组序（= ViewHostStore 当前插入序）

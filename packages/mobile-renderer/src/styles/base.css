@@ -1,0 +1,24 @@
+/* base.css —— 移动壳基础层（remote-use-mobile-v2 §6.6 S1 壳骨架）：焦点可见性 + 动效降级。
+   tokens.css 只放变量与镜像层，本文件放全局 reset 级规则（对齐桌面「style.css 只放
+   CSS 变量 + reset」三层分工——组件样式统一走 Tailwind 工具类，禁在此写组件级样式）。 */
+
+/* 键盘导航焦点环（触控点按不触发 :focus-visible，键盘 Tab 导航可见——WCAG 2.4.7）。
+   颜色取 tokens 既有的 accent 变量（禁硬编码颜色，前端编码规范 5）。 */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* reduced-motion 降级（§6.16：动效偏好下高度切换等动效瞬时完成）——用户系统级
+   「减弱动态效果」开启时，全壳过渡/动画压到最短（不删 transition 属性本身，保住
+   状态切换的正常完成信号，只去掉可感知运动）。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -599,7 +599,7 @@ describe("进程级槽（bindDeliveryPort / getDeliveryPort）", () => {
 	});
 });
 
-// ─── collect 挂起面（result-collect 设计 §3.1②；§4 中断形态单测分工）───
+// ─── collect 挂起行为（result-collect 设计 §3.1②；§4 中断形态单测分工）───
 
 /** pending register entry fixture（写侧落盘形态：index.ts safeAppendEntry 同构）。 */
 const pendingRegister = (id: string, type = "bash") => ({

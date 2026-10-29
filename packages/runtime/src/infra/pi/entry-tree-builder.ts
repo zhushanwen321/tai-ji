@@ -22,7 +22,7 @@ import { applyEntryEndTimes, computeActivePathEntries, mapSessionEntries } from 
  * 产出 taiji 内部类型（Message）。services 层调本函数，不直接碰 pi entry 类型。
  */
 
-/** msg-id-mapper extension 写入的 client-msg-id custom entry 的 data 结构。 */
+/** host-internals 扩展（msg-id-mapper 模块）写入的 client-msg-id custom entry 的 data 结构。 */
 interface ClientMsgIdData {
   clientUuid: string
   userEntryId: string
@@ -53,9 +53,9 @@ export interface RebuiltHistory {
 }
 
 /**
- * msg-id-mapper extension 写入的 customType 常量。
+ * host-internals 扩展（msg-id-mapper 模块）写入的 customType 常量。
  *
- * 与 extension 实现的 customType 字符串严格一致（步骤 1 的 @zhushanwen/pi-msg-id-mapper extension）。
+ * 与 extension 实现的 customType 字符串严格一致（@zhushanwen/pi-host-internals 的 msg-id-mapper 模块）。
  * 改名需同步 extension 端 + 测试。taiji. 前缀是 taiji namespace 约定，避免与 pi/其他扩展冲突。
  */
 const CLIENT_MSG_ID_TYPE = 'taiji.client-msg-id'
@@ -67,7 +67,7 @@ const CLIENT_MSG_ID_TYPE = 'taiji.client-msg-id'
  * MSG_ID_TAG_BARE_RE 单份常量（uuid 段经 MSG_ID_UUID_SEGMENT 单点构造，捕获组 1 = 裸
  * uuid，buildDeferEntryIdMap match[1] 提取）；与 core apply-entry-convert 的
  * DEFER_FLUSH_MARKER_RE 是同一常量，无双侧派生器与同步纪律。字符集（uuid hex，不含
- * u-）与 msg-id-mapper TAG_MATCH 的 u- 前缀形态结构互斥——u- 标记帧不被本正则捕获、
+ * u-）与 host-internals msg-id-mapper 模块 TAG_MATCH 的 u- 前缀形态结构互斥——u- 标记帧不被本正则捕获、
  * 裸标记不被 TAG_MATCH 捕获（行为锁定：pi-semantics-defer-marker-survival 探针 +
  * entry-tree-builder D2）。
  */
@@ -181,6 +181,33 @@ function backfillSegments(
       msg.content = segments
     }
   }
+}
+
+/**
+ * 窗口级 segments 回填（session-cold-switch-perf 尾读快路径）：对已转换的 Message[]
+ * 执行与 rebuildHistoryFromEntries 第 2-4 步同一判定链（clientUuid 链先、deferEntryId
+ * 直查兜底、非空 segments 才覆盖）的 segments.json sidecar 回填。
+ *
+ * 为什么导出独立组合而非让调用方重走 rebuildHistoryFromEntries：文件尾读窗口
+ *（collectRecentTurnEntriesFromTail → convertWindowEntries）已用 mapSessionEntries +
+ * convertHistory 产出 Message[]（文件路径读链，无 entry 树重建语义），只缺 segments
+ * 回填一步——复用同一私有三件（buildClientUuidMap / buildDeferEntryIdMap /
+ * backfillSegments），保证尾读与全量两条路径的消息内容判定链单源（防双轨实现漂移）。
+ *
+ * @param converted convertHistory 产出的 Message[]（就地回填）
+ * @param customDataEntries mapSessionEntries 返回的 custom entry 集（clientUuid 映射源）
+ * @param scopedEntries 剥 session header 后的窗口 entries（defer 裸标记提取源；与
+ * rebuildHistoryFromEntries 传裁剪后 scoped 不同，此处传未裁剪窗口——多出的被撤分支
+ * 映射无消费方（backfill 按 msg.piEntryId 查，被撤消息不在 converted），无害）
+ * @param segmentsMetadata segments.json sidecar（null = 无 sidecar，全降级不回填）
+ */
+export function backfillConvertedSegments(
+  converted: Message[],
+  customDataEntries: PiSessionCustomEntry[],
+  scopedEntries: PiSessionEntry[],
+  segmentsMetadata: SegmentsMetadataFile | null,
+): void {
+  backfillSegments(converted, buildClientUuidMap(customDataEntries), segmentsMetadata, buildDeferEntryIdMap(scopedEntries))
 }
 
 /**

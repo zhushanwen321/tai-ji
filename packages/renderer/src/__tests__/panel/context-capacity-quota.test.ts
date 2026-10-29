@@ -25,11 +25,11 @@
  * 合并让全部用例共享一份组件树装载与环境初始化。未并入：thinking-md-variant.test.ts
  * （其 `@vitest-environment jsdom` pragma 与包默认 happy-dom 环境冲突，且本文件 quota 区
  * 用例的 portal 断言设计依赖 happy-dom 行为——环境实质冲突，保持独立）。detail 节的
- * useDetailPane/useCopy/useChatViewDeps 等 mock 只覆盖 DetailPane 依赖面（DetailPane
+ * useDetailPane/useCopy/useChatViewDeps 等 mock 只覆盖 DetailPane 依赖集（DetailPane
  * 不直接 import '@/api'，与 quota 节 @/api 全量 mock 无交互）；block 节经 mockChatProvide
  * 注入，不经模块 mock。各节以裸块隔离节内 helper。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/context-capacity-quota.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel npx vitest run src/__tests__/panel/context-capacity-quota.test.ts（本文件登记在 domain-map.json panel 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -46,7 +46,7 @@ import { composerInjectionStore } from '@/composables/panel/composer-injection-s
 
 // ── mock ──
 
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }) },
   // session.getContext：组件经 useContextUsage 恢复路径挂载即调（Phase 2.2 纯读改造）——
   // mock 为永不 resolve 的 pending（本文件只测 quota 区与帧直驱显示，恢复路径行为在
   // use-context-usage.test.ts / context-usage-journeys.test.ts 覆盖）
@@ -74,7 +74,7 @@ vi.mock('@/i18n', () => ({
   default: { global: { t: (key: string) => key } },
 }))
 
-// ── detail-selection-bubble 节的 mock（useDetailPane 可控 state + 选区 bubble 依赖面）──
+// ── detail-selection-bubble 节的 mock（useDetailPane 可控 state + 选区 bubble 依赖集）──
 // 可配置的 detail state（测试切换 viewMode/content）
 const detailState = ref({
   path: 'src/foo.ts',
@@ -145,7 +145,7 @@ const deepseekProvider: ProviderInfo = {
 }
 
 const mockQuotaRow: NormalizedQuotaRow = {
-  label: '智谱 GLM Coding Plan',
+  label: 'Zhipu Coding Plan',
   wins: [
     { pct: 68, resetSec: 4980 },
     { pct: 42, resetSec: 266400 },
@@ -447,7 +447,7 @@ describe('ComposerMetricsAggregate coding-plan 区', () => {
       quotaStore.setCache('zhipu', mockQuotaRow, 500)
       quotaStore.setError('zhipu', 'panel.context.quotaFailNetwork')
       const freshRow: NormalizedQuotaRow = {
-        label: '智谱 GLM Coding Plan',
+        label: 'Zhipu Coding Plan',
         wins: [{ pct: 90, resetSec: 3600 }, { pct: 80, resetSec: 86400 }, { pct: null, resetSec: null }],
       }
       vi.mocked(quotaApi.refreshQuota).mockResolvedValue({ data: freshRow, lastFetchAt: 2000 })
@@ -642,7 +642,7 @@ describe('ComposerMetricsAggregate coding-plan 区', () => {
 
     it('整数 pct 不补尾零，与设置页同一函数（formatQuotaPct）', async () => {
       const wrapper = mountCardWithRow({
-        label: '智谱 GLM Coding Plan',
+        label: 'Zhipu Coding Plan',
         wins: [{ pct: 68, resetSec: 4980 }, { pct: 100, resetSec: 266400 }, { pct: null, resetSec: null }],
       })
       await flushPromises()

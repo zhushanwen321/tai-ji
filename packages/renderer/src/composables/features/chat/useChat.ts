@@ -14,7 +14,8 @@
  * 2. ensureStreamSubscription 同名包装：core 版加 deps 参数（TD5），本包装注入 renderer deps，
  *    3 个复用点（useForkActions/useSidebar/useSessionStreamSync）零改动。
  * 3. re-export resetChatModuleState（as alias core 的 resetChatModuleStateForTest）：
- *    旧测试（useChat.test.ts beforeEach）import 路径兼容。
+ *    renderer 侧测试消费方（chat-panel-bundle / composer 系列 / shell-host-bundle 等
+ *    beforeEach）经 '@/composables/features/chat/useChat' 路径 import。
  *
  * 历史：原文件 563 行（模块级 streamSubscriptions/historyTruncatedSessions + ensureStreamSubscription
  * + useChat() factory），w5 全部迁 core。core 保持模块级 Map（clarify Q1/TD2：对齐
@@ -150,7 +151,7 @@ export function ensureStreamSubscription(
   coreEnsureStreamSubscription(sid, chat as unknown as ChatStoreInstance, sessionStore, rendererSubDeps())
 }
 
-// re-export test reset（as 别名保持旧测试 beforeEach 兼容：resetChatModuleState()）。
+// re-export test reset（renderer 测试消费方经本模块路径 import：resetChatModuleState()）。
 // handoff「resetChatModuleState 删除（cleanup 取代）」精神：生产路径靠 disposeSession +
 // triggerSessionCleanups 编排，本函数仅供测试隔离（TD3）。
 export { resetChatModuleState }

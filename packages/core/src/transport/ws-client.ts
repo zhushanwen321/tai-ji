@@ -63,6 +63,7 @@ export type ConnectionState =
   | 'reconnecting'
   | 'restarting' // runtime 崩溃，主进程正在拉起新实例（来自 IPC runtime-restarting）
   | 'failed'     // runtime 重启用尽，需用户手动重试（来自 IPC runtime-failed）
+  | 'waiting-runtime' // 已请求目标快照但尚未获得，无连接可发起（connection-datasync-ssot §6.8；快照推送/拉取到达即转 connecting）
 
 /**
  * connect 凭据对象（S4 凭据语义显式化）：auth 意图由调用方显式声明，替代旧
@@ -171,17 +172,21 @@ export function onQueueDrop(cb: (msgs: ClientMessage[], reason: SendQueueDropRea
 
 /**
  * auth 拒绝回调（单槽，对齐 onMessage 体例）：auth.result ok:false 时、**先于 ws.close()**
- * 触发。消费方 = use-connection 远程 profile 分支（移动壳：落 token 输入视图 + 凭据来源
- * 分支处置）；桌面形态不注册——不注册 = 拒绝不置抑制位 = close 走原重连链，行为逐字节不变。
+ * 触发。消费方 = use-connection 的两个形态分支——本地形态 installLocalAuthVerification
+ * （快照重拉换凭据，connection-datasync-ssot §6.3）+ 远程 profile 形态
+ * installAuthRejectionSignal（D8 转发至壳层凭据重摄）；mock 形态无握手不注册——不注册 =
+ * 拒绝不置抑制位 = close 走原重连链，行为不变。
  */
 let authRejectedHandler: (() => void) | null = null
 
 /**
- * auth 拒绝重连抑制位（D8「全触发点」）：仅当存在注册消费方时才会在拒绝时置位（桌面零回归
- * by construction）。置位后两个自动重连触发点全部短路：ws-client scheduleReconnect（退避
- * /onclose 链，下方检查）+ use-connection 的 visibility 切前台主动重连（经
- * isAuthRejectedSuppressed 查询）。解除 = markConnected（auth 成功 = 凭据已有效）或
- * resetAuthRejectionSuppression（token 重试路径的显式入口）。
+ * auth 拒绝重连抑制位（D8「全触发点」）：存在注册消费方时拒绝即置位——本地与远程两个
+ * 形态分支都注册消费方（仅 mock 不注册），故除 mock 外拒绝都短路自动重连、重连责任移交
+ * 消费方。置位后两个自动重连触发点全部短路：ws-client scheduleReconnect（退避/onclose 链，
+ * 下方检查）+ use-connection 的 visibility 切前台主动重连（经 isAuthRejectedSuppressed
+ * 查询）。解除 = markConnected（auth 成功 = 凭据已有效）或 resetAuthRejectionSuppression
+ * （消费方交还重连责任的显式入口——本地形态复位后随即调 scheduleReconnect 重启调度；
+ * 远程形态复位后由壳层显式 connect）。
  */
 let authRejectedSuppressed = false
 
@@ -217,10 +222,34 @@ export function isAuthRejectedSuppressed(): boolean {
   return authRejectedSuppressed
 }
 
+// ── auth 接受信号（实例核对，connection-datasync-ssot §6.1/§6.3）─────────────
+
 /**
- * 显式解除 auth 拒绝重连抑制（token 重试路径专用）：移动壳 token 输入视图提交新凭据后、
- * 重新发起连接前调用。markConnected（auth 成功）会自行复位，本入口覆盖「重试再次失败 →
- * 换凭据再试」的循环。
+ * auth 接受回调（单槽，对齐 onAuthRejected 体例）：auth.result ok:true 时、**先于
+ * connected 化**触发，携带应答 runtimeId（runtime 侧 env 注入缺失/旧 runtime 时为 null）。
+ *
+ * 消费方 = use-connection 本地形态连接控制器（核对期望快照 runtimeId，不一致 fail-fast）。
+ * 回调返回 false = 消费方裁决拒绝该连接（连到非预期实例）——ws-client 停止 connected 化
+ * 并主动断开（不走自动重连；重拉快照/失败呈现由消费方编排）。返回 true（或未注册）=
+ * 继续 markConnected。未注册时行为与旧客户端逐字节一致（P-1 兼容：仅读 payload.ok 的
+ * 消费路径不破坏）。
+ */
+let authAcceptedHandler: ((info: { runtimeId: string | null }) => boolean) | null = null
+
+/** 注册 auth 接受回调，返回取消函数。 */
+export function onAuthAccepted(cb: (info: { runtimeId: string | null }) => boolean): () => void {
+  authAcceptedHandler = cb
+  return () => {
+    if (authAcceptedHandler === cb) authAcceptedHandler = null
+  }
+}
+
+/**
+ * 显式解除 auth 拒绝重连抑制：消费方交还重连责任的显式入口。远程形态 = 壳层 token 输入
+ * 视图提交新凭据后、重新发起连接前调用；本地形态 = recoverAfterAuthRejection 的「交还
+ * 退避链」分支调用，复位后随即调 scheduleReconnect 重启调度（真实 WS 的 onclose 与 IPC
+ * 回包竞速，早到形态下退避链已在抑制期短路、复位本身不恢复调度）。markConnected（auth
+ * 成功）会自行复位，不经本入口。
  */
 export function resetAuthRejectionSuppression(): void {
   authRejectedSuppressed = false
@@ -365,6 +394,19 @@ export function setFailed(): void {
 }
 
 /**
+ * 设置为 waiting-runtime 态（connection-datasync-ssot §6.2/§6.8：init 拉取目标快照为
+ * null 时调，use-connection 连接控制器编排）。语义 = 「已请求目标快照但尚未获得，无连接
+ * 可发起」——与 connecting（已发起连接正在握手）显式区分，连接屏呈现「正在启动 runtime」。
+ *
+ * disconnect 先清残留连接与退避定时器（等待期不做任何自动重连——无目标可连，退避重试
+ * 是备用猜连时代的残留形态）；快照到达（推送或拉取）后控制器 connect() 转入 connecting。
+ */
+export function setWaitingRuntime(): void {
+  disconnect()
+  state.value = 'waiting-runtime'
+}
+
+/**
  * 建立连接（已连接/连接中时幂等 no-op）。
  *
  * @param url         连接地址（纯路由标识，由 platform 的 webSocket factory 消费；mock 装配
@@ -469,20 +511,36 @@ export function connect(url: string, credentials: ConnectCredentials): void {
     noteParsedInboundFrame(parsed)
     // auth 握手期：只消费 auth.result，其余消息（握手期不应出现）丢弃
     if (!connectionAuthed) {
-      const r = parsed as { type?: unknown; payload?: { ok?: unknown } | null }
+      const r = parsed as { type?: unknown; payload?: { ok?: unknown; runtimeId?: unknown } | null }
       if (r.type === 'auth.result' && r.payload != null) {
         clearAuthTimer()
         if (r.payload.ok === true) {
           connectionAuthed = true
+          // 实例标识核对（connection-datasync-ssot §6.3）：应答 runtimeId 先交消费方
+          // 裁决再 connected 化——false = 连到非预期实例，fail-fast 断开（不 markConnected：
+          // 不置 connected、不启心跳、不 flush 队列；重拉快照/失败呈现由消费方编排）。
+          if (authAcceptedHandler) {
+            const rawId = r.payload.runtimeId
+            const accepted = authAcceptedHandler({ runtimeId: typeof rawId === 'string' ? rawId : null })
+            if (!accepted) {
+              console.warn('[ws] auth accepted but rejected by identity check (runtimeId mismatch), disconnecting')
+              disconnect()
+              return
+            }
+          }
           markConnected()
         } else {
-          // runtime 拒绝（token 失效，如 runtime 已换 token 重启）→ close 走重连链，
-          // 新 token 由 use-connection 的 onRuntimePort 路径刷新；
+          // runtime 拒绝（token 失效，如 runtime 已换 token 重启）→ 凭据已失效，自动
+          // 退避重连只复用旧凭据必再拒：有消费方形态在下方置重连抑制位短路退避链，
+          // 重连改由消费方驱动——本地形态 = use-connection recoverAfterAuthRejection
+          // 重拉目标快照、携新快照凭据重连（新连接 auth 成功 markConnected 时抑制位
+          // 复位）；远程形态 = 壳层 D8 凭据重摄路径换凭据；
           // pre-auth 队列清空 + 通知（入队消息的 pending 由 onQueueDrop 消费方快速 reject）
           dropPreAuthQueue('auth-failed')
-          // D8 显式信号：先置抑制位 + 触发消费方（移动壳切 token 输入视图），再 close——
-          // 抑制位对 onclose → scheduleReconnect 可见（先置位再 close 的顺序保证）。
-          // 桌面形态无注册消费方：不置位，close 走原重连链，行为不变。
+          // D8 显式信号：先置抑制位 + 触发消费方，再 close——抑制位对 onclose →
+          // scheduleReconnect 可见（先置位再 close 的顺序保证）。消费方 = 本地形态（快照
+          // 重拉换凭据，§6.3）与远程形态（壳层 D8 凭据重摄）；无注册消费方（mock）不置位，
+          // close 走原重连链，行为不变。
           if (authRejectedHandler) {
             authRejectedSuppressed = true
             authRejectedHandler()
@@ -772,10 +830,24 @@ function isServerMessage(x: unknown): x is ServerMessage {
   )
 }
 
-function scheduleReconnect(): void {
+/**
+ * 重连调度（退避/onclose 链的唯一调度点）。导出消费方 = use-connection
+ * recoverAfterAuthRejection：本地形态复位 auth 拒绝抑制位后确定性重启调度——真实 WS 的
+ * onclose 与 IPC 重拉回包竞速，早到形态（onclose 先至，主形态）下退避链已在抑制期被短路
+ * 且无定时器残留，复位本身不恢复调度，缺本调用则连接静默挂 disconnected。守卫链：
+ * currentUrl（无目标 no-op）→ socket 死透（onclose 未发生的晚到形态由 onclose 到达时的
+ * 本函数接力）→ 抑制位 → 退避时长上限（超限置 failed，失败呈现）。
+ */
+export function scheduleReconnect(): void {
   if (!currentUrl) return
-  // D8 抑制位触发点 ①：auth 拒绝后不自动重连（凭据失效重连 100% 失败，纯烧日志；等 token
-  // 重试路径显式 reset + connect）。置位前提 = 存在注册消费方（桌面恒 false，重连链不变）。
+  // socket 死透检查：仅 readyState 已 CLOSED（onclose 已发生——早到形态）时放行调度；
+  // socket 尚在（CLOSING/OPEN——晚到形态下 IPC 回包先于 close 事件）时 no-op，由 onclose
+  // 到达时的本函数接力，不对未死透 socket 空设定时器（到点也会被 connect 单飞拦截）且
+  // 不重复推进退避簿记。
+  if (ws && ws.readyState !== WS_READY_STATE.CLOSED) return
+  // D8 抑制位触发点 ①：auth 拒绝后不自动重连（凭据失效重连 100% 失败，纯烧日志；等消费方
+  // 换凭据重连或显式复位——本地形态 recoverAfterAuthRejection 复位后调本函数重启调度，
+  // 远程形态壳层 token 重试路径显式 reset + connect）。
   if (authRejectedSuppressed) {
     console.log('[ws] reconnect suppressed after auth rejection (waiting for credential retry)')
     return

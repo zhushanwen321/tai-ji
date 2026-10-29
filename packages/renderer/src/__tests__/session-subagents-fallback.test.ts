@@ -54,9 +54,8 @@ vi.mock('../../../core/src/transport/ws-client', () => ({
 }))
 
 vi.mock('@/lib/ipc', () => ({
-  getRuntimePort: vi.fn(async () => undefined),
-  getRuntimePortOffset: vi.fn(async () => undefined),
-  getRuntimeToken: vi.fn(async () => undefined),
+  // 连接控制器快照读口桩（connection-datasync-ssot §6.2：null = 不发起连接）
+  getRuntimeTargetSnapshot: vi.fn(async () => null),
   onRuntimePort: vi.fn(() => () => {}),
   onRuntimeRestarting: vi.fn(() => () => {}),
   onRuntimeFailed: vi.fn(() => () => {}),

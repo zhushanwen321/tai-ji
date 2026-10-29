@@ -3,6 +3,7 @@ export default {
   connecting: 'Connecting…',
   connected: 'Connected',
   reconnecting: 'Reconnecting…',
+  waitingRuntime: 'Starting runtime…',
   restarting: 'Runtime restarting…',
   failed: 'Runtime unavailable after multiple retries',
   // Visible failure feedback when the retry IPC fails (with a "retry" recovery action)

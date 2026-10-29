@@ -28,8 +28,9 @@
     <ScrollArea class="min-h-0 flex-1">
       <!-- 段间 hairline 分隔（demo .tray-seg + .tray-seg { border-top: 1px solid var(--hairline) }） -->
       <div class="flex flex-col divide-y divide-hairline">
-        <!-- built-in 各类别段（顺序 = 外壳 built-in 固定序 bash → subagent → workflow → session →
-             canvas；段集 = 外壳 builtinItems——D4 隔离后 canvas 段同三态，零画布不出段） -->
+        <!-- built-in 各类别段（顺序 = 外壳 built-in 固定序 bash → session →
+             canvas；段集 = 外壳 builtinItems——D4 隔离后 canvas 段同三态，零画布不出段；
+             subagent / workflow 段已随件迁移删，容器扩展点统一 §6.6/U9+U10） -->
         <section
           v-for="section in sections"
           :key="section.kind"

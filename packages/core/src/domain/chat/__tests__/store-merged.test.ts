@@ -218,7 +218,7 @@ describe("invalidate-stream-subscription", () => {
     ensure: (sid: string) => void
     streamSubscribe: ReturnType<typeof vi.fn>
     subscribeRpc: ReturnType<typeof vi.fn>
-    /** effectScope.stop（对齐 useChat.test.ts fixture dispose 先例） */
+    /** effectScope.stop（对齐 store-merged-merged.test.ts useChat 合并节 fixture dispose 先例） */
     dispose: () => void
   }
 
@@ -363,7 +363,7 @@ describe("lifecycle-effects", () => {
     dispose: () => void
   }
 
-  function makeFixture(): Fixture {
+  function makeFixture(ensureStream?: (sessionId: string) => void): Fixture {
     const scope = effectScope(true)
     const chat = scope.run(() => createChatStore())!
     const session = createSessionStore()
@@ -391,6 +391,7 @@ describe("lifecycle-effects", () => {
         markDead: markDeadSpy,
         revive: (sid) => session.revive(sid),
       },
+      ...(ensureStream ? { ensureStream } : {}),
     }
     return {
       chat,
@@ -527,6 +528,21 @@ describe("lifecycle-effects", () => {
 
       expect(getSubscriptionState('s1')?.subscribed ?? false).toBe(false)
       warn.mockRestore()
+    })
+
+    it('deps.ensureStream 注入：走全套重建（events handler 重挂 + bus 订阅），不回落 bus 层 resubscribe', () => {
+      // [remote-use-mobile-v2 A5] 注入态分流：恢复窗口订阅优先走壳侧全套重建原语——只发
+      // bus 层 subscribe 时恢复帧到不了已退订的 events handler（见 lifecycle-effects.ts 注释）
+      const ensureStream = vi.fn()
+      const injected = makeFixture(ensureStream)
+
+      injected.effects.openRestoreWindow('s1')
+
+      expect(ensureStream).toHaveBeenCalledTimes(1)
+      expect(ensureStream).toHaveBeenCalledWith('s1')
+      // 分流断言：注入态不得再发 bus 层 subscribe（避免双订阅）
+      expect(injected.subscribeRpc).not.toHaveBeenCalled()
+      injected.dispose()
     })
   })
 
@@ -839,7 +855,7 @@ describe("lru-unsubscribe", () => {
       f.evict()
       expect(f.unsubscribeRpc).toHaveBeenCalledWith('s0')
 
-      // 模拟重走 12 步切入链（步 5 ensureStreamSubscription）：不被残留检查短路
+      // 模拟重走 13 步切入链（步 5 ensureStreamSubscription）：不被残留检查短路
       f.ensure('s0')
       expect(f.streamSubscribe).toHaveBeenCalledTimes(2)
       await flushSubscribes(f.subscribeRpc)

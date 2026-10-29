@@ -527,11 +527,21 @@ function buildRepairFailureMessage(r: ContentRepairResult, envTail: string): str
   );
 }
 
+/** severity 等级表（critical > major > minor）：单向只升不降的判定基准。 */
+const SEVERITY_RANK: Record<string, number> = { critical: 3, major: 2, minor: 1 };
+
 /**
  * 延续/重报条目的身份锚点字段继承（空壳缺陷修复核心，wf-1792073055433）：
  * - title：target 缺失侧才回填——已追踪条目的 title 是跨轮身份锚点（L2 标题对账依据），
  *   锁定不覆盖，防聚合器空 title 把锚点抹掉；
- * - severity：source 显式给出（非空且不同）才采信——本轮判定为准，空值不覆盖。
+ * - severity：单向只升不降（dmg-r1-1）——source 显式给出且等级更高时回写，更低时
+ *   不覆盖。同题 suggestion 重报（恒 minor 层）经 L2 标题命中已追踪 critical/major
+ *   条目时若照采本轮标注，追踪条目被洗成 minor 后 ES3 defer 校验以追踪 severity 为
+ *   权威，「must-fix 不得 defer」红线被静默绕过；降级必须走 aggregator 显式裁决
+ *   （adjudication=downgraded → dormant 通道）。与 R1 init 的同题异号防覆盖守卫
+ *   （已建条目不覆盖）镜像，「must-fix 优先」在 R1/R2+ 两个合并站点一致成立。
+ *   target.severity 来自历史状态文件，不在等级表内的意外值不参与降级判定（source
+ *   合法等级照常回写，保持「清单侧字段异常时本轮为权威」语义）。
  * 返回是否有变更（调用方可记 log）。
  */
 function inheritCarryoverFields(
@@ -544,8 +554,14 @@ function inheritCarryoverFields(
     changed = true;
   }
   if (typeof source.severity === "string" && source.severity && target.severity !== source.severity) {
-    target.severity = source.severity;
-    changed = true;
+    // target.severity 可能 undefined（历史条目缺字段）——等级表查值前先收窄，缺值视同历史脏值
+    const from = target.severity !== undefined ? SEVERITY_RANK[target.severity] : undefined;
+    const to = SEVERITY_RANK[source.severity];
+    // from 缺等级 = 历史脏值 → 采信本轮；to 缺等级（normalize 契约破裂）或降级 → 不覆盖
+    if (from === undefined || to > from) {
+      target.severity = source.severity;
+      changed = true;
+    }
   }
   return changed;
 }
@@ -1344,12 +1360,13 @@ const alignByTitle = (i: AggIssueInput): IssueRecord | undefined => {
 /** 延续条目字段安全合并（空壳缺陷修复，run wf-1792073055433）：旧无条件赋值在聚合器
  *  输出无 title/severity 的空壳延续条目时把已追踪字段抹空——跨轮身份锚点断链，下轮
  *  L2 标题对账失配关不掉，连续 3 轮 clean 后误判 stuck。改为：title 锁定（缺失侧才
- *  回填）+ severity 采信本轮显式标注 + 内容字段非空刷新（单源 shared 段承载）。已确认
+ *  回填）+ severity 单向只升不降（缺失/升级才回写，防同题 minor 重报洗白绕过 ES3
+ *  门禁，dmg-r2-3）+ 内容字段非空刷新（单源 shared 段承载）。已确认
  *  修复的问题被重报 = 复发（对齐 pi 版 MF-2）：转 regressed + 修复失败 +1，needs-redesign
  *  可达；open（活跃仍报）不改状态。 */
 const mergeCarryover = (prev: IssueRecord, i: AggIssueInput): IssueRecord => {
   if (inheritCarryoverFields(prev, i)) {
-    log(`身份对齐：延续条目 ${prev.id} 继承 title 缺失侧 / severity 本轮标注`);
+    log(`身份对齐：延续条目 ${prev.id} 继承 title 缺失侧 / severity 单向只升不降回写`);
   }
   refreshTrackedFields(prev, i, ["files", "evidence", "guidance"]);
   if (prev.status === "fixed") {

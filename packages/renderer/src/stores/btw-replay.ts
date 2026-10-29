@@ -6,8 +6,9 @@
  * liftHistoryToEntries → replayEntries 对 pi 会话文件的 applyEntry 派生视图）拉取快照，注入
  * chatStore 的线分区（W4a 后键 = 线 pi 真实会话 id；store.hydrate，内部 mergeBaselineWithLive
  * 保尾部 live 实体）。
- * live ≡ reload 由共用同一 applyEntry reducer 构造性成立（等价性断言见本目录测试
- * btw-replay.test.ts + core apply-entry-equivalence 家族）。
+ * live ≡ reload 由共用同一 applyEntry reducer 构造性成立（等价性断言见
+ * __tests__/stores/chat-store-bundle.test.ts 的 btw-replay 节 + core
+ * domain/chat/__tests__/helpers/equivalence-asserts.ts 家族）。
  *
  * 触发范围 = 复合谓词单一源「drawer 开 + btw tab + 选中线」（selection/predicates.ts 的
  * useViewedBtwSession，display-containers §7.1 迁出不变量——与 getViewedVids 的 D5 豁免、

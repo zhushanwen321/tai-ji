@@ -45,7 +45,7 @@
 // send 内保留第二道防线（标记检查，覆盖提交同步链与 compaction 边沿交叠的残余窗口）；
 // 标记读取无异常面（原 isIdle 探测的保守 busy 吞咽随预检移除）。
 //
-// ── collect 挂起面（result-collect 设计 §3.1②）──────────────
+// ── collect 挂起行为（result-collect 设计 §3.1②）──────────────
 // 批量收取的分流发生在提交编排层（deliver 入口）：条目照常受理前落盘（I2 耐久不
 // 变），随后按「collectKey 键集 ∩ 在途等待集 ≠ ∅」分流——命中 → 挂起缓冲（纯内存，
 // 不进投递内核）+ onCollectArrival 唤醒等待器；未命中 → push 现状零变化。挂起不独立
@@ -56,7 +56,7 @@
 // collect 阻塞期不可达（设计 §3.1 [重绑] 登记），dispose 只做在途等待器 warn 留痕
 // 不变量检查，不定义唤醒与返回语义。
 //
-// ── 耐久面的分工（为什么 store.persist 是 no-op）─────────────
+// ── 耐久职责的分工（为什么 store.persist 是 no-op）─────────────
 // outbox 权威 = 成员记录（deliver 入口 appendEntry，先于受理——「耐久承诺先于投递
 // 尝试」内核契约由该同步时序等价兑现：appendEntry 抛错 = 承诺未落 → deliver 返回
 // rejected("persist-failed")，不进投递流程）。内核侧 store.persist 因此有意 no-op：
@@ -145,7 +145,7 @@ export function _resetDeliveryPortForTest(): void {
   getSlot().current = undefined;
 }
 
-// ─── 子系统装配（createDeliveryPort 的两个内聚子面：内核接线 / collect 挂起面）───
+// ─── 子系统装配（createDeliveryPort 的两个内聚子系统：内核接线 / collect 挂起）───
 //
 // createDeliveryPort 是装配壳：持提交侧闭包态（双缓冲 / hold 标志 / 幂等索引），两个
 // 子系统经工厂构造、以 deps 注入读端口闭包态——可变标志经 getter 出站时点读取（装配
@@ -157,7 +157,7 @@ function emitBucketLog(host: DeliveryPortHost, bucket: keyof DeliveryPortMetrics
   host.logger.warn(`delivery-port bucket [${bucket}]`, { detail: { total } });
 }
 
-/** 内核装配对端口闭包态的最小依赖面。 */
+/** 内核装配对端口闭包态的最小依赖集。 */
 interface KernelAssemblyDeps {
   host: DeliveryPortHost;
   state: JournalState;
@@ -180,7 +180,7 @@ function createKernelAssembly(deps: KernelAssemblyDeps): { kernel: ReturnType<ty
 
   const store: DeliveryStore = {
     persist(_record: DeliveryStoreRecord): void {
-      // 有意 no-op：port 半区落盘在 deliver 提交层前置完成（文件头「耐久面的分工」）。
+      // 有意 no-op：port 半区落盘在 deliver 提交层前置完成（文件头「耐久职责的分工」）。
     },
     ack(id: string): void {
       // 内核终局（delivered / cancelled）→ 持久终局列。抛错由内核 ackStore 捕获
@@ -267,7 +267,7 @@ function createKernelAssembly(deps: KernelAssemblyDeps): { kernel: ReturnType<ty
   return { kernel: createDelivery(kernelPort, kernelConfig) };
 }
 
-/** collect 挂起面对端口闭包态的最小依赖面（result-collect 设计 §3.1②）。 */
+/** collect 挂起子系统对端口闭包态的最小依赖集（result-collect 设计 §3.1②）。 */
 interface CollectFaceDeps {
   host: DeliveryPortHost;
   state: JournalState;
@@ -279,7 +279,7 @@ interface CollectFaceDeps {
   routeDirect(records: readonly JournalRecord[]): void;
 }
 
-/** collect 挂起面对端口的路由面（deliver 分流判定 / handle 装配 / dispose 清理）。 */
+/** collect 挂起子系统对端口的路由接口（deliver 分流判定 / handle 装配 / dispose 清理）。 */
 interface CollectFace {
   /** deliver 分流判定：键集 ∩ 在途等待集 ≠ ∅。 */
   hasWaiterFor(collectKeys: readonly string[]): boolean;
@@ -289,12 +289,12 @@ interface CollectFace {
   consume(): CollectedEntry[];
   collectRelease(): void;
   onCollectArrival(cb: () => void): () => void;
-  /** 清空挂起面三集合；返回清空前的在途量（dispose 不变量 warn 的判定与数据）。 */
+  /** 清空挂起行为的三个集合；返回清空前的在途量（dispose 不变量 warn 的判定与数据）。 */
   dispose(): { waiting: number; suspended: number };
 }
 
 /**
- * collect 挂起面（result-collect 设计 §3.1②，纯内存分流态，投递日志即耐久层）：
+ * collect 挂起行为（result-collect 设计 §3.1②，纯内存分流态，投递日志即耐久层）：
  * 登记等待集 / 挂起缓冲 / 到达唤醒 + consume 收取 + collectRelease 解散，自成
  * 子系统；对 push 管线只有两个触点——deliver 分流（hasWaiterFor / suspend）与
  * 解散直通（routeDirect 回调）。
@@ -334,6 +334,11 @@ function createCollectFace(deps: CollectFaceDeps): CollectFace {
     };
   }
 
+  /** 注销 key 的 outcome（结清视图优先——权威通道 resolveSettlementReason；legacy status 兜底）。 */
+  function unregisterOutcomeOf(pending: PendingBaseline, key: string) {
+    return pending.unregisterSettlements.get(key) ?? pending.unregisterStatus.get(key);
+  }
+
   /**
    * 登记在途等待集 + 对每个 key 按五态判据定态（同步段：JS 单线程内无交错窗口，
    * 与 deliver 分流读同一等待集——I3 等待集原子性）。
@@ -352,12 +357,7 @@ function createCollectFace(deps: CollectFaceDeps): CollectFace {
    *   曾注册集的补集。不登记等待集（防空等到 timeout 挂死）、不虚构终态；工具侧
    *   读本态组装 errors（不再伪装 waiting——端口是唯一未知判定点，词表诚实表达）。
    */
-  /** 注销 key 的 outcome（结清视图优先——权威通道 resolveSettlementReason；legacy status 兜底）。 */
-function unregisterOutcomeOf(pending: PendingBaseline, key: string) {
-  return pending.unregisterSettlements.get(key) ?? pending.unregisterStatus.get(key);
-}
-
-function collectArm(keys: string[]): CollectSnapshot {
+  function collectArm(keys: string[]): CollectSnapshot {
     if (deps.isDisposed()) throw new Error("collectArm on disposed delivery port");
     const pending = scanPendingBaseline(host.readSessionEntries());
     const snapshot: CollectSnapshot = [];
@@ -521,7 +521,7 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
   /**
    * 显式覆写的失败保留策略（deliver opts.onFailure → submitToKernel 的单次传递）：
    * 条目在提交缓冲期（compaction 挂起等提交期悬置；攒批窗已删 §3.3.7③）暂存 id → policy，提交内核时
-   * 消费并摘除。不进 JournalRecord / outbox schema（§3.7 耐久面行 schema 定形，
+   * 消费并摘除。不进 JournalRecord / outbox schema（§3.7 耐久职责行 schema 定形，
    * 策略是提交时选项非账目字段）。重放重建的条目不在册（缺省 retain）：forget
    * 条目首败即 discard 落终局列、不在重放差集；「首败前崩溃」的残留条目重放按
    * retain 重投（通知域安全侧，多留账不丢不重）。
@@ -543,7 +543,7 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
     isCompacting: () => compacting,
   });
 
-  // ─── collect 挂起面（result-collect 设计 §3.1②；子系统实现见 createCollectFace）───
+  // ─── collect 挂起子系统（result-collect 设计 §3.1②；实现见 createCollectFace）───
   // routeDirect = 解散等待集后未收条目的直通放行（进 pumpDirect 分组放行管线——
   // 边沿即投，攒批窗已删 §3.3.7③，不逐条唤醒泵）。
   const collectFace = createCollectFace({
@@ -762,7 +762,7 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
   /**
    * 单成员提交内核。返回值处置：swallowed = 已终局（幂等命中，丢弃即正确——该
    * 通知已送达过）；rejected 理论不可达（store.persist no-op 恒成功、payload 恒
-   * custom、放行前已挡 disposed），warn 防御留痕；accepted 出站面由内核托管
+   * custom、放行前已挡 disposed），warn 防御留痕；accepted 出站环节由内核托管
    * （retain 留守 → settled 边沿 / compaction 边沿重投）。
    */
   function submitToKernel(rec: JournalRecord): void {

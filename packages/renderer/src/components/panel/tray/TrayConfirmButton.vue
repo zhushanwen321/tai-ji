@@ -1,6 +1,6 @@
 <!--
-  TrayConfirmButton —— 托盘行内两段式确认按钮（bash kill / subagent cancel / workflow abort
-  三处同形标记收敛于此）。
+  TrayConfirmButton —— 托盘行内两段式确认按钮（bash kill 消费点；workflow abort 消费点已随 §6.6/U10 件迁移退役；
+  原 subagent cancel 消费点已随件迁移删，容器扩展点统一 §6.6/U9）。
 
   契约：
   - `testid`（基础名）→ `data-testid="${testid}-confirm"`（确认态）/ `${testid}`（常态），
@@ -8,7 +8,7 @@
   - `title` / `confirmTitle` 按确认态切换。
   - 视觉（demo .bash-kill 形态）：24px 方形热区（N4 库内下限）+ rounded-xs（4px）；
     常态 dim + hover 红（danger 软底 12% ≈ --danger-soft）；确认态 danger 实心。
-    差异点以 props 表达（bash/subagent 有 rounded、workflow 无；bash 确认态补 opacity-100）
+    差异点以 props 表达（rounded / 确认态 opacity-100 形态保留）
     ——逐字保持各处既有类串语义。
   - 图标经 `icon` / `confirmIcon` slot 注入（默认 X / Check）；`v-if` 渲染条件与 `@click`
     处理器仍由调用方持有（行级条件差异）。

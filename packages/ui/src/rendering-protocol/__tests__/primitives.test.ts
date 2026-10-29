@@ -11,7 +11,12 @@ import StatsLine from '../primitives/StatsLine.vue';
 import TabBar from '../primitives/TabBar.vue';
 import { GUI_CUSTOM_REGISTRY_KEY } from '@taiji/core/rendering-protocol/custom-registry';
 import { flushPromises, mount } from '@vue/test-utils';
-import type { GuiComponent, GuiComponentProps } from '@zhushanwen/extension-protocol';
+import type { GuiComponent, GuiComponentProps, HostContainerAction } from '@zhushanwen/extension-protocol';
+import {
+  CONTAINER_NAVIGATION_KEY,
+  VIEW_SCOPE_SESSION_KEY,
+  type ContainerNavigationExecutor,
+} from '../container-navigation-key';
 import { AnsiUp } from 'ansi_up';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { defineComponent, h, ref } from 'vue';
@@ -182,6 +187,105 @@ describe('Actionbar 执行器缺位降级（对齐 TabBar 降级出声范式）'
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     mount(Actionbar, { props: { items: [{ id: 'stat-1', label: '共 2 项' }] } })
     expect(warn).not.toHaveBeenCalled()
+  })
+})
+
+// ── 容器导航执行器（§6.4 hostAction 交互路径，Actionbar / ListTree 两节共用）────
+
+type NavigateFn = (action: HostContainerAction, options?: { viewSessionId?: string }) => void
+
+const makeNavigationExecutor = (): { navigate: ReturnType<typeof vi.fn<NavigateFn>> } & ContainerNavigationExecutor => ({
+  navigate: vi.fn<NavigateFn>(),
+})
+
+describe('Actionbar 容器导航（§6.4 hostAction 交互路径，U5 验收③）', () => {
+  const drawerHostAction: HostContainerAction = {
+    kind: 'drawer',
+    tabId: 'probe.tab',
+    params: { filePath: '/tmp/report.md' },
+  }
+
+  it('仅 hostAction 项渲染为可点按钮（用户可见 DOM 断言），点击触发导航执行器', async () => {
+    const nav = makeNavigationExecutor()
+    const wrapper = mount(Actionbar, {
+      props: { items: [{ id: 'open-1', label: '打开详情', hostAction: drawerHostAction }] },
+      global: {
+        provide: {
+          [CONTAINER_NAVIGATION_KEY as symbol]: nav,
+          [VIEW_SCOPE_SESSION_KEY as symbol]: 'view-sid',
+        },
+      },
+    })
+    const btn = wrapper.find('[data-testid="gui-action-bar-item-open-1"]')
+    expect(btn.exists()).toBe(true)
+    expect(btn.attributes('disabled')).toBeUndefined()
+    await btn.trigger('click')
+    expect(nav.navigate).toHaveBeenCalledTimes(1)
+    expect(nav.navigate).toHaveBeenCalledWith(drawerHostAction, { viewSessionId: 'view-sid' })
+  })
+
+  it('commandId 与 hostAction 并存 → commandId 优先走命令链，导航执行器不被调用', async () => {
+    const cmd = makeExecutor()
+    const nav = makeNavigationExecutor()
+    const wrapper = mount(Actionbar, {
+      props: {
+        items: [{ id: 'both-1', label: '两路', commandId: 'sched.run', hostAction: drawerHostAction }],
+      },
+      global: {
+        provide: {
+          [ACTION_EXECUTOR_KEY as symbol]: cmd,
+          [CONTAINER_NAVIGATION_KEY as symbol]: nav,
+        },
+      },
+    })
+    await wrapper.find('[data-testid="gui-action-bar-item-both-1"]').trigger('click')
+    expect(cmd.execute).toHaveBeenCalledTimes(1)
+    expect(cmd.execute).toHaveBeenCalledWith('sched.run', undefined)
+    expect(nav.navigate).not.toHaveBeenCalled()
+  })
+
+  it('hostAction 项但导航执行器缺位 → 禁用 + warn 一次（文案含 CONTAINER_NAVIGATION_KEY）', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const wrapper = mount(Actionbar, {
+      props: { items: [{ id: 'open-1', label: '打开详情', hostAction: drawerHostAction }] },
+    })
+    const btn = wrapper.find('[data-testid="gui-action-bar-item-open-1"]')
+    expect(btn.attributes('disabled')).toBeDefined()
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(String(warn.mock.calls[0]?.[0])).toContain('CONTAINER_NAVIGATION_KEY')
+    await btn.trigger('click')
+    expect(warn).toHaveBeenCalledTimes(1)
+  })
+
+  it('viewSessionId 未 provide → 导航请求 options.viewSessionId 为 undefined（执行器回退焦点会话）', async () => {
+    const nav = makeNavigationExecutor()
+    const wrapper = mount(Actionbar, {
+      props: { items: [{ id: 'open-1', label: '打开详情', hostAction: drawerHostAction }] },
+      global: { provide: { [CONTAINER_NAVIGATION_KEY as symbol]: nav } },
+    })
+    await wrapper.find('[data-testid="gui-action-bar-item-open-1"]').trigger('click')
+    expect(nav.navigate).toHaveBeenCalledWith(drawerHostAction, { viewSessionId: undefined })
+  })
+
+  it('应用路径喂树：GuiComponentRenderer 挂载含 hostAction 的树照常触发导航执行器', async () => {
+    const nav = makeNavigationExecutor()
+    const wrapper = mount(GuiComponentRenderer, {
+      props: {
+        component: {
+          type: 'action-bar',
+          props: { items: [{ id: 'open-1', label: '打开详情', hostAction: drawerHostAction }] },
+        } satisfies GuiComponent<'action-bar'>,
+      },
+      global: {
+        provide: {
+          [CONTAINER_NAVIGATION_KEY as symbol]: nav,
+          [VIEW_SCOPE_SESSION_KEY as symbol]: 'view-sid',
+        },
+      },
+    })
+    await wrapper.find('[data-testid="gui-action-bar-item-open-1"]').trigger('click')
+    expect(nav.navigate).toHaveBeenCalledTimes(1)
+    expect(nav.navigate).toHaveBeenCalledWith(drawerHostAction, { viewSessionId: 'view-sid' })
   })
 })
 
@@ -826,6 +930,86 @@ describe('ListTree', () => {
     expect(label.classes()).toContain('min-w-0')
     expect(label.classes()).toContain('flex-1')
     expect(label.classes()).toContain('truncate')
+  })
+})
+
+describe('ListTree 行点击动作（§6.4 导航原语，U5 验收③④）', () => {
+  const drawerHostAction: HostContainerAction = { kind: 'drawer', tabId: 'doc', params: { commandName: 'commit' } }
+
+  const mountWithExecutors = (items: TreeItem[]) => {
+    const cmd = makeExecutor()
+    const nav = makeNavigationExecutor()
+    const wrapper = mount(ListTree, {
+      props: { items },
+      global: {
+        provide: {
+          [ACTION_EXECUTOR_KEY as symbol]: cmd,
+          [CONTAINER_NAVIGATION_KEY as symbol]: nav,
+          [VIEW_SCOPE_SESSION_KEY as symbol]: 'view-sid',
+        },
+      },
+    })
+    return { cmd, nav, wrapper }
+  }
+
+  it('action 行渲染为原生 button（键盘可达探针 PB-4 的 DOM 层：Tab 可聚焦 + Enter/Space 触发 click）', () => {
+    const { wrapper } = mountWithExecutors([
+      { label: '可点行', action: { hostAction: drawerHostAction } },
+      { label: '纯展示行' },
+    ])
+    const actionRow = wrapper.find('[data-testid="gui-list-tree-action-0"]')
+    expect(actionRow.exists()).toBe(true)
+    expect(actionRow.element.tagName).toBe('BUTTON')
+    expect(actionRow.attributes('type')).toBe('button')
+    expect(actionRow.attributes('disabled')).toBeUndefined()
+    // 纯展示行维持 div（旧行为），无 action testid
+    expect(wrapper.findAll('.list-tree__item')[1]!.element.tagName).toBe('DIV')
+  })
+
+  it('点击 hostAction 行 → 导航执行器收到 (action, { viewSessionId })，命令执行器不被调用', async () => {
+    const { cmd, nav, wrapper } = mountWithExecutors([
+      { label: '打开文档', action: { hostAction: drawerHostAction } },
+    ])
+    await wrapper.find('[data-testid="gui-list-tree-action-0"]').trigger('click')
+    expect(nav.navigate).toHaveBeenCalledTimes(1)
+    expect(nav.navigate).toHaveBeenCalledWith(drawerHostAction, { viewSessionId: 'view-sid' })
+    expect(cmd.execute).not.toHaveBeenCalled()
+  })
+
+  it('点击 commandId 行 → 走既有命令链（并存 hostAction 时 commandId 优先，与 Actionbar 同源）', async () => {
+    const { cmd, nav, wrapper } = mountWithExecutors([
+      { label: '重试', action: { commandId: 'sched.retry', hostAction: drawerHostAction } },
+    ])
+    await wrapper.find('[data-testid="gui-list-tree-action-0"]').trigger('click')
+    expect(cmd.execute).toHaveBeenCalledTimes(1)
+    expect(cmd.execute).toHaveBeenCalledWith('sched.retry', undefined)
+    expect(nav.navigate).not.toHaveBeenCalled()
+  })
+
+  it('递归 children 内的 action 行同样可点（inject 沿组件链取到同一执行器）', async () => {
+    const { nav, wrapper } = mountWithExecutors([
+      {
+        label: 'parent',
+        children: [{ label: 'child', action: { hostAction: drawerHostAction } }],
+      },
+    ])
+    const childRow = wrapper.find('[data-testid="gui-list-tree-action-0"]')
+    await childRow.trigger('click')
+    expect(nav.navigate).toHaveBeenCalledTimes(1)
+    expect(nav.navigate).toHaveBeenCalledWith(drawerHostAction, { viewSessionId: 'view-sid' })
+  })
+
+  it('纯展示行点击不触发任何执行器（旧行为零变化）', async () => {
+    const { cmd, nav, wrapper } = mountWithExecutors([{ label: '纯展示行' }])
+    await wrapper.findAll('.list-tree__item')[0]!.trigger('click')
+    expect(cmd.execute).not.toHaveBeenCalled()
+    expect(nav.navigate).not.toHaveBeenCalled()
+  })
+
+  it('action 空对象（两字段缺省）按纯展示行处理：无 action testid、不渲染 button', () => {
+    const { wrapper } = mountWithExecutors([{ label: '空动作', action: {} }])
+    expect(wrapper.find('[data-testid="gui-list-tree-action-0"]').exists()).toBe(false)
+    expect(wrapper.findAll('.list-tree__item')[0]!.element.tagName).toBe('DIV')
   })
 })
 

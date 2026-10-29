@@ -42,7 +42,7 @@ describe('mermaid-render-cleanup', () => {
  * 组件级失败态渲染（「渲染失败」占位）归 mermaid.test.ts（U12），此处不重复。
  *
  * [D10 渲染链下沉] 自 renderer 随渲染链迁入 ui（import 改相对路径）。
- * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/mermaid-render-cleanup.test.ts
+ * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/mermaid.test.ts（mermaid-render-cleanup 节）
  */
 
 /** 复现真实 mermaid 失败路径的临时 DOM 植入：render(id) 先在 body 放 `#d{id}` div

@@ -8,7 +8,7 @@
  * 契约边界：getHistory 不在此端口（属 chat 域）——selectSession 的 hydrate
  * 经 ChatApiPort（w3 use-session 的 ChatHydratePort 注入回调）承接。
  */
-import type { PanelLeaf, SessionGroup, SessionSummary, BatchDeleteResult, ThinkingLevel, SessionArchiveReply } from '@taiji/shared'
+import type { PanelLeaf, SessionGroup, SessionSummary, BatchDeleteResult, ThinkingLevel, SessionArchiveReply, ServerMessageMap } from '@taiji/shared'
 /**
  * session 后端操作端口。
  * 壳侧实现：renderer 现 api/domains/session（pending/events/request/domains 原样继承，是好地基不动）。
@@ -72,6 +72,20 @@ export interface SessionApiPort {
    */
   onConfigSessions(handler: (groups: SessionGroup[]) => void): () => void
   /**
+   * [session-cold-switch-perf §3.3-3] 订阅 session.historyCacheReady 广播（后台全量重建
+   * 完成的轻通知：成功/失败都推，失败带 error；snapshotLeafId = 重建快照末条 entry id）。
+   *
+   * 帧带 sessionId（走 crossSession 通道——本 handler 只该由全局单消费面注册，use-session
+   * factory 内 refCount 单飞对齐 onConfigSessions 消费形态），返回退订函数。payload 类型
+   * 锚定 shared 协议 SSOT（帧名对账由类型层承载）。壳侧实现：events.onCrossSession 内
+   * 按 type 过滤 + payload 窄化（带 sid 帧不经 onGlobalType）。可选成员：壳未接线
+   * （headless / mock 装配）时通知监听整体不注册——重拉/失败收敛由下一次 getHistory
+   * 拉取自然承接（ADR-0097 拉为主推补充）。
+   */
+  onHistoryCacheReady?(
+    handler: (sessionId: string, payload: ServerMessageMap['session.historyCacheReady']) => void,
+  ): () => void
+  /**
    * [W2 权威拉取与冷读] 拉取会话运行时状态（modelId / thinkingLevel）。
    *
    * 打开视图 / 缓存缺失 / 重连三时机拉取（设计 §5-W2；ADR-0097 拉为真理通道）。活会话读
@@ -110,7 +124,7 @@ export interface PanelOrchestrationPort {
 }
 
 /**
- * sessionEntry 端口束（renderer-deepening D3）——selectSession 完整 12 步切入链的跨域
+ * sessionEntry 端口束（renderer-deepening D3）——selectSession 完整 13 步切入链的跨域
  * 步骤注入口。链本体在 use-session.selectSession 单点编排（唯一载体：改时序只改那一处），
  * 跨域动作（chat 订阅/LRU、new-task flow、壳未读标记/文件树）经本端口注入，core 零跨域
  * import（不开 domain 间直接 import 的先例，包拓扑铁律）。

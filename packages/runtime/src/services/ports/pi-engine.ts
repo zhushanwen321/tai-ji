@@ -219,6 +219,12 @@ export interface IPiEngine {
   onExit(callback: PiProcessExitCallback): () => void
   /** 进程是否已退出。 */
   readonly exited: boolean
+  /**
+   * pi 子进程 pid（spawn 后非 null；未 spawn / 已退出后 proc 置空为 null）。
+   * 消费方 = 预热槽存在性探活（session-cold-switch-perf §3.3-2 检查③：pid 存活 +
+   * exited 标记，禁 RPC 探活——RPC 墙钟超时已随 ADR-0122 退役）与信号取证（死亡主语 pid）。
+   */
+  readonly pid: number | null
 
   // ── 活动时钟（观测范围） ──
   /**

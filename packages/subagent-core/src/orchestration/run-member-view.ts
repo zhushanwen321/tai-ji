@@ -393,6 +393,7 @@ const MODEL_COL = 30;
 const MS_PER_SECOND = 1000;
 
 export function memberViewLine(view: RunMemberView): string {
+  // 列宽与时长换算消费模块级常量（STATE_COL/AGENT_COL/MODEL_COL/MS_PER_SECOND）
   const parts: string[] = [
     `[${view.stepIndex}]`,
     view.state.padEnd(STATE_COL),

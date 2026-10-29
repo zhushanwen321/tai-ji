@@ -223,7 +223,8 @@ describe("truncated-window", () => {
       getHistory: vi.fn().mockResolvedValue({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 }),
       streamSubscribe: vi.fn(() => vi.fn()),
       // [U5 消息撤回] ChatApiPort 新增必选成员（revokeMessage/cancelDelivery）——本套件不触达
-      // 撤回链，mock 补协议合法最小响应（类型完备；行为断言在 useChat.test.ts）
+      // 撤回链，mock 补协议合法最小响应（类型完备；行为断言在本文件 useChat 合并节，见
+      // describe('[U5] useChat.revokeMessage（统一撤回编排）'）
       revokeMessage: vi.fn().mockResolvedValue({ sessionId: 's1', revoked: false, error: 'no-mapping' }),
       cancelDelivery: vi.fn().mockResolvedValue({ clientUuid: 'u-x', cancelled: false }),
     }
@@ -420,7 +421,7 @@ describe("use-chat-disposition", () => {
     }
   }
 
-  /** session.delivery 帧工厂（useChat.test.ts morph 用例同款形态） */
+  /** session.delivery 帧工厂（本文件 useChat 合并节「session.delivery 帧消费与气泡 morph」组同款形态） */
   function deliveryFrame(
     sid: string,
     entries: Array<{ clientUuid: string; state: string; lane: string }>,
@@ -884,6 +885,21 @@ describe("useChat", () => {
       f.dispose()
     })
 
+    it('send options.clientUuid 透传：调用方注入幂等键贯穿到 submitDelivery + 气泡 id（remote-use-mobile-v2 §7.1 幂等口径一）', async () => {
+      // 「未送达重发」契约：弱网失败重试复用原 clientUuid，runtime 按 clientUuid 幂等防
+      // 已受理回执丢失双投——透传断裂（内部重新生成）会让该防线静默失效，此处锁定全链。
+      const f = makeFixture()
+      const injected = 'u-00000000-0000-4000-8000-000000000001'
+      await expect(f.useChat.send('s1', textToSegments('retry'), { clientUuid: injected })).resolves.toBe(true)
+      expect(f.chatApi.submitDelivery).toHaveBeenCalledTimes(1)
+      const calledUuid = (f.chatApi.submitDelivery.mock.calls[0] as unknown as [string, string, string])[2]
+      expect(calledUuid).toBe(injected)
+      // 气泡 id = 注入键（appendUser 显式 id 入参契约——内核条目 id 与乐观气泡同源）
+      const userMsg = f.chatStore.getMessages('s1').find((m) => m.role === 'user')!
+      expect(userMsg.id).toBe(injected)
+      f.dispose()
+    })
+
     it('send 在非 secure context（crypto.randomUUID undefined）下照常提交（移动壳 LAN http 场景）', async () => {
       // 场景：移动壳经 LAN http（http://<lan-ip>:<port>）访问，isSecureContext=false →
       // crypto.randomUUID 为 undefined（Web API 仅 secure context 暴露）。submitNewMessage
@@ -1286,7 +1302,7 @@ describe("useChat", () => {
         string, string, string,
       ]
       expect(calledSid).toBe('d7')
-      // 非纯文本消息（session 段）：u- 标记拼进 prompt（msg-id-mapper 映射通路不变，D8 双标记共存）
+      // 非纯文本消息（session 段）：u- 标记拼进 prompt（msg-id-mapper 模块映射通路不变，D8 双标记共存）
       expect(calledContent.startsWith('#sess-1 看看这个')).toBe(true)
       expect(calledContent).toMatch(/<!--taiji:msg:u-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-->$/i)
       expect(calledUuid).toMatch(/^u-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)

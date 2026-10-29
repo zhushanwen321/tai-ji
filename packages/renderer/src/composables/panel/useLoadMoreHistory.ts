@@ -28,13 +28,17 @@
  * virtua 按列表**末尾**保位（reverse scroll adjustment）——prepend 插入的更早历史不把
  * 视口往下推（virtua 单一 scrollTop owner，最小可靠形态）；同时也构造了自动续载的节流：
  * 插入后 offset 随新内容高度抬升，用户需再次主动上滑触顶才会触发下一页。
+ * [session-cold-switch-perf §3.3-3 滚动位置保持] isPrepend 的第二驱动源 = chat store 基线
+ * 前置替换事件计数（getBaselinePrependTick，全量精化头部插入时跳变）——见下方 watch；
+ * 手动翻页与基线前置共用同一 :shift 保位通路。
  *
  * 不含：load-more 按钮的 DOM 渲染 + 高度断言（容器 useConstantHeightAssert 负责）。
  *
  * @param sessionId 当前 session id getter
  */
-import { computed, nextTick, reactive, type ComputedRef, type Ref } from 'vue'
+import { computed, nextTick, reactive, watch, type ComputedRef, type Ref } from 'vue'
 import { useChat } from '@/composables/features/chat/useChat'
+import { useChatStore } from '@/stores/chat'
 import { useSessionScopedState } from '@/composables/useSessionScopedState'
 import { LOAD_MORE_RESERVED_HEIGHT } from './message-stream-layout'
 
@@ -85,9 +89,10 @@ export function useLoadMoreHistory(
   showLoadMore: ComputedRef<boolean>
   /** 防重入加载调用（loadingMore / showLoadMore 检查） */
   handleLoadMore: () => Promise<void>
-  /** [cw wave w3 / IF8] 顶部插入信号（load-more 期间 true）。
-   *  喂给 `<Virtualizer :shift>`：virta 在 shift=true 时按列表**末尾**保位（reverse scroll adjustment），
-   *  专用于头部插入（load-more-history）——比手写 scrollAdjustDelta 补偿更准。 */
+  /** [cw wave w3 / IF8] 顶部插入信号（驱动 `<Virtualizer :shift>` 保位）。
+   *  置位源两处：手动翻页 handleLoadMore 期间 + 基线前置替换事件（§3.3-3 滚动位置保持，
+   *  下方 watch）。喂给 `<Virtualizer :shift>`：virta 在 shift=true 时按列表**末尾**保位
+   *  （reverse scroll adjustment），专用于头部插入——比手写 scrollAdjustDelta 补偿更准。 */
   isPrepend: Ref<boolean>
   /** 滚动位置信号入口（MessageStream 的 virtua @scroll 透传 offset）——触顶自动续载判定点。 */
   onScrollOffset: (offset: number, isDetached: boolean) => void
@@ -118,8 +123,40 @@ export function useLoadMoreHistory(
   // 消费方 computed：读当前 sid 分区（切 sid 自动切视图，无需手动复位）
   const loadingMore = computed(() => state.current.value.loadingMore)
   const isPrepend = computed(() => state.current.value.isPrepend)
-  const loadMoreError = computed(() => state.current.value.loadMoreError)
+  // [session-cold-switch-perf §3.3-3] 合并后台重建失败态：historyCacheReady 失败帧把
+  // 「正在加载更早」指示收敛为同一失败重试行（复用 loadMore 失败态形态，与手动翻页失败
+  // 共用同一呈现）；重试动作（handleLoadMore 成功）或任意 history 重拉成功即清除。
+  const loadMoreError = computed(
+    () => state.current.value.loadMoreError || useChatStore().isHistoryCacheFailed(sessionId()),
+  )
   const slowLine = computed(() => state.current.value.slowLine)
+
+  // [session-cold-switch-perf §3.3-3 滚动位置保持] 全量精化（historyCacheReady 重拉 →
+  // reconcileHistory 基线替换）在分区头部插入更早历史——virtua 仅 shift=true 时对该形态
+  // 做滚动补偿（reverse scroll adjustment），而 :shift 此前的唯一驱动是本 composable 的
+  // 手动翻页。此 watch 把 store 的基线前置事件计数（getBaselinePrependTick）转成一拍
+  // isPrepend：tick 跳变与 messages 更新同源于 store 同步写 → 同一 flush 内 :shift 先于
+  // Virtualizer 的 data.length watcher 生效（watcher 创建序：本 composable setup 先于子组件）；
+  // nextTick 后复位对齐 handleLoadMore 的既有时序（shift 在 virtua 消费 length change 后
+  // 翻 false，后到的 RO 测量校正不受影响）。key = `${sid}::${tick}` 字符串源：切 sid 引起的
+  // tick 数值变化（读的是新分区计数）经 sid 段比对排除，不误置位。
+  watch(
+    () => `${sessionId()}::${useChatStore().getBaselinePrependTick(sessionId())}`,
+    (val, oldVal) => {
+      const [sid, tickStr] = val.split('::')
+      const [prevSid] = oldVal.split('::')
+      if (sid !== prevSid || Number(tickStr) <= 0) return
+      state.updateFor(sid, (s) => {
+        s.isPrepend = true
+      })
+      void nextTick().then(() => {
+        state.updateFor(sid, (s) => {
+          // 手动翻页在途时不抢复位（其 finally 收敛 isPrepend，保持其保位窗口完整）
+          if (!s.loadingMore) s.isPrepend = false
+        })
+      })
+    },
+  )
 
   async function handleLoadMore(): Promise<void> {
     if (loadingMore.value || !showLoadMore.value) return

@@ -235,7 +235,7 @@ pi 崩溃（exit 1）
 **D9：两个 supersession / 检查裁决（O3-C + O1-2 补课）**
 
 - **O3-C 截断反转 —— 裁决：被已交付形态 superseded，不实施**。原承诺「六工具白名单反转为默认截断 + 豁免名单」针对的「白名单外工具在 renderer 无界」问题，已被 crash-resilience.md（已删，git 可追溯）u7 交付的 **entryStates 64KB 条目截断**（apply-entry-utils.ts，live/reload 共用同一截断层）结构性覆盖——所有工具的 entry 累积态恒有界。再反转 display 层白名单（truncate-tool-output 4KB 截断视图）只是显示层一致性收益，引入双截断体系的维护成本。**登记 supersession 而非静默放弃**：对账动作已执行——prevention-deep-dive.md §5 总表 O3-C 行已加注 superseded-by（该文档已删除，git 可追溯；其 O3-C 行注记与本条裁决一致）。
-- **O1-2 审计覆盖机器检查 —— 采用 B 方案（清单完备性检查）而非 AST lint**：新增检查脚本（挂 extensions 三连或 pre-commit）：解析 `stale-ctx-audit.md` **§3 全仓普查清单**（权威表——不是 §2 接入清单）vs `extensions/{taiji,universal,shared}/` **三组目录**的实际包列表——任何新增 extension 包未在普查表出现即红（forcing 新包接入时填写 stale 静默语义判定）。**合并行解析规则**：普查表存在一行多包斜杠分隔的合并行（如「rename-session / msg-id-mapper / …」），按 `/` 拆分后逐一比对。不采用 A 方案（taste-lint AST 规则识别「未检查的异步 ctx 调用」）：过匹配/漏匹配不可靠（回调形态发散：timer/事件/Promise/闭包传递），误报噪音会教人绕过；清单完备性是可机器判定的强不变量，语义判定交回人（普查表）+ 行为兜底交回检查（guardStaleCtx 已交付）。
+- **O1-2 审计覆盖机器检查 —— 采用 B 方案（清单完备性检查）而非 AST lint**：新增检查脚本（挂 extensions 三连或 pre-commit）：解析 `stale-ctx-audit.md` **§3 全仓普查清单**（权威表——不是 §2 接入清单）vs `extensions/{taiji,universal,shared}/` **三组目录**的实际包列表——任何新增 extension 包未在普查表出现即红（forcing 新包接入时填写 stale 静默语义判定）。**合并行解析规则**：普查表存在一行多包斜杠分隔的合并行（如「rename-session / host-internals / …」），按 `/` 拆分后逐一比对。不采用 A 方案（taste-lint AST 规则识别「未检查的异步 ctx 调用」）：过匹配/漏匹配不可靠（回调形态发散：timer/事件/Promise/闭包传递），误报噪音会教人绕过；清单完备性是可机器判定的强不变量，语义判定交回人（普查表）+ 行为兜底交回检查（guardStaleCtx 已交付）。
 
 ---
 

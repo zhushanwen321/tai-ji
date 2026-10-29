@@ -37,6 +37,9 @@ export default taijiTestConfig({
             // sessions/__tests__/: 会话 JSONL 导出 IPC（真实 copyFile 落盘，同挂
             // fs-guard；夹具 mkdtemp tmpdir 自建自删，piAgentDir 经 env 注入 tmp）
             'sessions/__tests__/**/*.test.ts',
+            // quota/__tests__/：cookie 登录态刷新器（真实 secrets 文件读写落盘，
+            // 同挂 fs-guard；夹具 mkdtemp tmpdir 自建自删，dataDir 经 deps 注入 tmp）
+            'quota/__tests__/**/*.test.ts',
             // main-run-state：真实文件 IO（run-state marker/checkpoint 写盘）+ mock 驱动
             // main.ts 真实 import 链（app.isPackaged=true 会执行打包 pin 分支改写
             // TAIJI_AGENT_DATA_DIR）——写通路必须在 fs-guard 拦截范围内

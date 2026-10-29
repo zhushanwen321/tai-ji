@@ -4,7 +4,7 @@
 // （设计 §3.3.3 轮收条事实化 + §3.4「NEW_STOP_REASONS/ROUND_TERMINAL_STOP_REASONS
 // 常量锚与枚举完整性测试同批」——三词表锚之一的 record-types 同位）。
 //
-// 锁定面：
+// 锁定范围：
 //   ① 全枚举值数与成员逐一（16 值无重复——归档族 + 宿主中断族 + 引擎原值 +
 //      迁移期旧值四个分区的并集）；
 //   ② 轮终写入值域 ROUND_TERMINAL_STOP_REASONS = 引擎原值三态（stop/error/aborted

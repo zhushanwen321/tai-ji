@@ -32,6 +32,10 @@ export const ENGINE_ENV_DENY_LIST: readonly string[] = [
   // 事实只对 runtime 直接 spawn 的 pi 成立，引擎一跳继承会造成子 agent pi 假披露
   'TAIJI_PRESET_FALLBACK_FROM',
   'TAIJI_PRESET_FALLBACK_TO',
+  // runtime 实例标识（connection-datasync-ssot §6.1，env 名 SSOT = shared
+  // RUNTIME_ID_ENV）：supervisor 每次 spawn 签发的生命周期标志，只有 runtime 自身
+  // 消费；引擎一跳继承陈旧值 = 后代进程持有已死实例标识，出站剥除
+  'TAIJI_RUNTIME_ID',
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

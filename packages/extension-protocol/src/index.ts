@@ -22,6 +22,7 @@ export type {
   GuiComponentType,
   GuiComponentProps,
   GuiRenderResult,
+  HostContainerAction,
   PlanDocMeta,
   PlanReviewComment,
   PlanReviewDecision,
@@ -250,6 +251,17 @@ export type {
   SubagentEngineModelInfo,
 } from './extensions/subagent-engine/contract'
 export { SUBAGENTS_ENGINES_FILENAME } from './extensions/subagent-engine/contract'
+
+// ── ./extensions/subagent-projection：subagent 投影判据单点（占用谓词 / 失败轮 / 失败分类
+//    展示词——插件侧托盘 widget（subagent-workflow interface/gui/tray-widget.ts）与宿主
+//    renderer（lib/subagent-bucket.ts re-export）同源消费；入参取两侧 SubagentRecord 形状
+//    子集，本包不 import 两侧词表）──
+export type { SubagentProjectionRecord, SubagentFailureLike } from './extensions/subagent-projection/predicates'
+export {
+  isRunningProjection,
+  failedRoundOf,
+  failureCauseLabel,
+} from './extensions/subagent-projection/predicates'
 
 // ── ./extensions/canvas：问题解决画布协议（U1 契约 SSOT：marker + 16 action 词表 +
 // per-action × actor 权限矩阵 + 6 工具映射 + CanvasState/ReviewReport schema + 领域事件

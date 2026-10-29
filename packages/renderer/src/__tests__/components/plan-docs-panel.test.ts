@@ -29,7 +29,7 @@
  * 装配器 mock）。状态驱动用 store.applyFrame（真实 WS 帧路径，不绕被测消费链）。
  * i18n 经 vitest-i18n-setup 全局 mock，t() 取 zh-CN 文案。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/components/plan-docs-panel.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=plan npx vitest run src/__tests__/components/plan-docs-panel.test.ts（本文件登记在 domain-map.json plan 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'

@@ -28,8 +28,8 @@
  *     PERMISSION_DENIED，可诊断）；open / promises.open 只放行读 flags（'r' /
  *     'rs' / O_RDONLY），promises.open 返回的 FileHandle 经 Proxy 包装拒绝写方法。
  *
- * 模板 = 代理构建逻辑的单一事实源：in-process 测试做结构断言（import 面 / 内联
- * 白名单 / named export 与名单一致），行为面由真实 fork 的 P-perm fixture 覆盖。
+ * 模板 = 代理构建逻辑的单一事实源：in-process 测试做结构断言（import 清单 / 内联
+ * 白名单 / named export 与名单一致），行为断言由真实 fork 的 P-perm fixture 覆盖。
  */
 
 const REAL_FS = require('node:fs')

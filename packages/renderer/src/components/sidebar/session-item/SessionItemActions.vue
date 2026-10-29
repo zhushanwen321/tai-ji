@@ -38,8 +38,11 @@
          归类可逆（可再点其他 project / 默认项目），无需两段确认。
          浮层形态 = spec 待裁决 3 既定方向「复用右键菜单的项目选择浮层」：行渲染与
          SessionItemContextMenu「移动到项目」分组同构（行首 14px 定宽勾标列，当前归属项
-         accent Check），仅含项目列表；迁移 toast 在共享 handler（useSidebarSessionActions）统一出。 -->
-    <Popover v-if="!confirming" :open="assignOpen" @update:open="assignOpen = $event">
+         accent Check），仅含项目列表；迁移 toast 在共享 handler（useSidebarSessionActions）统一出。
+         归属编辑入口禁用（connection-datasync-ssot §6.9）：project 无有效数据形态
+         （idle/从未成功的 loading/failed）时目标列表为空，整个入口钮不渲染；重拉子形态
+         不禁用（目标列表照常派生）。 -->
+    <Popover v-if="!confirming && assignTargets.length > 0" :open="assignOpen" @update:open="assignOpen = $event">
       <PopoverTrigger as-child>
         <Button
           variant="ghost"

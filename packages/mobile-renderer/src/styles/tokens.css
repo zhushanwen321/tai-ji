@@ -277,8 +277,9 @@
 
 /* ============================================================
    字体大小槽位（data-font-size → --font-scale-u，D17 + v6 calc 自适应）
-   store.setSystem({fontSize}) 同步 <html data-font-size>。
-   映射到 --font-scale-u，驱动 --text-* calc 链路（base 14px × 档位）。
+   移动壳写入方 = app-runtime applyMobilePrefs 直接写 dataset（SettingsScreen
+   切换经 saveMobilePrefs 触达）；映射到 --font-scale-u，驱动 --text-* calc 链路
+   （base 14px × 档位）。桌面侧的 store.setSystem({fontSize}) 通道移动壳不存在。
    ============================================================ */
 :root[data-font-size="small"] {
   --font-scale-u: 0.929;

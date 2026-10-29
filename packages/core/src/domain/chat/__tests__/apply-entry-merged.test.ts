@@ -746,8 +746,8 @@ describe("apply-entry-equivalence", () => {
   // - morph 回填（E5a/E5c）：统一 submit 的乐观气泡（appendUser，原 segments 引用）→
   //   session.delivery 帧非 direct 投递路径 morph（truncateFrom 移出对话流 + captureMorphSegments
   //   捕获原段）→ message_end(user) 裸标记 id 命中派生视图条目 → appendUser(原 segments) 回填
-  //   （非降级恢复）。morph 编排的锁定点 = useChat.test.ts「session.delivery 帧消费与气泡
-  //   morph」组（本文件只驱动同一组原语，不复制编排）。
+  //   （非降级恢复）。morph 编排的锁定点 = store-merged-merged.test.ts useChat 合并节
+  //   「session.delivery 帧消费与气泡 morph」组（本文件只驱动同一组原语，不复制编排）。
   // - 纯文本降级（E5b）：无本地乐观气泡的投递（外来注入 / reattach 恢复形态——前身 = 路径 2
   //   includes 兜底的职责域）→ 回执命中派生视图且无 morph 段 → 按 reload 派生视图同规则剥标记入流。
   //
@@ -825,7 +825,8 @@ describe("apply-entry-equivalence", () => {
     }
 
     /** 非 direct 投递路径 morph（handleSessionDelivery 第二步：气泡移出对话流 + 原 segments 捕获；
-   *  编排锁定点见 useChat.test.ts「session.delivery 帧消费与气泡 morph」组）。返回捕获引用。 */
+   *  编排锁定点见 store-merged-merged.test.ts useChat 合并节「session.delivery 帧消费与气泡
+   *  morph」组）。返回捕获引用。 */
     function morphBubbleOut(store: ChatStoreInstance, sid: string, clientUuid: string): Segment[] {
       const bubble = store.getMessages(sid).find((m) => m.id === clientUuid)
       expect(bubble, 'morph 前乐观气泡应在对话流中（appendUser 契约：气泡 id = clientUuid）').toBeDefined()

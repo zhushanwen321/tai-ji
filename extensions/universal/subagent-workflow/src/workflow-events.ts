@@ -68,6 +68,13 @@ import { createInFlightReporter, type InFlightReporter } from "./host/inflight-r
 // setJournalAppendListener（与 inflight reporter 同 seam 同款），session_start /
 // session_shutdown 驱动 attach/detach；测试可注入 fake。
 import { createJournalReporter, type JournalReporter } from "./host/journal-reporter.ts";
+// [容器扩展点统一 §6.6 U9] subagent 托盘件 widget 推送器：实例由本 seam 创建，
+// session_start / session_shutdown 驱动 attach/detach；测试可注入 fake。
+import { createSubagentTrayWidgetPusher, type SubagentTrayWidgetPusher } from "./interface/gui/tray-widget.ts";
+// [容器扩展点统一 §6.6 U10] workflow 托盘件 widget 推送器：与 subagent 件同 seam 同款
+//（session_start/shutdown 驱动 attach/detach，测试可注入）；变更信号 = run 域 journal
+// 落盘出口的组合分发（下方 setJournalAppendListener 接线处）。
+import { createWorkflowTrayWidgetPusher, type WorkflowTrayWidgetPusher } from "./interface/gui/workflow-tray-widget.ts";
 // [W2/V1 D1 第 8 行] 判活类消费方（isScriptRunning）经 core 派生视图单点
 //（runSummary.status 三态派生视图——终局判定源 = 终局记录注册表）。
 import { type RunSettlementRecord } from "./jsonl-run-store.ts";
@@ -278,7 +285,12 @@ export interface WorkflowDomainHandle {
  */
 export function setupWorkflowDomain(
   pi: ExtensionAPI,
-  wiring: { inflightReporter?: InFlightReporter; journalReporter?: JournalReporter } = {},
+  wiring: {
+    inflightReporter?: InFlightReporter;
+    journalReporter?: JournalReporter;
+    trayWidgetPusher?: SubagentTrayWidgetPusher;
+    workflowTrayWidgetPusher?: WorkflowTrayWidgetPusher;
+  } = {},
 ): WorkflowDomainHandle {
   // [u7a D5] 在途聚合上报接线（自组合根 index.ts 收编）：core 状态迁移
   // （spawn/close/arm/disarm）→ 出口回调 → reporter 经 select 通道推绝对计数帧。
@@ -289,14 +301,40 @@ export function setupWorkflowDomain(
   // 组合根对实例零知识（纯管道参数已删）。
   const inflightReporter = wiring.inflightReporter ?? createInFlightReporter();
   setInFlightListener(inflightReporter.onInFlightChanged);
-  // [event-push-channel W-P1] journal 推送出口接线（与 inflight reporter 同 seam 同款）：
-  // core 两域落盘提交点 → 出口回调 → reporter 按 (domain,fileKey) 分组合并 → select
-  // marker 通道带回执推送 runtime。出口为进程级单监听，后注册覆盖先注册（jiti 重载
-  // 幂等）；回调同步 void，不进任何落盘 await 链。ctx 由 session_start 注入
-  // （factory 阶段无 ui）。wiring.journalReporter 是测试注入点（fake reporter 观察
-  // attach/detach 驱动时点）；生产路径缺省真实创建——组合根对实例零知识。
+  // [event-push-channel W-P1] journal 推送出口接线：core 两域落盘提交点 → 出口回调 →
+  // reporter 按 (domain,fileKey) 分组合并 → select marker 通道带回执推送 runtime。出口为
+  // 进程级单监听，后注册覆盖先注册（jiti 重载幂等）；回调同步 void，不进任何落盘 await 链。
+  // ctx 由 session_start 注入（factory 阶段无 ui）。wiring.journalReporter 是测试注入点
+  // （fake reporter 观察 attach/detach 驱动时点）；生产路径缺省真实创建——组合根对实例零知识。
   const journalReporter = wiring.journalReporter ?? createJournalReporter();
-  setJournalAppendListener(journalReporter.onJournalAppended);
+  // [容器扩展点统一 §6.6 U10] 出口单监听的壳层组合分发：journal reporter（W-P1 通道）
+  // 与 workflow 托盘推送器共用同一事件流——run 域每条转移帧落盘 = run 生命周期变更的
+  // 权威信号。两个消费者各自围栏：一个出口故障不阻断另一个、都不反噬 core 落盘主链
+  // （core notifyJournalAppended 的外层 catch 只兜监听者 throw，内部分发在这里隔离）。
+  setJournalAppendListener((domain, fileKey, events) => {
+    try {
+      journalReporter.onJournalAppended(domain, fileKey, events);
+    } catch (err) {
+      logger.warn(
+        `[workflow-events] journal reporter dispatch failed: ${toErrorMessage(err)}`,
+      );
+    }
+    if (domain === "run") workflowTrayWidgetPusher.notifyRunsChanged();
+  });
+  // [容器扩展点统一 §6.6 U9] 托盘 subagent 件 widget 推送器（与上方两 reporter 同 seam
+  // 同款：实例由本 seam 创建，session_start/shutdown 驱动 attach/detach，测试可注入）。
+  // 无进程级出口监听——消费的是 queries.onChange 实例订阅（per-factory 生命周期）。
+  const trayWidgetPusher = wiring.trayWidgetPusher ?? createSubagentTrayWidgetPusher();
+  // [容器扩展点统一 §6.6 U10] 托盘 workflow 件 widget 推送器（与 subagent 件同 seam）。
+  // readRuns = 当前 session 的 runs Map 值集（聚合根内存投影；装配链完成前条目缺席
+  // 返回空集——推送器按清屏投影，session_start attach 在装配后时序保证正常路径有值）。
+  // 变更信号经下方 journal 出口组合分发（run 域帧落盘 = run 生命周期转移的权威出口）。
+  const workflowTrayWidgetPusher =
+    wiring.workflowTrayWidgetPusher ??
+    createWorkflowTrayWidgetPusher(() => {
+      const state = sessionState.get(lsRef.lastSessionId);
+      return state ? [...state.runs.values()] : [];
+    });
   // [skill-reload D2] handle.state 即槽对象本身（不做解构重包装——否则容器每次
   //  factory 重跑新建，调用方拿不到「同一 domain state 引用」的接管前提）。
   const domainState = getOrCreateWorkflowDomainState();
@@ -498,6 +536,13 @@ export function setupWorkflowDomain(
         existing,
       });
       sessionState.set(result.sessionId, result);
+      // [容器扩展点统一 §6.6 U9] 托盘 widget 初始推送 + record 变更订阅。attach 放
+      // 装配链完成后（getSubagentService 单例此时必在——订阅queries.onChange 需要
+      // service 实例；初始推送经 collectRecords 磁盘重建覆盖重启后冷读收敛）。
+      trayWidgetPusher.attach(ctx);
+      // [容器扩展点统一 §6.6 U10] workflow 托盘件初始推送（与 subagent 件同位——attach
+      // 放装配链完成后，sessionState 条目已在，readRuns 现读 runs Map 做绝对投影）。
+      workflowTrayWidgetPusher.attach(ctx);
     } catch (err) {
       logger.error(
         `[subagent-workflow] session_start handler failed (sessionId=${lsRef.lastSessionId})`,
@@ -584,6 +629,11 @@ export function setupWorkflowDomain(
       // [event-push-channel W-P1] journal 推送通道随 reload 同步摘 ctx（旧 ctx 的
       // session 已被 pi 替换，推送帧无法归属；新 session_start 重新 attach）。
       journalReporter.detachSession();
+      // [容器扩展点统一 §6.6 U9] 托盘 widget 推送通道随 reload 同步摘 ctx + 退订
+      // （旧 ctx 已死；新 session_start 重新 attach + 重订）。
+      trayWidgetPusher.detach();
+      // [容器扩展点统一 §6.6 U10] workflow 托盘件推送通道随 reload 同步摘 ctx（同上）。
+      workflowTrayWidgetPusher.detach();
 
       // [skill-reload D8] reload 分支归因日志：preserved 计数取自跳过清理时的存活
       // 对象真实统计（runs = 各 session 内存 run 聚合根数；records = run.state.calls
@@ -623,6 +673,11 @@ export function setupWorkflowDomain(
     // [event-push-channel W-P1] journal 推送通道随 session 终结：摘 ctx + 丢弃待推
     // 缓冲（未推事件由消费方冷读/缺口补读收敛，不重推——设计 D5）。
     journalReporter.detachSession();
+    // [容器扩展点统一 §6.6 U9] 托盘 widget 推送通道随 session 终结：摘 ctx + 退订
+    // （宿主 widget 数据在 per-session 分区自然保留，切回该会话仍可见）。
+    trayWidgetPusher.detach();
+    // [容器扩展点统一 §6.6 U10] workflow 托盘件推送通道随 session 终结：摘 ctx（同上）。
+    workflowTrayWidgetPusher.detach();
 
     // ── workflow 域：terminate 所有 running run + store 收尾 + 清理 temp files ──
     // H-5: 遍历所有 sessionState 条目清理（而不只 lastSessionId——

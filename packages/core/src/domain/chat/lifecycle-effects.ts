@@ -46,6 +46,16 @@ export interface LifecycleEffectsDeps { // oe-exempt:20261003:framework:D5 设�
   /** chat store 动作侧：markSessionError（session 级错误统一入口，含流式终结）+ appendRespawnNotice（恢复提示条写入点）。 */
   chat: Pick<ChatStoreInstance, 'markSessionError' | 'appendRespawnNotice'>
   session: LifecycleSessionActions
+  /**
+   * 流订阅全套重建原语（ensureStreamSubscription 的壳侧绑定，可选）：openRestoreWindow
+   * 恢复窗口订阅消费。[A5 缺陷修复] 原实现只重发 bus 层 subscribeSession——session.delivery
+   * 等帧的 renderer 分发走 events 层 handler（streamSubscribe 回调），该 handler 已随
+   * markSessionDead 的 invalidateStreamSubscription 退订，无人重挂则恢复后帧全部落空
+   * （session.delivery 无 ROUTE_TABLE 兜底条目，dispatchSession 无订阅者静默丢弃）。
+   * 注入 = 重挂 events handler + bus 订阅一步完成（ensureStreamSubscription 内含
+   * subscribeSession）；未注入（存量装配零变化）回落 bus 层 resubscribe。
+   */
+  ensureStream?: (sessionId: string) => void
 }
 
 /** 恢复提示条两形态文案（壳注入——core 不持有 i18n）。 */
@@ -104,6 +114,12 @@ export function createLifecycleEffects(deps: LifecycleEffectsDeps, notices: Life
     },
 
     openRestoreWindow(sessionId) {
+      // 全套重建优先（deps.ensureStream）：events handler 重挂 + bus 订阅一步完成——只发
+      // bus 层 subscribe 时恢复帧到不了已退订的 events handler（deps.ensureStream 注释）。
+      if (deps.ensureStream) {
+        deps.ensureStream(sessionId)
+        return
+      }
       resubscribe(sessionId, 'restore-window subscribe')
     },
 

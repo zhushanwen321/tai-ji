@@ -16,7 +16,7 @@
  *  - vi.mock('qrcode') 固定 toDataURL 返回（二维码生成是外部纯函数，断言 img src 转发）
  *  - useToast 用真实单例（toasts.value 断言，与 settings-modal-smoke 同形态）
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/settings/remote-access-page.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=settings npx vitest run src/__tests__/settings/remote-access-page.test.ts（本文件登记在 domain-map.json settings 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'

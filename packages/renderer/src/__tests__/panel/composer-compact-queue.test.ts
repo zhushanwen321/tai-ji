@@ -23,7 +23,7 @@
  *   setText/getSegments 供撤销回草稿断言）
  * - 帧到达模拟：直接写 core 派生视图 ref（帧消费链路由 core useChat handler 承担，u3b 已覆盖）
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-compact-queue.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel npx vitest run src/__tests__/panel/composer-compact-queue.test.ts（本文件登记在 domain-map.json panel 域，默认档被排除）
  */
 // helper import 必须先于项目内模块（@/api mock factory 在模块图加载期执行，TDZ 约束）
 import { composerApiModule, composerChildStubs, composerFlowModule, composerSessionStoreModule, makeComposerInputMock } from '../helpers/composer-mount'

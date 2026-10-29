@@ -3,9 +3,17 @@
 // workspace 声明 + bootstrap import 图护住，ac1-dependency-edge.test.ts 断言 package.json 面）。
 import './styles/tokens.css'
 
+// 移动尺度层 --m-*（DESIGN.md §4.9 / 设计 §6.8，@taiji/ui 子路径出口）：ui 移动原语
+// （Sheet 圆角/限高/scrim/动效）、ChatView density=mobile 档与触控 44px 热区的变量源。
+// 壳层入口 import 一次；桌面壳不 import（双壳零感知边界），不进本目录镜像文件。
+import '@taiji/ui/mobile-tokens.css'
+
 // 浮层进出场过渡（dialog 居中依赖 translate(-50%,-50%)，缺失时弹窗出视口）。
 // styles/shell.css 是桌面 style.css 同段的 mobile 镜像副本，改动须同步两处。
 import './styles/shell.css'
+
+// 壳基础层（焦点可见性 / reduced-motion 降级；remote-use-mobile-v2 S1 壳骨架）。
+import './styles/base.css'
 
 import { bootstrap } from './bootstrap'
 

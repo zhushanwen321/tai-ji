@@ -19,7 +19,7 @@
  *    components 版同组件测试共享。
  *  - PresetModeSection 子组件 stub（本测试聚焦 PiPresetsPage 主逻辑）。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/settings/pi-presets-page.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=settings npx vitest run src/__tests__/settings/pi-presets-page.test.ts（本文件登记在 domain-map.json settings 域，默认档被排除）
  */
 import { describe, it, expect, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -351,7 +351,7 @@ describe('PiPresetsPage 内置扩展提示', () => {
     wrapper = mount(PiPresetsPage)
     await flushPromises()
 
-    expect(wrapper.text()).toContain('3 个内置扩展')
-    expect(wrapper.text()).toContain('@zhushanwen/pi-agent-ext')
+    expect(wrapper.text()).toContain('2 个内置扩展')
+    expect(wrapper.text()).toContain('@zhushanwen/pi-host-internals')
   })
 })

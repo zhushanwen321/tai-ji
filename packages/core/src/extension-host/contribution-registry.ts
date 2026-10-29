@@ -6,13 +6,14 @@
  *
  * 契约（IF4）：
  * - registerBuiltin 初始化即调用（builtin 免 runtime）
- * - loadExternal 幂等：重复注入同一 pluginId 覆盖不翻倍
+ * - loadExternal 幂等：重复注入同一 pluginId 不翻倍；覆盖粒度 = (type, contributionId)
+ *   逐项（声明源合并 §6.2——静态表项不被未被清单覆盖的声明清除，失败模式 D 防线）
  * - routeAll 后每条 contribution 的 available 反映挂载点注册态（AC9 置灰依据）；
  *   未注册挂载点 → emit unregistered-mount-point 事件（ERR1，不静默丢弃）
  * - clearForPlugin(pluginId)：清除该插件全部贡献（崩溃/禁用/卸载清理族，幂等）
  * - 向后兼容：旧 panels 字段（legacy manifest）映射为 view（deprecated alias）
- * - loadExternal 的 descriptor 无 contributes → 注册为空不抛错（ERR5 降级，
- *   debug 日志——s3 未完成透传前的已知中间态）
+ * - loadExternal 的 descriptor 无清单声明（contributes 缺失或 {}）→ 不清不注册（ERR5 降级，
+ *   debug 日志）
  */
 import type { InternalEventBus } from './internal-event-bus'
 import { builtinContributions } from './builtin-contributions'
@@ -52,7 +53,6 @@ function parseViewContributions(pluginId: string, c: PluginContributes): Contrib
       view: {
         viewType: v.viewType ?? 'gui',
         title: v.title,
-        initialVisibility: v.initialVisibility ?? 'hidden',
       },
     })
   }
@@ -166,20 +166,21 @@ export class ContributionRegistry {
 
   /**
    * 注入 external plugin descriptor（含 contributes，按 PluginContributes v2 解析）。
-   * 幂等：重复注入同一 pluginId 覆盖不翻倍。无 contributes → 注册为空不抛错（ERR5 降级）。
+   *
+   * 覆盖粒度（容器扩展点统一 §6.2 声明源合并规则）：按 (type, contributionId) 逐项覆盖——
+   * registerContribution 的三维 key 天然按项 set，静态表（registerBuiltin）先注册的项
+   * 不被未被清单覆盖的同插件声明清除。整插件清空语义会在接通声明通路后由第一次
+   * config.plugins 广播清掉 scheduler-manager 的纯静态声明（其清单无 contributes 段，
+   * 贡献只在 builtin 静态表——失败模式 D），故不可回退。
+   * 幂等：同一 descriptor 重复注入同 key set 不翻倍。
+   * 无清单声明（contributes 缺失或 {} 与缺失同义）→ 不清不注册，不抛错。
    */
   loadExternal(descriptors: PluginDescriptorLike[]): void {
     for (const d of descriptors) {
-      // ERR5：数据未就绪（runtime 透传归 s3），debug 日志降级，不抛错
-      if (!d.contributes && !d.panels) {
-        console.debug(
-          `[ContributionRegistry] ${d.pluginId}: no contributes in descriptor (ERR5 EXTERNAL_CONTRIBUTIONS_MISSING, s3 透传未完成)`,
-        )
+      // 无清单声明：不触碰既有记录（「不清」与覆盖粒度规则配套——静态项不因空声明丢失）
+      if ((!d.contributes || Object.keys(d.contributes).length === 0) && !d.panels) {
+        console.debug(`[ContributionRegistry] ${d.pluginId}: no contributes in descriptor (无清单声明，不清不注册)`)
         continue
-      }
-      // 覆盖式重注入：先清该 pluginId 全部旧 contribution 再注册（幂等不翻倍）
-      for (const [k, c] of this.contributions) {
-        if (c.pluginId === d.pluginId) this.contributions.delete(k)
       }
       if (d.contributes) {
         for (const c of this.parseContributes(d.pluginId, d.contributes)) {
@@ -195,7 +196,7 @@ export class ContributionRegistry {
             type: 'view',
             placement: p.placement ?? 'sidebar.tab',
             available: false,
-            view: { viewType: 'gui', title: p.title ?? p.id, initialVisibility: 'hidden' },
+            view: { viewType: 'gui', title: p.title ?? p.id },
           })
         }
       }
@@ -203,8 +204,10 @@ export class ContributionRegistry {
   }
 
   /**
-   * 按 placement 路由到挂载点。未注册挂载点 → emit unregistered-mount-point
-   * （含 pluginId+contributionId+expectedMountPoint）+ available=false（ERR1/AC9）。
+   * 按 placement 路由到挂载点（§5.4 判定表行 1 的判定出口：未注册位置族 →
+   * available=false + emit unregistered-mount-point，种类值 'unregistered-mount-point'
+   * 与 failure-degradation 的 FAILURE_JUDGEMENT_TABLE 行 1 同名——renderer 订阅侧按
+   * 同形去重键 `pluginId::contributionId::unregistered-mount-point` warn 一次）。
    */
   routeAll(mounts: MountPointRegistry): void {
     for (const c of this.contributions.values()) {
@@ -235,8 +238,11 @@ export class ContributionRegistry {
 
   /**
    * 按 placement 查询视图贡献（IF1，视图宿主消费入口）。
-   * viewId=contributionId，title 缺省回退 contributionId，icon 显式 undefined，
-   * initialVisibility 取记录值（view payload 缺省时回退 'hidden'，legacy panels 固定 'hidden'）。
+   * viewId=contributionId，title 缺省回退 contributionId，icon 恒 undefined——
+   * record.view 形状（types.ts）未含 icon，声明侧 PluginContributesView.icon 到本通道
+   * 的透传缺位（§7.2「parseViewContributions 透传新字段」的 record 扩形未实施）；
+   * 图标统一解析入口 = failure-degradation 的 resolveContributionIcon（§6.13），
+   * 消费单元直接以声明数据调它，不经本摘要。
    */
   getViewsByPlacement(placement: string): ViewContributionSummary[] {
     return this.getContributions({ type: 'view' })
@@ -245,7 +251,6 @@ export class ContributionRegistry {
         viewId: c.contributionId,
         title: c.view?.title ?? c.contributionId,
         icon: undefined,
-        initialVisibility: c.view?.initialVisibility ?? 'hidden',
       }))
   }
 

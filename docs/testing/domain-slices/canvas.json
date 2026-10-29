@@ -41,6 +41,7 @@
     "packages/renderer/src/components/canvas/canvas-pane.test.ts",
     "packages/renderer/src/composables/use-canvas-sync.test.ts",
     "packages/renderer/src/stores/canvas.test.ts",
+    "packages/core/src/domain/overlay/__tests__/content-slots.test.ts",
     "packages/core/src/domain/overlay/__tests__/coordination.test.ts",
     "packages/core/src/domain/overlay/__tests__/types.test.ts"
   ],

@@ -89,7 +89,7 @@ grep -rln 'readSessionHeaderId\|SESSION_HEADER_TYPE' scripts/ --include='*.mjs'
 
 | 模块 | 读取点 | 归类 | 判定理由 | 接入单元 |
 |------|--------|------|----------|----------|
-| `infra/pi/entry-tree-builder.ts` | `rebuildHistoryFromEntries`（get_entries RPC 全量 → 重建 Message[]，含 msg-id-mapper `taiji.client-msg-id` custom entry 映射回填） | 随树 | 对话流历史 = 模型视角派生视图（G2 主张「该消息从未发生」）；leafId 沿 parentId 回溯裁剪。映射回填随裁剪构造性覆盖：被撤消息的映射目标不在活跃路径，映射失效即正确语义 | U6a |
+| `infra/pi/entry-tree-builder.ts` | `rebuildHistoryFromEntries`（get_entries RPC 全量 → 重建 Message[]，含 host-internals msg-id-mapper 模块 `taiji.client-msg-id` custom entry 映射回填） | 随树 | 对话流历史 = 模型视角派生视图（G2 主张「该消息从未发生」）；leafId 沿 parentId 回溯裁剪。映射回填随裁剪构造性覆盖：被撤消息的映射目标不在活跃路径，映射失效即正确语义 | U6a |
 | `infra/pi/session-entry-mapper.ts` | `mapSessionEntries`（RPC / 文件两条历史链共用映射单点） | 随树 | 喂入裁剪后 entries；无分支 session leafId 缺省 = 文件尾 = 现行为 | U6a |
 | `services/session-history.ts` | `getHistoryFromFilePath` + 离线尾读（`tailReadOffline`） | 随树 | 同一历史派生视图的文件源路径；离线尾读等价裁剪 | U6a |
 | `services/session/history-rebuild-cache.ts` | 全量重建缓存 | 随树 | 缓存基线语义 = 活跃路径派生视图（非全文件）；撤回编排显式清缓存强制全量重建 | U6a |

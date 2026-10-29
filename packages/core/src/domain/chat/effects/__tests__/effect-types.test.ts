@@ -491,7 +491,7 @@ describe("effects", () => {
       // 帧 timestamp（ms）→ entry ISO（reducer compaction case toMs 往返）
       expect(entry.timestamp).toBe(new Date(8000).toISOString())
       // overlay 派生视图：system 压缩行（用户可见行为——live 与重开同款，live≡reload 归一
-      // deep-equal 由 apply-entry-equivalence E4 锁定）
+      // deep-equal 由 apply-entry-merged.test.ts 的 apply-entry-equivalence 合并节 E4 锁定）
       const list = getMsgs(ctx)
       expect(list).toHaveLength(1)
       expect(list[0]).toMatchObject({
@@ -833,7 +833,8 @@ describe("effects", () => {
 
   // ── [投递所有权内核 u3b] message_end(user) 投递确认收敛（原三分支 → 两分支）──
   // ① 内核送达回执（标记 id 匹配派生视图条目）→ ② 纯计数兜底。① 的正测在
-  // effects-delivery-receipt.test.ts（含派生视图/morph 段/inflight 回收/幂等），此处锁定
+  // domain/chat/__tests__/effect-types.test.ts 的 effects-delivery-receipt 合并节
+  // （含派生视图/morph 段/inflight 回收/幂等），此处锁定
   // ② 计数兜底与「③ includes 兜底已退役」的零消费终态（[B1] 其消费方计数路径已删除）。
 
   describe('dispatchMessageEvent message_end(user) 投递确认收敛（u3b：①回执 + ②计数兜底）', () => {

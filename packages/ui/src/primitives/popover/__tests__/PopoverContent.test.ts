@@ -123,7 +123,7 @@ describe('SelectContent', () => {
  * 跳过注册——该降级语义由 renderer 侧 production-wiring 测试族覆盖，此处测装配态）。
  * reka Select 经 Portal teleport 到 document.body，attachTo body + nextTick 后查询。
  *
- * 运行：cd packages/ui && npx vitest run src/primitives/select/__tests__/SelectContent.test.ts
+ * 运行：cd packages/ui && npx vitest run src/primitives/popover/__tests__/PopoverContent.test.ts（SelectContent 节）
  */
 
 /** 挂载 SelectRoot 宿主（可控 open）+ 捕获桩注册桥 */

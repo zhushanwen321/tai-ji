@@ -5,7 +5,8 @@
  *
  * 测的是真 bug（PR#116 review M3 指出），不是凑覆盖率：
  * - M3-1 挂载时已 streaming：watch 必须 immediate 才能保证 pinnedIndexes 在消费者副作用时机前就绪
- * - M3-2 跨 session 切换 streaming→streaming：watch 源含 sessionId 才能在派生布尔值不变时重新触发
+ * - M3-2 跨 session 切换 streaming→streaming：items 整体重建（identity 变）驱动 pinnedIndexes
+ *   重算重钉（computed 派生自动承接，无 watch 副作用；派生 isStreaming 布尔值不变也重算）
  * - M3-3 flush:post 顺序：resetSession watch（pre flush）清状态后，本 watch（post flush）重钉生效
  *
  * [cw wave w4] 删 pinStreaming 旧路径用例：w3 切到 virtua 后固定统一走 pinnedIndexes，
@@ -69,7 +70,7 @@ function turnKeyOf(item: RenderItem): string {
 }
 
 /**
- * 测试用驱动器：把 items（ref 可变）+ sessionId（ref 可变）喂给 useStreamingPin，
+ * 测试用驱动器：把 items（ref 可变）喂给 useStreamingPin，
  * 返回控制句柄 + pinnedIndexes（消费者真实读取的钉拽数据源）。
  *
  * [cw wave w4] setup 不再传 pinStreaming（旧路径已删），pinnedIndexes 是唯一钉拽数据源。
@@ -77,13 +78,11 @@ function turnKeyOf(item: RenderItem): string {
  */
 function setup(opts: {
   items: RenderItem[]
-  sessionId?: string
   editingTurnKey?: Ref<string | null>
 }) {
   const itemsRef = ref(opts.items)
   // 用 ref（非 shallowRef）：测试通过赋值新数组替换整体（identity 变）触发响应式，
   // 模拟生产 renderItems 真 computed 重建（currentMessages 变 → renderItems 重算即新引用）。
-  const sessionIdRef = ref(opts.sessionId ?? 'sess-A')
   // editingTurnKey：外部传入 ref（测试可动态改值触发 pinnedIndexes 重算）；默认不传（undefined）
   const editingTurnKeyRef = opts.editingTurnKey
 
@@ -92,13 +91,12 @@ function setup(opts: {
   scope.run(() => {
     const ret = useStreamingPin({
       items: computed(() => itemsRef.value),
-      sessionId: () => sessionIdRef.value,
       editingTurnKey: editingTurnKeyRef,
     })
     pinnedIndexes = ret.pinnedIndexes
   })
 
-  return { scope, itemsRef, sessionIdRef, editingTurnKeyRef, pinnedIndexes }
+  return { scope, itemsRef, editingTurnKeyRef, pinnedIndexes }
 }
 
 // ── M3-1：挂载时已 streaming → pinnedIndexes 立即含 lastTurnIdx ───────
@@ -144,30 +142,28 @@ describe('useStreamingPin · M3-1: 挂载时已 streaming（immediate）', () =>
 
 // ── M3-2：跨 session 切换 streaming→streaming → pinnedIndexes 重新派生 ──
 
-describe('useStreamingPin · M3-2: 跨 session 切换 streaming→streaming（追踪 sessionId）', () => {
+describe('useStreamingPin · M3-2: 跨 session 切换 streaming→streaming（items 重建驱动重钉）', () => {
   it('session A→B 末 turn 均 streaming → 切换后 pinnedIndexes 含新 session 的 lastTurnIdx', async () => {
-    const { itemsRef, sessionIdRef, pinnedIndexes } = setup({
+    const { itemsRef, pinnedIndexes } = setup({
       items: [turnItem(1, 'k1', false), turnItem(2, 'k2', true)],
-      sessionId: 'sess-A',
     })
     // 初始挂载：pinnedIndexes=[1]（lastTurnIdx=1）
     expect(pinnedIndexes!.value).toEqual([1])
 
-    // 切到 session B：items 替换为新 session 的 turns，末 turn 也 streaming
+    // 切到 session B：items 替换为新 session 的 turns（生产 renderItems 随 session 切换整体重建），末 turn 也 streaming
     itemsRef.value = [turnItem(1, 'kB1', false), turnItem(2, 'kB2', true)]
-    sessionIdRef.value = 'sess-B'
     await nextTick()
-    // flush:post 在 DOM 更新后触发，再 nextTick 确保 post 回调落地
+    // pinnedIndexes 是 computed（同步派生），nextTick 仅作响应式更新推进保险
     await nextTick()
 
-    // 关键：派生 isStreaming 布尔值未变（A→B 都是 true），但 sessionId 变 → watch 重触发 → 重钉
+    // 关键：派生 isStreaming 布尔值未变（A→B 都是 true），重钉由 items 整体重建（identity 变）
+    // 驱动——computed pinnedIndexes 依赖 items 自动重算，无需 watch 副作用（[PR#116 review M3]）
     expect(pinnedIndexes!.value).toEqual([1])
   })
 
   it('session A→B 末 turn 均 streaming 且 turn 数不同 → pin 到新 session 的 lastTurnIdx', async () => {
-    const { itemsRef, sessionIdRef, pinnedIndexes } = setup({
+    const { itemsRef, pinnedIndexes } = setup({
       items: [turnItem(1, 'k1', true)],
-      sessionId: 'sess-A',
     })
     expect(pinnedIndexes!.value).toEqual([0])
 
@@ -177,7 +173,6 @@ describe('useStreamingPin · M3-2: 跨 session 切换 streaming→streaming（�
       turnItem(2, 'kB2', false),
       turnItem(3, 'kB3', true),
     ]
-    sessionIdRef.value = 'sess-B'
     await nextTick()
     await nextTick()
 
@@ -203,15 +198,13 @@ describe('useStreamingPin · 回归：streaming 变化与释放', () => {
   })
 
   it('session 切换 streaming→非 streaming → pinnedIndexes=[]（不残留旧 pin）', async () => {
-    const { itemsRef, sessionIdRef, pinnedIndexes } = setup({
+    const { itemsRef, pinnedIndexes } = setup({
       items: [turnItem(1, 'k1', true)],
-      sessionId: 'sess-A',
     })
     expect(pinnedIndexes!.value).toEqual([0])
 
     // 切到 session B：末 turn 非 streaming
     itemsRef.value = [turnItem(1, 'kB1', false)]
-    sessionIdRef.value = 'sess-B'
     await nextTick()
     await nextTick()
 

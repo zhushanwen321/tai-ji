@@ -41,10 +41,9 @@ export function sessionsInRuntimeGroupOrder(groups: readonly SessionGroup[]): Se
  * - 移动子集：isActive/isCompacting（core chat store）+ hasBackgroundWork（A9 subagent
  *   运行态分区）+ metaStatus；**hasBlockingOverlay 缺省 false**——移动壳无 extensionUI
  *   store（面板族裁剪），该输入源不存在，等待态只由 toolCall 分支达成。语义损失 =
- *   富交互表单 pending 在列表不显 waiting（移动表单呈现是页面级 MobileFormCard，列表
- *   状态点不承载该信号），已登记 D9② 白名单（docs/todo，随本单元交付同 commit）。
- */
-export interface SessionStatusInputs {
+ *   富交互表单 pending 在列表不显 waiting（移动表单呈现是浮层 FormSheet，列表
+ *   状态点不承载该信号）——D9② 白名单条目随移动壳 v2 hasBlockingOverlay 接线消除。
+ */export interface SessionStatusInputs {
   /** pendingSend ∨ isGenerating（提交后到 message_start 空窗 + 流式占用的 UI 层 SSOT） */
   isActive: boolean
   /** compact 互斥态（occupancy 派生视图 compacting 维） */

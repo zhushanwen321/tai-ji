@@ -2931,8 +2931,9 @@ fi
 #   staged 命中任一登记定义文件或检查脚本自身时触发：
 #   scripts/check-cross-process-literals.mjs —— 断言两组跨进程契约串的全部
 #   生产定义点同串：'taiji.client-msg-id'（runtime entry-tree-builder /
-#   revoke-orchestrator × msg-id-mapper 扩展三侧）与 'taiji:revoked'
-#   （revoke-orchestrator × agent-ext × scheduler-manager 插件三侧）。定义点
+#   revoke-orchestrator × host-internals 扩展的 msg-id-mapper 模块三侧）与
+#   'taiji:revoked'（revoke-orchestrator × host-internals 扩展的 host-commands
+#   模块 × scheduler-manager 插件三侧）。定义点
 #   分属互相不可 import 的包，编译期拦截不可行，多侧手抄仅靠注释纪律——本
 #   检查以 AST 提取代码字符串字面量（注释不算），任一侧漂移即红并指明需
 #   同步的各侧文件。触发范围 = 登记定义文件 + 脚本自身：对账结果只由这些文件
@@ -2943,9 +2944,9 @@ fi
 #   总开关 SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
 
-CROSS_PROC_LIT_PATHS="packages/runtime/src/infra/pi/entry-tree-builder.ts packages/runtime/src/services/session/revoke-orchestrator.ts extensions/taiji/msg-id-mapper/src/index.ts extensions/taiji/agent-ext/src/index.ts resources/plugins/scheduler-manager/index.ts scripts/check-cross-process-literals.mjs"
+CROSS_PROC_LIT_PATHS="packages/runtime/src/infra/pi/entry-tree-builder.ts packages/runtime/src/services/session/revoke-orchestrator.ts extensions/taiji/host-internals/src/msg-id-mapper.ts extensions/taiji/host-internals/src/host-commands.ts resources/plugins/scheduler-manager/index.ts scripts/check-cross-process-literals.mjs"
 CROSS_PROC_LIT_STAGED=$(git diff --cached --name-only -- $CROSS_PROC_LIT_PATHS)
-if echo "$CROSS_PROC_LIT_STAGED" | grep -qE "^packages/runtime/src/infra/pi/entry-tree-builder\.ts$|^packages/runtime/src/services/session/revoke-orchestrator\.ts$|^extensions/taiji/msg-id-mapper/src/index\.ts$|^extensions/taiji/agent-ext/src/index\.ts$|^resources/plugins/scheduler-manager/index\.ts$|^scripts/check-cross-process-literals\.mjs$"; then
+if echo "$CROSS_PROC_LIT_STAGED" | grep -qE "^packages/runtime/src/infra/pi/entry-tree-builder\.ts$|^packages/runtime/src/services/session/revoke-orchestrator\.ts$|^extensions/taiji/host-internals/src/msg-id-mapper\.ts$|^extensions/taiji/host-internals/src/host-commands\.ts$|^resources/plugins/scheduler-manager/index\.ts$|^scripts/check-cross-process-literals\.mjs$"; then
     print_section "[跨进程契约字面量对账]"
     if [ ! -f "scripts/check-cross-process-literals.mjs" ]; then
         echo -e "${RED}[ERROR] 找不到 scripts/check-cross-process-literals.mjs（检查脚本被删除）${NC}"

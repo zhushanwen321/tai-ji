@@ -11,7 +11,7 @@
  * 注入（[C3] 禁直连门面——不 mock @/api）；ViewHost 数据源经
  * VIEW_HOST_SOURCE_KEY 注入内存表（不打运输层）。Dialog 走 Teleport，断言经 document.body。
  *
- * 运行：cd packages/renderer && npx vitest run src/components/settings/provider
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=settings npx vitest run src/components/settings/provider（本文件登记在 domain-map.json settings 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'

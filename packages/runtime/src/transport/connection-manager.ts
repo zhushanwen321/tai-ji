@@ -10,7 +10,8 @@
  *   失败以 close 1008。token 校验是集合成员比较（remote-access D2）：{spawn token} ∪
  *   {remote token（仅开态、每次握手热读 provider）}；两个通道都缺失时 fail-closed
  *   （拒绝全部连接——组合根 env 与 token 文件都缺失且无 remote 通道的场景，见 index.ts
- *   resolveRuntimeToken 与 remoteTokenProvider 装配）。
+ *   resolveRuntimeToken 与 remoteTokenProvider 装配）。auth 成功应答回传实例标识
+ *   runtimeId（connection-datasync-ssot §6.1，env 经组合根注入；缺失容忍置 null）。
  * - HTTP /health 端点（与 WS 同端口，简单存活探针；不要求 token——supervisor 探活用，
  *   响应只有 status/uptime，无敏感数据）。
  * - 移动壳静态托管分派（remote-access D3/E5，S3 拆分后）：静态实现与开态判定均在
@@ -36,10 +37,6 @@ const HTTP_OK = 200
 const HTTP_NOT_FOUND = 404
 /** WS 1001 Going Away（RFC 6455）——服务端计划内关停时发给全部存量连接的 close 码。 */
 const WS_CLOSE_GOING_AWAY = 1001
-/**
- * stop 等待存量连接优雅退出的有界上界：本机回环 close 握手毫秒级，2s = 20 倍极端余量，
- * 正常路径不触发；超时后 closeAllConnections 强制断开属回收层兜底（非正常路径依赖）。
- */
 /** WS policy violation 关闭码（RFC 6455）——auth 失败 / fail-closed 拒绝统一用它。 */
 const WS_CLOSE_POLICY_VIOLATION = 1008
 
@@ -105,6 +102,14 @@ export interface ConnectionManagerOptions {
    * 返回 null = E10（文件缺失/损坏，读侧已响亮日志），该次握手 remote 通道为空。
    */
   remoteTokenProvider?: () => string | null
+  /**
+   * 本进程实例标识（connection-datasync-ssot §6.1）：auth 成功应答回传字段的数据源。
+   * 组合根经 env TAIJI_RUNTIME_ID（RUNTIME_ID_ENV）解析注入（supervisor spawn 时与
+   * token 同点签发）；null / 未注入 = 裸跑形态（脚本/测试直起 runtime，env 缺失），
+   * 应答以 runtimeId: null 回传——运行时侧容忍缺失（fail-closed 只对 token，见
+   * resolveRuntimeId），实例核对的 fail-fast 消费侧在 renderer 连接控制器。
+   */
+  runtimeId?: string | null
 }
 
 export class ConnectionManager {
@@ -112,7 +117,6 @@ export class ConnectionManager {
   private wss: WebSocketServer
   /** 连接池（仅 authed 连接）——broker.broadcast 遍历此集合向所有客户端推送。 */
   readonly clients = new Set<WsType>()
-  /** 未认证连接的握手超时计时器（auth 成功/连接关闭时清除）。 */
   /** 已通过 auth 的连接集合（与 clients 池同步维护）。 */
   private authedConnections = new Set<WsType>()
   /**
@@ -126,6 +130,11 @@ export class ConnectionManager {
    * 不进静态分支（与无远程访问形态逐字节一致）。
    */
   private readonly mobileStaticHandler: MobileStaticHandler | null
+  /**
+   * 本进程实例标识（connection-datasync-ssot §6.1）：auth 成功应答回传（见
+   * handleUnauthedMessage 的 auth.result）；null = env 未注入的裸跑形态。
+   */
+  private readonly runtimeId: string | null
 
   constructor(
     private port: number,
@@ -136,6 +145,7 @@ export class ConnectionManager {
     private options: ConnectionManagerOptions = {},
   ) {
     this.mobileStaticHandler = options.mobileStaticHandler ?? null
+    this.runtimeId = options.runtimeId ?? null
     // HTTP 超时依赖登记（code-harden P2：消除未定义性，显式声明依赖的 Node 默认值，
     // 本服务不自设值）：
     // - requestTimeout 默认 300s、headersTimeout 默认 60s（Node ≥18 引入；本机 Node
@@ -271,9 +281,11 @@ export class ConnectionManager {
       return
     }
     // unauthed → authed：入池、回执、推 initial state。
+    // 应答回传 runtimeId（connection-datasync-ssot §6.1）：客户端连接控制器与目标快照
+    // 核对「连的是谁」；旧客户端只读 payload.ok 不受影响（P-1）。null = env 未注入形态。
     this.authedConnections.add(ws)
     this.clients.add(ws)
-    ws.send(JSON.stringify({ type: 'auth.result', payload: { ok: true } }))
+    ws.send(JSON.stringify({ type: 'auth.result', payload: { ok: true, runtimeId: this.runtimeId } }))
     this.callbacks.onConnect(ws)
     // 口径对齐上方 handleConnection：authenticated 只计已认证池（旧文案 total 同值但语义混用）
     console.log(`[runtime] client authenticated (authenticated: ${this.clients.size})`)

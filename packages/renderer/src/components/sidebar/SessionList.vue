@@ -42,9 +42,9 @@
           variant="ghost"
           size="icon"
           data-testid="project-add-btn"
-          class="grid size-[24px] place-items-center rounded-[var(--radius-xs)] p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[13px]"
-          :title="t('sidebar.projectGroup.newProject')"
-          :aria-label="t('sidebar.projectGroup.newProject')"
+          class="grid size-[24px] place-items-center rounded-[var(--radius-xs)] p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-neutral-dim [&_svg]:size-[13px]"
+          :title="editingEnabled ? t('sidebar.projectGroup.newProject') : t('sidebar.sessionList.projectEditDisabledHint')"
+          :aria-label="t('sidebar.projectGroup.newProject')" :disabled="!editingEnabled"
           @click="startCreate"
         >
           <Plus :stroke-width="1.8" />
@@ -119,18 +119,18 @@
           @blur="onDraftBlur"
         />
       </div>
-      <!-- 平铺模式：默认项目平铺区（置顶）+ 命名项目锚定分组 -->
+      <ProjectLoadStatus v-if="projectAreaMode !== 'groups'" :mode="projectAreaMode" :load-error="projectStore.loadError" @retry="retryProjectLoad" />
       <template v-if="mode === 'flat'">
-        <!-- 默认项目平铺区（用户裁决 2026-10-13 方案 A）：默认项目 = 未归类收件箱，
-             不展示项目组框（无组头/无左线/无缩进），session 直接平铺在列表顶部；
-             空区不渲染。命名项目组照旧（锚定展开 + 折叠一行）。 -->
+        <!-- 默认项目平铺区（用户裁决 2026-10-13 方案 A）：默认项目 = 未归类收件箱，不展示项目框，
+             session 平铺在列表顶部，空区不渲染；降级形态（§6.7）同一渲染位承载会话本体（无默认项目头行） -->
         <div
-          v-if="defaultZone && defaultZone.items.length"
+          v-if="sessionBodyZone && sessionBodyZone.items.length"
           class="flex flex-col"
-          data-testid="default-project-flat-zone"
+          :data-testid="degradedZone ? 'session-body-flat' : 'default-project-flat-zone'"
         >
           <!-- 默认项目轻量头行（锚定/新建/drop 落点入口；有会话才渲染，与空区不渲染一致） -->
           <DefaultProjectHead
+            v-if="defaultZone"
             :current="projectStore.isDefaultProject"
             :name="defaultZone.name"
             @anchor="onAnchorDefault"
@@ -138,7 +138,7 @@
             @drop-session="onDropToDefault"
           />
           <SessionItem
-            v-for="s in defaultZone.items"
+            v-for="s in sessionBodyZone.items"
             :key="s.id"
             :session="s"
             :active="s.id === activeId"
@@ -205,26 +205,25 @@
           </div>
         </ProjectGroup>
       </template>
-      <!-- 目录模式：默认项目目录区（置顶，无组框）+ 命名项目组（浏览态） -->
+      <!-- 目录模式：默认项目目录区（置顶无组框）+ 命名项目组；降级形态（§6.7）同一渲染位承载会话本体 -->
       <template v-else>
-        <!-- 默认项目：无组头，轻量头行（锚定/新建/drop 入口，同平铺模式）+ 目录标签直接
-             平铺在列表顶部（用户裁决 2026-10-13：默认项目不展示项目 item；目录模式下同样
-             不给框，标签自描述无需包裝） -->
-        <template v-if="defaultZone">
+        <!-- 默认项目：无组头，轻量头行（锚定/新建/drop 入口，同平铺模式）+ 目录标签直接平铺在
+             列表顶部（用户裁决 2026-10-13：默认项目不展示项目 item，目录模式下同样不给框） -->
+        <template v-if="sessionBodyZone">
           <DefaultProjectHead
-            v-if="defaultZone.items.length"
+            v-if="defaultZone && defaultZone.items.length"
             :current="projectStore.isDefaultProject"
             :name="defaultZone.name"
             @anchor="onAnchorDefault"
             @create-task="onCreateTaskIn(defaultZone)"
             @drop-session="onDropToDefault"
           />
-          <template v-for="g in defaultZone.dirs" :key="g.cwd">
+          <template v-for="g in sessionBodyZone.dirs" :key="g.cwd">
             <SessionDirLabel
               :cwd="g.cwd"
               :count="g.sessions.length"
               :confirming="folderConfirmingCwd === g.cwd"
-              :delete-available="isFolderDeleteAvailable(defaultZone, g.cwd)"
+              :delete-available="isFolderDeleteAvailable(sessionBodyZone, g.cwd)"
               @new-in-folder="emit('newSessionInFolder', $event)"
               @remove-click="onFolderRemoveClick"
               @leave="onFolderMouseLeave"
@@ -358,6 +357,7 @@ import { useProjectGroups, type ProjectGroupVM } from '@/composables/features/si
 import { useSidebarSessionMode } from '@/composables/features/sidebar/use-sidebar-session-mode'
 import ProjectGroup from './ProjectGroup.vue'
 import DefaultProjectHead from './DefaultProjectHead.vue'
+import ProjectLoadStatus from './ProjectLoadStatus.vue'
 import SessionDirLabel from './SessionDirLabel.vue'
 import SessionItem from './SessionItem.vue'
 
@@ -477,9 +477,9 @@ function handoffTargetLabelOf(s: SessionSummary): string {
  * 同一 cwd 的 session 可散布在多个项目分组（按 session.projectId 逐条切分），任一分组内
  * 只显示子集；仅当某分组恰好包含该 cwd 全量会话时点删除才不会连带删掉不可见 session。
  */
-function isFolderDeleteAvailable(pg: ProjectGroupVM, cwd: string): boolean {
+function isFolderDeleteAvailable(zone: Pick<ProjectGroupVM, 'dirs'>, cwd: string): boolean {
   const total = props.groups.find((g) => g.cwd === cwd)?.sessions.length ?? 0
-  const visible = pg.dirs.find((g) => g.cwd === cwd)?.sessions.length ?? 0
+  const visible = zone.dirs.find((g) => g.cwd === cwd)?.sessions.length ?? 0
   return total > 0 && total === visible
 }
 
@@ -491,9 +491,9 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
 })
 provide('sessionItemEsc', escCount)
 
-/** 后代 SessionItem 删除确认态登记槽（§6.7 后行档聚合谓词的读点来源）：
+/** 后代 SessionItem 删除确认态登记槽（modal-surface-registry spec §6.7 后行档聚合谓词的读点来源）：
  *  每个 SessionItem 把自己的 confirming ref 注入本集合，卸载即撤。聚合谓词直读各 ref 当前值
- *  （动作时刻新鲜度），不经 escCount 反向推导——广播计数器单调递增、非状态本体（§6.7 禁绑）。 */
+ *  （动作时刻新鲜度），不经 escCount 反向推导——广播计数器单调递增、非状态本体（modal-surface-registry spec §6.7 禁绑）。 */
 const itemConfirmingSet = new Set<Ref<boolean>>()
 provide('sessionItemConfirmingSet', itemConfirmingSet)
 
@@ -528,6 +528,7 @@ const { mode, setMode } = useSidebarSessionMode(() => {
 const {
   projectGroups,
   totalCount,
+  projectAreaMode, degradedZone, editingEnabled, retryProjectLoad,
   flatClosed,
   dirClosed,
   expandGroup,
@@ -553,9 +554,9 @@ const {
 
 // ── 默认项目头行交互 + session 拖拽落点（拖到组头/默认行 = 移动归属，走既有 setProject 链）──
 
-/** 点默认头行主体：锚定切回默认项目（修复「锚定一旦落到命名项目即无法新建到默认区」死角） */
+/** 点默认头行主体：锚定切回默认项目（修复「锚定切走后新会话进不了默认区」死角）；命令化后 chip 跟随回执，失败 toast 由 store 出声 */
 function onAnchorDefault(): void {
-  projectStore.setActiveProject(DEFAULT_PROJECT_ID)
+  void projectStore.setActiveProject(DEFAULT_PROJECT_ID).catch(() => {})
 }
 
 /** drop 落点统一写入口：同归属 no-op（防自拖自落 + 省一次 RPC），否则透传既有 setProject
@@ -587,6 +588,25 @@ function onDropToDefault(sessionId: string): void {
 const defaultZone = computed(() => projectGroups.value.find((pg) => pg.isDefault))
 const namedGroups = computed(() => projectGroups.value.filter((pg) => !pg.isDefault))
 
+/**
+ * 会话本体渲染源（connection-datasync-ssot §6.7 两形态，默认区所在渲染位共用）：
+ * - loaded / 重拉子形态：默认项目区（默认项目 = 未归类收件箱，带头行）；
+ * - 降级形态（projectAreaMode !== 'groups'，即 idle / 无数据 loading / failed）：
+ *   degradedZone——项目分组区由 ProjectLoadStatus（失败状态条 / 加载占位行）替换，
+ *   会话本体按 runtime 会话清单的 cwd 结构照常呈现（平铺模式 = 全量平铺、目录模式 =
+ *   cwd 目录标签序列），且不渲染默认项目头行：「未分组/默认组」这个展示概念只在
+ *   loaded 态由真实项目清单派生，不渲染兜底默认表（idle 初值）或上次已知表（failed
+ *   态缓存视图里残留的旧项目清单）。
+ *
+ * 模板结构上 ProjectLoadStatus 是独立 v-if（叠加渲染），不占用模式模板的 v-if/v-else
+ * 链——否则非 groups 形态会连带整段列表体一起不渲染（§5.2 失败窗口用户看不到任何会话）。
+ * 头行的渲染判据是 defaultZone（真实默认项目区，降级形态为 undefined），与渲染位判据
+ * sessionBodyZone 分开：两者在降级形态下一有一无。
+ *
+ * 两个来源都提供 dirs（目录模式渲染源）/ items（平铺模式渲染源），模板按 mode 取用。
+ */
+const sessionBodyZone = computed(() => degradedZone.value ?? defaultZone.value)
+
 watch(escCount, () => {
   if (folderConfirmingCwd.value) folderConfirmingCwd.value = null
 })
@@ -607,7 +627,7 @@ useEventListener(window, 'pointerdown', (e: PointerEvent) => {
   folderConfirmingCwd.value = null
 })
 
-/** 删除确认态聚合谓词（§6.7 后行档开合态绑定源 = 确认态本体）：
+/** 删除确认态聚合谓词（modal-surface-registry spec §6.7 后行档开合态绑定源 = 确认态本体）：
  *  N 个 SessionItem 后代确认态 与 folderConfirmingCwd。任一确认态开着 ⇒ 入聚合让位族
  *  （yieldsEsc=true，见 modal-surface-registry 登记表），编排器 Esc 不动作、由本组件 escCount
  *  链路清确认态——一次 Esc 只清确认不动容器，第二次 Esc 才走层级序。 */

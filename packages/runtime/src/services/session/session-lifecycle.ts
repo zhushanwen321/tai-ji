@@ -61,6 +61,11 @@ import { isGeneratingTurn } from './types.js'
 // restore 附着辅助（F2/F3 归一化 + U2/D1 生效值播种 + get_state 共用解析）——
 // 自本文件迁出（max-lines 行数合规），函数体逐字节等价，见 restore-seeding.ts。
 import { normalizeInactiveSessionFileIfNeeded, readEffectiveModelFromState, seedRestoreMetaOverride } from './restore-seeding.js'
+// 预热空 pi 单槽（session-cold-switch-perf §3.3-2/§3.3-5/§3.3-6）：槽状态机自包含模块，
+// 本文件接线仅两处（构造器内实例组装 + restoreSession 的 acquireRestoreClient 单一取用
+// 接线点），删除即整体摘除（P4 命中率持续偏低时的降级路径）。
+import { WarmupPiSlot, WARMUP_SLOT_SESSION_ID } from './warmup-pi-slot.js'
+import { isStartupReattachActive } from '../startup-reattach.js'
 
 // ─── notify-once D5 死亡处置登记（组合根 index.ts 订阅消费）──────────────
 // 汇聚点先于杀进程立 latch（设计检查点①：delete 在 pm.destroySession 之前），
@@ -339,6 +344,16 @@ export class SessionLifecycle implements ISessionRegistry {
    * 各域模块各自注册,互不挤占。
    */
   private readonly sessionRegisteredHandlers: Array<(sessionId: string) => void> = []
+  /**
+   * 预热空 pi 单槽（session-cold-switch-perf §3.3-2）。实例在本构造器内组装（组合根零
+   * 改动）：spawn 侧闭包走 spawnPresetClient 同一构造链（§3.3-5 参数签名同源），让位检查
+   * 直连 startup-reattach 活跃标记（§3.3-6）；补位候选 = 消费目标参数直传（switch 主路径
+   * 与最新查看条目同一；本文件 acquireRestoreClient 承载的 restore RPC/startup-reattach/
+   * respawn 等非 switch 消费点不写 markSessionViewed，直传消费目标更准，免跨模块读取器
+   * ——完整边界见 warmup-pi-slot 模块头注释）。摘除 = 本组装 + acquireRestoreClient
+   * 接线点两处（均在本文件）。
+   */
+  private readonly warmupSlot: WarmupPiSlot
 
   constructor(
     private readonly svc: ILifecycleSessionOps,
@@ -354,7 +369,20 @@ export class SessionLifecycle implements ISessionRegistry {
      * 失败仅记日志保留标记，下次 restore 重试。
      */
     private readonly userStoppedOps?: { forceQuitFallback: (sessionId: string) => Promise<void> },
-  ) {}
+  ) {
+    this.warmupSlot = new WarmupPiSlot({
+      // §3.3-5 参数签名同源：槽 spawn 与 restoreSession 现状 spawn 走同一构造链本体，
+      // 禁止「预热用简化参数、取用后补挂」（pi 每次进程启动读扩展参数，后补挂与原生
+      // 挂载不可证等价）。
+      spawnSlotProcess: async (slotSessionId, target) => {
+        const spawned = await this.spawnPresetClient(target.presetId, slotSessionId, target.cwd)
+        return { client: spawned.client, allExtPaths: spawned.allExtPaths, fellBackFromPresetId: spawned.fellBackFromPresetId }
+      },
+      destroySlotProcess: () => this.pm.destroySession(WARMUP_SLOT_SESSION_ID),
+      // §3.3-6 让位检查：补位 spawn 与 startup-reattach 编排期重叠时推迟。
+      isReattachBusy: isStartupReattachActive,
+    })
+  }
 
   // ── ISessionRegistry：sessions Map 只读查询面（Facade 残余域读点的统一通道）──
 
@@ -1184,6 +1212,14 @@ export class SessionLifecycle implements ISessionRegistry {
     // 画布绑定解绑（problem-solve-canvas U2）：active / scanned 两分支共用的真删除点——
     // 与 B5 同款挂点形态（模块级分发 + delete 主链段）。纯同步 Map 摘除，无失败形态。
     unbindCanvasOnSessionDeleted(sessionId)
+    // seq 高水位回收（dmg-r1-6）：真删除 = 该 session id 永不复用，MessageBus 的
+    // seqHighWater 登记（removeSessionEntry 内 clearSession 写入 / 早期崩溃退出残留）随之
+    // 回收——防长驻 runtime 随会话建删循环无界增长。与三条存活销毁路径（pi 崩溃 / forceQuit /
+    // restore 清场，respawn·restore 同 id 复活需高水位延续，TC6c）及归档（簿记保留同 id、
+    // 恢复即复活）刻意区分，故不挂 removeSessionEntry 汇聚点。btw 直删分支不经本点——
+    // 线侧高水位在 onLineTerminated 终结合一挂点回收（组合根接线）。挂点在 cascade 之后：
+    // 整树 trash 失败上抛时 session 仍在盘（可恢复形态），id 存续则高水位保留语义不变。
+    this.registerDeps.getMessageBus()?.forgetSession(sessionId)
     // wave:perf-w26（D9-1 delete 失效点）：session 文件已 trash，目录 TTL 快照 1s 内仍含
     // 已删条目——显式失效，删除后立即从侧栏列表消失（05 文档 V5 验收）。
     this.sessionStore.invalidateScanCache()
@@ -1273,8 +1309,7 @@ export class SessionLifecycle implements ISessionRegistry {
     const target = this.resolveRestoreTarget(sessionId)
     await this.clearExistingSessionForRestore(sessionId)
     const { sessionCwd, cwdFellBack } = this.resolveRestoreCwd(target)
-    const { client, presetId, allExtPaths, fellBackFromPresetId } = await this.spawnRestoreClient(target, sessionId, sessionCwd)
-    await this.attachRestoreFile(client, target, sessionId, cwdFellBack)
+    const { client, presetId, allExtPaths, fellBackFromPresetId } = await this.attachRestoredClient(target, sessionId, sessionCwd, cwdFellBack)
 
     // U2: get_state 读回 pi 生效 model + thinkingLevel（D2 设计）。
     // switchSession 成功后 pi 已附着会话文件，get_state 返回当前生效值
@@ -1407,6 +1442,68 @@ export class SessionLifecycle implements ISessionRegistry {
   }
 
   /**
+   * restore 进程获取（预热槽唯一接线点，session-cold-switch-perf §3.3-2）：优先取预热槽；
+   * 槽未命中（槽空/参数签名不匹配/探活失败）回退 spawnRestoreClient 现状链（三道检查
+   * 与补位时机全在槽模块内，本方法只裁决「命中与否」）。命中时先 rekey 把槽进程改挂到
+   * 目标 sessionId（tee 树随迁 + exit 回调反查正确，create 路径 tempId → piSessionId
+   * 同款既有语义），随后按现状链的附着段继续（attachRestoreFile 的 switchSession 对空
+   * pi 进程附着 = 设计 F5 已验证形态）。fromWarmupSlot 随返回值上抛：附着失败的回退
+   * 裁决（设计 §3.1 失败路径「附着失败 → 回退现状 spawn 链」）由 attachRestoredClient
+   * 按此标记执行——spawn 链来源的附着失败无回退语义（已是最坏 = 现状）。
+   */
+  private async acquireRestoreClient(
+    target: ScannedSession,
+    sessionId: string,
+    sessionCwd: string,
+  ): Promise<{ client: IPiEngine; presetId: string; allExtPaths: string[]; fellBackFromPresetId?: string; fromWarmupSlot: boolean }> {
+    const presetId = target.launchPresetId ?? BUILTIN_PRESET_IDS.FULL
+    const taken = this.warmupSlot.take({ presetId, cwd: sessionCwd })
+    if (taken.kind === 'hit') {
+      this.pm.rekey(WARMUP_SLOT_SESSION_ID, sessionId)
+      return {
+        client: taken.client,
+        presetId,
+        allExtPaths: taken.allExtPaths,
+        fellBackFromPresetId: taken.fellBackFromPresetId,
+        fromWarmupSlot: true,
+      }
+    }
+    const spawned = await this.spawnRestoreClient(target, sessionId, sessionCwd)
+    return { ...spawned, fromWarmupSlot: false }
+  }
+
+  /**
+   * restore 进程获取 + 附着编排（session-cold-switch-perf §3.1 失败路径）：槽命中但
+   * 附着失败（探活通过、switch_session/附着断言抛错的半死形态）→ 回退现状 spawn 链
+   * 重试全链（目标 3「最坏体验 = 现状，不更糟」——槽半死时体验劣化为「多等一次 spawn
+   * 后成功」而非「切换失败报错」）。首次附着失败后 safeDestroy 已由 attachRestoreFile
+   * 的 catch 段执行（半死槽进程清册，子进程/监听器不泄漏）；回退 spawn 再失败按原失败
+   * 语义上抛（与现状 spawn 链附着失败同语义）。spawn 链来源（fromWarmupSlot=false）的
+   * 附着失败无回退——已是最坏 = 现状。
+   */
+  private async attachRestoredClient(
+    target: ScannedSession,
+    sessionId: string,
+    sessionCwd: string,
+    cwdFellBack: boolean,
+  ): Promise<{ client: IPiEngine; presetId: string; allExtPaths: string[]; fellBackFromPresetId?: string }> {
+    const acquired = await this.acquireRestoreClient(target, sessionId, sessionCwd)
+    if (!acquired.fromWarmupSlot) {
+      await this.attachRestoreFile(acquired.client, target, sessionId, cwdFellBack)
+      return acquired
+    }
+    try {
+      await this.attachRestoreFile(acquired.client, target, sessionId, cwdFellBack)
+      return acquired
+    } catch (e) {
+      console.warn(`[session-lifecycle] warmup slot client attach failed for ${sessionId}, falling back to spawn chain: ${toErrorMessage(e)}`)
+      const respawned = await this.spawnRestoreClient(target, sessionId, sessionCwd)
+      await this.attachRestoreFile(respawned.client, target, sessionId, cwdFellBack)
+      return respawned
+    }
+  }
+
+  /**
    * restore spawn 段：preset 解析 → migrationGate 等待 → createSession（gate 等待使启动时
    * 恢复路径与 create 一致，D8-3/perf W29）。
    *
@@ -1418,10 +1515,6 @@ export class SessionLifecycle implements ISessionRegistry {
    * 存在但定义不可得时，`getLaunchPresetOptions` 回落 builtin:full 并在 resolution 上附
    * `fellBackFromPresetId`——本函数原样上抛给 restoreSession 置披露位（不在此处写 summary，
    * 与 hydrateBindingMeta 回填同点）。
-   *
-   * 求值顺序硬约束（同拆分前，勿把 options 字面量提到 gate 之前）：getLaunchPresetOptions →
-   * extensionPaths 兜底 → buildPresetClientOptions → **await migrationGate** → createSession
-   *（skillPaths / systemPrompt 在 options 字面量内求值 = gate 之后）。
    */
   private async spawnRestoreClient(
     target: ScannedSession,
@@ -1429,6 +1522,22 @@ export class SessionLifecycle implements ISessionRegistry {
     sessionCwd: string,
   ): Promise<{ client: IPiEngine; presetId: string; allExtPaths: string[]; fellBackFromPresetId?: string }> {
     const presetId = target.launchPresetId ?? BUILTIN_PRESET_IDS.FULL
+    return this.spawnPresetClient(presetId, sessionId, sessionCwd)
+  }
+
+  /**
+   * spawn 构造链本体（session-cold-switch-perf §3.3-5「参数签名与真实 spawn 逐项一致」
+   * 的同源落点）：restore 现状 spawn 与预热槽 spawn 共用本函数，杜绝「预热简化参数」。
+   *
+   * 求值顺序硬约束（同拆分前，勿把 options 字面量提到 gate 之前）：getLaunchPresetOptions →
+   * extensionPaths 兜底 → buildPresetClientOptions → **await migrationGate** → createSession
+   *（skillPaths / systemPrompt 在 options 字面量内求值 = gate 之后）。
+   */
+  private async spawnPresetClient(
+    presetId: string,
+    sessionId: string,
+    sessionCwd: string,
+  ): Promise<{ client: IPiEngine; presetId: string; allExtPaths: string[]; fellBackFromPresetId?: string }> {
     const resolution = await this.svc.getLaunchPresetOptions(presetId, sessionCwd)
     const allExtPaths = resolution?.extensionPaths ?? await this.svc.getExtensionPaths(sessionCwd)
     // restore 不接收 Landing Chip override（无用户交互）。preset 的 model 是 launch 配置
@@ -1459,6 +1568,10 @@ export class SessionLifecycle implements ISessionRegistry {
   /**
    * restore 附着段：F2/F3 归一化 → switchSession → 附着断言 → 清 .meta.json 旧 sidecar；
    * 任一失败 → **await** safeDestroy 已建进程后原样重抛（子进程/监听器不泄漏）。
+   *
+   * 失败语义按进程来源分轨（session-cold-switch-perf §3.1 失败路径）：spawn 链来源 =
+   * 重抛（现状语义）；槽命中来源的回退（spawn 重试全链）由调用方 attachRestoredClient
+   * 承载——本方法只负责清册 + 上抛，不感知来源。
    *
    * W1（restore-fork-attach-fix）F2/F3 分流：pi 的 switch_session 是「永久重绑读写目标」
    *（pi-mono session-manager.ts setSessionFile 把传入路径存为永久 sessionFile，_persist

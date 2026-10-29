@@ -21,22 +21,33 @@
  *
  * 问题清单层两侧已登记语义差异（结构标记只锁「定义在场」，以下行为语义差异不在
  * 机器锁步面内；改任一侧问题清单层前先核对本清单，新增差异须同步登记于此）：
- *  - D1 延续条目 title 权威【已对齐，2026-10-23 单源化】：title 清单权威语义
- *    （清单侧缺 title 才回填、已有不覆盖；severity 采信本轮显式标注）现由单源段
+ *  - D1 延续条目 title/severity 合并语义【已对齐，单源化】：title 清单权威（缺失侧
+ *    才回填、已有不覆盖）；severity 单向只升不降（dmg-r1-1）——均由单源段
  *    inheritCarryoverFields（packages/subagent-core/workflows/src/review-fix-loop.shared.ts）
  *    承载，zcode 与 pi 产物经构建拼装共用同一实现；zcode 侧另有内容字段非空刷新
  *    （refreshTrackedFields，files/evidence/guidance——防空壳覆盖，pi 侧无此刷新为
  *    已登记差异：pi 条目 evidence/guidance 保持首见值）。
- *  - D2 聚合条目 title 可选性【pi 侧现状】：pi 侧 schema 宽——normalizeMustFixEntry
+ *  - D2 聚合条目 title 可选性【刻意】：pi 侧 schema 宽——normalizeMustFixEntry
  *    容忍缺 title 并配套回填补偿；zcode 侧 AggIssueInput.title 必填（schema 窄，
- *    无补偿需求）。属契约层差异（聚合器 schema 双轨），不在单源段面内。
+ *    无补偿需求）——两侧 schema 模型由宿主形态决定，各自自洽。
  *  - D3 复活模型【刻意】：pi 侧 dormant 分区 + 复活即迁出（复活点 state.dormant.filter
  *    迁出 + dormantRevivalTitle 回填，recordDormant 恒 pending 单形态；resolveIssueIdentity
  *    dormant 自识别）；zcode 侧无 dormant——条目 deferred 退出追踪，唯一复活入口 =
  *    reviewer escalate 申报。两侧宿主演化路径不同，接受为刻意差异（dormant/deferred
  *    域模型统一未立项）。
  *  - D4 dormantRevivalTitle 的 zcode 侧处置：属 dormant 机制（随 D3 无对应物），
- *    登记豁免、无镜像义务。
+ *    登记豁免、无镜像义务（inheritCarryoverFields 单源化后两侧同一实现，见 D1，
+ *    无镜像义务可言）。
+ *  - D5 台账 fail-fast 机制【刻意】：pi 侧走 aggregator 独立台账（schema 条目级 +
+ *    detectLedgerDefect 入口 fail-fast，双通道：must-fix 通道按 adjudication=evidence
+ *    活跃口径、suggestion 通道按全量口径做计数-台账核对——must_fix>0 而活跃条目不足，
+ *    或 suggestion>0 而 suggestion_ids 缺失/条数不足 = 带因重试一次后
+ *    aggregator-failure；终态 suggestion-not-accounted ES3 记账防 suggestion 静默
+ *    遗漏）。zcode 侧无对应物：minor 与 must-fix 同在单一问题清单（severity 词表
+ *    含 minor），「不静默遗漏」由 reconciliation 逐条申报 + clean 轮清单守门
+ *    （残留强制重派追账）承担；「数字-条目一致」仅 prompt 文字约定（条数合计
+ *    须等于 mustFix+suggestion），无机器 fail-fast——两侧问题清单模型不同
+ *    （pi 双通道台账 / zcode 单清单对账），登记豁免、无镜像义务。
  *
  * 退出码：0 = 一致（或 zcode 侧文件不存在 → SKIP）；1 = 结构缺失或行为分歧。
  * 输出 [FIX] 指引：两侧文件路径 + 需要同步的内容。

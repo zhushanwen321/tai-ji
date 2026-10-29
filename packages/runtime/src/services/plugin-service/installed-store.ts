@@ -11,8 +11,9 @@
  * （warn fail-visible），不阻断安装/卸载编排。
  */
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { atomicWriteAsync } from '../../utils/fs-utils.js'
 
 /** 单个插件的安装登记条目。schema 冻结：只含 installedAt（ISO 时间串）。 */
 export interface InstalledPluginEntry { // oe-exempt:20261024:framework:ports/SDK 契约类型——接口先立、单实现常态（映射表/端口单一数据源）
@@ -84,9 +85,9 @@ export class InstalledStore {
   }
 
   private async write(all: InstalledPluginsFile): Promise<void> {
-    // pluginsDir 可能尚不存在（首次登记先于任何安装落盘的调用形态），writeFile
+    // pluginsDir 可能尚不存在（首次登记先于任何安装落盘的调用形态），写入原语
     // 不自建父目录——先确保目录在（fail-safe：登记写失败由调用方 catch 呈报）
     await mkdir(dirname(this.filePath), { recursive: true })
-    await writeFile(this.filePath, JSON.stringify(all, null, JSON_INDENT), 'utf-8')
+    await atomicWriteAsync(this.filePath, JSON.stringify(all, null, JSON_INDENT))
   }
 }

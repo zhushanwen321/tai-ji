@@ -348,11 +348,7 @@
       "directory": "extensions/shared/session-path",
       "dependsOn": []
     },
-    {
-      "name": "@zhushanwen/pi-agent-ext",
-      "directory": "extensions/taiji/agent-ext",
-      "dependsOn": []
-    },
+
     {
       "name": "@zhushanwen/pi-system-prompt",
       "directory": "extensions/taiji/system-prompt",
@@ -365,13 +361,13 @@
       ]
     },
     {
-      "name": "@zhushanwen/pi-msg-id-mapper",
-      "directory": "extensions/taiji/msg-id-mapper",
+      "name": "@zhushanwen/pi-host-internals",
+      "directory": "extensions/taiji/host-internals",
       "dependsOn": [
         {
           "package": "@zhushanwen/pi-extension-logger",
           "type": "package",
-          "reason": "代码层静态 import getLogger（src/index.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+          "reason": "代码层静态 import getLogger（src/msg-id-mapper.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },

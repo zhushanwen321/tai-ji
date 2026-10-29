@@ -122,28 +122,26 @@ export interface ContributionRecord {
   /** 路由后置：挂载点已注册=true，未注册=false（AC9 置灰依据） */
   available: boolean
   // type 特定 payload（按 s1 schema v2）
-  view?: { viewType: string; title: string; initialVisibility: 'visible' | 'hidden' }
+  view?: { viewType: string; title: string }
   menu?: { group?: string; when?: string }
   command?: { title: string; category?: string; keybinding?: string; when?: string }
   slashCommand?: { name: string; description: string }
   configuration?: { properties: unknown }
   /** 声明原文存档：badge/tooltip/disabled 等可变字段经 plugin:headerActionUpdate 广播，声明侧只有静态形状；
    *  activation = 点击激活方式（声明驱动分派键，见 PluginContributesHeaderAction.activation）。 */
-  headerAction?: { title: string; icon: string; commandId?: string; order?: number; activation?: 'scheduler-overlay' }
+  headerAction?: { title: string; icon: string; commandId?: string; order?: number; activation?: HeaderActionActivation }
 }
 
 // ── ViewContributionSummary（IF1，视图宿主消费的扁平视图摘要）───────────
 
 /**
  * getViewsByPlacement 的返回形状（IF1）。
- * viewId=contributionId，title 缺省回退 contributionId，icon 显式 undefined（当前无图标源），
- * initialVisibility 取记录值（legacy panels 固定 'hidden'）。
+ * viewId=contributionId，title 缺省回退 contributionId，icon 显式 undefined（当前无图标源）。
  */
 export interface ViewContributionSummary {
   viewId: string
   title: string
   icon?: string
-  initialVisibility: 'visible' | 'hidden'
 }
 
 // ── core 版 PluginContributes v2（对齐 s1 schema v2）──────────────────
@@ -157,7 +155,14 @@ export interface PluginContributesView {
   placement: string
   viewType?: 'gui' | 'webview' | 'tree'
   activationEvent?: string
-  initialVisibility?: 'visible' | 'hidden'
+  /** 图标名（lucide 名，宿主按白名单统一解析，未命中落兜底图标 + 一次 warning）；缺省 = 容器兜底图标 */
+  icon?: string
+  /** 排序权重（序号契约：内置项按下标派生，未声明排在内置项之后，同值按 pluginId 字典序决胜） */
+  order?: number
+  /** 空态文案（快照拉取完成仍无树时展示，插件自带；缺省 = 容器通用空态） */
+  emptyState?: { text?: string; hint?: string }
+  /** 会话归属（会话删除级联与进入范围）；缺省 'session' */
+  scope?: 'session' | 'global'
 }
 
 /** menu contribution（s1 DM2）。键集不含 'panel.header'——该键自 schema 起无渲染端消费方
@@ -196,6 +201,22 @@ export interface PluginConfigurationProperty {
   enumDescriptions?: string[]
 }
 
+/**
+ * headerAction 点击激活方式（结构化联合，容器扩展点统一 §6.3；与 plugin-sdk 版
+ * HeaderActionActivation 形状一致——两版契约漂移会让声明解析层与插件作者契约各自
+ * 演化，字段级语义以本版注释为准）。
+ *
+ * 结构化成员 = 声明即存在的静态入口：command 走命令链（需 commandId）；overlay / drawer
+ * 为容器导航（点击请求宿主打开对应容器的 tabId，params 透传给目标容器的选项字段，
+ * 值限标量）。'scheduler-overlay' 为迁移期兼容值（定时任务直开入口，带运行时徽标），
+ * 下一版本删除——新声明一律用结构化形态。
+ */
+export type HeaderActionActivation =
+  | { kind: 'command' }
+  | { kind: 'overlay'; tabId: string; params?: Record<string, string | number | boolean> }
+  | { kind: 'drawer'; tabId: string; params?: Record<string, string | number | boolean> }
+  | 'scheduler-overlay'
+
 /** headerAction contribution（AP-1，composer 左簇按钮区）。icon 为 lucide 名字符串（宿主解析，插件不给 SVG）；
  *  badge/tooltip/disabled/hidden 等可变字段不在声明侧，经 api.ui.updateHeaderAction + plugin:headerActionUpdate 广播。 */
 export interface PluginContributesHeaderAction {
@@ -204,21 +225,21 @@ export interface PluginContributesHeaderAction {
   icon: string
   /**
    * 命令链命令 id（可选）。缺省（无 activation 且无 commandId）声明无法走命令链，
-   * 渲染端不渲染；带 commandId 的缺省声明点击经 CommandRegistry.execute。
-   * activation='scheduler-overlay' 声明无需 commandId——点击走 overlay 分派
-   * （renderer 侧 openSchedulerTab），不经命令链。
+   * 渲染端不渲染；带 commandId 的缺省声明点击经 CommandRegistry.execute（E13
+   * 可用性三态 + E3 点击 execute）。
+   * activation 结构化成员 / 'scheduler-overlay' 兼容值声明无需 commandId——
+   * 前者按 kind 分派（overlay/drawer 走容器导航，command 走命令链），
+   * 后者走既有 scheduler overlay 直开分派（renderer 侧 openSchedulerTab）。
    */
   commandId?: string
   /** 与内置按钮组的相对序；缺省追加在后 */
   order?: number
   /**
    * 点击激活方式（声明驱动分派，渲染端消费；core 不读此字段）。
-   * 缺省 = 走 commandId 命令链（E13 可用性三态 + E3 点击 execute，需 commandId）；
-   * 'scheduler-overlay' = 点击打开 workflow-viz overlay 的定时任务 tab（renderer 侧
-   * openSchedulerTab，不经命令链）。
+   * 缺省 = 走 commandId 命令链；结构化联合与迁移兼容值见 HeaderActionActivation。
    * 与 PluginContributesView.activationEvent（view 激活时机事件）语义无关。
    */
-  activation?: 'scheduler-overlay'
+  activation?: HeaderActionActivation
 }
 
 /**

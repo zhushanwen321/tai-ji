@@ -39,18 +39,23 @@ vi.mock('../ws-client', () => ({
   },
   onMessage: vi.fn(() => () => {}),
   onQueueDrop: vi.fn(() => () => {}),
+  setWaitingRuntime: vi.fn(),
+  onAuthAccepted: vi.fn(() => () => {}),
+  onAuthRejected: vi.fn(() => () => {}),
+  resetAuthRejectionSuppression: vi.fn(),
+  isAuthRejectedSuppressed: vi.fn(() => false),
 }))
 
 // ── 端口 fixture：捕获 onRuntimeError 回调 + 可控拉取值 ────────────────
 let errorCb: ((error: { message: string }) => void) | null = null
 let pullResult: string | null = null
+/** 快照桩返回值（null = runtime 未启动 → 等待态；有值 → 连接） */
+let snapshotResult: import('@taiji/shared').RuntimeTargetSnapshot | null = null
 
 function makePorts(): ConnectionPorts {
   return {
     ipc: {
-      getRuntimePort: vi.fn().mockResolvedValue(undefined),
-      getRuntimePortOffset: vi.fn().mockResolvedValue(undefined),
-      getRuntimeToken: vi.fn(async () => null),
+      getRuntimeTargetSnapshot: vi.fn(async () => snapshotResult),
       onRuntimePort: vi.fn(() => () => {}),
       onRuntimeRestarting: vi.fn(() => () => {}),
       onRuntimeFailed: vi.fn(() => () => {}),
@@ -80,6 +85,7 @@ describe('RD-3#2：runtime 启动失败真因消费（状态转移）', () => {
     mockStateRef = ref('disconnected')
     errorCb = null
     pullResult = null
+    snapshotResult = null
     const ports = makePorts()
     setConnectionPorts(ports)
     // dispatcher 预装 no-op（对齐 clear-pending：route-inbound defaultPorts 不参与）
@@ -118,12 +124,13 @@ describe('RD-3#2：runtime 启动失败真因消费（状态转移）', () => {
     teardown()
   })
 
-  it('init 拉取无记录 → 正常端口发现 + 连接（不短路）', async () => {
+  it('init 拉取无记录 → 正常快照拉取 + 连接（不短路）', async () => {
+    snapshotResult = { seq: 1, runtimeId: 'rt-1', port: 4000, token: 'tok-1' }
     const { init, teardown } = useConnection()
     await init()
 
     expect(mockStateRef.value).not.toBe('failed')
-    expect(mockConnect).toHaveBeenCalled()
+    expect(mockConnect).toHaveBeenCalledWith('ws://localhost:4000', { auth: 'token', token: 'tok-1' })
     teardown()
   })
 

@@ -10,7 +10,7 @@
   ── 形态（与三件任务面板的差异点）──
   扁平列表（刻意不做两视图分桶：子会话条数少，用户要一眼看全「我派发的全部」）——段头摘要
   `{total} 个 · {running} 运行中` + 每行：7px 状态点 + label + `cwd 末段 · 状态 · 最近活动`。
-  行点击 = 打开该子会话（`useSidebar().selectSession`，与侧栏点击同一条 core 12 步切入链）；
+  行点击 = 打开该子会话（`useSidebar().selectSession`，与侧栏点击同一条 core 13 步切入链）；
   pin 态行内渲染「停止」（`chat.abort` 软停止，两段确认——TrayConfirmButton 原语），与三件
   面板 D8「hover 态不渲染行内操作防误触」契约一致。
 
@@ -122,7 +122,7 @@ withDefaults(defineProps<{
 
 const { t } = useI18n()
 const { error: toastError } = useToast()
-/** 打开子会话：与侧栏点击同一条 core 12 步切入链（useSidebar 为每次调用新建实例，无副作用） */
+/** 打开子会话：与侧栏点击同一条 core 13 步切入链（useSidebar 为每次调用新建实例，无副作用） */
 const { selectSession } = useSidebar()
 
 /** 数据范围（单例注入）：实例由外壳 ComposerTray 创建并 provide，本面板零拉取（见文件头） */
@@ -169,7 +169,7 @@ function lastActiveLabel(child: SessionSummary): string {
   return formatCompactDuration(seconds, { hours: true })
 }
 
-/** 行点击 = 打开该子会话（与侧栏点击同一条 core 12 步切入链） */
+/** 行点击 = 打开该子会话（与侧栏点击同一条 core 13 步切入链） */
 async function openChild(child: SessionSummary): Promise<void> {
   try {
     await selectSession(child.id)

@@ -2,10 +2,10 @@
  * Sidebar plugins tab 渲染测试（MF-10）。
  *
  * 验证第 5 plugin tab（本批次核心验收「tab 激活后渲染 plugin view」）：
- * - TC1: activeTab='plugins' + 有焦点 session → PluginViewContainer 挂载且
+ * - TC1: activeTab='ui.plugins' + 有焦点 session → PluginViewContainer 挂载且
  *   sessionId 绑定焦点 session（L2 二级路由容器，内部 L2TabBar + ViewHost）
- * - TC2: activeTab='plugins' + 无焦点 session 态→ sidebar-plugin-no-session 占位 DOM
- * - TC3: activeTab='sessions'（非 plugins）→ 不挂 PluginViewContainer（回归）
+ * - TC2: activeTab='ui.plugins' + 无焦点 session 态→ sidebar-plugin-no-session 占位 DOM
+ * - TC3: activeTab='ui.sessions'（非 plugins）→ 不挂 PluginViewContainer（回归）
  *
  * mock 策略对齐 sidebar-ondeletefolder.test.ts 先例（Sidebar.vue 整体 mount 依赖
  * 10+ store/composable，shallowMount + store/composable mock；activeTab/focusedSessionId
@@ -55,12 +55,16 @@ vi.mock('@/composables/features/sidebar/useSidebar', async () => {
 // ── mock stores（Sidebar setup 期读取；activeTab 可变 ref 控制 plugins tab 分支）──
 vi.mock('@/stores/sidebar', async () => {
   const { ref, reactive } = await import('vue')
-  const activeTab = ref<string>('sessions')
+  const activeTab = ref<string>('ui.sessions')
   sidebarMocks.activeTab = activeTab
   return {
     // reactive 包装：属性 ref 在模板中自动解包（裸对象属性 ref 不解包，
-    // `sidebar.activeTab === 'plugins'` 判断会恒 false，plugins tab 分支不可达）
+    // `sidebar.activeTab === SIDEBAR_TAB_PLUGINS` 判断会恒 false，plugins tab 分支不可达）。
+    // tab 值 = 注册表内置项 id（U8 派生后的键空间，'ui.' 前缀）；常量随模块导出同步。
     useSidebarStore: () => reactive({ collapsed: false, activeTab, toggleCollapsed: vi.fn() }),
+    SIDEBAR_TAB_SESSIONS: 'ui.sessions',
+    SIDEBAR_TAB_FILES: 'ui.files',
+    SIDEBAR_TAB_PLUGINS: 'ui.plugins',
   }
 })
 vi.mock('@/stores/session', () => ({
@@ -130,13 +134,13 @@ import { onGlobalType } from '@taiji/core/transport/api'
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
-  sidebarMocks.activeTab.value = 'sessions'
+  sidebarMocks.activeTab.value = 'ui.sessions'
   sidebarMocks.focusedSessionId.value = null
 })
 
 describe('Sidebar plugins tab（MF-10 渲染 gate）', () => {
   it('TC1: activeTab=plugins + 焦点 session → PluginViewContainer 挂载，sessionId 绑定焦点 session', () => {
-    sidebarMocks.activeTab.value = 'plugins'
+    sidebarMocks.activeTab.value = 'ui.plugins'
     sidebarMocks.focusedSessionId.value = 's1'
     const wrapper = shallowMount(Sidebar)
 
@@ -149,7 +153,7 @@ describe('Sidebar plugins tab（MF-10 渲染 gate）', () => {
   })
 
   it('TC2: activeTab=plugins + 无焦点 session 态→ sidebar-plugin-no-session 占位 DOM，不挂 PluginViewContainer', () => {
-    sidebarMocks.activeTab.value = 'plugins'
+    sidebarMocks.activeTab.value = 'ui.plugins'
     const wrapper = shallowMount(Sidebar)
 
     expect(wrapper.find('[data-testid="sidebar-plugin-no-session"]').exists()).toBe(true)

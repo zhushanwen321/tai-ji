@@ -13,7 +13,7 @@
  * mock 策略：i18n 由 vitest-i18n-setup 全局 mock（zh-CN 文案）；TC7 用 vi.mock('@/api')
  * 的 preset 域 + createPinia；子组件测试纯 props/emits 驱动。
  *
- * 运行：cd packages/renderer && npx vitest run src/components/settings/__tests__/preset-sections.spec.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=settings npx vitest run src/components/settings/preset/__tests__/preset-sections.spec.ts（本文件登记在 domain-map.json settings 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'

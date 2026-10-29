@@ -634,6 +634,20 @@ describe('两域目录派生（[session-store-layout-inversion D2/D3] 分区键 
 // getSessionsDir 指向测试 tmp（fork 产物真实写入；不碰真实数据目录）
 const sessionsDirMock = vi.hoisted(() => ({ value: '/mock/not-yet-initialized' }))
 
+// [session-cold-switch-perf §3.3-2] restoreSession 消费预热槽：槽空回退现状 spawn 链时
+// 「顺带补位」会经同一构造链再调一次 pm.createSession（后台），使 spawnOptions 的
+// toHaveBeenCalledTimes(1) 与 mock.calls[0] 取值错位。槽本体由
+// src/__tests__/warmup-pi-slot.test.ts 覆盖，此处 mock 恒空槽（take 恒 empty、零补位）。
+vi.mock('../warmup-pi-slot.js', () => {
+  return {
+    WARMUP_SLOT_SESSION_ID: 'warmup-pi-slot',
+    WarmupPiSlot: class {
+      take(): { kind: 'empty' } { return { kind: 'empty' } }
+      warm(): void {}
+    },
+  }
+})
+
 vi.mock('../../../infra/pi/pi-paths.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../infra/pi/pi-paths.js')>()
   return { ...actual, getSessionsDir: () => sessionsDirMock.value }

@@ -7,7 +7,8 @@
  *
  * 覆盖用例（execution-plan T4.1-T4.3）：
  * - T4.1: 打开 popover 展示 mock 的 3 条 records（DOM 可见断言）
- * - T4.2: 搜索无命中 → 空态文案「暂无最近工作区」
+ * - T4.2: 搜索无命中 → 列表清零、空态不渲染（defaultSessionDir 恒在）、尾部动作项仍在
+ *   （AC-5.4：empty-state 仅两区全空且无 defaultSessionDir 才出，mock 下发固定演示路径）
  * - T4.3: 搜索 'foo' → 仅 another-foo 命中（project-a/b 被过滤）
  *
  * UI 结构约束（坑）：
@@ -44,18 +45,21 @@ test.describe('最近工作区 popover E2E（T4.1-T4.3）', () => {
     await expect(items.filter({ hasText: 'another-foo' })).toBeVisible()
   })
 
-  test('T4.2: 搜索无命中 → 空态文案「暂无最近工作区」', async ({ page }) => {
+  test('T4.2: 搜索无命中 → 列表清零、空态不渲染（defaultSessionDir 恒在）、尾部动作项仍在', async ({ page }) => {
     await openPopover(page)
     // 搜索框：普通 <input>，placeholder 精确定位（避开 landing composer 的 textarea）
     const search = page.getByPlaceholder('搜索工作区')
     await expect(search).toBeVisible()
     await search.fill('zzz-no-match')
-    // filtered（computed 即时，无 debounce）变空 → empty-state 出现
-    await expect(page.getByTestId('empty-state')).toBeVisible({ timeout: 3_000 })
-    // 空态文案（DirSelectPopover：暂无最近工作区 · 选择一个本地目录开始）
-    await expect(page.getByTestId('empty-state')).toContainText('暂无最近工作区')
-    // 列表项被清空（强化：非仅空态可见，列表确已无项）
-    await expect(page.getByTestId('workspace-item')).toHaveCount(0)
+    // filtered（computed 即时，无 debounce）变空 → 列表项清零
+    const popover = page.getByTestId('dir-select-popover')
+    await expect(popover.getByTestId('workspace-item')).toHaveCount(0)
+    // 空态不渲染（AC-5.4 契约，DirSelectPopover isEmpty = 两区全空 && 无 defaultSessionDir）：
+    // mock fixture 下发 defaultSessionDir（固定演示路径）→ 恒有可选目标，不出「暂无最近工作区」
+    await expect(popover.getByTestId('empty-state')).toHaveCount(0)
+    // 尾部动作项仍在：「默认会话」（按 defaultSessionDir 渲染）+「打开文件夹」（恒在）
+    await expect(popover.getByTestId('action-default-session')).toBeVisible()
+    await expect(popover.getByTestId('action-open-dir')).toBeVisible()
   })
 
   test('T4.3: 搜索 foo → 仅 another-foo 命中（过滤掉 project-a/b）', async ({ page }) => {

@@ -6,6 +6,7 @@ import ComposerInput from '../../features/composer/ComposerInput.vue';
 import { ComposerInputDepsKey, type ComposerInputDeps } from '../../features/composer/composer-input-deps';
 import { rebuildSegmentsWithEditedText } from '../../lib/segment-rebuild';
 import { type DialogRequest as DialogRequest_m2, type InternalEvent, InternalEventBus } from '@taiji/core';
+import { triggerSessionCleanups } from '@taiji/core/foundation/use-session-scoped-state';
 import { dispatchGlobal } from '@taiji/core/transport/api';
 import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension';
 import type { HandleImagePasteResult } from '@taiji/dom-core/composer/input';
@@ -387,6 +388,96 @@ describe('DialogRequestQueue', () => {
       q.resetFor('A')
       expect(q.pendingCount.value).toBe(0)
       expect(initCounter.count).toBe(0) // 已有分区的清空不触发 init
+    } finally {
+      scope.stop()
+    }
+  })
+
+  // ── pendingCountBySession 跨分区计数（remote-use-mobile-v2 §6.18 待办聚合半）────
+  // currentRequest/pendingCount 只读当前活跃分区；「需要你处理」聚合要全部会话的 dialog
+  // 待答数——本组锁定计数登记与分区写点的同步（入队/出队/dedup/resetFor 四路径）。
+
+  it('TC-15 跨分区聚合：非活跃分区的请求计入 pendingCountBySession（活跃分区读口不可见的面）', () => {
+    const sid = ref<string | null>('A')
+    const { source, scope, getQueue } = createHarness(sid)
+    try {
+      const q = getQueue()
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r1' })
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r2' })
+      source.triggerUiRequest({ sessionId: 'B', requestId: 'b1' }) // 非活跃分区
+      expect(q.pendingCountBySession.value.get('A')).toBe(2)
+      expect(q.pendingCountBySession.value.get('B')).toBe(1)
+    } finally {
+      scope.stop()
+    }
+  })
+
+  it('TC-16 出队递减与键消失：逐条 respond 后计数递减，最后一条出队后键从 Map 摘除', () => {
+    const sid = ref<string | null>('A')
+    const { source, scope, getQueue } = createHarness(sid)
+    try {
+      const q = getQueue()
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r1' })
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r2' })
+      expect(q.pendingCountBySession.value.get('A')).toBe(2)
+      q.respond('r1', true)
+      expect(q.pendingCountBySession.value.get('A')).toBe(1)
+      q.respond('r2', true)
+      expect(q.pendingCountBySession.value.has('A')).toBe(false)
+      expect(q.pendingCountBySession.value.size).toBe(0)
+    } finally {
+      scope.stop()
+    }
+  })
+
+  it('TC-17 dedup 不加计：同 requestId 双源重复入队计数仍为 1（与 TC-3 分区行为对齐）', () => {
+    const sid = ref<string | null>('A')
+    const { source, scope, getQueue } = createHarness(sid)
+    try {
+      const q = getQueue()
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r1' })
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r1' })
+      expect(q.pendingCountBySession.value.get('A')).toBe(1)
+    } finally {
+      scope.stop()
+    }
+  })
+
+  it('TC-18 resetFor 计数归零 + 不存在分区 resetFor 不误登记：与分区写点同语义', () => {
+    const sid = ref<string | null>('A')
+    const { source, scope, getQueue } = createHarness(sid)
+    try {
+      const q = getQueue()
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r1' })
+      source.triggerUiRequest({ sessionId: 'B', requestId: 'b1' })
+      q.resetFor('A')
+      expect(q.pendingCountBySession.value.has('A')).toBe(false)
+      expect(q.pendingCountBySession.value.get('B')).toBe(1) // 他分区不受影响
+      q.resetFor('never-existed') // no-op 不误建登记（与 TC-14 分区侧同语义）
+      expect(q.pendingCountBySession.value.size).toBe(1)
+    } finally {
+      scope.stop()
+    }
+  })
+
+  it('TC-19 session 删除清理计数：triggerSessionCleanups 后 pendingCountBySession 不再含该 sid（他分区不受影响）', () => {
+    const sid = ref<string | null>('A')
+    const { source, scope, getQueue } = createHarness(sid)
+    try {
+      const q = getQueue()
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r1' })
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r2' })
+      source.triggerUiRequest({ sessionId: 'B', requestId: 'b1' })
+      expect(q.pendingCountBySession.value.get('A')).toBe(2)
+      // 会话删除路径（triggerSessionCleanups）：分区由工厂自动注册的 cleanup 删除，
+      // 计数登记表须同口径清条目——否则删除后三点全部不可达（resetFor 被 hasPartition
+      // 早退、dequeueByRequestId 被 deletedSids 拦截），残留计数永久无法清除
+      triggerSessionCleanups('A')
+      expect(q.pendingCountBySession.value.has('A')).toBe(false)
+      expect(q.pendingCountBySession.value.get('B')).toBe(1) // 他分区不受影响
+      // 删除后迟到入队不复活计数（updateFor 对已删 sid no-op，计数写点在 updater 内不触）
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r3' })
+      expect(q.pendingCountBySession.value.has('A')).toBe(false)
     } finally {
       scope.stop()
     }
@@ -1336,6 +1427,97 @@ describe('SubagentRow: running / failed / unfinished 态', () => {
   })
 })
 
+// ── [容器扩展点统一 §7.4 U9 层 2] 行内呈现两分支：details.__gui__ 存在 → 内层呈现替换为
+//    插件树（GuiComponentRenderer 真渲染），点击仍归本行外壳（openSubagent 需要 virtualId，
+//    树内传不出去——三问答案②）；无树 → 保留现有解析（宿主单行摘要）。──────────────
+
+import { guiComponent, guiResult, PROTOCOL_VERSION } from '@zhushanwen/extension-protocol';
+
+/** 构造合法 __gui__ 渲染载荷（版本协商字段必须与协议一致，extractGui 校验 v）。 */
+function makeGuiDetails() {
+  return {
+    __gui__: guiResult(
+      guiComponent('card', {
+        header: 'research-trace-ui',
+        body: [guiComponent('stats-line', { items: [{ label: 'status', value: 'running', severity: 'ok' }] })],
+      }),
+    ),
+  }
+}
+
+describe('SubagentRow: 行内呈现两分支（§7.4 层 2 接树）', () => {
+  it('有 __gui__ → 渲插件树（插件 card/stats-line 真渲染可见），宿主单行解析不渲染', () => {
+    const wrapper = mount(SubagentRow, {
+      props: { tool: makeSubagent({ details: makeGuiDetails() }), sessionId: 's1' },
+    })
+    // 用户可见断言：插件树内容在行内（card header = slug + stats-line 值）
+    expect(wrapper.find('[data-testid="gui-card"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="gui-stats-line"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('research-trace-ui')
+    expect(wrapper.text()).toContain('running')
+    // 宿主解析行不并存（内层呈现已替换为插件树）
+    expect(wrapper.text()).not.toContain('researcher')
+    expect(wrapper.text()).not.toContain('子代理')
+  })
+
+  it('有 __gui__ 时点击仍开抽屉（点击不交给插件树——virtualId 从树内传不出，外壳 @click 保留）', async () => {
+    const wrapper = mount(SubagentRow, {
+      props: {
+        tool: makeSubagent({
+          details: makeGuiDetails(),
+          output: JSON.stringify({ action: 'start', subagentId: '1338dda5', slug: 'rs' }),
+        }),
+        sessionId: 's1',
+      },
+    })
+    await wrapper.find('[data-testid="subagent-block"] > div').trigger('click')
+    expect(openSubagentMock).toHaveBeenCalledTimes(1)
+    expect(openSubagentMock).toHaveBeenCalledWith({
+      virtualId: subagentVirtualId('s1', '1338dda5'),
+    })
+  })
+
+  it('无 __gui__ → 保留现有解析（宿主单行摘要：agent/slug 在场，树节点不存在）', () => {
+    const wrapper = mount(SubagentRow, {
+      props: { tool: makeSubagent(), sessionId: 's1' },
+    })
+    expect(wrapper.find('[data-testid="gui-card"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('researcher')
+    expect(wrapper.text()).toContain('research-trace-ui')
+  })
+
+  it('details.__gui__ 版本不符 → 不渲树（走无树分支，防过期协议组件上屏）', () => {
+    const details = makeGuiDetails()
+    ;(details.__gui__ as { v: number }).v = PROTOCOL_VERSION + 1
+    const wrapper = mount(SubagentRow, {
+      props: { tool: makeSubagent({ details }), sessionId: 's1' },
+    })
+    expect(wrapper.find('[data-testid="gui-card"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('researcher')
+  })
+
+  it('running 态 streaming detail.__gui__ 兜底：终态 details 无树时渲 streaming 树', () => {
+    const wrapper = mount(SubagentRow, {
+      props: {
+        tool: makeSubagent({ status: 'running', detail: makeGuiDetails() }),
+        sessionId: 's1',
+      },
+    })
+    expect(wrapper.find('[data-testid="gui-card"]').exists()).toBe(true)
+  })
+
+  it('终态（非 running）无 details.__gui__ 时 streaming detail 残留不作为渲染源', () => {
+    const wrapper = mount(SubagentRow, {
+      props: {
+        tool: makeSubagent({ status: 'completed', detail: makeGuiDetails() }),
+        sessionId: 's1',
+      },
+    })
+    expect(wrapper.find('[data-testid="gui-card"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('researcher')
+  })
+})
+
 // ======================================================================
 // ← features/composer/__tests__/ComposerInput.test.ts
 // ======================================================================
@@ -1357,7 +1539,7 @@ describe('composer-input-chip-mousedown', () => {
  * 只能在被 find 的元素上派发，无法把 e.target 指到 chip 子元素）。deps 经 ComposerInputDeps
  * provide 注入（W4 契约）。
  *
- * 运行：cd packages/ui && npx vitest run src/features/composer/__tests__/composer-input-chip-mousedown.test.ts
+ * 运行：cd packages/ui && npx vitest run src/__tests__/wave3/happy-dom-52-composerinput-dialog-request-queue-form-permission.test.ts（composer-input-chip-mousedown 节）
  */
 
 const deps: ComposerInputDeps = {
@@ -1560,7 +1742,7 @@ describe('composer-input-trigger-forward', () => {
  * renderer 侧同名场景测试（composer-hash-trigger.test.ts）在 renderer 包跑 coverage，
  * 本文件落 ui 包内，补 ui 包对 ComposerInput.vue 的行覆盖。
  *
- * 运行：cd packages/ui && npx vitest run src/features/composer/__tests__/composer-input-trigger-forward.test.ts
+ * 运行：cd packages/ui && npx vitest run src/__tests__/wave3/happy-dom-52-composerinput-dialog-request-queue-form-permission.test.ts（composer-input-trigger-forward 节）
  */
 
 const deps: ComposerInputDeps = {

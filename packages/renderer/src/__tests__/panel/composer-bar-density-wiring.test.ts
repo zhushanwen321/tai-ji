@@ -41,7 +41,7 @@
  * `composer-overflow-menu` / `composer-capacity-merged` / `composer-model-merged` testid、
  * 合流发丝分隔（separatorsInBar）已随三步聚合击败的旧语义删除。
  *
- * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/panel/composer-bar-density-wiring.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/panel/composer-bar-density-wiring.test.ts（本文件登记在 domain-map.json panel 域，默认档被排除）
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
@@ -65,13 +65,15 @@ import { useCommandStore, __testing } from '@/composables/features/command/useCo
 // state = mock 工厂挂载的 reactive 计数（挂载前 null）：mount 前定值与 mount 后中途变更
 // （归零→恢复 emitter 存活链用例）都经 setTrayCounts 写同一 proxy，驱动 counts 重算。
 const trayFixture = vi.hoisted(() => ({
-  state: null as { bashRunning: number; subagentRunning: number } | null,
+  state: null as { bashRunning: number; sessionRunning: number } | null,
 }))
 
 vi.mock('@/components/panel/tray/useTrayCounts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/components/panel/tray/useTrayCounts')>()
   const { computed, reactive } = await import('vue')
-  const state = reactive({ bashRunning: 2, subagentRunning: 1 })
+  // [容器扩展点统一 §6.6/U9+U10 终态] 内置三件 = bash/session/canvas；subagent/workflow
+  // 两件已迁插件 widget 区（本文件不验 widget 件——无 provide 推树源，恒空）
+  const state = reactive({ bashRunning: 2, sessionRunning: 1 })
   trayFixture.state = state
   const emptyList = (): ReturnType<typeof computed<never[]>> => computed(() => [])
   return {
@@ -79,28 +81,17 @@ vi.mock('@/components/panel/tray/useTrayCounts', async (importOriginal) => {
     useTrayCounts: (): UseTrayCountsReturn => ({
       counts: computed(() => ({
         bash: { running: state.bashRunning, ended: 0, total: state.bashRunning },
-        subagent: { running: state.subagentRunning, ended: 0, total: state.subagentRunning },
-        workflow: { running: 0, ended: 0, total: 0 },
-        // u7 第 4 件：本文件不验 session 件（无子会话 → 该件不渲染），恒 0
-        session: { running: 0, ended: 0, total: 0 },
-        // u-tray-entry 第 5 件：本文件不验 canvas 件，恒 0（canvas 按钮仍恒渲染，dim 态）
+        // session 件（第 4 件升内置终态）：本文件验聚合运行数 = bash + session 之和
+        session: { running: state.sessionRunning, ended: 0, total: state.sessionRunning },
+        // canvas 件：本文件不验，恒 0（三态判定下 total=0 该件不渲染）
         canvas: { running: 0, ended: 0, total: 0 },
       })),
       lists: {
         bash: { running: emptyList(), ended: emptyList() },
-        subagent: { running: emptyList(), ended: emptyList() },
-        workflow: { running: emptyList(), ended: emptyList() },
         session: { children: emptyList() },
         canvas: { entries: emptyList() },
       },
       bashPartition: computed(() => ({ tasks: [], loaded: true, corrupted: false, fetchFailed: false })),
-      errors: { subagent: computed(() => null), workflow: computed(() => null) },
-      loading: {
-        bash: computed(() => false),
-        subagent: computed(() => false),
-        workflow: computed(() => false),
-      },
-      retry: vi.fn().mockResolvedValue(undefined),
     }),
   }
 })
@@ -289,11 +280,11 @@ function lastButtonTitle(): string | undefined {
 }
 
 /** 写托盘计数（响应式 state：mount 前定值与 mount 后中途变更同口） */
-function setTrayCounts(bashRunning: number, subagentRunning: number): void {
+function setTrayCounts(bashRunning: number, sessionRunning: number): void {
   const state = trayFixture.state
   if (!state) throw new Error('tray fixture state 未初始化：useTrayCounts mock 工厂未执行')
   state.bashRunning = bashRunning
-  state.subagentRunning = subagentRunning
+  state.sessionRunning = sessionRunning
 }
 
 beforeEach(() => {
@@ -508,7 +499,7 @@ describe('不留死入口（能力标志 → 左簇形态）', () => {
   })
 
   it('非保护态托盘恒挂载：条目归零→恢复，聚合运行数跟随归零再回升（外壳与 emitter 链不卸载）', async () => {
-    // L2 聚合态起步（左簇聚合生效）：聚合入口在场，运行数 = bash 2 + subagent 1
+    // L2 聚合态起步（左簇聚合生效）：聚合入口在场，运行数 = bash 2 + session 1
     await mountAndFit(300, { 0: 500, 1: 300, 2: 180, 3: 100 })
     expectClusterShape({ leftCluster: 'aggregated' })
     const aggregate = bar().find('[data-testid="tray-aggregate-button"]')

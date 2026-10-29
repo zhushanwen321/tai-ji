@@ -88,7 +88,7 @@ export function parseGateArgs(argv) {
       if (!v) throw usageError(`--only 需要组名列表（${ONLY_GROUPS.join(',')}，逗号分隔）`)
       const groups = v.split(',').map((x) => x.trim()).filter(Boolean)
       // 纯分隔符输入（--only ,）过滤后为空 → 全门组关闭、零 FAIL、exit 0 的「无检查即绿」
-      // 形态，fail-fast 拒绝（ADR-0167 反对的输入边缘）
+      // 形态，fail-fast 拒绝（ADR-0173 反对的输入边缘）
       if (groups.length === 0) throw usageError(`--only 至少需要一个有效组名（${ONLY_GROUPS.join(',')}）——「${v}」解析后无有效组`)
       const bad = groups.filter((g) => !ONLY_GROUPS.includes(g))
       if (bad.length > 0) throw usageError(`--only 只接受 ${ONLY_GROUPS.join(',')}，得到：${bad.join(',')}`)
@@ -634,11 +634,11 @@ export function createDefaultDeps(cwd = process.cwd()) {
 }
 
 /**
- * 聚合编排。返回 { exitCode, result }——result 可直接 --json 序列化；
- * 人可读输出由调用方（main）按 result.gates 渲染。
+ * [runGates 拆分] 前置准备：py 实体检查 + base 解析 + worktree 级互斥锁。
+ * abort 非 null = fail-fast（实体缺失 / 锁获取失败），调用方直接返回 abort；
+ * 否则返回 { base, source, release }（release 必须在门跑完后调用）。
  */
-export async function runGates(deps, args) {
-  const gates = []
+function prepareRun(deps, args) {
   const { side, base: explicitBase } = args
   const groups = args.only ?? null
   const on = (g) => groups === null || groups.includes(g)
@@ -649,16 +649,18 @@ export async function runGates(deps, args) {
   const missing = needsPy ? missingPythonEntities(deps) : []
   if (missing.length > 0) {
     return {
-      exitCode: 2,
-      result: {
-        verdict: 'error',
-        base: null,
-        baseSource: null,
-        gates: [],
-        error: {
-          message: 'pr-cr-fix 门禁脚本实体缺失（.agents 实体不入 git，恢复通道 = refs/skills-snapshot）',
-          missing,
-          recover: 'git archive refs/skills-snapshot | tar -x -C <workspace 根>',
+      abort: {
+        exitCode: 2,
+        result: {
+          verdict: 'error',
+          base: null,
+          baseSource: null,
+          gates: [],
+          error: {
+            message: 'pr-cr-fix 门禁脚本实体缺失（.agents 实体不入 git，恢复通道 = refs/skills-snapshot）',
+            missing,
+            recover: 'git archive refs/skills-snapshot | tar -x -C <workspace 根>',
+          },
         },
       },
     }
@@ -677,24 +679,39 @@ export async function runGates(deps, args) {
   // worktree 级互斥：同 worktree 同时只允许一个 quality-gates 整体运行（并发两次
   // 会让两个 vitest coverage 跑互删 .tmp 覆盖文件、报 ENOENT 哑 FAIL，根因与修法
   // 见 acquireGateLock 头注释）。获取失败 = 环境错误（exit 2，不自动重试）。
-  let release
   try {
-    release = deps.acquireGateLock()
+    return { base, source, release: deps.acquireGateLock() }
   } catch (e) {
     return {
-      exitCode: 2,
-      result: {
-        verdict: 'error',
-        base,
-        baseSource: source,
-        gates: [],
-        error: {
-          message: `quality-gates 互斥锁获取失败：${e.message}`,
-          recover: '持锁进程在跑则等其结束后重跑；持锁方已退出或 pid 复用时锁会被自动回收；仍异常时 ps aux | grep quality-gates.mjs 核对，无进程在跑可手动删除报错中的锁文件后重跑',
+      abort: {
+        exitCode: 2,
+        result: {
+          verdict: 'error',
+          base,
+          baseSource: source,
+          gates: [],
+          error: {
+            message: `quality-gates 互斥锁获取失败：${e.message}`,
+            recover: '持锁进程在跑则等其结束后重跑；持锁方已退出或 pid 复用时锁会被自动回收；仍异常时 ps aux | grep quality-gates.mjs 核对，无进程在跑可手动删除报错中的锁文件后重跑',
+          },
         },
       },
     }
   }
+}
+
+/**
+ * 聚合编排。返回 { exitCode, result }——result 可直接 --json 序列化；
+ * 人可读输出由调用方（main）按 result.gates 渲染。
+ */
+export async function runGates(deps, args) {
+  const gates = []
+  const groups = args.only ?? null
+  const on = (g) => groups === null || groups.includes(g)
+
+  const prep = prepareRun(deps, args)
+  if (prep.abort) return prep.abort
+  const { base, source, release } = prep
 
   try {
     // 1. typecheck 四处（自跑）

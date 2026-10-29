@@ -7,6 +7,13 @@
       "testScript": "test:resources-plugins",
       "publish": false,
       "coverage": true
+    },
+    "resources/plugins/probe-container-plugin": {
+      "reason": "D3 验收探针插件（容器扩展点统一验收素材，不入 pnpm workspace；无测试防线、不发布，index.js 经 esbuild 本地构建）",
+      "typecheckAnchor": "TypeCheck - builtin plugins (resources)",
+      "testScript": null,
+      "publish": false,
+      "coverage": false
     }
   },
   "exempt": {

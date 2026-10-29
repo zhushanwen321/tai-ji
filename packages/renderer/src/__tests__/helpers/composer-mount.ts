@@ -225,7 +225,6 @@ export function composerApiModule() {
   return {
     project: {
       load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }),
-      save: vi.fn().mockResolvedValue(undefined),
     },
     model: { switchModel: vi.fn() },
     // W4b：session.listSessions 进公共 session 组（useBtwTabData badge 数据源——btw 线进
@@ -296,6 +295,10 @@ export function composerChatStoreModule() {
       sessionPhase: () => ({ turn: 'idle', compacting: false, bash: false }),
       getMessages: () => [],
       getOccupancy: () => ({ turn: 'idle', compacting: false, bash: false }),
+      // useLoadMoreHistory 的 watch getter / 失败态派生读 store（core createChatStore 成员）：
+      // tick=0 让基线前置 watch 恒不置位，failed=false 不注入失败行
+      getBaselinePrependTick: () => 0,
+      isHistoryCacheFailed: () => false,
     }),
   }
 }

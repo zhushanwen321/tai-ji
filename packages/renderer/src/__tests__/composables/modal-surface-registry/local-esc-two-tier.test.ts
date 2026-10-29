@@ -20,7 +20,7 @@
  * 确认态按钮的可见性与文案翻转）+ 观察者形态（真实事件序 yield→act 递进）。
  *
  * 测试框架：vitest + @vue/test-utils（真实 KeyboardEvent/MouseEvent，无 fake timer）。
- * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/modal-surface-registry/local-esc-two-tier.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=app-shell npx vitest run src/__tests__/composables/modal-surface-registry/local-esc-two-tier.test.ts（本文件登记在 domain-map.json app-shell 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'

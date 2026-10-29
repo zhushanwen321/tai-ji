@@ -145,7 +145,10 @@
            使流式重渲染不重播；keepMounted 使工作 turn 不被虚拟化卸载，无重挂重播）；
            trace--just-done = 轮次落完成瞬间的换块落位标记（200ms 淡入 + 4px 落位），仅刚落
            完成的轮次携带（justDone ref，见 script），历史轮不误标。 -->
-      <div class="trace mt-[12px] flex flex-col text-[length:var(--text-md)]" :class="{ 'trace--live': isWorkingTurn, 'trace--just-done': justDone }">
+      <!-- [remote-use-mobile-v2 §6.2] 行主体字号随 density 切档：desktop 维持 text-md（15px，
+           与原静态类同位同类，渲染串逐字一致——快照用例锁）；mobile 降 --m-text-sub（13px，
+           工具行密度档），正文块由 TextRow 自行升回 --m-text-body。 -->
+      <div class="trace mt-[12px] flex flex-col" :class="[traceDensityClass, { 'trace--live': isWorkingTurn, 'trace--just-done': justDone }]">
         <!-- 收纳完成通知展开明细行：展开区首行起逐条一行
              （低频查看区，行距紧凑、无横线装饰；成功弱档 dim / 失败 warn 不依赖 hover），
              其后才是本轮 trace。仅落成态展开时渲染（工作态通知还是外部行，无明细可看）。 -->
@@ -292,7 +295,7 @@ import SystemNotice from './SystemNotice.vue'
 import { FOLDED_TYPE_ICON, FOLDED_TYPE_WORD_KEY, foldedStatusText } from './folded-notice'
 import { useTurnElapsed } from './composables/useTurnElapsed'
 import { formatDurationHms } from './format-utils'
-import { useChatViewDeps } from './chat-view-deps'
+import { useChatViewDeps, useChatDensity } from './chat-view-deps'
 import { useTurnTrace } from './composables/use-turn-trace'
 
 const props = withDefaults(
@@ -306,6 +309,16 @@ const props = withDefaults(
     isLastTurn?: boolean
   }>(),
   { isSessionActive: undefined },
+)
+
+/** 密度档（§6.2）：setup 期一次 inject（inject 禁在 computed 内调用），派生类名按档切换 */
+const density = useChatDensity()
+
+/** trace 容器行主体字号（§6.2 密度维度）：desktop 档 = 原静态类原位，mobile 13px 密度档 */
+const traceDensityClass = computed(() =>
+  density === 'mobile'
+    ? 'text-[length:var(--m-text-sub)]'
+    : 'text-[length:var(--text-md)]',
 )
 
 /** trigger 起点行文案（W4·D3）：仅 bg-notify turn 渲染，见 template 注释。 */

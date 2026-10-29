@@ -21,14 +21,8 @@
  * NAMESPACE_MISMATCH（越权触达）/ PERMISSION_DENIED（身份缺失 / 能力未声明）。
  */
 
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { deriveNamespace, NAMESPACE_MISMATCH } from '@taiji/shared/plugin-namespace'
-import { findPackageRootDir } from './plugin-service/pkg-root.js'
 import type { PluginRpcServer, RpcDispatchContext } from './plugin-service/plugin-rpc-server.js'
-// 能力词经 shared SSOT 常量引用（与 manifest 校验/放行计算同一词表——裸字面量在词表
-// 改值时会静默失配为 credential 恒拒，常量引用让失配在编译期可见）
-import { PluginCapabilityConstants } from '@taiji/shared/plugin-capability-map'
 import { errorWithCode } from '../utils/errors.js'
 
 /** 三方法的 wire 方法名（插件 RPC 线协议，自由 method 字符串）。 */
@@ -50,7 +44,7 @@ export type ProviderCredentialReply =
   | { providerId: string; key: string; source: 'auth.json' | 'models.json'; kind: 'api_key' | 'oauth' }
   | { providerId: string; unsupported: 'command' | 'unresolved-env' }
 
-/** 插件包清单读取结果（命名空间与能力判定的输入）。 */
+/** 插件包清单信息（命名空间与能力判定的输入；registry.scan 装配 descriptor 时透传，非本模块直读）。 */
 export interface PluginManifestInfo { // oe-exempt:20261024:framework:ports/SDK 契约类型——接口先立、单实现常态（映射表/端口单一数据源）
   /** npm 包名（ns 推导唯一事实源，D4）。 */
   pkgName: string
@@ -79,7 +73,7 @@ export interface ProviderWriteProxyDeps { // oe-exempt:20261024:framework:ports/
     | { unsupported: 'command' | 'unresolved-env' }
     | undefined
   >
-  /** 插件包清单读取（包名 + capabilities；未装/清单不可读 = undefined → fail-closed）。 */
+  /** 插件包清单信息（包名 + capabilities，经 registry descriptor 注入；未装/包名不可用 = undefined → fail-closed）。 */
   readPluginManifest: (pluginId: string) => PluginManifestInfo | undefined
   /**
    * 写落点 provider 列表广播（组合根注入 server.broadcastProviderList）：providers.write /
@@ -88,8 +82,8 @@ export interface ProviderWriteProxyDeps { // oe-exempt:20261024:framework:ports/
    * 直连调用会被去抖调度器包装（见 createMutatedBroadcastScheduler），注入方无需自行去抖。
    */
   notifyProvidersMutated: () => void
-}
 
+}
 /**
  * 写落点广播去抖窗口（ms）。插件提取编排的 writeCredentials + writeCatalog 是两个串行
  * RPC（第二个在第一个响应返回后才发出，跨宏任务），微任务级合并对其零效果——故用单发
@@ -112,6 +106,8 @@ export function createMutatedBroadcastScheduler(notify: () => void): () => void 
     }, WRITE_BROADCAST_DEBOUNCE_MS)
   }
 }
+
+
 
 function asNonEmptyString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined
@@ -184,29 +180,16 @@ async function handleProviderWrite(deps: ProviderWriteProxyDeps, params: Record<
       throw errorWithCode('INVALID_PAYLOAD: providers.write models entries must be strings or objects with a string id.', 'INVALID_PAYLOAD')
     })
   }
-  // 载荷收窄（headers）：值必须全为字符串，非字符串值与 models 元素同款显式
-  // INVALID_PAYLOAD 拒绝——静默过滤会让插件误以为非字符串头已生效，写入侧与插件
-  // 预期静默漂移（2026-10-25 审查回写：修复前为 filter 静默丢弃）。
   const rawHeaders = params.headers
-  let headers: Record<string, string> | undefined
-  if (rawHeaders !== undefined) {
-    if (typeof rawHeaders !== 'object' || rawHeaders === null || Array.isArray(rawHeaders)) {
-      throw errorWithCode('INVALID_PAYLOAD: providers.write headers must be a flat string record.', 'INVALID_PAYLOAD')
-    }
-    for (const [key, value] of Object.entries(rawHeaders as Record<string, unknown>)) {
-      if (typeof value !== 'string') {
-        throw errorWithCode(
-          `INVALID_PAYLOAD: providers.write headers['${key}'] must be a string (got ${typeof value}).`,
-          'INVALID_PAYLOAD',
-        )
-      }
-    }
-    headers = { ...(rawHeaders as Record<string, string>) }
+  if (rawHeaders !== undefined && (typeof rawHeaders !== 'object' || rawHeaders === null || Array.isArray(rawHeaders))) {
+    throw errorWithCode('INVALID_PAYLOAD: providers.write headers must be a flat string record.', 'INVALID_PAYLOAD')
   }
-  const displayName = asNonEmptyString(params.displayName)
+  const headers = rawHeaders === undefined ? undefined : Object.fromEntries(
+    Object.entries(rawHeaders as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+  )
 
   await deps.setProvider(providerId, {
-    ...(displayName !== undefined ? { name: displayName } : {}),
+    ...(asNonEmptyString(params.displayName) !== undefined ? { name: asNonEmptyString(params.displayName) } : {}),
     apiKey,
     ...(headers !== undefined ? { headers } : {}),
     ...(models !== undefined ? { models } : {}),
@@ -263,7 +246,7 @@ async function handleProviderCredential(deps: ProviderWriteProxyDeps, params: Re
       'PERMISSION_DENIED',
     )
   }
-  if (!manifest.capabilities.includes(PluginCapabilityConstants.NETWORK_HTTP)) {
+  if (!manifest.capabilities.includes('network.http')) {
     console.warn(
       `[provider-write-proxy] providers.credential denied at link 'capability': manifest of '${pluginId}' ` +
         `does not declare 'network.http' (declared: [${manifest.capabilities.join(', ')}]). ` +
@@ -309,10 +292,9 @@ async function handleProviderCredential(deps: ProviderWriteProxyDeps, params: Re
  * 是羊毛/插件域的宿主服务通道，归属本模块自包含。
  */
 export function registerProviderWriteProxy(rpcServer: PluginRpcServer, deps: ProviderWriteProxyDeps): void {
-  // 写落点广播（ISSUES-2 ⑧）：write/delete 成功 resolve 后经去抖调度触发 provider 列表
+  const notifyAfterMutation = createMutatedBroadcastScheduler(deps.notifyProvidersMutated)
   // 广播——handler 抛错（INVALID_PAYLOAD / NAMESPACE_MISMATCH / PERMISSION_DENIED）不触发，
   // broadcast 语义 = 「写成功」，与既有 config.setProvider/deleteProvider handler 的收尾一致。
-  const notifyAfterMutation = createMutatedBroadcastScheduler(deps.notifyProvidersMutated)
   rpcServer.registerMethod(PROVIDERS_WRITE_METHOD, (params, ctx) =>
     handleProviderWrite(deps, params, ctx).then((result) => {
       notifyAfterMutation()
@@ -327,34 +309,20 @@ export function registerProviderWriteProxy(rpcServer: PluginRpcServer, deps: Pro
 }
 
 /**
- * 组合根装配的插件清单读取器：descriptor.pluginPath 是 entry 文件（可能在 dist/ 子目录），
- * 包根 = 自 entry 目录向上第一个含 package.json 的祖先（npm 生态通用语义）。包根定位
- * 用共享实现 pkg-root（与 fork env 注入 / CJS 拦截器三处同源——ISSUES-2 ⑤）。
- * registry 以窄接口注入（{ getDescriptor } 子集），本模块不 import PluginRegistry 类型。
+ * 组合根装配的插件清单信息读取器：manifest 数据经 registry descriptor 注入
+ *（scan 已直读 package.json 装配 pkgName / capabilities——本读取器只做窄化投影，
+ * 不二次直读磁盘，services 层零 node:fs）。registry 以窄接口注入
+ *（{ getDescriptor } 子集），本模块不 import PluginRegistry 类型。pkgName 缺失/
+ * 空（畸形包形态）= undefined → fail-closed（与「未安装」同判，不猜测 ns）。
  */
 export function createPluginManifestReader(
-  registry: { getDescriptor(pluginId: string): { pluginPath: string } | undefined },
+  registry: { getDescriptor(pluginId: string): { pkgName?: string; capabilities?: readonly string[] } | undefined },
 ): (pluginId: string) => PluginManifestInfo | undefined {
   return (pluginId: string) => {
     const descriptor = registry.getDescriptor(pluginId)
     if (descriptor === undefined) return undefined
-    const pkgPath = join(findPackageRootDir(descriptor.pluginPath), 'package.json')
-    if (!existsSync(pkgPath)) return undefined
-    try {
-      const raw = JSON.parse(readFileSync(pkgPath, 'utf8')) as {
-        name?: unknown
-        taijiPlugin?: { capabilities?: unknown }
-      }
-      if (typeof raw.name !== 'string' || raw.name.length === 0) return undefined
-      const capabilities = raw.taijiPlugin?.capabilities
-      return {
-        pkgName: raw.name,
-        capabilities: Array.isArray(capabilities)
-          ? capabilities.filter((entry): entry is string => typeof entry === 'string')
-          : [],
-      }
-    } catch {
-      return undefined
-    }
+    const pkgName = asNonEmptyString(descriptor.pkgName)
+    if (pkgName === undefined) return undefined
+    return { pkgName, capabilities: descriptor.capabilities ?? [] }
   }
 }

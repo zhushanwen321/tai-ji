@@ -13,7 +13,7 @@
  * - TC6：message.complete 期间 ask-user pending 不误触发收起（isStreaming true→false 但 active 仍 true）
  * - TC8：subagent 后台跑（isSessionActive=true via working 态）→ 对话流不收起
  *
- * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/panel/turn-working.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel npx vitest run src/__tests__/panel/turn-working.test.ts（本文件登记在 domain-map.json panel 域，默认档被排除）
  *
  * 单文件多源合并（2 源同装载簇）：turn-working（本节，最大源，零 mock 纯 provide 注入
  * 形态）+ tray/tray-session-panel——mock 正交（tray 节 useSidebar selectSession 替身 +

@@ -1,6 +1,6 @@
 // journal schema v2 定形与 v1 兼容读映射的单测锁定（设计「待验证检查点 1」，
 // unified-delivery.impl-plan §0：检查点 1 → u2-delivery-port）。
-// 锁定面：① v2 outbox/ack data 字段定形与形态校验宽容度；② v1（notify 账本）
+// 锁定范围：① v2 outbox/ack data 字段定形与形态校验宽容度；② v1（notify 账本）
 // 映射函数全字段（notifyId→id / timing / customType 通道映射 / record→details）；
 // ③ 差集扫描基线（outbox 后写覆盖 / ack 双形态 / delivered details-id 双形态与
 // 接受域）。schema 漂移在此红。

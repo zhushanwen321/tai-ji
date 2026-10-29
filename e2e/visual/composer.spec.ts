@@ -43,11 +43,16 @@ test.describe('visual baseline: composer', () => {
     // 只等 composer-box 会把「托盘未挂载」静默照成基线，视觉层的断言对象必须显式在场。
     // s3 = 'API 性能优化'，mock 对该 session 有 workflow/subagent 历史记录 → 托盘挂 dim 条目。
     await expect(page.getByTestId('composer-tray')).toBeVisible({ timeout: 10_000 })
-    await expect(page.locator('[data-testid="tray-builtin-button"][data-kind="workflow"]')).toBeVisible()
+    // [plugin-container 统一后形态修正，2026-10-29 CI 实发] 原「workflow 内置按钮在场」断言
+    // 随容器扩展点统一（§6.6/U9+U10）过时：内置件收敛为 bash/session/canvas 三件，
+    // subagent/workflow 两件迁插件 widget 区（mock 环境无插件贡献，不渲染）——聚合单入口
+    // 只在 aggregated 密度档出现（本基线档内置按钮直接渲染），两者在此环境都不承担该断言。
+    // workflow 记录的托盘可见性由插件侧测试与真机走查承载。
     // [u7a / u7 已落地：回归断言] 第 4 件 session kind：mock fixture 给 s3 挂了 3 个
     // parentAgentSessionId='s3' 的子会话 → 托盘必须渲染 session 条目（计数 ● 3）。
     // 托盘条目存在性同时是视觉基线断言对象（底栏重排 + 第 4 件是本次基线变更驱动元素）。
     await expect(page.locator('[data-testid="tray-builtin-button"][data-kind="session"]')).toBeVisible()
+    await expect(page.locator('[data-testid="tray-builtin-count"]')).toHaveText('3')
     // settle：等 composer 渲染 + 动画平息 + bundled 字体就绪
     await page.waitForTimeout(1500)
     await fontsReady(page)

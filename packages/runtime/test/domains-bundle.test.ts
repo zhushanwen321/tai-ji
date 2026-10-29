@@ -498,8 +498,8 @@ describe('Task 2: Worker Sandbox (require 拦截)', () => {
     // fs.read-user-data 的 CJS 通道落地（2026-10-24 裁决）：拦截器对 fs / fs/promises
     // 按能力声明两态放行——声明含该名 → 放行（initSandbox 的 Module._load patch 返回
     // 只读代理对象，与 ESM 通道同语义）；未声明 → PERMISSION_DENIED（fail-closed）。
-    // 放行行为面（代理对象读写正反例）由 plugin-esm-loader.test.ts 的 buildProxyObject
-    // 组与 sandbox-escape 的 fork 门控组覆盖，这里锁定拦截器判定面。
+    // 放行行为集（代理对象读写正反例）由 plugin-esm-loader.test.ts 的 buildProxyObject
+    // 组与 sandbox-escape 的 fork 门控组覆盖，这里锁定拦截器判定。
     let pluginDir = ''
 
     beforeAll(() => {
@@ -3119,28 +3119,31 @@ describe('discovery-store', () => {
       }), 'utf-8')
       // 触发读取（deserialize 迁移到 v2）
       expect(getSkillPathScopes()).toEqual({ projectPaths: ['.agents/skills'], globalPaths: ['~/.pi/agent/skills'] })
-      // 一次写入把迁移结果落盘为 v2
-      setSkillDirs([proj('.agents/skills'), glob('~/.pi/agent/skills')])
+      // 一次写入把迁移结果落盘为 v2（写端经 partitionByScope 脏数据过滤：~/.pi/agent/skills
+      // 已移出预设（2026-10 taiji/pi 数据隔离），CI 无该目录会被过滤——写端 fixture 用仍属
+      // 预设的 ~/.agents/skills（豁免 existsSync，环境无关）；读端断言上方保留 pi 历史值）
+      setSkillDirs([proj('.agents/skills'), glob('~/.agents/skills')])
       invalidateDiscoveryCache()
       const onDisk = JSON.parse(readFileSync(discoveryPath, 'utf-8'))
       expect(onDisk.version).toBe(2)
-      expect(onDisk.skill).toEqual({ projectPaths: ['.agents/skills'], globalPaths: ['~/.pi/agent/skills'] })
+      expect(onDisk.skill).toEqual({ projectPaths: ['.agents/skills'], globalPaths: ['~/.agents/skills'] })
     })
   })
 
   describe('setSkillDirs / setAgentDirs / setExtensionDirs (SkillDirConfig[])', () => {
     it('按 scope 分发：project 路径进 projectPaths，global 路径进 globalPaths', () => {
-      setSkillDirs([proj('.agents/skills'), glob('~/.pi/agent/skills')])
-      expect(getSkillPathScopes()).toEqual({ projectPaths: ['.agents/skills'], globalPaths: ['~/.pi/agent/skills'] })
+      setSkillDirs([proj('.agents/skills'), glob('~/.agents/skills')])
+      expect(getSkillPathScopes()).toEqual({ projectPaths: ['.agents/skills'], globalPaths: ['~/.agents/skills'] })
       // 合并：project 在前
-      expect(getSkillDirs()).toEqual(['.agents/skills', '~/.pi/agent/skills'])
+      expect(getSkillDirs()).toEqual(['.agents/skills', '~/.agents/skills'])
     })
 
     it('writes skillDirs and preserves existing agentDirs', () => {
-      // 注：~/.claude/skills 已移出预设，不作为 preset 豁免用例（存在性过滤不确定性），改用 ~/.agents/skills
-      setSkillDirs([glob('~/.pi/agent/skills'), glob('~/.agents/skills')])
+      // 注：preset 豁免用例值必须用仍属预设的路径（~/.claude/skills、~/.pi/agent/skills
+      // 相继移出预设后，存在性过滤在无该目录的环境会吃掉条目——2026-10-29 CI 实发）
+      setSkillDirs([glob('~/.agents/skills')])
       setAgentDirs([glob('~/.agents/agents')])
-      expect(getSkillDirs()).toEqual(['~/.pi/agent/skills', '~/.agents/skills'])
+      expect(getSkillDirs()).toEqual(['~/.agents/skills'])
       expect(getAgentDirs()).toEqual(['~/.agents/agents'])
     })
 
@@ -3150,11 +3153,11 @@ describe('discovery-store', () => {
     })
 
     it('persists to disk as v2 (re-read via fresh cache after invalidate)', () => {
-      setSkillDirs([glob('~/.pi/agent/skills')])
+      setSkillDirs([glob('~/.agents/skills')])
       invalidateDiscoveryCache()
       const onDisk = JSON.parse(readFileSync(discoveryPath, 'utf-8'))
       expect(onDisk.version).toBe(2)
-      expect(onDisk.skill).toEqual({ projectPaths: [], globalPaths: ['~/.pi/agent/skills'] })
+      expect(onDisk.skill).toEqual({ projectPaths: [], globalPaths: ['~/.agents/skills'] })
     })
 
     it('keeps file when all six fields empty（全空 = 用户显式取消全部勾选，不被默认态复活）', () => {
@@ -3173,11 +3176,11 @@ describe('discovery-store', () => {
 
   describe('setExtensionDirs', () => {
     it('writes extensionDirs and preserves existing skillDirs/agentDirs', () => {
-      setSkillDirs([glob('~/.pi/agent/skills')])
+      setSkillDirs([glob('~/.agents/skills')])
       setAgentDirs([glob('~/.agents/agents')])
       setExtensionDirs([glob('~/.pi/agent/extensions')])
       expect(getExtensionDirs()).toEqual(['~/.pi/agent/extensions'])
-      expect(getSkillDirs()).toEqual(['~/.pi/agent/skills'])
+      expect(getSkillDirs()).toEqual(['~/.agents/skills'])
       expect(getAgentDirs()).toEqual(['~/.agents/agents'])
     })
 
@@ -5981,19 +5984,18 @@ describe('skill-dir-config buildDirConfigs', () => {
   })
 
   it('preset 全部未启用时，按 scope 分组追加（project preset 在前，global preset 在后）', () => {
-    // PRESET_SKILL_DIRS = ['~/.pi/agent/skills'(g), '~/.agents/skills'(g), '.agents/skills'(p)]
-    // （claude 已移出预设，2026-09：preset 成员恒在 UI 重挂导致 claude 行无法真正删除）
+    // PRESET_SKILL_DIRS = ['~/.agents/skills'(g), '.agents/skills'(p)]
+    // （claude 已移出预设 2026-09；~/.pi/agent/skills 已移出预设 2026-10——taiji/pi 数据隔离）
     const configs = buildDirConfigs(PRESET_SKILL_DIRS, { projectPaths: [], globalPaths: [] })
     expect(configs).toHaveLength(PRESET_SKILL_DIRS.length)
     expect(configs.every(c => c.enabled === false)).toBe(true)
-    // project preset（'.agents/skills'）在前，global preset（前两个）在后，各自内层按 preset 固定顺序
+    // project preset（'.agents/skills'）在前，global preset（'~/.agents/skills'）在后
     expect(configs.map(c => c.path)).toEqual([
       '.agents/skills',
-      '~/.pi/agent/skills',
       '~/.agents/skills',
     ])
     expect(configs.find(c => c.path === '.agents/skills')!.scope).toBe('project')
-    expect(configs.find(c => c.path === '~/.pi/agent/skills')!.scope).toBe('global')
+    expect(configs.find(c => c.path === '~/.agents/skills')!.scope).toBe('global')
   })
 
   it('discovery 启用顺序保留（= 用户拖拽优先级，靠前覆盖靠后）', () => {
@@ -6022,7 +6024,7 @@ describe('skill-dir-config buildDirConfigs', () => {
     expect(enabled[1]).toEqual({ path: tmpRealDir, enabled: true, scope: 'global' })
     // 之后是 project preset 未启用（'.agents/skills'），再 global preset 未启用
     const disabled = configs.filter(c => !c.enabled)
-    expect(disabled.map(c => c.path)).toEqual(['.agents/skills', '~/.pi/agent/skills', '~/.agents/skills'])
+    expect(disabled.map(c => c.path)).toEqual(['.agents/skills', '~/.agents/skills'])
   })
 
   it('agent preset 结构对称（PRESET_AGENT_DIRS）', () => {
@@ -6084,9 +6086,19 @@ describe('discovery-store setSkillDirs 脏数据写入过滤（v2 SkillDirConfig
     expect(getSkillDirs()).toEqual([realDir])
   })
 
-  it('preset 成员即使不存在也保留（推荐候选语义，豁免 existsSync）', () => {
-    setSkillDirs([glob_m2('~/.agents/skills'), glob_m2('~/.pi/agent/skills'), glob_m2('/path/a')])
-    expect(getSkillDirs()).toEqual(['~/.agents/skills', '~/.pi/agent/skills'])
+  it('preset 成员即使不存在也保留（推荐候选语义，豁免 existsSync）；已移出预设的路径按普通绝对路径过滤', () => {
+    // HOME 隔离：本机真实 ~/.pi/agent/skills 若存在，pi 路径会因「存在」而保留，测不出
+    // 「非成员被过滤」语义（2026-10-29 CI 实发）——pi 路径已移出预设（taiji/pi 数据隔离）
+    const realHome = process.env.HOME
+    const fakeHome = mkdtempSync(join(tmpdir(), 'skill-home-preset-'))
+    process.env.HOME = fakeHome
+    try {
+      setSkillDirs([glob_m2('~/.agents/skills'), glob_m2('~/.pi/agent/skills'), glob_m2('/path/a')])
+      expect(getSkillDirs()).toEqual(['~/.agents/skills'])
+    } finally {
+      process.env.HOME = realHome
+      rmSync(fakeHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
   })
 
   it('相对路径不检查存在性（project scope，无 cwd 上下文）', () => {
@@ -6125,12 +6137,12 @@ describe('discovery-store setSkillDirs 脏数据写入过滤（v2 SkillDirConfig
     expect(getSkillDirs()).toEqual(['.agents/skills', realDir, '~/.agents/skills'])
   })
 
-  it('文件缺失（ENOENT）→ 读回落到默认态：preset 全勾（pi + taiji，无 claude）', () => {
-    // 新装 / 首启：discovery.json 不存在时，UI 打开即见 pi+taiji 目录默认勾选，无需手动配置。
+  it('文件缺失（ENOENT）→ 读回落到默认态：preset 全勾（.agents 约定，无 claude/pi）', () => {
+    // 新装 / 首启：discovery.json 不存在时，UI 打开即见 .agents 约定目录默认勾选，无需手动配置。
     setDiscoveryPath(join(discoveryTmpDir, 'nonexistent', 'discovery.json'))
     const scopes = getSkillPathScopes()
     expect(scopes.projectPaths).toEqual(['.agents/skills'])
-    expect(scopes.globalPaths).toEqual(['~/.pi/agent/skills', '~/.agents/skills'])
+    expect(scopes.globalPaths).toEqual(['~/.agents/skills'])
     // agent / extension 同构默认勾选
     expect(getAgentPathScopes().globalPaths).toContain('~/.pi/agent/agents')
     expect(getExtensionPathScopes().projectPaths).toEqual(['.pi/extensions', '.taiji/extensions'])
@@ -6389,7 +6401,7 @@ describe('migrateSettingsSkillsToDiscovery', () => {
     migrateSettingsSkillsToDiscovery()
     // no-op 语义不变：迁移不写 discovery.json；文件缺失时读端回落 DEFAULT_DISCOVERY_CONFIG
     // （feat: discovery scan dirs default-enabled），skill preset 默认勾选 → 非空。
-    expect(getSkillPaths()).toEqual(['.agents/skills', '~/.pi/agent/skills', '~/.agents/skills'])
+    expect(getSkillPaths()).toEqual(['.agents/skills', '~/.agents/skills'])
   })
 
   it('旧路径父目录不是容器（无 SKILL.md 子目录）→ 过滤掉', () => {
@@ -6403,7 +6415,7 @@ describe('migrateSettingsSkillsToDiscovery', () => {
 
     // 非容器被正确过滤（未写入 discovery）；迁移无有效产物提前 return 不写盘，
     // 读端回落 DEFAULT_DISCOVERY_CONFIG 默认勾选（feat: default-enabled）→ 非空。
-    expect(getSkillPaths()).toEqual(['.agents/skills', '~/.pi/agent/skills', '~/.agents/skills'])
+    expect(getSkillPaths()).toEqual(['.agents/skills', '~/.agents/skills'])
   })
 
   it('迁移后 discovery 为 v2 结构（容器进 globalPaths）', () => {
@@ -7662,8 +7674,8 @@ describe('SessionService.getSubagentHistory', () => {
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), 'subagent-hist-'))
-    // 隔离数据目录到 tempDir，使 getPiAgentDir() 返回 tempDir/agent —— 测试文件写入真实
-    // piAgentDir 下（getSubagentHistory W-R1 路径穿越校验），又不污染真实 ~/.taiji。
+    // 隔离数据目录到 tempDir，使守卫锚 getSessionStoreDir(getDataDir()) 落在 tempDir 内
+    //（getSubagentHistory 路径穿越校验），又不污染真实 ~/.taiji。
     prevDataDir = process.env.TAIJI_AGENT_DATA_DIR
     process.env.TAIJI_AGENT_DATA_DIR = tempDir
   })
@@ -7676,9 +7688,10 @@ describe('SessionService.getSubagentHistory', () => {
 
   it('reads subagent JSONL and converts to Message[]', async () => {
     const mainSessionFile = join(tempDir, 'main.jsonl')
-    // subagent JSONL 必须落在 piAgentDir 下（getSubagentHistory W-R1 路径穿越校验）。
-    // 真实 subagent 文件由 pi-subagent-workflow 写入 getSubagentSessionDir(mainCwd)，位于 piAgentDir 内。
-    const subagentDir = join(getPiAgentDir(), 'subagents', 'mock-subagent-hist')
+    // subagent JSONL 必须落在 session 存储树（<dataDir>/ext-sessions/）下（getSubagentHistory
+    // 路径穿越校验锚，[session-store-layout-inversion] 后合法根 = 会话存储树）。
+    // 真实 subagent 文件由 pi 写入 <ext-sessions>/<rootSid>/subagents/sessions/。
+    const subagentDir = join(tempDir, 'ext-sessions', MAIN_SESSION_ID, 'subagents', 'sessions', 'mock-subagent-hist')
     mkdirSync(subagentDir, { recursive: true })
     const subagentFile = join(subagentDir, 'subagent.jsonl')
 

@@ -18,6 +18,7 @@ import { registerImageCacheHandlers } from '../images/image-cache-ipc.js'
 import { registerLogRetentionDebugHandler } from '../logs/log-retention-ipc.js'
 import { registerDiagnosticsExportHandler } from '../diagnostics/diagnostics-export-ipc.js'
 import { registerSessionExportHandler } from '../sessions/session-export-ipc.js'
+import { registerQuotaCookieRefreshHandler } from '../quota/quota-cookie-ipc.js'
 
 /**
  * 注册所有 IPC handlers（特权 + 桥接 + browser drawer + 自动升级（含代理配置） + 系统提示音
@@ -45,4 +46,7 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): void {
   // 会话 JSONL 导出（右键菜单入口，源路径三树校验 +
   // 保存对话框由 main 弹出，fs.promises.copyFile 直复制）
   registerSessionExportHandler()
+  // cookie 登录态刷新（设置页入口：隐藏窗口加载平台页轮询 API，导出 cookie 写回
+  // secrets 文件；无 deps 注入面，dataDir 经 @taiji/shared/paths 推导）
+  registerQuotaCookieRefreshHandler()
 }

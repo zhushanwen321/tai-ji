@@ -3,8 +3,8 @@
  * （happy-dom；四原文件均默认环境；fileTree 为 round5 产物）。
  *
  * 并入来源（基名）：
- *  - subagent（subagent store 全行为面 + streaming 订阅生命周期，44 例）
- *  - workflow（workflow store 全行为面 + 拉取收敛，38 例）
+ *  - subagent（subagent store 全行为集 + streaming 订阅生命周期，44 例）
+ *  - workflow（workflow store 全行为集 + 拉取收敛，38 例）
  *  - fileTree（round5 产物：fileTree store 结构/git overlay/徽章 + B/M 系 chat 联动，46 例）
  *  - list-load-error（三列表加载错误态，4 例）
  *
@@ -19,7 +19,7 @@
  *    四节链上门面其余域真成员保留（quota/extension 等），原砍成员版未触的域不受影响。
  *  - transport/api：subagent 中部砍成员 {on} 与 list-load 砍成员 {on,dispatchSession,
  *    dispatchGlobal,onGlobalType} → 统一并集工厂。经 grep 核实链上仅 stores/subagent.ts
- *    消费该模块（events.on），四成员覆盖全部消费面。
+ *    消费该模块（events.on），四成员覆盖全部消费场景。
  *  - useToast（fileTree 节）：砍成员 error spy——subagent/workflow/list-load 节与
  *    store 链经 grep 核实无 useToast 消费（error 成员在场兜底）。
  *  - 各文件级 beforeEach 已下沉进各自 describe（subagent/workflow/list-load 含
@@ -41,7 +41,7 @@ import type { NormalizedQuotaRow } from '@taiji/shared'
 import type { ServerMessageMap, WorkflowRunRecord, SubagentRecord } from '@taiji/shared'
 import { agentCallVirtualId } from '@taiji/shared'
 
-// ── 共享 mock 替身（正文引用面 hoisted）──
+// ── 共享 mock 替身（供正文引用，vi.hoisted 提升）──
 const listMock = vi.hoisted(() => vi.fn(() => Promise.resolve([])))
 const getWorkflowsMock = vi.hoisted(
   () =>
@@ -99,6 +99,9 @@ vi.mock('@taiji/core/transport/api', () => ({
   dispatchSession: vi.fn(),
   dispatchGlobal: vi.fn(),
   onGlobalType: vi.fn(() => () => {}),
+  // [session-cold-switch-perf §3.3-3] historyCacheReady 订阅经 crossSession 通道
+  // （session-api-port.onHistoryCacheReady 消费），mock 须提供
+  onCrossSession: vi.fn(() => () => {}),
 }))
 
 vi.mock('@/composables/useToast', () => ({
@@ -2232,7 +2235,7 @@ describe('useQuotaStore', () => {
   beforeEach(() => setActivePinia(createPinia()))
 
   const mockRow: NormalizedQuotaRow = {
-    label: '智谱 GLM Coding Plan',
+    label: 'Zhipu Coding Plan',
     wins: [
       { pct: 68, resetSec: 4980 },
       { pct: 42, resetSec: 266400 },

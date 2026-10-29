@@ -287,6 +287,19 @@ function emptyReattachReport(): ReattachReport {
 }
 
 /**
+ * 编排期活跃标记（session-cold-switch-perf §3.3-6 让位检查的查询点）：预热槽补位 spawn
+ * 与本编排期（checkpoint 读 → 孤儿收割等待 → 高水位轮询 → 分批恢复）重叠时推迟。计数
+ * 形态防重入误清；runStartupReattach 零动作早退（无 checkpoint）同样瞬时进出，不产生
+ * 恒 busy 误让位。
+ */
+let activeOrchestrations = 0
+
+/** startup-reattach 编排是否正在执行（预热槽补位的让位检查消费点）。 */
+export function isStartupReattachActive(): boolean {
+  return activeOrchestrations > 0
+}
+
+/**
  * 执行 reattach 编排（一次性；组合根 listen 后 fire-and-forget 调用）。
  * 本函数不抛（内部逐步容错），返回编排报告供日志与测试断言。阶段实现拆分至下方
  * 阶段函数（partitionSnapshot / waitForOrphanReap / waitForMemPressureClear /
@@ -295,6 +308,18 @@ function emptyReattachReport(): ReattachReport {
 export async function runStartupReattach(
   deps: StartupReattachDeps,
   options: StartupReattachOptions = {},
+): Promise<ReattachReport> {
+  activeOrchestrations++
+  try {
+    return await runStartupReattachOrchestrating(deps, options)
+  } finally {
+    activeOrchestrations--
+  }
+}
+
+async function runStartupReattachOrchestrating(
+  deps: StartupReattachDeps,
+  options: StartupReattachOptions,
 ): Promise<ReattachReport> {
   const ctx = createReattachContext(deps, options)
   const report = emptyReattachReport()

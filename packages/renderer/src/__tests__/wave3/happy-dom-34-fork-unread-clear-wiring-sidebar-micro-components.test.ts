@@ -56,6 +56,9 @@ vi.mock('@taiji/core/transport/api/domains/chat', () => ({
 vi.mock('@taiji/core/transport/api', () => ({
   on: vi.fn(() => () => {}),
   onGlobalType: vi.fn(() => () => {}),
+  // [session-cold-switch-perf §3.3-3] historyCacheReady 订阅经 crossSession 通道
+  // （session-api-port.onHistoryCacheReady 消费），mock 须提供
+  onCrossSession: vi.fn(() => () => {}),
   dispatchSession: vi.fn(),
 }))
 vi.mock('@taiji/core/transport/api/domains/file', () => ({ tree: vi.fn().mockResolvedValue({}) }))
@@ -237,7 +240,7 @@ describe('Brand DEV 徽标', () => {
 function mountTab(props: Partial<{ modelValue: SidebarTab; sessionCount: number; fileCount: number }> = {}) {
   return mount(SegmentedTab, {
     props: {
-      modelValue: 'sessions' as SidebarTab,
+      modelValue: 'ui.sessions' as SidebarTab,
       sessionCount: 0,
       fileCount: 0,
       ...props,
@@ -274,7 +277,7 @@ describe('SegmentedTab', () => {
   })
 
   it('文字 tab 形态：不渲染 icon svg 与 count 数字（demo .vtab，count props 保留外部契约）', () => {
-    const wrapper = mountTab({ sessionCount: 3, fileCount: 6, modelValue: 'sessions' })
+    const wrapper = mountTab({ sessionCount: 3, fileCount: 6, modelValue: 'ui.sessions' })
 
     const buttons = wrapper.findAll('button')
     expectTextOnlyTabs(buttons, ['3', '6'])
@@ -288,11 +291,11 @@ describe('SegmentedTab', () => {
 
     const emitted = wrapper.emitted('update:modelValue')
     expect(emitted).toBeTruthy()
-    expect(emitted![0][0]).toBe('files')
+    expect(emitted![0][0]).toBe('ui.files')
   })
 
   it('tablist 范式（spec sidebar §3.1）：容器 role=tablist + 钮 role=tab + aria-selected', () => {
-    const wrapper = mountTab({ modelValue: 'files' })
+    const wrapper = mountTab({ modelValue: 'ui.files' })
 
     expect(wrapper.find('[role="tablist"]').exists()).toBe(true)
     const buttons = wrapper.findAll('button')
@@ -302,26 +305,26 @@ describe('SegmentedTab', () => {
   })
 
   it('方向键环形移动并立即激活（spec §3.1：→ 下一视图、← 上一视图、首尾环形）', async () => {
-    const wrapper = mountTab({ modelValue: 'sessions' })
+    const wrapper = mountTab({ modelValue: 'ui.sessions' })
     const tablist = wrapper.find('[role="tablist"]')
 
     // → 自会话到文件
     await tablist.trigger('keydown', { key: 'ArrowRight' })
-    expect(wrapper.emitted('update:modelValue')![0][0]).toBe('files')
-    await wrapper.setProps({ modelValue: 'files' })
+    expect(wrapper.emitted('update:modelValue')![0][0]).toBe('ui.files')
+    await wrapper.setProps({ modelValue: 'ui.files' })
 
     // → 自文件到插件（立即激活随 modelValue 推进）
     await tablist.trigger('keydown', { key: 'ArrowRight' })
-    expect(wrapper.emitted('update:modelValue')![1][0]).toBe('plugins')
-    await wrapper.setProps({ modelValue: 'plugins' })
+    expect(wrapper.emitted('update:modelValue')![1][0]).toBe('ui.plugins')
+    await wrapper.setProps({ modelValue: 'ui.plugins' })
 
     // → 自插件环形回会话（尾首相接）
     await tablist.trigger('keydown', { key: 'ArrowRight' })
-    expect(wrapper.emitted('update:modelValue')![2][0]).toBe('sessions')
-    await wrapper.setProps({ modelValue: 'sessions' })
+    expect(wrapper.emitted('update:modelValue')![2][0]).toBe('ui.sessions')
+    await wrapper.setProps({ modelValue: 'ui.sessions' })
 
     // ← 自会话环形回插件（反向环绕）
     await tablist.trigger('keydown', { key: 'ArrowLeft' })
-    expect(wrapper.emitted('update:modelValue')![3][0]).toBe('plugins')
+    expect(wrapper.emitted('update:modelValue')![3][0]).toBe('ui.plugins')
   })
 })

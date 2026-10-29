@@ -18,7 +18,9 @@
  *
  * 运行：
  *   cd packages/renderer && npx vitest run src/__tests__/composables/rd5-hardening.test.ts
- *   cd packages/renderer && npx vitest run src/__tests__/terminal/terminal-view-spawn-error.test.ts
+ *   node scripts/run-domain-tests.mjs terminal（RD-5#2 用例已随 terminal-view-spawn-error.test.ts
+ *   并入 landing-terminal-traffic.test.ts——该文件登记在 domain-map.json terminal 域，
+ *   默认档被排除，须域档触发）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { ref } from 'vue'

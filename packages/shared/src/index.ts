@@ -63,6 +63,13 @@ export type {
   // 两段式安装 reply（provider-plugin-access U4/U6）：确认卡知情面 + 提交结果
   //（core plugin 域 preparePluginInstall/confirmPluginInstall 跨包具名消费）
   PluginPrepareInstallReply, PluginConfirmInstallReply,
+  // 连接目标快照 + project 写命令统一回执（connection-datasync-ssot u-foundation）：
+  // 快照形状 = supervisor 生产（main/preload IPC 链）与 core 连接控制器消费跨包共用；
+  // 命令回执 = runtime 写通道（u6a）与 renderer project store（u5）跨包共用
+  RuntimeTargetSnapshot, ProjectCommandReply,
+  // project.load 回执（connection-datasync-ssot u6a）：状态整表 + revision 水位——
+  // core mock project 域 / renderer project store 首发命令 revision 来源，跨包共用
+  ProjectLoadReply,
 } from './protocol'
 // 消息撤回（U3）：__taiji_nav__ 信令命令名常量——U4 runtime 编排跨包消费；
 // 本文件对 protocol.ts 是显式 allowlist（非 export *），漏登记会使常量对下游不可达。
@@ -250,11 +257,16 @@ export type { ProviderApiType } from './constants'
 // 但 renderer 严禁调用（process 未定义 ReferenceError）；main / runtime 专用，
 // 完整警示见 constants.ts 内 JSDoc。
 export { OUTBOUND_FRAME_WARN_BYTES, OUTBOUND_FRAME_TRUNCATE_BYTES, PLUGIN_EVENT_PAYLOAD_MAX_BYTES, RING_BUDGET_BYTES, READ_PRECHECK_MAX_BYTES, BYTES_PER_MB, HISTORY_BUDGET, DEFAULT_LOG_KEEP_DAYS, readLogKeepDays, RUNTIME_PLANNED_EXIT_CODE } from './constants'
+// runtime 实例标识 env 名（connection-datasync-ssot §6.1：main spawn 注入方与
+// runtime auth 应答读取方跨包共用，禁字面量分叉）。
+export { RUNTIME_ID_ENV } from './constants'
 // Electron IPC 通道名 SSOT（u-foundation：全量 invoke / 推送通道常量——preload 与
 // main 两侧注册 import 消费，renderer 经 preload electronAPI 方法面间接使用）。
 export {
   RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE, SESSION_EXPORT_JSONL, LOCAL_FILE_SERVABLE, LOCAL_FILE_READ,
-  RUNTIME_PORT, RUNTIME_ERROR, RUNTIME_RESTARTING, RUNTIME_FAILED, GET_RUNTIME_PORT, GET_RUNTIME_PORT_OFFSET, GET_RUNTIME_TOKEN, GET_RUNTIME_START_ERROR, RUNTIME_RESTART,
+  RUNTIME_PORT, RUNTIME_ERROR, RUNTIME_RESTARTING, RUNTIME_FAILED, GET_RUNTIME_START_ERROR, RUNTIME_RESTART,
+  // 连接目标快照读口（connection-datasync-ssot §6.1，u1 同批接线 preload / renderer ipc）
+  GET_RUNTIME_TARGET_SNAPSHOT,
   CREATE_WINDOW, GET_WINDOWS, FOCUS_WINDOW, WINDOW_LIST_UPDATED, WINDOW_MINIMIZE, WINDOW_TOGGLE_MAXIMIZE, WINDOW_CLOSE, FULLSCREEN_CHANGED,
   PICK_DIRECTORY, PICK_FILE, OPEN_EXTERNAL, REVEAL_IN_FOLDER, GET_DATA_DIR,
   SHORTCUT, SHORTCUT_FORWARD,
@@ -262,6 +274,7 @@ export {
   UPDATE_CHECK, UPDATE_DOWNLOAD, UPDATE_INSTALL, UPDATE_GET_PRELOADED, UPDATE_GET_LAUNCH_RESULT, UPDATE_GET_PROXY_CONFIG, UPDATE_SET_PROXY_CONFIG, UPDATE_TEST_PROXY, UPDATE_GET_PENDING, UPDATE_GET_SETTINGS, UPDATE_SET_SETTINGS, UPDATE_OPEN_MANUAL_DIR, UPDATE_PROGRESS, UPDATE_ERROR,
   GET_REMOTE_ACCESS_INFO, ROTATE_REMOTE_ACCESS_TOKEN, SET_REMOTE_ACCESS_ENABLED,
   SOUND_LIST, SOUND_PLAY,
+  QUOTA_REFRESH_COOKIE,
 } from './ipc-channels'
 // local-file 预检 / 源码读取通道 payload 类型（chat-html-support §6.9 D9：preload 两文件 /
 // renderer lib/ipc / main local-file-prefixes 四方共用同一形态声明——C-comm-22 唯一类型源）。
@@ -312,6 +325,9 @@ export type { OverlayContentKind } from './ipc-payloads'
 // browser:state view 状态推送载荷（display-containers W2：main 组装点 / preload
 // ElectronAPI 签名 / renderer ipc 封装三方共用同一形态声明，防漂移）。
 export type { BrowserFrameState } from './ipc-payloads'
+// quota:refresh-cookie 通道契约（请求 payload / 返回类型——main quota handler、
+// preload ElectronAPI 签名与 renderer 刷新入口三方共用同一形态声明，防漂移）。
+export type { QuotaRefreshCookiePayload, QuotaRefreshCookieResult } from './ipc-payloads'
 // 崩溃条目清单事件 Schema SSOT（docs/architecture/crash-forensics-and-watchdog.md §3.3 D1，
 // 实施计划 u1a：layer/event/reason 枚举 + 字段集 + writer 接口——u1b runtime 与
 // u1c main 两 writer 共用，禁止复制定义；纯类型/常量无 node 依赖，barrel 安全）。
@@ -358,6 +374,16 @@ export * from './file-tree'
 export * from './local-file-url'
 export type { RecentWorkspaceRecord } from './workspace'
 export type { Project, ProjectStoreState } from './project'
+// 默认项目领域规则（connection-datasync-ssot §6.6① 归一化迁 runtime）：id 常量 + 工厂
+// （makeDefaultProject）+ 谓词（isDefaultProjectOf）+ 归一化纯函数（normalizeProjectState）
+// ——runtime ProjectStore / renderer project store / core mock 三方共用的单一登记处，
+// 跨包禁止手抄副本（工厂/谓词/回退链副本收敛见 dmg-r2-2）。
+export {
+  DEFAULT_PROJECT_ID,
+  makeDefaultProject,
+  isDefaultProjectOf,
+  normalizeProjectState,
+} from './project'
 // [subagent-observability §3.3.3⑤] FailureCause 族 = sdk 权威的 type-only re-export
 // （subagent.ts 内转出口；wire 载体 = SubagentRecord.lastRound.failure，renderer 红点
 // 判据与 u8 测试的数据源）。SubagentLastRound = 轮收条事实快照契约（F4）。
@@ -434,9 +460,13 @@ export type {
   QuotaCredentialSource,
   QuotaConfigurePayload,
 } from './quota-types'
-export { extractQuotaWorkspaceId, normalizeQuotaParamValue, normalizeCookieHeader, resolveQuotaCredentialSource, supportsExclusiveCredential, formatQuotaPct, QUOTA_PCT_DECIMALS } from './quota-types'
+export { extractQuotaWorkspaceId, normalizeQuotaParamValue, normalizeCookieHeader, mergeCookieHeader, resolveQuotaCredentialSource, supportsExclusiveCredential, formatQuotaPct, QUOTA_PCT_DECIMALS } from './quota-types'
 export type { QuotaPreset, QuotaParamSpec } from './quota-presets'
 export { QUOTA_PRESETS, isQuotaPreset, matchQuotaPreset, resolveQuotaPresets } from './quota-presets'
+// cookie 登录态刷新目标（quota:refresh-cookie 通道的导航信息 SSOT：main 隐藏窗口
+// 刷新器与 renderer 入口判定共用，与 runtime baseline-fetchers 的请求解析规则分治）
+export type { QuotaRefreshTarget, QuotaFetcherProviderLike } from './quota-refresh-targets'
+export { QUOTA_REFRESH_TARGETS, getQuotaRefreshTarget, resolveQuotaFetcherId } from './quota-refresh-targets'
 // 语音合成朗读（TTS）契约类型（ai-voice-tts 设计 §7.1/§7.3；协议载荷形状 SSOT，纯类型无 node 依赖）
 export type {
   TtsProviderId,
@@ -597,7 +627,7 @@ export { displayAgentName, displayWorkflowName } from './display-name'
 // 推导与 wire 形态检查——runtime 快照存储 / core 渲染缓存 / renderer bridge 三方共用
 // 的跨包契约（type 与可执行函数同源单模块）。
 export type { PluginViewScope, SessionViewScope, GlobalViewScope } from './plugin-view-scope'
-export { pluginViewScopeKey, pluginViewScopeFromWire } from './plugin-view-scope'
+export { pluginViewScopeKey, pluginViewScopeMountPrefix, pluginViewScopeFromWire } from './plugin-view-scope'
 // session occupancy 域（chat-flow-consistency D1 契约根）：turn 相位值域 + 「回合进行中」
 // 判定集合与函数（laneOf 投递判定 / 发送位形态与角标 / Alt+⏎ 分流 / 活动条 / 前端回合判定
 // 统一引用）。形状 SSOT = ./session-occupancy，protocol.ts 的 'session.occupancy' 帧内联引用

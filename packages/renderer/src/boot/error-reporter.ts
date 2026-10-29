@@ -20,6 +20,9 @@
  * 时通道整体消失、错误可整体蒸发。现 report ① 必写 console.error（console 留现场）② 入环形
  * 缓冲（≤50，按 message 去重计数）③ 经 reportRendererLog 交付并按其返回的交付信号在通道恢复
  * 后回放滞留条目（lib/ipc 侧配套：无 IPC / reject / 同步抛错均返 false 而非静默吞）。
+ *
+ * **D5 RO loop 告警聚合**：window-onerror 来源、无堆栈且文本命中浏览器内置 RO loop 固定
+ * 告警串的条目不逐条转发——窗内计数，窗尾一条含次数的汇总（退役条件见该 section 注释）。
  */
 import type { App } from 'vue'
 import type { RendererErrorSource, RendererLogPayload, RendererMemorySnapshot } from '@taiji/shared'
@@ -155,10 +158,39 @@ async function replayBuffer(): Promise<void> {
   }
 }
 
+/**
+ * 常规转发（report 与聚合汇总共用）：console 显形 + 环形缓冲 + 交付（成功则回放滞留）。
+ * detail 为原始错误对象（聚合汇总无此形态，省略后 console 不输出 undefined 占位）。
+ */
+function emitPayload(payload: RendererLogPayload, detail?: unknown): void {
+  // RD-3#8 ① console.error 显形：即便 IPC 通道消失（无 electronAPI / invoke reject），
+  // renderer 侧错误仍在 console 留现场（修复「全链静默、不写 console」）。
+  console.error(
+    `[renderer-error] source=${payload.source}:`,
+    payload.message,
+    ...(detail !== undefined ? [detail] : []),
+  )
+  // RD-3#8 ② 环形缓冲 + 按 message 去重计数：通道不可用期错误不丢，可回放 + 崩溃前取证。
+  const entry = bufferError(payload)
+  // RD-3#8 ③ 交付当前这条（同步调用 api，保持「每 report 一次同步上报」既有可观测行为）；
+  // 成功则标记 delivered 并回放此前滞留条目（通道恢复），失败则留缓冲待下次成功时回放。
+  void reportRendererLog(payload).then((delivered) => {
+    if (delivered) {
+      entry.delivered = true
+      void replayBuffer()
+    }
+  })
+}
+
 function report(source: RendererErrorSource, err: unknown, vueInfo?: string): void {
   try {
     const message = formatMessage(err, vueInfo)
     if (!message) return
+    // D5 聚合降噪：RO loop 无堆栈固定告警只入窗计数（窗尾一条汇总），不逐条转发
+    if (isRoLoopNoiseHit(source, message, err)) {
+      countRoLoopNoise()
+      return
+    }
     const payload: RendererLogPayload = {
       source,
       message,
@@ -167,23 +199,79 @@ function report(source: RendererErrorSource, err: unknown, vueInfo?: string): vo
       ...(extractStack(err) !== undefined ? { stack: extractStack(err) } : {}),
       ...(readMemorySnapshot() !== undefined ? { memory: readMemorySnapshot() } : {}),
     }
-    // RD-3#8 ① console.error 显形：即便 IPC 通道消失（无 electronAPI / invoke reject），
-    // renderer 侧错误仍在 console 留现场（修复「全链静默、不写 console」）。
-    console.error(`[renderer-error] source=${source}:`, message, err)
-    // RD-3#8 ② 环形缓冲 + 按 message 去重计数：通道不可用期错误不丢，可回放 + 崩溃前取证。
-    const entry = bufferError(payload)
-    // RD-3#8 ③ 交付当前这条（同步调用 api，保持「每 report 一次同步上报」既有可观测行为）；
-    // 成功则标记 delivered 并回放此前滞留条目（通道恢复），失败则留缓冲待下次成功时回放。
-    void reportRendererLog(payload).then((delivered) => {
-      if (delivered) {
-        entry.delivered = true
-        void replayBuffer()
-      }
-    })
+    emitPayload(payload, err)
   } catch (reportErr) {
     // best-effort 兜底：连 message 组装都失败时退一条最小 console.error 留痕，不再递归上报
     // （错误捕获器自身零抛错 = D2 降级契约，任何环节异常都不得成为新崩溃源）。
     console.error('[renderer-error] report assembly failed', reportErr)
+  }
+}
+
+// ── D5 RO loop 告警聚合降噪 ────────────────────────────────────────
+// RO loop 告警是浏览器在单帧观察者广播超限时派发的无堆栈固定告警，流式高频场景逐条
+// 转发会把 renderer-error 日志放大到淹没真实错误。命中条目改为聚合：窗口内只计数，
+// 窗尾输出一条含次数的汇总（console + 落盘各一条）；非命中条目（含同文本但带堆栈的
+// 真错误）逐条转发行为完全不变。
+// 退役条件（设计 D5 登记）：数据信号主触发落地且真机验证该告警归零后，随下一次
+// error-reporter 维护删除本聚合分支。
+
+/** 聚合判据锚点：浏览器内置 RO loop 告警文本（规范化比对基准）。 */
+const RO_LOOP_NOISE_TEXT = 'ResizeObserver loop completed with undelivered notifications'
+
+/** 聚合窗口时长（毫秒）：窗内命中只计数，窗尾输出一条汇总（设计 D5「每分钟一条」）。 */
+const RO_LOOP_AGGREGATE_WINDOW_MS = 60_000
+
+/** 聚合窗口时长（秒）：汇总文案显示用（上一常量的秒制值，改窗长时两处同改）。 */
+const RO_LOOP_AGGREGATE_WINDOW_S = 60
+
+/** 聚合窗状态（模块级，跨 report 调用共享；vi.resetModules 后重置）。 */
+let roLoopAggregateTimer: ReturnType<typeof setTimeout> | null = null
+let roLoopAggregateCount = 0
+
+/**
+ * 命中判定（三条件缺一不可）：window-onerror 来源 ∧ 无堆栈 ∧ 文本规范化后与固定告警串全等。
+ * 规范化（trim + 去 Uncaught 前缀 + 去尾句点）覆盖浏览器派发形态的前后缀噪声；全等比对
+ * （非子串包含）确保消息里恰好含该串的其他错误不被误聚合。带堆栈的同文本错误不命中——
+ * 聚合只针对无堆栈噪声条目，不吞真错误。
+ */
+function isRoLoopNoiseHit(source: RendererErrorSource, message: string, err: unknown): boolean {
+  if (source !== 'window-onerror') return false
+  if (extractStack(err) !== undefined) return false
+  return normalizeNoiseText(message) === RO_LOOP_NOISE_TEXT
+}
+
+function normalizeNoiseText(message: string): string {
+  return message
+    .trim()
+    .replace(/^Uncaught\s+/i, '')
+    .replace(/\.$/, '')
+}
+
+/** 命中入窗：首命中开窗并安排窗尾汇总，窗内只累计次数。 */
+function countRoLoopNoise(): void {
+  if (roLoopAggregateTimer === null) {
+    roLoopAggregateTimer = setTimeout(flushRoLoopNoiseAggregate, RO_LOOP_AGGREGATE_WINDOW_MS)
+  }
+  roLoopAggregateCount += 1
+}
+
+/** 窗尾汇总：一条含次数的条目走常规转发通道（emitPayload），随后复位等待下一窗。 */
+function flushRoLoopNoiseAggregate(): void {
+  roLoopAggregateTimer = null
+  const count = roLoopAggregateCount
+  roLoopAggregateCount = 0
+  if (count <= 0) return
+  try {
+    emitPayload({
+      source: 'window-onerror',
+      message: `${RO_LOOP_NOISE_TEXT} x${count} within ${RO_LOOP_AGGREGATE_WINDOW_S}s (aggregated summary)`,
+      timestamp: Date.now(),
+      ...(readActiveSessionId() !== undefined ? { sessionId: readActiveSessionId() } : {}),
+    })
+  } catch (flushErr) {
+    // best-effort 降级：窗尾汇总组装/转发失败只留 console 痕迹、不重抛——丢一条汇总
+    // 不影响后续窗口聚合，三件套自身零抛错契约（D2）优先于汇总必达。
+    console.error('[renderer-error] ro-loop aggregate flush failed', flushErr)
   }
 }
 

@@ -14,7 +14,7 @@
  *  [C3] 测试打 seam 不 mock 路由链）替换 10 个 worktree API；
  *  i18n 经 vitest-i18n-setup 全局解析 zh-CN。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/settings/worktree-page.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=settings npx vitest run src/__tests__/settings/worktree-page.test.ts（本文件登记在 domain-map.json settings 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, DOMWrapper } from '@vue/test-utils'

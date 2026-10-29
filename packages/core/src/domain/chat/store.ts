@@ -133,6 +133,23 @@ function attachRunningToolCall(prev: Message[], form: PiToolCallEntryForm): Mess
  * 同源命中（不双计）；真实失配域仅 sidecar 丢失的兜底反解析路径（剥块残留分隔空白
  * 等字节差，含 skill chip 消息）。
  */
+/** 消息的文件侧身份（piEntryId 优先，缺省回退消息 id）——窗口切分锚与基线前置判定的共同读法。 */
+function fileSideId(m: Message): string {
+  return m.piEntryId ?? m.id
+}
+
+/**
+ * [u6] 窗口合并切分锚（reconcileHistory 消费）：window.truncated（窗口响应）时，窗口基线
+ * 首条的文件侧身份在分区中的下标——锚之前的分区消息属「已加载的更早历史」，保留不动，
+ * 仅锚及之后被响应刷新。返回 ≤0 = 无更早历史可保留（0 = 分区无更早历史；-1 = 窗口首条
+ * 不在分区——异常改写，或非窗口响应/空基线）→ 调用方退化为整体合并。
+ */
+function windowedBaselineSplitIdx(cur: Message[], history: Message[], window?: HistoryWindow): number {
+  if (!window?.truncated || history.length === 0) return -1
+  const windowFirstId = fileSideId(history[0]!)
+  return cur.findIndex((m) => fileSideId(m) === windowFirstId)
+}
+
 function userMessageText(m: Message): string {
   const c = m.content
   if (typeof c === 'string') return c
@@ -483,6 +500,35 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   /** getHistory 加载失败的 session（#2 AC-2.6：landing 重试出口，不永久卡住） */
   const failedHistory = ref<Set<string>>(new Set())
   /**
+   * [session-cold-switch-perf §3.3-3] 后台全量重建失败的 session（historyCacheReady 失败帧写入）。
+   *
+   * 语义 = 「尾读首屏可用的最新窗口之后，后台精化失败」——与 failedHistory（landing 重试
+   * 出口，未 hydrate 通路）不同位：本分区的会话已 hydrate（尾读数据在场），失败的是「加载
+   * 更早」背后的全量缓存铺设，呈现收敛 = 对话流顶部「加载更早失败 + 重试入口」（renderer
+   * useLoadMoreHistory.loadMoreError 合并本分区，复用手动翻页失败同一呈现形态）。与截断
+   * 窗口状态（historyWindows）**解耦**：失败不写 truncated（「还有更早历史」的事实不随后台
+   * 任务状态改变——窗口状态唯一写方仍是 history 响应）。清除点 = 任意一次该会话 history
+   * 拉取成功（重拉 / 手动翻页 / 切入刷新）；disposeSession 同点清理。
+   *
+   * Set 形态（布尔语义无载荷）对齐 failedHistory/respawnPending。
+   */
+  const historyCacheFailed = ref<Set<string>>(new Set())
+  /**
+   * [session-cold-switch-perf §3.3-3 滚动位置保持] per-session 基线前置替换事件计数
+   * （refill 信号，消费方 = renderer useLoadMoreHistory watch 跳变 → 置 isPrepend 一拍 →
+   * `<Virtualizer :shift>` 保位）。
+   *
+   * 为什么需要：§3.3-3 全量精化走 reconcileHistory 基线替换分支（truncated=false），全量
+   * 相对尾读窗口在分区**头部**插入更早历史——virtua 仅在 shift=true 时对该形态做滚动补偿
+   * （virtua store ACTION_ITEMS_LENGTH_CHANGE 的 applyJump 仅 shift 路径；shift=false 时
+   * scrollTop 不变 + 前方插入 = 视口内容前移跳变）。:shift 由 isPrepend 驱动，而 isPrepend
+   * 此前的唯一写方是手动翻页（useLoadMoreHistory.handleLoadMore）——基线替换路径不经过它。
+   * 贴底（stickToBottom）场景由 follow 机制承载不受影响；本信号只兜「用户已上滑阅读中段
+   * 时全量到达」的形态。tick 计数而非 Set：事件性语义（每次替换都是新事件，消费方 watch
+   * 数值跳变），Set 的一次性 add 对第二次替换不触发响应。disposeSession / LRU 驱逐同点清理。
+   */
+  const baselinePrependTicks = ref<Map<string, number>>(new Map())
+  /**
    * [u4d-truncated-ui] per-session 历史预算截断窗口状态（crash-resilience §3.3 D4）。
    *
    * // @data-owner #7 —— 权威源 = u4b session.history 响应（truncated/loadedTurns/totalTurnsEstimate，
@@ -596,6 +642,14 @@ export function createChatStore(options: ChatStoreOptions = {}) {
       entryStates.delete(sid)
       // [u4d] 截断窗口状态同点清理（重建型，驱逐重进后重 hydrate 重建）
       clearHistoryWindow(sid)
+      // [session-cold-switch-perf §3.3-3] 基线前置 tick 分区同点清理（重建型事件计数，
+      // 驱逐重进后由 reconcileHistory 头部插入判定重新计数；has 门控防无谓新 Map 触发
+      // 响应式——同段 messages 清理范式）
+      if (baselinePrependTicks.value.has(sid)) {
+        const nextTicks = new Map(baselinePrependTicks.value)
+        nextTicks.delete(sid)
+        baselinePrependTicks.value = nextTicks
+      }
     },
     // [B9] agentcall 联动驱逐查询（renderer 装配注入；缺省空数组 = 不联动）
     options.agentCallEvictionsOf,
@@ -645,6 +699,50 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     const next = new Set(failedHistory.value)
     next.delete(sessionId)
     failedHistory.value = next
+  }
+
+  /** [session-cold-switch-perf §3.3-3] 标记后台全量重建失败（historyCacheReady 失败帧写入） */
+  function markHistoryCacheFailed(sessionId: string): void {
+    historyCacheFailed.value = new Set(historyCacheFailed.value).add(sessionId)
+  }
+
+  /** [session-cold-switch-perf §3.3-3] 清除后台重建失败态（该会话任一次 history 拉取成功收敛） */
+  function clearHistoryCacheFailed(sessionId: string): void {
+    if (!historyCacheFailed.value.has(sessionId)) return
+    const next = new Set(historyCacheFailed.value)
+    next.delete(sessionId)
+    historyCacheFailed.value = next
+  }
+
+  /** 后台重建失败态读口（renderer 顶部失败重试行呈现判定；无记录 = 未失败） */
+  function isHistoryCacheFailed(sessionId: string): boolean {
+    return historyCacheFailed.value.has(sessionId)
+  }
+
+  /**
+   * [session-cold-switch-perf §3.3-3 滚动位置保持] 基线前置替换事件计数读口
+   * （renderer useLoadMoreHistory watch 数值跳变 → isPrepend 一拍 → virtua :shift 保位；
+   * 无记录 = 0 = 从未发生，跳变判定不受「从未有 tick」与「tick=0」区分干扰）。
+   */
+  function getBaselinePrependTick(sessionId: string): number {
+    return baselinePrependTicks.value.get(sessionId) ?? 0
+  }
+
+  /**
+   * [session-cold-switch-perf §3.3-3] 快照版本对账：分区尾消息的文件侧身份是否等于
+   * snapshotLeafId（重建快照末条 entry id）。
+   *
+   * 相等 = 快照覆盖到分区尾部（重建期间无新追加）→ 重拉安全；不等 = 快照基准不匹配
+   * （分区尾是快照外的新消息：用户发送过 / 流式中实体——pi entry 完成才落盘，快照必不含）
+   * → 过期不重拉，由尾部保护段继续衔接 live 数据。未 hydrate（无分区）= false（无对账
+   * 基准，调用方按「首屏加载由切入链承担」跳过）。
+   */
+  function isHistorySnapshotFresh(sessionId: string, snapshotLeafId: string): boolean {
+    if (!hydrated.value.has(sessionId)) return false
+    const cur = messages.value.get(sessionId)?.value ?? []
+    const tail = cur[cur.length - 1]
+    if (!tail) return false
+    return (tail.piEntryId ?? tail.id) === snapshotLeafId
   }
 
   /**
@@ -698,35 +796,49 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    * [u4d] window（可选）随切入刷新覆盖窗口状态（窗口响应 truncated=true 时顶部条保持
    * 「加载更早」入口；全量响应 false 时消失）。
    */
+  /**
+   * [session-cold-switch-perf §3.3-3 滚动位置保持] 基线在分区头部插入更早历史（全量精化
+   * 的常态形态：尾读窗口首条被全量更早首条替换）→ tick +1 通知 renderer 喂 virtua :shift
+   * 保位。判定 = 分区非空 + 变长 + 首条文件侧身份变化：keptEarlier 路径（窗口合并）头部
+   * 原样保留天然不触发；hydrate 首次填充（分区空）与等长刷新（重连对账）不触发。
+   */
+  function bumpBaselinePrependTickIfNeeded(sessionId: string, cur: Message[], next: Message[]): void {
+    if (
+      cur.length > 0 &&
+      next.length > cur.length &&
+      fileSideId(next[0]!) !== fileSideId(cur[0]!)
+    ) {
+      baselinePrependTicks.value = new Map(baselinePrependTicks.value).set(
+        sessionId,
+        (baselinePrependTicks.value.get(sessionId) ?? 0) + 1,
+      )
+    }
+  }
+
   function reconcileHistory(sessionId: string, history: Message[], window?: HistoryWindow): void {
     if (!hydrated.value.has(sessionId)) {
       hydrate(sessionId, history, window)
       return
     }
     const cur = messages.value.get(sessionId)?.value ?? []
-    // [u6] 窗口合并切分：windowFirstId 是窗口基线的文件侧首条，分区中它之前的消息
-    // 属「已加载的更早历史」——保留不动，仅窗口段被响应刷新。
-    let keptEarlier: Message[] | undefined
-    let tailFromIdx = 0
-    if (window?.truncated && history.length > 0) {
-      const windowFirstId = history[0]!.piEntryId ?? history[0]!.id
-      const splitIdx = cur.findIndex((m) => (m.piEntryId ?? m.id) === windowFirstId)
-      if (splitIdx > 0) {
-        keptEarlier = cur.slice(0, splitIdx)
-        tailFromIdx = splitIdx
-      }
-      // splitIdx === 0（分区无更早历史）或 -1（窗口首条不在分区）→ 走整体合并：
-      // 窗口已覆盖分区全部文件侧内容，无更早历史可保留
-    }
-    if (keptEarlier) {
-      const merged = mergeBaselineWithLive(history, cur.slice(tailFromIdx))
-      commitMessages(messages, sessionId, [...keptEarlier, ...truncateToolOutputBatch(merged)])
+    // [u6] 窗口合并切分：切分锚之前的分区消息属「已加载的更早历史」——保留不动，仅锚及
+    // 之后被响应刷新。锚 ≤0（分区无更早历史 / 窗口首条不在分区 / 非窗口响应）→ 走整体
+    // 合并：窗口已覆盖分区全部文件侧内容，无更早历史可保留。
+    const splitIdx = windowedBaselineSplitIdx(cur, history, window)
+    if (splitIdx > 0) {
+      const merged = mergeBaselineWithLive(history, cur.slice(splitIdx))
+      commitMessages(messages, sessionId, [
+        ...cur.slice(0, splitIdx),
+        ...truncateToolOutputBatch(merged),
+      ])
       if (window) setHistoryWindow(sessionId, window)
       lruTouch(sessionId)
       return
     }
     const merged = mergeBaselineWithLive(history, cur)
-    commitMessages(messages, sessionId, truncateToolOutputBatch(merged))
+    const next = truncateToolOutputBatch(merged)
+    bumpBaselinePrependTickIfNeeded(sessionId, cur, next)
+    commitMessages(messages, sessionId, next)
     if (window) setHistoryWindow(sessionId, window)
     lruTouch(sessionId) // W3: LRU recency（切入刷新视同活跃访问）
   }
@@ -745,7 +857,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   /**
    * 追加 user 消息（Segment[]，ADR-0043）。返回 id：useChat 用作 clientUuid 建立重开回填映射
    * （prompt 标记 `<!--taiji:msg:u-<uuid>-->` + segments sidecar 主键——extension TAG 正则锚定
-   * `u-[0-9a-fA-F-]{36}` 形态，@zhushanwen/pi-msg-id-mapper）。
+   * `u-[0-9a-fA-F-]{36}` 形态，@zhushanwen/pi-host-internals msg-id-mapper 模块）。
    *
    * [W2 fix-chat-flow-order D6 → 后修 overlay-only] 消息形态从 user message entry 派生（形态
    * 对照 apply-entry user 分支——segments 原样放 message.content，applyEntry 空态派生），但
@@ -1205,8 +1317,8 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     // 避免 TS 将不同 Map 元素推断为具体联合类型导致 new Map(ref.value) 不兼容。
     // inflightCounts（[steer-bubble D4]）：disposeSession 同步清 inflight——确认基线随分区
     // 销毁作废（与 LRU 驱逐的刻意豁免不同，见 lruEvictDeps 处声明注释）。
-    const mapRefs: { value: Map<string, unknown> }[] = [messages, retryStates, inflightCounts, compactingReasons, occupancies, historyWindows, submitSeqs]
-    const setRefs: { value: Set<string> }[] = [hydrated, pendingSend, failedHistory, respawnPending]
+    const mapRefs: { value: Map<string, unknown> }[] = [messages, retryStates, inflightCounts, compactingReasons, occupancies, historyWindows, submitSeqs, baselinePrependTicks]
+    const setRefs: { value: Set<string> }[] = [hydrated, pendingSend, failedHistory, respawnPending, historyCacheFailed]
     for (const ref of mapRefs) {
       if (ref.value.has(sessionId)) {
         const next = new Map(ref.value)
@@ -1251,12 +1363,18 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     submitSeqs,
     changeSetStatuses,
     failedHistory,
+    historyCacheFailed,
+    // [session-cold-switch-perf §3.3-3 滚动位置保持] 基线前置替换事件计数（readers 面；
+    // 消费方 renderer useLoadMoreHistory watch 跳变，读口 getBaselinePrependTick）
+    baselinePrependTicks,
     hydrated,
     getMessages,
     getRetryState,
     getChangeSetStatus, setChangeSetStatus,
     markChangeSetsSuperseded,
     isHydrated, markHistoryFailed, clearHistoryError,
+    markHistoryCacheFailed, clearHistoryCacheFailed, isHistoryCacheFailed, isHistorySnapshotFresh,
+    getBaselinePrependTick,
     hydrate, setMessages, reconcileHistory,
     // [u4d] 历史预算截断窗口状态（ref + 读/写/清，SSOT 见 truncated-window.ts）
     historyWindows, getHistoryWindow, setHistoryWindow, clearHistoryWindow,
@@ -1354,15 +1472,19 @@ export type ChatStoreReaders = Pick<
   ChatStoreInstance,
   | 'messages' | 'pendingSend'
   | 'retryStates' | 'changeSetStatuses'
-  | 'failedHistory' | 'hydrated' | 'inflightCounts'
+  | 'failedHistory' | 'historyCacheFailed' | 'hydrated' | 'inflightCounts'
   | 'occupancies'
   | 'historyWindows'
   | 'submitSeqs'
+  | 'baselinePrependTicks'
   | 'getMessages' | 'getRetryState' | 'getChangeSetStatus'
   | 'isHydrated' | 'isGenerating' | 'isActive'
   | 'isCompacting' | 'getCompactingReason' | 'isHandingOff'
   | 'sessionPhase' | 'isPendingSend'
   | 'isRespawnPending'
+  | 'isHistoryCacheFailed'
+  | 'isHistorySnapshotFresh'
+  | 'getBaselinePrependTick'
   | 'getInflight'
   | 'getSubmitSeq'
   | 'getHistoryWindow'
@@ -1379,6 +1501,7 @@ export type ChatStoreReaders = Pick<
 export type ChatStoreOps = Pick<
   ChatStoreInstance,
   | 'setChangeSetStatus' | 'markChangeSetsSuperseded' | 'markHistoryFailed'
+  | 'markHistoryCacheFailed' | 'clearHistoryCacheFailed'
   | 'clearHistoryError' | 'hydrate' | 'setMessages' | 'reconcileHistory'
   | 'prependHistory' | 'applySubagentStreamDelta' | 'finalizeSubagentStream'
   | 'applySubagentStreamChunk' | 'applySubagentStreamState' | 'requestSubagentStreamState'

@@ -1137,6 +1137,28 @@ describe('PluginService 两段式安装编排', () => {
     expect(Object.keys(await readInstalledJson())).toContain('fresh-after-rollback')
   })
 
+  it('两段式激活失败回滚 → pending 随失败清理，重试 confirm 报可操作错误（非原始 ENOENT）', async () => {
+    const { service } = buildService()
+    mockDownloadWrites(pkgJson('activate-fail-plugin'))
+    mockActivation(service, 'CRASHED')
+
+    await service.preparePluginInstall('activate-fail-plugin')
+    const first = await service.confirmPluginInstall('activate-fail-plugin')
+
+    expect(first.success).toBe(false)
+    expect(first.error).toContain('rolled back')
+    expect(first.error).toContain('请重新发起安装')
+    // staging 已被 commit rename 消费、正式目录被 rollback 删除
+    expect(await stagingEntries()).toEqual([])
+    expect(existsSync(join(pluginsDir, 'activate-fail-plugin'))).toBe(false)
+
+    // 重试确认：pending 已随失败清理 → 指向恢复动作的可操作错误；
+    // 若 pending 残留，此处是对缺失 staging rename 的原始 ENOENT 文案
+    const retry = await service.confirmPluginInstall('activate-fail-plugin')
+    expect(retry.success).toBe(false)
+    expect(retry.error).toContain('call preparePluginInstall first')
+  })
+
   it('直通 installPlugin（旧通道）：prepare + commit 一次完成，含激活与登记', async () => {
     const { service, registry, broker } = buildService()
     mockDownloadWrites(pkgJson('direct-plugin'))

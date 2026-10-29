@@ -14,7 +14,7 @@
  * mock 集同 composer-file-injection.test.ts（真 pinia + 真 composerInjectionStore 单例通道，
  * mock useChat/useNewTaskFlow/api/其余 store；ComposerInput spy 层 + importActual real 层）。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-session-injection.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel npx vitest run src/__tests__/panel/composer-session-injection.test.ts（本文件登记在 domain-map.json panel 域，默认档被排除）
  */
 // helper import 必须先于一切项目内模块（@/stores 等会在模块图加载期触发 @/api mock
 // factory，factory 引用的 helper 绑定彼时必须已初始化，否则 TDZ——vi.mock hoisting 约束）

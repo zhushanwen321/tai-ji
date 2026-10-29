@@ -1,7 +1,7 @@
 /**
  * 容器注册表单测 —— display-containers u-foundation（§7.2 条目文本逐字锚 + 载入序列对账）。
  *
- * 三视角：构建者白盒（条目六字段形状/单一事实源引用同一对象）、使用者黑盒（tab 数 7/1/2、
+ * 三视角：构建者白盒（条目六字段形状/单一事实源引用同一对象）、使用者黑盒（tab 数 8/1/4、
  * 显示序、条目文本——DrawerPanel L1 图标条的用户可见派生视图）、观察者形态（注册表纯数据形态）。
  * core 为 headless node 环境（vitest.config 零 DOM），用户可见断言落在 tab 数/顺序/文本等
  * 可见派生视图锚上；DOM 渲染断言归 ui 层 DrawerPanel 接线单元（E2E-MOCK-02 对账）。
@@ -29,7 +29,11 @@ const DESIGN_RIGHT_TEXTS = [
   'trace（条目详情）',
 ]
 const DESIGN_BOTTOM_TEXTS = ['terminal（终端）']
-const DESIGN_OVERLAY_TEXTS = ['browser（网页）', 'workflow（工作流图）']
+// [2026-10-25] 浮层补齐 scheduler/canvas（容器扩展点统一设计 §6.11 阶段 0）——4 条与
+// OverlayContent 判别联合成员序一致（browser/workflow/scheduler/canvas，overlay/types.ts）
+const DESIGN_OVERLAY_TEXTS = ['browser（网页）', 'workflow（工作流图）', 'scheduler（定时任务）', 'canvas（画布）']
+/** OverlayContent 判别联合 4 成员的 kind 序（注册表 content 序的独立对账锚） */
+const OVERLAY_CONTENT_KINDS = ['browser', 'workflow', 'scheduler', 'canvas']
 
 // ── 右抽屉 L1 显示序锚（终态 8 条：workflow 2026-10-19 删除 + trace 一级 tab 追加）──
 const RIGHT_EXPECTED_CONTENTS = ['git', 'doc', 'detail', 'subagent', 'bashTask', 'plan', 'btw', 'trace']
@@ -42,20 +46,24 @@ function contents(entries: readonly ContainerRegistryEntry[]): string[] {
   return entries.map((entry) => entry.content)
 }
 
-describe('注册表条目文本与设计 §7.2 逐字一致（右 8 / 底 1 / 浮 2）', () => {
+describe('注册表条目文本与设计 §7.2 逐字一致（右 8 / 底 1 / 浮 4）', () => {
   it('右抽屉 8 条目文本逐字一致', () => {
     expect(texts(RIGHT_DRAWER_REGISTRY)).toEqual(DESIGN_RIGHT_TEXTS)
   })
 
-  it('底抽屉 1 条、浮层 2 条文本逐字一致', () => {
+  it('底抽屉 1 条、浮层 4 条文本逐字一致', () => {
     expect(texts(BOTTOM_DRAWER_REGISTRY)).toEqual(DESIGN_BOTTOM_TEXTS)
     expect(texts(OVERLAY_REGISTRY)).toEqual(DESIGN_OVERLAY_TEXTS)
   })
 
-  it('容器条目数 = 右 8 / 底 1 / 浮 2（用户可见 L1 图标数锚）', () => {
+  it('容器条目数 = 右 8 / 底 1 / 浮 4（用户可见 L1 图标数锚）', () => {
     expect(RIGHT_DRAWER_REGISTRY).toHaveLength(8)
     expect(BOTTOM_DRAWER_REGISTRY).toHaveLength(1)
-    expect(OVERLAY_REGISTRY).toHaveLength(2)
+    expect(OVERLAY_REGISTRY).toHaveLength(4)
+  })
+
+  it('浮层 content 序 = OverlayContent 判别联合 4 成员（类型说有四个，注册表必须同为四个）', () => {
+    expect(contents(OVERLAY_REGISTRY)).toEqual(OVERLAY_CONTENT_KINDS)
   })
 
   it('CONTAINER_REGISTRY 与分容器声明同一数据源（引用同一数组，禁止双权威）', () => {

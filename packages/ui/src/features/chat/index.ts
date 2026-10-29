@@ -18,8 +18,8 @@ export { default as TruncatedHistoryBar } from './TruncatedHistoryBar.vue'
 // deps inject token（ChatViewDeps）。trace 折叠 stick-guard 通路已随 <Transition> 删除退役
 //（useVirtuaFollow INVAR-M4-2′ 复合判据：程序性写入回声不翻 stickToBottom=false，guarded
 // 回归结构上不可能）。
-export { ChatViewDepsKey, useChatViewDeps } from './chat-view-deps'
-export type { ChatViewDeps, DrawerOpenOptions, EditComposerProps } from './chat-view-deps'
+export { ChatViewDepsKey, useChatViewDeps, useChatDensity } from './chat-view-deps'
+export type { ChatViewDeps, ChatDensity, DrawerOpenOptions, EditComposerProps } from './chat-view-deps'
 // 纯函数（图标决策 + 耗时格式化）
 export * from './block-icon'
 export * from './format-utils'

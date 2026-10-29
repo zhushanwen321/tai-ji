@@ -31,7 +31,7 @@ export interface QuotaParamSpec {
 export interface QuotaPreset {
   /** 匹配 ProviderQuotaFetcher.id（fetcher 注册表的 key）。 */
   fetcher: string
-  /** 显示名（如 '智谱 GLM Coding Plan'）。 */
+  /** 显示名（如 'Zhipu Coding Plan'）。 */
   label: string
   /**
    * 认证方式能力声明（与 fetcher.auth 对齐，按优先级排序）：决定 UI 渲染哪种凭证输入、
@@ -67,7 +67,7 @@ export interface QuotaPreset {
 export const QUOTA_PRESETS: QuotaPreset[] = [
   {
     fetcher: 'zhipu',
-    label: '智谱 GLM Coding Plan',
+    label: 'Zhipu Coding Plan',
     auth: ['api-key'],
     match: {
       // [HISTORICAL] namePattern 用词边界收紧：避免 'zai' 这类短 token 作为子串误匹配
@@ -103,7 +103,7 @@ export const QUOTA_PRESETS: QuotaPreset[] = [
   },
   {
     fetcher: 'mimo',
-    label: '小米 MiMo Coding Plan',
+    label: 'MiMo',
     auth: ['cookie'],
     match: {
       baseUrlPattern: 'xiaomimimo.com',

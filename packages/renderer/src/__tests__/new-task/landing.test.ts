@@ -10,7 +10,7 @@
  * - Landing 直挂载（presentational，props/emits），无 store 依赖。
  * - Panel v-if 条件：mount Panel（子组件 stub）+ 真 pinia chat store，操控 messages/派生 isGenerating。
  *
- * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/new-task/landing.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=new-task npx vitest run src/__tests__/new-task/landing.test.ts（本文件登记在 domain-map.json new-task 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { nextTick, ref } from 'vue'

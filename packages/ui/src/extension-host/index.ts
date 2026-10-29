@@ -66,6 +66,9 @@ export {
   type CompanionDialogAdaptersOptions,
   type CompanionDialogAdaptersTesting,
 } from './shell-adapters'
+// dialog queue factory（remote-use-mobile-v2 §6.5：移动壳呈现 Sheet 化后 queue 宿主迁
+// companion-bridge 模块级，经 barrel 消费——v1 宿主 CompanionBand 是同目录深 import 不经 barrel）
+export { createDialogRequestQueue } from './dialog-request-queue'
 export {
   createFormRequestChannel,
   bindSessionFormActions,

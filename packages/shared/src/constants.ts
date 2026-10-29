@@ -170,16 +170,19 @@ export const MAX_WS_PAYLOAD_BYTES: number = 16 * 1024 * 1024
  * （~/.taiji/...）不在此列（UI 另行只读展示）。preset 成员豁免 existsSync 脏数据过滤
  * ——推荐候选语义，启用后即使此机器不存在也要保留（防 UI 消失回归）。
  *
- * [默认勾选] 全部 preset 成员默认勾选（DEFAULT_DISCOVERY_CONFIG，pi + taiji 相关路径）：
+ * [默认勾选] 全部 preset 成员默认勾选（DEFAULT_DISCOVERY_CONFIG，.agents 约定路径）：
  * 用户打开设置页即见已勾选态，无需手动配置。preset 即「默认启用集合」，新增成员时
  * 须同步评估 DEFAULT_DISCOVERY_CONFIG。
  *
  * [历史] 2026-09：移除 ~/.claude/skills / ~/.claude/agents 预设候选。原因：preset 成员
  * 恒在 UI 重挂（buildDirConfigs 未启用也会补回），导致用户「删除 claude 行」后重新出现、
  * 无法真正移除；且 claude 目录非本产品默认扫描范围。用户仍可手动「添加路径」加入。
+ *
+ * [历史] 2026-10：移除 ~/.pi/agent/skills 预设候选。原因：taiji 与 pi 数据隔离
+ * （架构约定 #1 taiji/pi 数据隔离），taiji 不默认扫 pi 原生用户目录。用户仍可手动
+ * 「添加路径」加入。
  */
 export const PRESET_SKILL_DIRS = [
-  '~/.pi/agent/skills',
   '~/.agents/skills',
   '.agents/skills',
 ] as const
@@ -287,9 +290,14 @@ export const ENGINE_ENV_DENY_LIST: readonly string[] = [
   // 此处按字面量镜像：guard 只提取引号条目，且本常量声明先于该对象）。模式回落事实是
   // runtime 直接 spawn 的那个 pi 的「本进程本次运行」事实；引擎一跳（主 pi → 引擎 CLI
   // → 子 agent pi）继承陈旧值会让子 agent pi 的 trace 扩展记一个从未发生的
-  // presetFallback 假披露——故在引擎出站面一律剥除。
+  // presetFallback 假披露——故在引擎出站环节一律剥除。
   'TAIJI_PRESET_FALLBACK_FROM',
   'TAIJI_PRESET_FALLBACK_TO',
+  // [connection-datasync-ssot §6.1] runtime 实例标识（env 名 SSOT = 下方 RUNTIME_ID_ENV，
+  // 此处按字面量镜像，形态对齐上方 PRESET_FALLBACK 两键）：supervisor 每次 spawn 签发、
+  // 只有 runtime 进程自身消费（auth 成功应答回传）。引擎一跳继承陈旧值 = 后代进程持有
+  // 已死实例标识——生命周期标志族同害，引擎出站环节一并剥除。
+  'TAIJI_RUNTIME_ID',
 ]
 
 /**
@@ -499,3 +507,16 @@ export const TTS_CACHE_MAX_BYTES: number = 512 * 1024 * 1024
  * 本值的转发常量（导出清单不变，u1f 既有测试与消费方 import 点不受影响）。
  */
 export const RUNTIME_PLANNED_EXIT_CODE = 86
+
+/**
+ * runtime 实例标识 env 名（connection-datasync-ssot §6.1，SSOT——main 写入方与 runtime
+ * 读取方共用，禁字面量分叉）。
+ *
+ * 语义：supervisor 每次 spawn 与 issueRuntimeToken 同点签发的实例标识（randomBytes 8
+ * 字节 hex），经本 env 注入 runtime 进程；runtime 在 WS auth 成功应答中回传自己的
+ * runtimeId，renderer 连接控制器与目标快照（RuntimeTargetSnapshot）比对做实例核对。
+ * 与 TAIJI_RUNTIME_TOKEN 同属「进程生命周期标志」族：出站剥除清单（spawn-env-contract
+ * 的 SPAWN_ENV_OUTBOUND_DENY_LIST / 本文件 ENGINE_ENV_DENY_LIST）须一并登记该成员，
+ * 漏登记则随 spawn 链泄漏到全部 pi 子进程 env。
+ */
+export const RUNTIME_ID_ENV = 'TAIJI_RUNTIME_ID' as const

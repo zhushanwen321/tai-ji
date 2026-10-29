@@ -838,7 +838,8 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // appendCompaction，summary/tokensBefore 同值）。帧字段足以构造 PiCompactionEntry →
     // 改直插为构造 entry → applyEntryFrame（user/bash/custom 同款范式），reducer 的 compaction
     // case（apply-entry）自此 live/reload 共用——「live ≡ reload」全类型构造性成立
-    // （等价性断言见 apply-entry-equivalence / effects 测试）。
+    // （等价性断言见 apply-entry-merged.test.ts 的 apply-entry-equivalence 合并节与
+    // effects/__tests__/effect-types.test.ts）。
     //
     // 已知窄差异（D2 closure 已消灭，登记 data-source-registry #7 例外④销案）：interpreter 曾
     // 只在 result.summary 真值时发帧（`if (r.summary)` 门），summary 缺失的 compaction live 无

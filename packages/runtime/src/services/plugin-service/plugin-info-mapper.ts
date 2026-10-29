@@ -38,6 +38,10 @@ function toPluginInfo(descriptor: PluginDescriptor): PluginInfo {
     status,
     trustLevel: descriptor.trustLevel,
     enabled: status === 'active',
+    // 声明通路主体（容器扩展点统一 §6.2）：清单贡献声明随 PluginInfo 透传，config.plugins
+    // 广播即声明载体——此前该字段在协议层被挑掉，插件声明到不了渲染层（失败模式 A）。
+    // 无声明时缺省不带键（undefined 与缺省对消费者等价，避免协议载荷出现空键）。
+    ...(descriptor.contributes !== undefined ? { contributes: descriptor.contributes } : {}),
   }
 }
 

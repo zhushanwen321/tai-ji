@@ -10,11 +10,24 @@
  * W2 扩展位（u-w2-browser-mount）：openBrowser(url, sessionId) 协调函数落本文件（URL 注入链）。
  * 入口语义分立（§6.4）：openWorkflow（drawer/coordination，改向开浮层）不并入本层。
  * （openWorkflowInDrawer 显式 drawer 回落语义 2026-10-19 随 drawer workflow tab 删除移除。）
+ * 容器扩展点统一（§6.4/§6.8）：openOverlayContent(contentId, sessionId) 通用寻址入口
+ * （内置走既有组装、插件走 plugin 载体）+ closeOverlayForSession 级联统一判据落本文件。
  */
 import { overlayControl, getOverlayControlState } from './state'
-import type { OverlayContent } from './types'
+import type { OverlayContent, OverlayKind } from './types'
 
-/** 载荷有效性判据（browser:url+sessionId 非空 / workflow:sessionId+runId 均非空 / scheduler:sessionId 非空 / canvas:canvasId+sessionId 均非空） */
+/**
+ * 内置内容类型词表（与 @taiji/shared OverlayContentKind / domain/drawer OVERLAY_REGISTRY
+ * 对账——registry 单测锚定成员序一致；satisfies 保证词表漂移编译期报错）。
+ * openOverlayContent 的寻址分派依据：命中 = 内置（scheduler 可组装、其余走专属入口），
+ * 未命中 = 插件声明 id（§6.8 载体）。
+ */
+const BUILTIN_OVERLAY_KINDS = ['browser', 'workflow', 'scheduler', 'canvas'] as const satisfies readonly OverlayKind[]
+
+/** 内置词表中 openOverlayContent 不可寻址的成员（载荷需专属参数，走专属入口）。 */
+const BUILTIN_ADDRESSABLE_EXCLUDED = BUILTIN_OVERLAY_KINDS.filter((k) => k !== 'scheduler')
+
+/** 载荷有效性判据（browser:url+sessionId 非空 / workflow:sessionId+runId 均非空 / scheduler:sessionId 非空 / canvas:canvasId+sessionId 均非空 / plugin:contentId+sessionId 均非空——§6.8 插件载体，sessionId 由宿主注入） */
 function isValidContent(content: OverlayContent): boolean {
   if (content.kind === 'browser') {
     return content.payload.url.trim() !== '' && content.payload.sessionId.trim() !== ''
@@ -24,6 +37,9 @@ function isValidContent(content: OverlayContent): boolean {
   }
   if (content.kind === 'canvas') {
     return content.payload.canvasId.trim() !== '' && content.payload.sessionId.trim() !== ''
+  }
+  if (content.kind === 'plugin') {
+    return content.payload.contentId.trim() !== '' && content.payload.sessionId.trim() !== ''
   }
   return content.payload.sessionId.trim() !== '' && content.payload.runId.trim() !== ''
 }
@@ -92,6 +108,48 @@ export function openCanvasOverlay(canvasId: string, sessionId: string): void {
 export function closeCanvasOverlayForSession(sessionId: string): void {
   const cur = getOverlayControlState().current
   if (cur?.kind === 'canvas' && cur.payload.sessionId === sessionId) closeOverlay()
+}
+
+/**
+ * 打开浮层内容（§6.4「请求宿主打开容器」原语的浮层落点协调函数）：contentId 全局寻址。
+ *
+ * - 内置内容类型词表成员：走既有 payload 组装。能凭 (contentId, sessionId) 组装完整
+ *   载荷的仅 scheduler（载荷只持归属会话）；browser/workflow/canvas 的载荷需专属参数
+ *   （url / runId / canvasId），各有专属入口（openBrowser / openWorkflowVizOverlay /
+ *   openCanvasOverlay），不经本通道——命中时 warn + no-op（不静默）。
+ * - 其余 contentId = 插件声明 id（§6.12 命名空间形态）：走 §6.8 插件载体
+ *   {kind:'plugin', payload:{contentId, sessionId}}。sessionId 由宿主在执行打开时注入
+ *   当前会话（插件不传，避免自报不一致），同时是会话删除级联的唯一判据；scope:'global'
+ *   的内容不参与级联（豁免由导航执行器的声明校验层裁决——domain 不查注册表）。
+ *
+ * 已开态调用 = 单例换内容；无效载荷 no-op（openOverlay 校验）。声明存在性与可打开性
+ * 校验归导航执行器（§6.4 先校验后动作）——本函数是校验通过后的写入端，不查注册表
+ * （core domain 不依赖 extension-host）。
+ */
+export function openOverlayContent(contentId: string, sessionId: string): void {
+  if (contentId === 'scheduler') {
+    openSchedulerOverlay(sessionId)
+    return
+  }
+  if ((BUILTIN_ADDRESSABLE_EXCLUDED as readonly string[]).includes(contentId)) {
+    console.warn(
+      `[overlay] openOverlayContent: 内置内容 '${contentId}' 的载荷需专属参数（browser:url / workflow:runId / canvas:canvasId），不经本通道打开（no-op）——改走专属入口 openBrowser / openWorkflowVizOverlay / openCanvasOverlay`,
+    )
+    return
+  }
+  openOverlay({ kind: 'plugin', payload: { contentId, sessionId } })
+}
+
+/**
+ * 会话删除级联（§6.8/§11.1-2 统一判据）：删除的是浮层当前内容的归属会话 → 关浮层；
+ * 其它会话被删不动浮层。判据唯一 = payload.sessionId（kind 不参与——五类内容的载荷
+ * 都持归属 sessionId，插件载体 §6.8 同构），取代按 kind 分派的级联编排。per-kind
+ * 级联函数（closeBrowserOverlayForSession / closeCanvasOverlayForSession）保留为专属
+ * hook 的既有入口，行为收敛为本判据的 kind 收窄子集。
+ */
+export function closeOverlayForSession(sessionId: string): void {
+  const cur = getOverlayControlState().current
+  if (cur !== null && cur.payload.sessionId === sessionId) closeOverlay()
 }
 
 /**

@@ -21,7 +21,7 @@
  * 两层：组件级（mount TraceInspector 断言详情内容）+ 壳路径（mount PanelContainer，
  * stub 桌面面板，对齐 panel-container-drawer-mode.test.ts harness）。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/session-trace/trace-inspector.test.ts
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=subagent npx vitest run src/__tests__/panel/session-trace/trace-inspector.test.ts（本文件登记在 domain-map.json subagent 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, beforeAll, vi } from 'vitest'
 import { computed, defineComponent, nextTick, reactive } from 'vue'
@@ -111,7 +111,7 @@ vi.mock('@/api', async (importOriginal) => {
 })
 
 // ── mock '@/lib/ipc' revealInFolder（reveal 调用链组件层段落：TraceInspector →
-//  lib/ipc；electronAPI 边界归 ipc-reveal-in-folder.test.ts，两段拼接成完整链）──
+//  lib/ipc；electronAPI 边界归 __tests__/lib/ipc.test.ts，两段拼接成完整链）──
 const ipcMock = vi.hoisted(() => ({ revealInFolder: vi.fn() }))
 vi.mock('@/lib/ipc', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/ipc')>()
@@ -119,7 +119,7 @@ vi.mock('@/lib/ipc', async (importOriginal) => {
 })
 
 // ── mock jumpToParentSession（onJumpParent 编排：throw 路径的用户反馈在本组件层，
-//    编排内部归 useTraceJump.test.ts；本文件只验「组件把失败翻译成可见 toast」）──
+//    编排内部归 __tests__/panel/session-trace/useSessionTrace.test.ts（节 2 useTraceJump）；本文件只验「组件把失败翻译成可见 toast」）──
 const jumpMock = vi.hoisted(() => ({ jumpToParentSession: vi.fn() }))
 vi.mock('@/composables/features/trace/useTraceJump', () => ({
   jumpToParentSession: jumpMock.jumpToParentSession,

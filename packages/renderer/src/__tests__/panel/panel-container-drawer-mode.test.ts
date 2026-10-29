@@ -35,7 +35,14 @@
  * DrawerPanel（@taiji/ui/features/drawer）真实渲染：drawer-panel/tab/空态断言与
  * header-extra slot 承接都在它身上。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/panel-container-drawer-mode.test.ts
+ * 容器扩展点统一 U6（抽屉改派生视图）：标签条数据源 = 容器位注册表派生视图（DrawerPanel
+ * 经 core domain drawerTabViews()，直读 RIGHT_DRAWER_REGISTRY 已删）；内容分派 = 生效 tab
+ * 的 renderer.kind 分派（host 走内置组件表 / view 走 ViewHost）。本文件「抽屉改派生视图」
+ * describe 承接 §11.1-1 三条行为断言（新会话默认 = 内置默认项 / A→B→A 回切分区值不变 /
+ * 插件卸载后正选中 tab 回退内置默认项——ADR-0049 per-session 分区范式不退化）与 host/view
+ * 分派用例；插件声明经注册表单例 loadExternal 注入、afterEach clearForPlugin 清理隔离。
+ *
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel npx vitest run src/__tests__/panel/panel-container-drawer-mode.test.ts（本文件登记在 domain-map.json panel 域，默认档被排除）
  */
 import { describe, it, expect, beforeAll, beforeEach, vi, afterEach } from 'vitest'
 import { mount, enableAutoUnmount } from '@vue/test-utils'
@@ -48,11 +55,13 @@ import {
   setDrawerTab,
   setBackgroundTaskView,
   _resetDrawerForTest,
+  effectiveDrawerTab,
   CONTAINER_REGISTRY,
   RIGHT_DRAWER_REGISTRY,
   BOTTOM_DRAWER_REGISTRY,
   OVERLAY_REGISTRY,
 } from '@taiji/core/domain/drawer'
+import { contentSlotRegistry, type ContentSlotDeclaration } from '@taiji/core/extension-host'
 // drawer-tab 注册表契约：全量 tab 清单收拢在 helpers/drawer-tabs.ts（RightDrawerTab 运行时
 // 派生视图，satisfies Record 双向防漂移），本文件的「注册表契约」用例是唯一全量断言处。其余
 // 用例只断言被测 tab 自身按钮，不再各留子集循环。
@@ -144,6 +153,28 @@ const DesktopStub = (name: string, testid: string) =>
     template: `<div data-testid="${testid}" />`,
   })
 
+// ── U6 抽屉派生视图用例的插件声明 fixture（注册表单例直接驱动，§6.1 声明形态）──
+const PROBE_PLUGIN_ID = 'probe-drawer-plugin'
+const PROBE_TAB_ID = `${PROBE_PLUGIN_ID}.sessions`
+
+/** 探针插件抽屉 tab 声明（placement='drawer.tab'；缺省 view 渲染器 = 插件推树）。 */
+function probeTabDeclaration(overrides: Partial<ContentSlotDeclaration> = {}): ContentSlotDeclaration {
+  return {
+    id: PROBE_TAB_ID,
+    placement: 'drawer.tab',
+    label: '探针面板',
+    scope: 'session',
+    pluginId: PROBE_PLUGIN_ID,
+    renderer: { kind: 'view', viewId: 'probe-view' },
+    ...overrides,
+  }
+}
+
+/** 注入探针声明（loadExternal per-pluginId 覆盖语义，重复调用幂等）；afterEach 清理。 */
+function registerProbeTab(declaration: ContentSlotDeclaration = probeTabDeclaration()): void {
+  contentSlotRegistry.loadExternal(PROBE_PLUGIN_ID, [declaration])
+}
+
 
 /** drawer resize handle 取样 + 存在性 / role=separator 断言单源（键盘可达入口）。 */
 function expectResizeHandleReachable(wrapper: ReturnType<typeof mountContainer>) {
@@ -209,6 +240,12 @@ beforeEach(() => {
   localStorage.clear() // 动态宽度持久化隔离（taiji:drawer-width）
 })
 
+// U6 注册表单例隔离：抽屉派生用例注入的插件声明 afterEach 清除（注册表是模块级单例，
+// 残留分区会让后续用例的 8 tab 断言见 9 tab）。内置项装配是幂等惰性单次，不受影响。
+afterEach(() => {
+  contentSlotRegistry.clearForPlugin(PROBE_PLUGIN_ID)
+})
+
 // [HISTORICAL] 用例间 wrapper 必须自动 unmount：PanelContainer 未卸载时其内部 watch（unread
 // watch 源含 panelSessionId → leaf → panel.currentLeaf）在下个用例 reset 的 version bump 时
 // 排队重算，求值旧 pinia store 的 getter 触发 pinia 内部 setActivePinia(旧 pinia)，污染全局
@@ -218,17 +255,18 @@ enableAutoUnmount(afterEach)
 describe('drawer-tab 注册表契约（L1 全量收敛点，display-containers §7.2）', () => {
   // 形状契约 = 纯数据断言（注册表 import 自 core/domain/drawer + helpers 常量，无 mount）：
   // 注册表派生数据本身的机器锚，与渲染断言分离后零渲染成本。
-  it('注册表形状：L1 8 成员（terminal/browser/workflow 均不在）；右 8/底 1/浮 2 + 底抽屉首内容 = terminal', () => {
+  it('注册表形状：L1 8 成员（terminal/browser/workflow 均不在）；右 8/底 1/浮 4 + 底抽屉首内容 = terminal', () => {
     // terminal 迁出 L1（用户可见：右抽屉不再有终端图标——入口改底抽屉 ⌃` / 顶栏终端开关按钮）；
     // browser 迁出 L1（用户可见：右抽屉不再有浏览器图标——能力在浮层复活，点 localhost 链接进入）
     expect(L1_DRAWER_TABS).toHaveLength(8)
     expect(L1_DRAWER_TABS).not.toContain('terminal')
     expect(L1_DRAWER_TABS).not.toContain('browser')
     expect(L1_DRAWER_TABS).not.toContain('workflow')
-    // 注册表形状机器锚（§8.2：右 8/底 1/浮 2——迁移源侧清空；[2026-10-19] workflow tab 删除 + trace 一级 tab 追加）
+    // 注册表形状机器锚（§8.2：右 8/底 1/浮 4——迁移源侧清空；[2026-10-19] workflow tab 删除 + trace 一级 tab 追加；
+    // [2026-10-25] 浮层补齐 scheduler/canvas 与 OverlayContent 4 成员一致——容器扩展点统一设计 §6.11 阶段 0）
     expect(RIGHT_DRAWER_REGISTRY).toHaveLength(8)
     expect(BOTTOM_DRAWER_REGISTRY).toHaveLength(1)
-    expect(OVERLAY_REGISTRY).toHaveLength(2)
+    expect(OVERLAY_REGISTRY).toHaveLength(4)
     expect(CONTAINER_REGISTRY['bottom-drawer'][0]?.content).toBe('terminal')
   })
 
@@ -748,5 +786,145 @@ describe('PanelContainer btw tab 接线（btw-question D7 M3-a）', () => {
     await nextTick()
     expect(wrapper.find('[data-testid="btw-panel"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="git-panel"]').exists()).toBe(true)
+  })
+})
+
+// ── 抽屉改派生视图（容器扩展点统一 U6）─────────────────────────────────────
+// 标签条数据源 = 注册表派生视图（drawerTabViews）；内容分派 = 生效 tab 的 renderer.kind
+//（host 内置组件表 / view ViewHost）；§11.1-1 三条行为断言（ADR-0049 per-session 分区范式
+// 不退化——选中态纯渲染侧派生，不进 runtime、无新增实例级变量）。
+describe('抽屉改派生视图（容器扩展点统一 U6）', () => {
+  /** 生效 tab = 内置默认项的用户可见断言单源：git 内容面板在场 + git tab 高亮 + 探针 tab 未高亮 */
+  function expectGitTabActive(wrapper: Awaited<ReturnType<typeof mountContainer>>): void {
+    expect(wrapper.find('[data-testid="git-panel"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="drawer-tab-git"]').classes()).toContain('bg-surface-hover')
+    const probeTab = wrapper.find(`[data-testid="drawer-tab-${PROBE_TAB_ID}"]`)
+    if (probeTab.exists()) expect(probeTab.classes()).not.toContain('bg-surface-hover')
+  }
+
+  it('插件声明 drawer.tab → 标签条派生出新 tab（排内置 8 项之后，§6.16 未声明 order 排后）', async () => {
+    const panel = usePanelStore()
+    panel.loadSession(ROOT_PANEL_ID, 's-u6-derive')
+    openDrawerTab('git')
+    registerProbeTab()
+
+    const wrapper = await mountContainer()
+    await nextTick()
+
+    const tabIds = wrapper.findAll('[data-testid^="drawer-tab-"]').map((w) => w.attributes('data-testid'))
+    expect(tabIds).toHaveLength(9)
+    // 未声明 order 的插件项排内置项之后（§6.16②）：末位 = 探针 tab
+    expect(tabIds[8]).toBe(`drawer-tab-${PROBE_TAB_ID}`)
+    // 插件项文案 = 声明原文 label（§6.16④ 有 label 用原文）
+    expect(wrapper.find(`[data-testid="drawer-tab-${PROBE_TAB_ID}"]`).attributes('title')).toBe('探针面板')
+  })
+
+  it('clearForPlugin（卸载清理链）→ 插件 tab 从标签条消失', async () => {
+    const panel = usePanelStore()
+    panel.loadSession(ROOT_PANEL_ID, 's-u6-clear')
+    openDrawerTab('git')
+    registerProbeTab()
+
+    const wrapper = await mountContainer()
+    await nextTick()
+    expect(wrapper.find(`[data-testid="drawer-tab-${PROBE_TAB_ID}"]`).exists()).toBe(true)
+
+    contentSlotRegistry.clearForPlugin(PROBE_PLUGIN_ID)
+    await nextTick()
+    expect(wrapper.find(`[data-testid="drawer-tab-${PROBE_TAB_ID}"]`).exists()).toBe(false)
+    expect(wrapper.findAll('[data-testid^="drawer-tab-"]')).toHaveLength(8)
+  })
+
+  it('renderer.kind=\'view\' → 内容走 ViewHost（插件推树），内置面板不渲染', async () => {
+    const panel = usePanelStore()
+    panel.loadSession(ROOT_PANEL_ID, 's-u6-view')
+    registerProbeTab()
+    openDrawerTab(PROBE_TAB_ID)
+
+    const wrapper = await mountContainer({ ViewHost: DesktopStub('ViewHost', 'plugin-view-host') })
+    await nextTick()
+
+    expect(wrapper.find('[data-testid="plugin-view-host"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="git-panel"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="drawer-widget-empty"]').exists()).toBe(false)
+  })
+
+  it('renderer.kind=\'host\'（白名单内置组件）→ 内容走内置组件表（声明项命中 GitPanel）', async () => {
+    const panel = usePanelStore()
+    panel.loadSession(ROOT_PANEL_ID, 's-u6-host')
+    registerProbeTab(probeTabDeclaration({ renderer: { kind: 'host', component: 'GitPanel' } }))
+    openDrawerTab(PROBE_TAB_ID)
+
+    const wrapper = await mountContainer()
+    await nextTick()
+
+    // host 声明经内置组件表分派（GitPanel 表项），与内置 git tab 同一组件出口
+    expect(wrapper.find('[data-testid="git-panel"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="drawer-widget-empty"]').exists()).toBe(false)
+  })
+
+  it('§11.1-1 断言一：新会话默认 = 内置默认项（插件 tab 在场不改变默认；open 不带 tab 走分区缺省）', async () => {
+    const panel = usePanelStore()
+    panel.loadSession(ROOT_PANEL_ID, 's-u6-default')
+    registerProbeTab()
+    // 不带 tab 参数打开（openDrawerTab() 不写 activeTab）→ 分区缺省值 = 内置默认 'git'
+    openDrawerTab()
+
+    const wrapper = await mountContainer()
+    await nextTick()
+
+    // 用户可见：内容面板与高亮都是内置默认项，插件 tab 在场但不选中
+    expectGitTabActive(wrapper)
+    expect(wrapper.find('[data-testid="plugin-view-host"]').exists()).toBe(false)
+  })
+
+  it('§11.1-1 断言二：A→B→A 回切后 A 的分区值不变（选中态 per-session 分区）', async () => {
+    const panel = usePanelStore()
+    registerProbeTab()
+    panel.loadSession(ROOT_PANEL_ID, 's-u6-ssa')
+    openDrawerTab(PROBE_TAB_ID) // A：选中插件 tab（分区 s-u6-ssa）
+
+    const wrapper = await mountContainer({ ViewHost: DesktopStub('ViewHost', 'plugin-view-host') })
+    await nextTick()
+    expect(wrapper.find('[data-testid="plugin-view-host"]').exists()).toBe(true)
+
+    // A→B：B 分区独立（打开 doc），A 的分区不动
+    panel.loadSession(ROOT_PANEL_ID, 's-u6-ssb')
+    openDrawerTab('doc')
+    await nextTick()
+    expect(wrapper.find('[data-testid="doc-panel"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="plugin-view-host"]').exists()).toBe(false)
+
+    // B→A：A 分区值原样恢复（插件 tab 选中态不变）
+    panel.loadSession(ROOT_PANEL_ID, 's-u6-ssa')
+    await nextTick()
+    expect(wrapper.find('[data-testid="plugin-view-host"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="doc-panel"]').exists()).toBe(false)
+  })
+
+  it('§11.1-1 断言三：插件卸载后正被选中的 tab 回退内置默认项（高亮/内容/派生值一致）', async () => {
+    const panel = usePanelStore()
+    panel.loadSession(ROOT_PANEL_ID, 's-u6-uninstall')
+    registerProbeTab()
+    openDrawerTab(PROBE_TAB_ID)
+
+    const wrapper = await mountContainer({ ViewHost: DesktopStub('ViewHost', 'plugin-view-host') })
+    await nextTick()
+    expect(wrapper.find('[data-testid="plugin-view-host"]').exists()).toBe(true)
+
+    // 卸载清理链动作（§5.4 判定表「插件卸载」行）：正被选中的插件 tab → 回退内置默认项
+    contentSlotRegistry.clearForPlugin(PROBE_PLUGIN_ID)
+    await nextTick()
+    expect(wrapper.find(`[data-testid="drawer-tab-${PROBE_TAB_ID}"]`).exists()).toBe(false)
+    expect(wrapper.find('[data-testid="plugin-view-host"]').exists()).toBe(false)
+    expectGitTabActive(wrapper)
+
+    // 域级同值断言：失效分区值经生效值派生回退内置默认（读侧派生，分区不回写）
+    expect(effectiveDrawerTab(PROBE_TAB_ID)).toBe('git')
+    // 分区值保留：同 id 声明重放（禁用再启用 S8 前置）→ 选中自然恢复，不残留已删态
+    registerProbeTab()
+    await nextTick()
+    expect(effectiveDrawerTab(PROBE_TAB_ID)).toBe(PROBE_TAB_ID)
+    expect(wrapper.find('[data-testid="plugin-view-host"]').exists()).toBe(true)
   })
 })

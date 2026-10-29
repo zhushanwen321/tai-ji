@@ -1,6 +1,6 @@
 // src/journal.ts
 //
-// 投递日志（delivery journal，设计 §3.3 词条 / §3.7 耐久面行）的 entry schema 与
+// 投递日志（delivery journal，设计 §3.3 词条 / §3.7 耐久职责行）的 entry schema 与
 // 扫描/映射函数。schema 定形与 v1 兼容读映射 = 设计「待验证检查点 1」（unified-
 // delivery §7）落点，由 src/__tests__/journal.test.ts 单测锁定。
 //
@@ -56,7 +56,7 @@ export interface OutboxEntryDataV1 { // oe-exempt:20261017:framework:投递日�
 }
 
 /**
- * v2 outbox entry data（待验证检查点 1 定形；设计 §3.7 耐久面行字段集）。
+ * v2 outbox entry data（待验证检查点 1 定形；设计 §3.7 耐久职责行字段集）。
  * payload 为调用方业务原样（不含 deliveryId——凭据 id 由端口在注入前统一写入
  * details，重放重投时同样注入；journal 记录保持业务原样使记录与注入形态解耦）。
  */
@@ -113,7 +113,7 @@ export interface JournalRecord { // oe-exempt:20261017:framework:投递日志记
 }
 
 /** 扫描结果（构造期全量 + 运行时增量维护的基线形态）。 */
-export interface JournalScan { // oe-exempt:20261017:framework:投递日志差集扫描契约（session_start 重放面）
+export interface JournalScan { // oe-exempt:20261017:framework:投递日志差集扫描契约（session_start 重放）
   /** outbox 记录（id → record；后写覆盖——同 id 多条 entry 取最新）。 */
   outbox: Map<string, JournalRecord>;
   /** 终局 id（ack ∪ discard）。 */

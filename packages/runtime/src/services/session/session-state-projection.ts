@@ -118,6 +118,14 @@ export interface SessionStateProjectionDeps {
   persistSessionOutcome(sessionId: string, outcome: SessionOutcome, reason?: string): void
   /** Facade 私有 helper（project sidecar 兜底补写，唯一消费方 = 本域 handleTurn* 两方法）。 */
   tryPersistProjectBinding(session: IManagedSessionView): void
+  /**
+   * 整表会话列表广播（remote-use-mobile-v2 §6.3 fallback）：回合终态（handleTurnEndSideEffects
+   * 的 persistSessionOutcome 后）补发既有 config.sessions 帧——未读信号的「新终态」触发源
+   * （客户端 status 翻转 diff 消费）。缺席（未注入）= no-op，既有测试装配零变化。
+   * 生产 = Facade 构造器注入（broker.broadcast + listPersistedSessions，与进程退出链
+   * session-service.ts onSessionExit 的广播形态同构）。
+   */
+  broadcastSessionList?(): void
 }
 
 /**
@@ -332,6 +340,13 @@ export class SessionStateProjection {
       : stopReason === 'aborted' ? 'stopped'
         : 'done'
     this.deps.persistSessionOutcome(sessionId, outcome)
+    // [remote-use-mobile-v2 §6.3 fallback] 回合终态即整表广播（既有 config.sessions
+    // 通道补发）：未读信号的「新终态」触发源——客户端以 status 翻转（done/error/stopped）
+    // diff 点亮非活跃会话未读。willRetry attempt 级失败已在上方提前 return（不写终态也
+    // 不广播——回合未结束，终态边沿未发生）。频度契约 = 每回合终态恰好一帧（事件边界
+    // 去重，禁定时器合帧；护栏单测 broadcast-session-list-fanout.test.ts 钉住）。异常
+    // 隔离依赖事件链调用方的 per-event try/catch（session-rename-fanout 同款）。
+    this.deps.broadcastSessionList?.()
   }
 
   /**

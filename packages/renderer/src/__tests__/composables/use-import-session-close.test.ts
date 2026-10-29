@@ -33,7 +33,6 @@ vi.mock('@/api', () => ({
   },
   project: {
     load: vi.fn(async () => undefined),
-    save: vi.fn(async () => undefined),
   },
 }))
 

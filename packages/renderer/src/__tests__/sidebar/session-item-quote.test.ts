@@ -12,7 +12,7 @@
  *   - '@/stores/session' 原窄替换（仅 active/list/applySnapshot 三键）改为 spread
  *     actual 全成员：quote 节显式控制 active 时（sessionState.active !== undefined）
  *     返回真实 store 快照 + active 覆写（对 quote 节等价原窄替换形态）；未控制时
- *     直通真实 store（hydrate 节真实 useSidebar 12 步切入链要 groups/list/activeId
+ *     直通真实 store（hydrate 节真实 useSidebar 13 步切入链要 groups/list/activeId
  *     全成员与响应性，零影响）。quote 节 afterEach 复位 sessionState.active。
  *
  * 剔出：effects/tool-status-flip.test.ts（6 例，清单既定剔出——useChat/useChatViewDeps
@@ -86,7 +86,7 @@ vi.mock('@/api', () => ({
   },
   extension: { scan: vi.fn(() => Promise.resolve({ extensions: [] })) },
   workspace: { listRecent: vi.fn(() => Promise.resolve([])), defaultSessionDir: vi.fn(() => Promise.resolve('')) },
-  project: { load: vi.fn(() => Promise.resolve({ projects: [], activeProjectId: '' })), save: vi.fn(() => Promise.resolve()) },
+  project: { load: vi.fn(() => Promise.resolve({ projects: [], activeProjectId: '' })) },
   file: { tree: vi.fn(() => Promise.resolve([])), expand: vi.fn(() => Promise.resolve([])) },
   git: { status: vi.fn(() => Promise.resolve({ sessionId: 'mock', isRepo: false, files: [] })) },
 }))
@@ -179,6 +179,9 @@ describe('session-item-assign-project', () => {
         { id: 'p-empty', name: '', lastUsedAt: 0 },
       ]
       store.activeProjectId = 'p1'
+      // loaded 态（§6.9）：无有效数据形态下归属入口整体隐藏，目标列表为空
+      store.revision = 1
+      store.loadState = 'loaded'
 
       const options = await openAssignMenu()
       expect(options.map((o) => o.textContent)).toEqual(['默认项目', 'Alpha', 'Beta'])
@@ -191,6 +194,8 @@ describe('session-item-assign-project', () => {
         { id: 'p1', name: 'Alpha', lastUsedAt: 0 },
       ]
       store.activeProjectId = 'p1'
+      store.revision = 1 // loaded 态（§6.9）：无有效数据形态下归属入口整体隐藏
+      store.loadState = 'loaded'
 
       const wrapper = mountItem({}, 'p1')
       await wrapper.find('[data-testid="assign-project-btn"]').trigger('click')
@@ -216,6 +221,8 @@ describe('session-item-assign-project', () => {
         { id: 'p1', name: 'Alpha', lastUsedAt: 0 },
       ]
       store.activeProjectId = 'p1'
+      store.revision = 1 // loaded 态（§6.9）：无有效数据形态下归属入口整体隐藏
+      store.loadState = 'loaded'
 
       // 归属 p1 → Alpha 项行首勾标（spec 待裁决 3 既定方向：浮层复用右键菜单「移动到项目」
       // 分组渲染——行首 14px 定宽列 + accent Check，行本体保持中性字色）

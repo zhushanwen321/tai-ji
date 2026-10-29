@@ -39,7 +39,8 @@
 const OPS_FIELDS = new Set([
   // 写操作
   'setChangeSetStatus', 'markChangeSetsSuperseded', 'markHistoryFailed',
-  'clearHistoryError', 'hydrate', 'setMessages', 'reconcileHistory',
+  'clearHistoryError', 'markHistoryCacheFailed', 'clearHistoryCacheFailed',
+  'hydrate', 'setMessages', 'reconcileHistory',
   'prependHistory', 'applySubagentStreamDelta', 'finalizeSubagentStream',
   'applySubagentStreamChunk', 'applySubagentStreamState', 'requestSubagentStreamState',
   'sealSubagentStream', 'markSubagentStreamDegraded', 'clearSubagentChunkState', 'clearSubagentChunkStateForSession',

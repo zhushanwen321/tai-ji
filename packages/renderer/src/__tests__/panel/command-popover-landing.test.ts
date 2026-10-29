@@ -26,7 +26,7 @@
  * 文件级 beforeEach 下沉为节内（节 2 经 taBeforeEach 挂 5 个 describe、节 3 单
  * describe），防止三重文件级 beforeEach 重建 pinia 互踩 models 注入。describe/it 名零改动。
  *
- * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/panel/command-popover-landing.test.ts --pool=threads
+ * 运行：cd packages/renderer && TAIJI_TEST_DOMAIN=panel TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/panel/command-popover-landing.test.ts --pool=threads（本文件登记在 domain-map.json panel 域，默认档被排除）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'

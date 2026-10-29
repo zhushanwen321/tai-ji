@@ -10,7 +10,7 @@
  *    transport/api 真实模块，壳不再注入）
  * 2. setConnectionPorts 注入（模块级一次，幂等）
  * 3. useConnection() = core useConnection() 薄包装（App.vue 的
- *    { state, init, teardown, retryRuntime } 接口不变）
+ *    { state, init, teardown, retryRuntime, retrySnapshot } 接口不变）
  *
  * 依赖方向：useConnection（装配）→ core use-connection + lib/ipc + useMessageEffects
  *   + i18n。
@@ -22,10 +22,8 @@ import {
 } from '@taiji/core'
 import i18n from '@/i18n'
 import {
-  getRuntimePort,
-  getRuntimePortOffset,
+  getRuntimeTargetSnapshot,
   getRuntimeStartError,
-  getRuntimeToken,
   onRuntimePort,
   onRuntimeError,
   onRuntimeRestarting,
@@ -40,12 +38,14 @@ const t = i18n.global.t as (key: string, params?: Record<string, unknown>) => st
 /**
  * 装配点：构建 core ConnectionPorts 实现（模块级一次构建，引用全部稳定：
  * ipc 模块级函数、effects 工厂返回稳定函数引用）。
+ *
+ * 连接目标 = supervisor 目标快照单一权威源（connection-datasync-ssot §6.1）：本装配点
+ * 只透传快照读口（getRuntimeTargetSnapshot）与快照推送（onRuntimePort，载荷为快照对象），
+ * 不再做端口发现（备用猜连链与 port-offset 装配已随 §6.2 删除）。
  */
 const connectionPorts: ConnectionPorts = {
   ipc: {
-    getRuntimePort,
-    getRuntimePortOffset,
-    getRuntimeToken,
+    getRuntimeTargetSnapshot,
     onRuntimePort: (cb) => onRuntimePort(cb),
     onRuntimeRestarting: (cb) => onRuntimeRestarting(cb),
     onRuntimeFailed: (cb) => onRuntimeFailed(cb),

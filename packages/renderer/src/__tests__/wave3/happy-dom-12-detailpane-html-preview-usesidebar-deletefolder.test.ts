@@ -63,7 +63,7 @@ vi.mock('@/composables/features/chat/useChat', () => ({
 // ── mock api 域：removeByCwd 是 deleteFolder 的核心 WS 调用 ──
 const removeByCwdMock = vi.hoisted(() => vi.fn())
 const switchSessionMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }) },
   chat: {
     getHistory: vi.fn(() => Promise.resolve({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 })),
     streamSubscribe: vi.fn(() => () => {}),

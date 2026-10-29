@@ -75,9 +75,8 @@ const SIZE_WARN_BYTES = 5 * 1024 * 1024
  *   npm view $(node -p "require('$d/package.json').name") version; done
  */
 const PUBLISHED_REGISTRY_PACKAGES = new Set([
-  // extensions/taiji 组（4）
-  '@zhushanwen/pi-agent-ext',
-  '@zhushanwen/pi-msg-id-mapper',
+  // extensions/taiji 组（2）。@zhushanwen/pi-host-internals 待首次 publish 后按上方
+  // 维护纪律登记（禁预登——未发布先登 = 假绿）。
   '@zhushanwen/pi-system-prompt',
   '@zhushanwen/pi-system-prompt-trace',
   // extensions/universal 组（16）

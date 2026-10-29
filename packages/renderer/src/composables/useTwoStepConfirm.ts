@@ -2,8 +2,8 @@
  * useTwoStepConfirm —— 两段式确认原语（首击 arm / 再击执行并复位 / 显式 clear 供 mouseleave
  * 防误触残留清理）。确认态为单槽（同屏至多一个 id 处于确认态）。
  *
- * 消费点：tray bash 终止 / tray subagent 取消 / workflow abort（useWorkflowAction 内部改用
- * 本原语，对外签名不变）。原语只负责确认态与 onConfirm(id) 回调——RPC / toast / 迟到收尾
+ * 消费点：tray bash 终止（tray workflow abort 的消费点已随 §6.6/U10 workflow 件迁移
+ * 一并退役）。原语只负责确认态与 onConfirm(id) 回调——RPC / toast / 迟到收尾
  * 等副作用仍留在各调用点。
  */
 import { ref } from 'vue'

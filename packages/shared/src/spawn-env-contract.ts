@@ -16,8 +16,9 @@
  * 出站剥除清单：无论下游如何组装，这些键绝不允许出现在 runtime/main 主动孵化的
  * 子进程 env 中。成员只增不减、增删须过评审（危害证据入档，见附录 A 探针记录）。
  *
- * 当前 3 项：首版 2 个实证害项（设计文档 D3）对应受害案例 §1.2；第 3 项 raw mirror
- * 随 M3 增补（引擎自身合法读取、task pi 零消费，方向说明见下方成员注释）。
+ * 当前 4 项：首版 2 个实证害项（设计文档 D3）对应受害案例 §1.2；第 3 项 raw mirror
+ * 随 M3 增补（引擎自身合法读取、task pi 零消费，方向说明见下方成员注释）；第 4 项
+ * runtime 实例标识随 connection-datasync-ssot §6.1 增补（生命周期标志族）。
  */
 export const SPAWN_ENV_OUTBOUND_DENY_LIST: readonly string[] = [
   /**
@@ -44,6 +45,13 @@ export const SPAWN_ENV_OUTBOUND_DENY_LIST: readonly string[] = [
    * 刻意不进 ENGINE_ENV_DENY_LIST（引擎自己要读，deny 即自断）。
    */
   'TAIJI_ENGINE_RAW_MIRROR',
+  /**
+   * [connection-datasync-ssot §6.1] runtime 实例标识：supervisor 每次 spawn 与 token
+   * 同点签发的生命周期标志（main 写入 runtime env），合法消费者只有 runtime 进程自身
+   * （auth 成功应答回传），pi 子树零消费——泄漏会让后代进程持有已死实例的陈旧标识，
+   * 与 TAIJI_AGENT_PACKAGED 同属「进程生命周期标志不出站」族。
+   */
+  'TAIJI_RUNTIME_ID',
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -119,7 +127,7 @@ export function composeChildEnvBase(opts: BuildOutboundChildEnvOptions): Record<
 /**
  * 在已构建的 env 副本上执行 deny 清单兜底剥除（原地删键）。模块私有分层：唯一调用方
  * 是本文件 buildOutboundChildEnv；对外不暴露——外部接线点必须走含兜底的完整终态接口，
- * 禁止单独消费 deny 步骤造成半成品出站面。
+ * 禁止单独消费 deny 步骤造成半成品 env 出站。
  */
 function applyOutboundDenyList(env: Record<string, string>): void {
   for (const denied of SPAWN_ENV_OUTBOUND_DENY_LIST) {

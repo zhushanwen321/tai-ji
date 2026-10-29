@@ -50,12 +50,19 @@ vi.mock('../../../core/src/transport/ws-client', () => ({
     return () => { mockHolder.routeHandler = null }
   }),
   onQueueDrop: vi.fn(() => () => {}),
+  // u3（connection-datasync-ssot）起 core use-connection init 链路新增的 ws-client 依赖，
+  // mock 工厂须补形状：auth 应答/拒绝单槽信号（返回取消函数）+ 抑制位读口/复位 + 等待态/探活
+  onAuthAccepted: vi.fn(() => () => {}),
+  onAuthRejected: vi.fn(() => () => {}),
+  isAuthRejectedSuppressed: vi.fn(() => false),
+  resetAuthRejectionSuppression: vi.fn(),
+  setWaitingRuntime: vi.fn(),
+  probeAlive: vi.fn(),
 }))
 
 vi.mock('@/lib/ipc', () => ({
-  getRuntimePort: vi.fn(async () => undefined),
-  getRuntimePortOffset: vi.fn(async () => undefined),
-  getRuntimeToken: vi.fn(async () => undefined),
+  // 连接控制器快照读口桩（connection-datasync-ssot §6.2：null = 不发起连接）
+  getRuntimeTargetSnapshot: vi.fn(async () => null),
   onRuntimePort: vi.fn(() => () => {}),
   onRuntimeRestarting: vi.fn(() => () => {}),
   onRuntimeFailed: vi.fn(() => () => {}),
@@ -238,19 +245,22 @@ describe('session.exited 事件端到端反馈链路', () => {
     await flushAsync()
     expect(subscribeCalls()).toBe(2)
     expect(getSubscriptionState('s-exit')).toMatchObject({ subscribed: false })
-    // isGenerating 已由 markSessionError 复位（前述用例锁定），dispatch m2 验证旧 handler 缺位
-    //——若旧 handler 仍在，message_start 会重新点亮 streaming 态
+    // [A5 修复接线] 恢复窗口经 lifecycle factory deps.ensureStream 全套重建：events handler
+    // 在 exited 同步链内即重挂（原「旧 handler 缺位、恢复帧落空」窗口结构性消除——恢复后
+    // 的 session.delivery 帧不再因无订阅者被静默丢弃）。dispatch m2 点亮 streaming = 新
+    // handler 已在位（修复前此处 false = m2 落空）。
     dispatchStart('m2')
     await nextTick()
-    expect(chatStore.isGenerating('s-exit')).toBe(false)
+    expect(chatStore.isGenerating('s-exit')).toBe(true)
 
-    // respawn 后再次 ensure：不被 streamSubscriptions 幂等检查短路，重挂 handler +
-    // 重发 subscribe（第 3 次；subscriptionStates 幂等检查对 subscribed=false 不拦截）
+    // respawn 后再次 ensure：openRestoreWindow 已在 exited 链内全套重建（handler 在位 +
+    // bus 订阅在），streamSubscriptions 幂等检查正确短路——不重发 subscribe（修复前的
+    // 「第 3 次」不再需要：重建已提前完成，这正是 A5 修复「恢复帧不再落空」的簿记形态）
     chatMod.ensureStreamSubscription('s-exit', chatStore, sessionStore)
     await flushAsync()
-    expect(subscribeCalls()).toBe(3)
+    expect(subscribeCalls()).toBe(2)
 
-    // 新 events handler 生效：dispatch message_start 驱动 streaming 态
+    // 已重挂的 events handler 生效：dispatch message_start 驱动 streaming 态
     dispatchStart('m3')
     await nextTick()
     expect(chatStore.isGenerating('s-exit')).toBe(true)
