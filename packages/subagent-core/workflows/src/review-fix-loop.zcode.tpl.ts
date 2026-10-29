@@ -1093,12 +1093,13 @@ const alignByTitle = (i: AggIssueInput): IssueRecord | undefined => {
 /** 延续条目字段安全合并（空壳缺陷修复，run wf-1792073055433）：旧无条件赋值在聚合器
  *  输出无 title/severity 的空壳延续条目时把已追踪字段抹空——跨轮身份锚点断链，下轮
  *  L2 标题对账失配关不掉，连续 3 轮 clean 后误判 stuck。改为：title 锁定（缺失侧才
- *  回填）+ severity 采信本轮显式标注 + 内容字段非空刷新（单源 shared 段承载）。已确认
+ *  回填）+ severity 单向只升不降（缺失/升级才回写，防同题 minor 重报洗白绕过 ES3
+ *  门禁，dmg-r2-3）+ 内容字段非空刷新（单源 shared 段承载）。已确认
  *  修复的问题被重报 = 复发（对齐 pi 版 MF-2）：转 regressed + 修复失败 +1，needs-redesign
  *  可达；open（活跃仍报）不改状态。 */
 const mergeCarryover = (prev: IssueRecord, i: AggIssueInput): IssueRecord => {
   if (inheritCarryoverFields(prev, i)) {
-    log(`身份对齐：延续条目 ${prev.id} 继承 title 缺失侧 / severity 本轮标注`);
+    log(`身份对齐：延续条目 ${prev.id} 继承 title 缺失侧 / severity 单向只升不降回写`);
   }
   refreshTrackedFields(prev, i, ["files", "evidence", "guidance"]);
   if (prev.status === "fixed") {

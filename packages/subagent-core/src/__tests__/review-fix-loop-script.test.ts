@@ -408,6 +408,10 @@ describe("review-fix-loop.js applyCarryoverRegression — 「重报 → regresse
     const tracked = trackedBase("fix-attempted");
     applyCarryoverRegression(tracked, { id: "MF-1", severity: "critical" }, 2);
     expect(tracked.severity).toBe("critical");
+    // 产物层守卫回归锚点（dmg-r2-3）：重报降级不得把追踪 must-fix 洗成 minor 绕过 defer 红线
+    const downgrade = trackedBase("fix-attempted");
+    applyCarryoverRegression(downgrade, { id: "MF-1", severity: "minor" }, 3);
+    expect(downgrade.severity).toBe("major");
   });
   it("severity 继承：重报降级不回写（dmg-r1-1——防同题 suggestion 重报洗掉 must-fix 等级）", () => {
     const { applyCarryoverRegression } = loadFns();
