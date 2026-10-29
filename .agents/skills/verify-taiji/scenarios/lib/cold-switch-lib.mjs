@@ -102,6 +102,28 @@ export function composerReadyTimeoutMs() {
 
 export const PROD_DATA_DIR = path.join(process.env.HOME ?? '', '.taiji')
 
+// runtime 历史预算常量精确镜像（packages/shared/src/constants.ts 的 HISTORY_BUDGET 与
+// READ_PRECHECK_MAX_BYTES；scenarios 独立于 packages 运行不 import @taiji/shared，
+// 两处同步靠本注释锚定——runtime 改值时此处跟随）：
+// HISTORY_BUDGET = { RECENT_TURNS: 20, MAX_BYTES: 640 * 1024 }，READ_PRECHECK_MAX_BYTES = 32MB。
+const HISTORY_BUDGET_RECENT_TURNS = 20
+const HISTORY_BUDGET_MAX_BYTES = 640 * 1024
+const TAIL_SCAN_MAX_BYTES = 32 * 1024 * 1024
+
+/** usable 消息文本判定（extractSessionSignatures 的签名判据专用）：渲染后精确子串匹配要求——太短、含 markdown/HTML 结构字符（渲染失真）、taiji:msg 内部标记行均不可用。预算窗口 needle 不复用它（needle 走渲染归一化，见 extractBudgetWindowNeedles 注释）。 */
+function isUsableMessageText(text) {
+  return typeof text === 'string' && text.length >= 8 && !/[*_`#[\]<>\\|]/.test(text) && !text.includes('taiji:msg')
+}
+
+/** message content 数组 → 纯文本（text 段空格连接；与 DOM 侧 readStreamText 同款 \\s+ 归一前的原始形态）。 */
+function flattenMessageText(content) {
+  return (Array.isArray(content) ? content : [])
+    .filter((c) => c?.type === 'text' && typeof c.text === 'string')
+    .map((c) => c.text)
+    .join(' ')
+    .trim()
+}
+
 /** 递归列举文件。 */
 function walk(dir, out = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -234,14 +256,6 @@ export function seedSessions(dataDir, prodRoot, picked) {
  */
 export function extractSessionSignatures(sessionFile, { tailInitialBytes = 1_048_576, tailMaxBytes = 8_388_608, headBytes = 262_144 } = {}) {
   const size = fs.statSync(sessionFile).size
-  const usable = (text) =>
-    typeof text === 'string' && text.length >= 8 && !/[*_`#[\]<>\\|]/.test(text) && !text.includes('taiji:msg')
-  const flatten = (content) =>
-    (Array.isArray(content) ? content : [])
-      .filter((c) => c?.type === 'text' && typeof c.text === 'string')
-      .map((c) => c.text)
-      .join(' ')
-      .trim()
   const readWindow = (start, length) => {
     const buf = Buffer.alloc(length)
     const fh = fs.openSync(sessionFile, 'r')
@@ -265,8 +279,8 @@ export function extractSessionSignatures(sessionFile, { tailInitialBytes = 1_048
       continue
     }
     if (row?.type !== 'message' || !row.message) continue
-    const text = flatten(row.message.content)
-    if (!usable(text)) continue
+    const text = flattenMessageText(row.message.content)
+    if (!isUsableMessageText(text)) continue
     const normalized = text.replace(/\s+/g, ' ')
     if (row.message.role === 'user' && !firstUser) firstUser = normalized.slice(0, 120)
     if (row.message.role === 'assistant' && !firstAssistant) firstAssistant = normalized.slice(0, 120)
@@ -285,8 +299,8 @@ export function extractSessionSignatures(sessionFile, { tailInitialBytes = 1_048
         continue
       }
       if (row?.type !== 'message' || !row.message) continue
-      const text = flatten(row.message.content)
-      if (!usable(text)) continue
+      const text = flattenMessageText(row.message.content)
+      if (!isUsableMessageText(text)) continue
       const normalized = text.replace(/\s+/g, ' ')
       if (row.message.role === 'user' && !lastUser) lastUser = normalized.slice(0, 120)
       if (row.message.role === 'assistant' && !lastAssistant) lastAssistant = normalized.slice(0, 120)
@@ -319,6 +333,145 @@ export function allSignatureTexts(sig) {
   return [sig?.lastUser, sig?.lastAssistant, sig?.firstUser, sig?.firstAssistant].filter(
     (t) => typeof t === 'string' && t.length > 0,
   )
+}
+
+/**
+ * 模拟 runtime 尾读预算窗口，提取「窗口内必含」的首屏判据文本（needle 候选集）。
+ *
+ * 为什么需要它：u1 尾读交付的首屏窗口受 HISTORY_BUDGET 字节帽截断（truncated=true +
+ * 「加载更早」入口是设计内语义；锚：packages/runtime/src/services/session-history.ts
+ * getHistoryFromFilePath / collectRecentTurnEntriesFromTail——离线尾读默认预算
+ * HISTORY_BUDGET.RECENT_TURNS=20 turns 叠加 HISTORY_BUDGET.MAX_BYTES=640KB 字节帽）。
+ * 尾部 turn 含截图工作流时体积巨大，物理尾签名（extractSessionSignatures 的
+ * lastUser/lastAssistant，usable 过滤后可能在距尾很远的更早历史里）会落在被截部分，
+ * 「签名入流」轮询永不满足——首屏判据 needle 必须取自「预算窗口内必含」的文本。
+ *
+ * 窗口语义对齐 runtime（session-history.ts 同名机制简化镜像，无 cursor 语义）：
+ * - 从文件尾逆序按行分块读（1MB 块 + 跨块行拼接，禁全量 readFileSync——42MB 载体）；
+ * - turn 边界 = user message entry（isTurnBoundary 同语义：type==='message' &&
+ *   message.role==='user'）；
+ * - 字节预算在 turn 边界处判定（hitsByteBudgetCap 同判：首个 turn 豁免完整放行，
+ *   后续超界不入窗——turnCount>1 时回退最后收集的 turn）；凑满 maxTurns 即停；
+ * - 总读取量上限 TAIL_SCAN_MAX_BYTES=32MB（READ_PRECHECK_MAX_BYTES 同值）；
+ * - 窗口起点对齐最早收集的 turn 边界行（残段丢弃，entry 原子性；扫到文件头时头部
+ *   孤儿段保留——runtime 同款）。
+ *
+ * 返回窗口内全部 message 文本的「渲染归一化」前 40 字符（去重保序）。为什么不用签名判据
+ * 的 usable 精确子串过滤：DOM textContent 是**渲染后**文本——HTML 注释（taiji:msg 内部
+ * 标记）渲染后不进 textContent，markdown/HTML 结构字符渲染后不保留原样；而物理尾 turn
+ * 常整段污染（user 消息带 taiji:msg 注释、assistant 带 markdown，42MB 样本实测尾部 5 turn
+ * 无一条 usable），照搬 usable 过滤会把窗口内文本全灭，判据载体错误只是从「签名落窗外」
+ * 变形为「窗口内无可匹配文本」。故 needle 取渲染归一化形态（剥 HTML 注释 + 结构标记字符
+ * + \\s 归一，≥8 字符），与 DOM 同构。分支会话被撤子树行会在 renderer 侧被滤除
+ * （computeActivePathEntries），此类 needle 不命中流——调用方判据为 some 语义，无害。
+ * 与签名组取并集使用（expectTexts），不单独作判据。
+ */
+export function extractBudgetWindowNeedles(sessionFile, { maxTurns = HISTORY_BUDGET_RECENT_TURNS, maxBytes = HISTORY_BUDGET_MAX_BYTES } = {}) {
+  const size = fs.statSync(sessionFile).size
+  const isTurnRow = (row) => row?.type === 'message' && row?.message?.role === 'user'
+  // 逆序收集态（session-history.ts TailWindowScan 简化镜像）：行与 turn 标记平行（新→旧）
+  const linesDesc = []
+  const turnFlagsDesc = []
+  const turnStartStack = []
+  let accBytes = 0
+  let turnCount = 0
+  let stop = false
+  const rollbackLastTurn = () => {
+    const popped = turnStartStack.pop()
+    if (!popped) return
+    const keepLen = turnStartStack.length > 0 ? turnStartStack[turnStartStack.length - 1].idx + 1 : 0
+    linesDesc.length = keepLen
+    turnFlagsDesc.length = keepLen
+    accBytes = popped.accBefore
+    turnCount--
+  }
+  const visit = (line) => {
+    if (stop) return
+    const trimmed = line.trim()
+    if (!trimmed) return
+    let row
+    try {
+      row = JSON.parse(trimmed)
+    } catch {
+      return
+    }
+    const isTurn = isTurnRow(row)
+    // 字节预算超界（hitsByteBudgetCap 同判：边界处判已收集字节；首个 turn 豁免——
+    // turnCount===1 时直接停但保留已收的完整 turn）
+    if (isTurn && turnCount > 0 && accBytes > maxBytes) {
+      if (turnCount > 1) rollbackLastTurn()
+      stop = true
+      return
+    }
+    if (isTurn) turnStartStack.push({ idx: linesDesc.length, accBefore: accBytes })
+    linesDesc.push(trimmed)
+    turnFlagsDesc.push(isTurn)
+    accBytes += Buffer.byteLength(trimmed, 'utf8')
+    if (isTurn) turnCount++
+    if (turnCount >= maxTurns) stop = true
+  }
+  // 逆序分块读：carry = 跨块行的首段（归更靠前的一块拼接）；块首 UTF-8 continuation
+  // 残字节留给下一块完整解码，防多字节字符被块边界劈成乱码
+  const CHUNK = 1024 * 1024
+  let carry = ''
+  let scannedBytes = 0
+  let reachedHead = false
+  let end = size
+  while (end > 0 && !stop) {
+    const start = Math.max(0, end - CHUNK)
+    const buf = Buffer.alloc(end - start)
+    const fh = fs.openSync(sessionFile, 'r')
+    let n
+    try {
+      n = fs.readSync(fh, buf, 0, buf.length, start)
+    } finally {
+      fs.closeSync(fh)
+    }
+    scannedBytes += n
+    let skip = 0
+    if (start > 0) while (skip < n && (buf[skip] & 0xc0) === 0x80) skip++
+    const lines = buf.toString('utf8', skip, n).split('\n')
+    const tail = lines.pop() ?? ''
+    const head = lines.shift() ?? ''
+    visit(tail + carry)
+    for (let i = lines.length - 1; i >= 0; i--) visit(lines[i])
+    if (!stop && start === 0) visit(head)
+    carry = head
+    if (start === 0) reachedHead = true
+    end = start
+    if (scannedBytes >= TAIL_SCAN_MAX_BYTES) break // 总读取量上限（READ_PRECHECK_MAX_BYTES 同值），未到头 = 非全文件扫描
+  }
+  // 窗口起点对齐 turn 边界（残段丢弃；扫到文件头时头部孤儿段保留——runtime 同款）
+  let startIdx = 0
+  if (!reachedHead) {
+    const firstTurn = turnFlagsDesc.indexOf(true)
+    startIdx = firstTurn === -1 ? linesDesc.length : firstTurn
+  }
+  const needles = []
+  const seen = new Set()
+  for (let i = startIdx; i < linesDesc.length; i++) {
+    let row
+    try {
+      row = JSON.parse(linesDesc[i])
+    } catch {
+      continue
+    }
+    if (row?.type !== 'message' || !row.message) continue
+    const text = flattenMessageText(row.message.content)
+    if (!text) continue
+    // 渲染归一化：剥 HTML 注释（taiji:msg 内部标记，渲染后不进 textContent）+ markdown/HTML
+    // 结构字符（渲染后不保留原样）+ \\s 归一（DOM 侧 readStreamText 同款），≥8 字符取前 40
+    const needle = text
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/[*_`#[\]<>\\|]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 40)
+    if (needle.length < 8 || seen.has(needle)) continue
+    seen.add(needle)
+    needles.push(needle)
+  }
+  return needles
 }
 
 /**
@@ -399,6 +552,8 @@ export async function readLatestTurn(page) {
  * 「流含任一签名且最后 turn 非空在视口」——不传时旧流未清空的恢复窗口会把「最后
  * turn 非空」误判成新会话已渲染（假阳性：切换请求已发出、restore 进行中，流还是
  * 前一会话内容），凡调用方持有所切会话的签名就必须传入。
+ * needle 命中用 needleHitInStream（DOM 渲染折叠容忍）——精确 includes 会在长消息
+ * 被折叠为「前缀 + …」时永不满足，把渲染成功的轮询拖到超时。
  */
 export async function waitForLatestTurnVisible(page, { timeoutMs = 30_000, expectTexts } = {}) {
   const needles = (expectTexts ?? []).filter((t) => typeof t === 'string' && t.length > 0).map((t) => t.slice(0, 40))
@@ -407,7 +562,7 @@ export async function waitForLatestTurnVisible(page, { timeoutMs = 30_000, expec
     if (!t?.inViewport || !t.text) return null
     if (needles.length > 0) {
       const stream = await readStreamText(page)
-      if (!needles.some((n) => stream.includes(n))) return null
+      if (!needles.some((n) => needleHitInStream(stream, n))) return null
     }
     return t
   }, { timeoutMs, label: needles.length > 0 ? '本会话签名入流且最近消息可见' : '最近消息 turn 渲染可见' })
@@ -426,10 +581,13 @@ export async function measureFirstPaint(page, clickFn, { timeoutMs = 30_000, exp
 }
 
 /**
- * 首屏计时的 smoke 容忍版：现状基线下大会话（>32MB）历史被 read-precheck cap 拒读
- * （runtime 日志「exceeds 32.0 MB read-precheck cap ... no full read」），首屏渲染
- * 原理上不可判（u1 交付物才会突破该 cap）——smoke 模式超时不抛错，返回
- * { rendered:false }（调用方登记 uncovered）；非 smoke（D3 实跑）超时照抛 = fail。
+ * 首屏计时的容忍版：轮询超时不一律抛错，按超时瞬间的流观测分流归因——
+ * - 流非空且最后 turn 可见（渲染已发生）但 needle 判据全灭（判据与 DOM 渲染不同构，
+ *   如长消息折叠「前缀 + …」后 needle 无一命中）：返回 { rendered:true, needleMiss:true }
+ *   交调用方降级 uncovered（归属判定原理上不可判；串话断言不依赖本会话 needle，照常
+ *   执行），text 带全流快照供裁决——比把判据资产缺陷报成 30s 超时 fail 诚实；
+ * - 流空 / 无 turn（切换渲染真失败）：smoke 返回 { rendered:false }（调用方登记
+ *   uncovered），实跑（D3）照抛 = fail。
  * smoke 下调用方应以更短的 timeoutMs 调用（如 45s），避免对必然超时的现状基线空等。
  */
 export async function firstPaintTolerant(page, clickFn, { timeoutMs = 30_000, expectTexts } = {}) {
@@ -437,9 +595,13 @@ export async function firstPaintTolerant(page, clickFn, { timeoutMs = 30_000, ex
     const seen = await measureFirstPaint(page, clickFn, { timeoutMs, expectTexts })
     return { ...seen, rendered: true }
   } catch (e) {
-    if (isSmokeMode() && e instanceof ColdSwitchLibError && /轮询超时/.test(e.message)) {
-      return { elapsedMs: timeoutMs, text: '', turnCount: 0, rendered: false }
+    if (!(e instanceof ColdSwitchLibError && /轮询超时/.test(e.message))) throw e
+    const probe = await readLatestTurn(page).catch(() => null)
+    if (probe?.inViewport && probe.text) {
+      const stream = await readStreamText(page).catch(() => '')
+      return { elapsedMs: timeoutMs, text: stream || probe.text, turnCount: probe.turnCount, rendered: true, needleMiss: true }
     }
+    if (isSmokeMode()) return { elapsedMs: timeoutMs, text: '', turnCount: 0, rendered: false }
     throw e
   }
 }
@@ -493,6 +655,32 @@ export async function readStreamText(page) {
     for (const t of turns) parts.push((t.textContent ?? '').replace(/\s+/g, ' '))
     return parts.join(' ')
   })
+}
+
+/**
+ * needle 在流文本中的命中判定（DOM 渲染折叠容忍）。
+ *
+ * 为什么不是 stream.includes(needle)：DOM 渲染会把长消息折叠为「前缀 + …」——省略号
+ * 进 textContent，截断点后的原文不进，needle 前 40 全串精确子串在折叠流中永不命中
+ * （D3 实测 A7[2]：needle「为什么用 pro ？谁让你用 pro 的？系统提示词怎么说？」在流中
+ * 是「为什么用 pro ？谁让你用 pro …」，includes 不中、轮询 other needle 假成功）。
+ * 判定两级：①needle 全串子串命中；②needle 的某前缀（≥minPrefix 字符）在流中出现且
+ * 紧跟省略号（…/⋯/...）——省略号截断证据把「折叠截断」与「短前缀巧合」区分开，
+ * minPrefix 下限压误报（12 字符连续中文子串 + 省略号，在无关流中按序出现可忽略）。
+ * 串话缺席断言同用本函数：放宽方向是多报泄漏（fail-safe 方向），不是漏报。
+ */
+export function needleHitInStream(streamText, needle, { maxLen = 40, minPrefix = 12 } = {}) {
+  const n = (needle ?? '').slice(0, maxLen)
+  if (!streamText || n.length === 0) return false
+  if (streamText.includes(n)) return true
+  for (let k = minPrefix; k <= n.length; k++) {
+    const prefix = n.slice(0, k)
+    const at = streamText.indexOf(prefix)
+    if (at === -1) continue
+    const after = streamText.slice(at + prefix.length, at + prefix.length + 3)
+    if (after.startsWith('…') || after.startsWith('⋯') || after.startsWith('...')) return true
+  }
+  return false
 }
 
 // ── 进程取证（C 通道：预热槽 / pi 子进程） ───────────────────────────

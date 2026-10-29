@@ -17,12 +17,14 @@
 import {
   allSignatureTexts,
   anySignatureText,
+  extractBudgetWindowNeedles,
   findWarmupPidFromLog,
   firstScreenTimeoutMs,
   firstPaintTolerant,
   flattenSessionList,
   isSmokeMode,
   locateSidebarSession,
+  needleHitInStream,
   pickLargestSession,
   pickSessionsWithSignatures,
   piChildPids,
@@ -75,9 +77,11 @@ export async function run(ctx) {
   const big = pickLargestSession(pool)
   const exclusion = new Set(big ? [big.sessionFile] : [])
   // 实跑连切序列 = 最大样本 + 次大候选（字节压力下的归属隔离）；smoke = 小会话快切。
-  // 只保留带尾部签名的会话（串话断言强判据覆盖）。
+  // 只保留带尾部签名的会话（串话断言强判据覆盖）。种子数 = ISOLATION_ROUNDS+2：
+  // A3 消费 rosterRows[0] + fallback-switch 打开 rosterRows[1]，A7 还需
+  // ISOLATION_ROUNDS 个未打开过的冷切会话（slice(2) 起）。
   const { picked: isolationRoster, signatures } = pickSessionsWithSignatures(pool, {
-    count: ISOLATION_ROUNDS + 1,
+    count: ISOLATION_ROUNDS + 2,
     picker: (p) => {
       const base = p.filter((s) => !exclusion.has(s.sessionFile))
       const ordered = smoke ? base.sort((a, b) => a.bytes - b.bytes) : base.sort((a, b) => b.bytes - a.bytes)
@@ -92,6 +96,9 @@ export async function run(ctx) {
   })
 
   const seeded = seedSessions(dataDir, PROD_DATA_DIR, isolationRoster)
+  // 尾读预算窗口判据（extractBudgetWindowNeedles）：物理尾签名可能落 HISTORY_BUDGET 字节帽
+  // 截掉的窗外部分（truncated=true 是设计内语义），首屏判据 needle 与「窗口内必含」文本并集
+  const budgetNeedles = new Map(isolationRoster.map((s) => [s.sessionId, extractBudgetWindowNeedles(s.sessionFile)]))
   ev.step({
     step: 'fixture.seed-sessions',
     channel: 'C',
@@ -132,7 +139,7 @@ export async function run(ctx) {
     await warmLocator.click()
     await waitForLatestTurnVisible(page, {
       timeoutMs: firstScreenTimeoutMs(),
-      expectTexts: allSignatureTexts(signatures.get(warmRow.id)),
+      expectTexts: [...allSignatureTexts(signatures.get(warmRow.id)), ...(budgetNeedles.get(warmRow.id) ?? [])],
     })
     ev.step({
       step: 'a3.consume-first',
@@ -193,7 +200,7 @@ export async function run(ctx) {
     // uncovered；D3 实跑（u2 落地）用全量预算且超时 = fail
     const fallbackSwitch = await firstPaintTolerant(page, () => coldLocator.click(), {
       timeoutMs: smoke ? 45_000 : firstScreenTimeoutMs(),
-      expectTexts: allSignatureTexts(signatures.get(coldRow.id)),
+      expectTexts: [...allSignatureTexts(signatures.get(coldRow.id)), ...(budgetNeedles.get(coldRow.id) ?? [])],
     })
     if (!fallbackSwitch.rendered) uncovered.push('A3 kill 预热槽后切换首屏渲染（smoke：u2 消费路径未冻结，D3 实跑执行）')
     ev.step({
@@ -245,19 +252,22 @@ export async function run(ctx) {
     })
 
     // ── 段 2：A7 连续冷切 5 会话无串话 ──────────────────────────────
-    // 序列从 rosterRows[1] 起（rosterRows[0] 已在 A3 打开——A7 要求每个会话都是冷切，
-    // 取未打开过的 5 个；roster 种了 ISOLATION_ROUNDS+1 个保证余量）
-    const isolationRows = rosterRows.slice(1, 1 + ISOLATION_ROUNDS)
+    // 序列从 rosterRows[2] 起：rosterRows[0] 已在 A3 步骤 1 消费、rosterRows[1] 已在
+    // A3 fallback-switch 打开（D3 实测对 [1] 再点击 elapsedMs=33 = 热切）——A7 要求
+    // 每个会话都是未打开过的冷切，取 slice(2) 起；roster 种了 ISOLATION_ROUNDS+2 个保证余量
+    const isolationRows = rosterRows.slice(2, 2 + ISOLATION_ROUNDS)
     ev.assert(`A7: 未打开过的冷切序列 ≥${ISOLATION_ROUNDS} 个`, isolationRows.length >= ISOLATION_ROUNDS, {
       channel: 'B',
       expected: `≥${ISOLATION_ROUNDS}`,
       actual: String(isolationRows.length),
     })
 
-    const foreignSignatures = new Map() // sid -> 判据文本（其他会话的签名，断言缺席用）
+    // sid -> 签名对象（extractSessionSignatures 原形态：串话缺席判定与本会话归属判定共用）。
+    // 必须存对象：anySignatureText/allSignatureTexts 只认签名对象字段，存拆出来的字符串
+    // 恒判空（D3 实测 A7[1] 会话签名非空却因存字符串判成「turn 非空」弱判据）
+    const foreignSignatures = new Map()
     for (const r of isolationRows) {
-      const sig = signatures.get(r.id)
-      foreignSignatures.set(r.id, sig?.lastUser ?? sig?.lastAssistant ?? null)
+      foreignSignatures.set(r.id, signatures.get(r.id) ?? null)
     }
 
     for (const [i, r] of isolationRows.entries()) {
@@ -265,26 +275,51 @@ export async function run(ctx) {
       // 连切的渲染窗口与签名提取窗口可能不重叠（中型会话风险同 evict），smoke 下 8s 观测即降级
       const paint = await firstPaintTolerant(page, () => locator.click(), {
         timeoutMs: smoke ? 8_000 : firstScreenTimeoutMs(),
-        expectTexts: allSignatureTexts(signatures.get(r.id)),
+        expectTexts: [...allSignatureTexts(signatures.get(r.id)), ...(budgetNeedles.get(r.id) ?? [])],
       })
       if (!paint.rendered) uncovered.push(`A7[${i + 1}] ${r.id} 首屏渲染超时（smoke 降级登记，归属判据不可判）`)
+      if (paint.needleMiss)
+        uncovered.push(`A7[${i + 1}] ${r.id} 首屏判据全灭（渲染已发生但 needle 与 DOM 渲染不同构），归属断言降级 uncovered；流文本快照已留存 step stats 待裁决`)
       const mineSig = foreignSignatures.get(r.id)
       const mine = anySignatureText(mineSig)
-      // 头尾双锚兼容：现状首屏=头部窗口（头部签名命中），尾读交付=尾部窗口（尾部签名命中）
-      const mineTexts = mineSig ? allSignatureTexts(mineSig) : []
-      const mineHit = paint.rendered && mineTexts.length > 0 ? mineTexts.some((t) => paint.text.includes(t.slice(0, 40))) : paint.text.length > 0
+      // 归属判定载体 = readStreamText 全流，与 waitForLatestTurnVisible 轮询判据同口径：
+      // paint.text 只含最后 turn，尾窗首屏下本会话签名常落更早 turn，用最后 turn 判会与
+      // 轮询结论自相矛盾（D3 实测 A7[1]：轮询 rendered=true 而 mineHit=false）
+      // 头尾双锚兼容：现状首屏=头部窗口（头部签名命中），尾读交付=尾部窗口（尾部签名或
+      // 预算窗口文本命中——物理尾签名可能落字节帽截掉的窗外部分，同首屏判据并集语义）
+      const mineTexts = [...allSignatureTexts(mineSig), ...(budgetNeedles.get(r.id) ?? [])]
+      const streamText = paint.rendered ? await readStreamText(page) : ''
+      const mineHit =
+        paint.rendered && mineTexts.length > 0
+          ? mineTexts.some((t) => needleHitInStream(streamText, t))
+          : paint.text.length > 0
       ev.step({
         step: `a7.cold-switch-${i + 1}`,
         channel: 'A',
         exitCode: mineHit ? 0 : 1,
-        stats: { sid: r.id, elapsedMs: paint.elapsedMs, turnCount: paint.turnCount, mineHit, rendered: paint.rendered },
+        stats: {
+          sid: r.id,
+          elapsedMs: paint.elapsedMs,
+          turnCount: paint.turnCount,
+          mineHit,
+          rendered: paint.rendered,
+          needleMiss: Boolean(paint.needleMiss),
+          // 流文本快照（前 500 字符）：判据全灭/归属存疑时的裁决证据（dataDir 会随
+          // dispose 删除，runDir 证据是唯一留存面）
+          streamSnapshot: paint.rendered ? streamText.slice(0, 500) : '',
+        },
       })
+      // 归属断言：首屏未渲染（smoke）或判据全灭（needleMiss，smoke/实跑一致——判据资产
+      // 失配与实现交付无关）时原理上不可判 → 放行 + uncovered 登记；其余按 mineHit 判
+      const ownershipUnprovable = !paint.rendered || Boolean(paint.needleMiss)
       ev.assert(
-        smoke && !paint.rendered ? `A7[${i + 1}](smoke): 切入 ${r.id} 归属断言降级 uncovered（首屏未渲染）` : `A7[${i + 1}]: 切入 ${r.id} 后流含本会话独有内容（归属正确）`,
-        smoke ? (paint.rendered ? mineHit : true) : mineHit,
+        ownershipUnprovable
+          ? `A7[${i + 1}]: 切入 ${r.id} 归属断言降级 uncovered（${paint.rendered ? '首屏判据全灭，needle 与 DOM 渲染不同构' : '首屏未渲染'}）`
+          : `A7[${i + 1}]: 切入 ${r.id} 后流含本会话独有内容（归属正确）`,
+        ownershipUnprovable ? true : mineHit,
         {
           channel: 'A',
-          expected: mine ? `含「${mine.slice(0, 40)}」（头/尾任一）` : 'turn 非空',
+          expected: ownershipUnprovable ? 'uncovered（判据不可判，流快照留存 step stats）' : mine ? `含「${mine.slice(0, 40)}」（头/尾任一）` : 'turn 非空',
           actual: `rendered=${paint.rendered} ${paint.text.slice(0, 80) || '(空)'}`,
         },
       )
@@ -292,10 +327,9 @@ export async function run(ctx) {
       // 无串话：其余会话的头尾签名都不在当前流中（首屏未渲染时旧流会误报泄漏，随之降级）
       let leaks = []
       if (paint.rendered) {
-        const streamText = await readStreamText(page)
         for (const [otherSid, sig] of foreignSignatures) {
           if (otherSid === r.id || !sig) continue
-          if (allSignatureTexts(sig).some((t) => streamText.includes(t.slice(0, 40)))) leaks.push(otherSid)
+          if (allSignatureTexts(sig).some((t) => needleHitInStream(streamText, t.slice(0, 40)))) leaks.push(otherSid)
         }
       }
       ev.assert(

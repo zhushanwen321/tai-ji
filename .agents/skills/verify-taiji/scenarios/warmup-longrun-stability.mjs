@@ -16,6 +16,7 @@
 import {
   allSignatureTexts,
   anySignatureText,
+  extractBudgetWindowNeedles,
   findWarmupPidFromLog,
   firstScreenTimeoutMs,
   firstPaintTolerant,
@@ -89,6 +90,9 @@ export async function run(ctx) {
     },
   })
   const seeded = seedSessions(dataDir, PROD_DATA_DIR, roster)
+  // 尾读预算窗口判据（extractBudgetWindowNeedles）：物理尾签名可能落 HISTORY_BUDGET 字节帽
+  // 截掉的窗外部分（truncated=true 是设计内语义），首屏判据 needle 与「窗口内必含」文本并集
+  const budgetNeedles = new Map(roster.map((s) => [s.sessionId, extractBudgetWindowNeedles(s.sessionFile)]))
   ev.step({
     step: 'fixture.seed-sessions',
     channel: 'C',
@@ -134,7 +138,7 @@ export async function run(ctx) {
     await firstLocator.click()
     await waitForLatestTurnVisible(page, {
       timeoutMs: firstScreenTimeoutMs(),
-      expectTexts: allSignatureTexts(signatures.get(firstRow.id)),
+      expectTexts: [...allSignatureTexts(signatures.get(firstRow.id)), ...(budgetNeedles.get(firstRow.id) ?? [])],
     })
     ev.step({
       step: 'consume-first',
@@ -220,7 +224,7 @@ export async function run(ctx) {
       // uncovered；D3 实跑（u2 落地）用全量预算且超时 = fail
       const paint = await firstPaintTolerant(page, () => locator.click(), {
         timeoutMs: smoke ? 45_000 : firstScreenTimeoutMs(),
-        expectTexts: allSignatureTexts(signatures.get(r.id)),
+        expectTexts: [...allSignatureTexts(signatures.get(r.id)), ...(budgetNeedles.get(r.id) ?? [])],
       })
       if (!paint.rendered) uncovered.push(`A4[${i + 1}] 放置后附着首屏渲染（smoke：u2 消费路径未冻结，D3 实跑执行）`)
       // 附着后流快照（P4 观测证据：放置后切换落点的流两端文本与覆盖层状态）
@@ -255,12 +259,12 @@ export async function run(ctx) {
           actual: `rendered=${paint.rendered} turnCount=${paint.turnCount}`,
         },
       )
-      // 头尾双锚兼容（现状首屏=头部窗口 / 尾读交付=尾部窗口）；前会话头尾签名都不得串入
+      // 头尾双锚兼容（现状首屏=头部窗口 / 尾读交付=尾部窗口——物理尾签名可能落字节帽截掉
+      // 的窗外部分，入流判据与首屏轮询同款并集窗口文本）；前会话头尾签名都不得串入
       // 首屏未渲染时流是旧会话内容，干净判据不可判 → smoke 随附着降级一同豁免
       const streamText = paint.rendered ? await readStreamText(page) : ''
-      const mineOk = mineSig
-        ? allSignatureTexts(mineSig).some((t) => streamText.includes(t.slice(0, 40)))
-        : paint.text.length > 0
+      const mineTexts = [...(mineSig ? allSignatureTexts(mineSig) : []), ...(budgetNeedles.get(r.id) ?? [])]
+      const mineOk = mineTexts.length > 0 ? mineTexts.some((t) => streamText.includes(t.slice(0, 40))) : paint.text.length > 0
       const prevTexts = prevSig ? allSignatureTexts(prevSig) : []
       const leakOk = prevTexts.every((t) => !streamText.includes(t.slice(0, 40)))
       ev.assert(
