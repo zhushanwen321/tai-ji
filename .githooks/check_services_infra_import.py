@@ -77,6 +77,14 @@ DOCUMENTED_MODULES = {
     "event-adapter",
     "thinking-levels",
 # 登记同步见 docs/architecture/runtime-layering.md §3 ③g
+    # entry-tree-builder（2026-10-29，session-cold-switch-perf u1 尾读 sidecar 回填）：
+    # kernel 类纯函数（无状态、无 IO、无副作用，输入全参数注入：converted Message[] /
+    # custom entries / scoped entries / segments metadata 四参就地内存回填）——services 侧
+    # 消费方仅 session-history 的尾读窗口（backfillConvertedSegments 单源复用全量路径
+    # backfillSegments 三件套，防双轨实现漂移），为纯内存数组变换定义 port 只会增加
+    # 无意义间接层，同 argv-redact / pi-protocol 门面族裁决形态。
+    # 登记同步见 docs/architecture/runtime-layering.md §3 ③h
+    "entry-tree-builder",
 
 }
 

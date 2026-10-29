@@ -26,14 +26,14 @@
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { Message, SegmentsMetadataFile } from '@taiji/shared'
+import type { Message, SegmentsMetadataFile, ServerMessage } from '@taiji/shared'
 import { HISTORY_BUDGET } from '@taiji/shared'
 // paths.ts 是 Node-only 模块，刻意不从 shared barrel 导出（见 shared/src/index.ts L32 注释），
 // Node 端从子路径 import
 import { getAttachmentsDir } from '@taiji/shared/paths'
 import type { IProcessManager } from '../ports/pi-engine.js'
 import type { ISessionStore } from '../ports/session.js'
-import { getHistoryTailFromFile, tailReadHistory, type HistoryWindowQuery, type HistoryWindowResult } from '../session-history.js'
+import { getHistoryTailFromFile, tailReadHistory, type HistoryWindowQuery, type HistoryWindowResult, type TailReadSidecarOpts } from '../session-history.js'
 import { applyOrphanToolResults } from '../../infra/pi/message-converter.js'
 import { computeActivePathEntries } from '../../infra/pi/session-entry-mapper.js'
 import { isEntryNotFoundError } from './trace-sync.js'
@@ -312,6 +312,45 @@ export interface SessionHistoryReaderDeps {
    * 缺省注入（未接线构造）= btw 线尾读恒空 + warn，主会话路径零影响。
    */
   resolveBtwThreadFile?: (sessionId: string) => string | undefined
+  /**
+   * [session-cold-switch-perf §3.3-1] session.historyCacheReady 帧出口（组合根接
+   * messageBus.publish——session 级分区广播，与 session.deliveryHandled 同形态）。
+   * 缺省注入（未接线构造，存量测试形态）= 不发帧，后台任务其余行为不变。
+   */
+  publishToBus?: (sessionId: string, msg: ServerMessage) => void
+}
+
+/**
+ * [session-cold-switch-perf §3.3-1] 后台全量重建任务的结果（deferred 消费形态）：
+ * - ok=true：快照落定（snapshotLeafId = 重建快照末条 entry id；messages = 完整活跃路径
+ *   派生视图，挂靠方自行按预算切窗）。
+ * - ok=false：任务失败（进程丢失 / get_entries 失败 / 会话删除或撤回使在途快照失效）。
+ *   挂靠方按现状失败语义收敛（态 4 不无限等待的机制保证——promise 恒有终态）。
+ */
+export type RebuildOutcome =
+  | { ok: true; snapshotLeafId: string; messages: Message[] }
+  | { ok: false; error: string }
+
+/** 后台全量重建任务句柄（sessionId 键单例的内部形态）。 */
+interface RebuildJob {
+  readonly promise: Promise<RebuildOutcome>
+  resolve: (outcome: RebuildOutcome) => void
+  /**
+   * 会话删除（onSessionDisposed）或撤回失效（onSessionReclaimed）置位：任务不中断，
+   * 完成时丢弃结果——不写缓存（防删除后写回残留 / 撤回后写回含被撤分支的旧快照）、
+   * 不发帧；挂靠方收到 ok=false 按失败语义收敛。
+   */
+  disposed: boolean
+}
+
+/**
+ * 事件循环让出点（后台任务编排段间）：setImmediate 让并发 RPC 插队，降低后台全量重建
+ * 对其他会话请求的干扰（session-cold-switch-perf §3.3-1 实现项②；rebuild 重建段自身
+ * 仍是单次同步 O(n)——批内切分需改 entry 树构建语义或 worker 化，后者设计明文
+ * out-of-scope，残留风险「数百毫秒级干扰」已在设计登记并设重审触发线）。
+ */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve))
 }
 
 /**
@@ -333,6 +372,28 @@ export class SessionHistoryReader {
    * 先完成者的新缓存交错写回」竞态。finally 清理，无泄漏。
    */
   private readonly inflightGetHistory = new Map<string, Promise<HistoryWindowResult>>()
+
+  /**
+   * [session-cold-switch-perf §3.3-1] 后台全量重建任务单例（sessionId 键，含在途与
+   * 排队中）：态 2 触发 / 态 3 事件驱动启动的唯一登记处。并发请求（态 4 挂靠、游标翻页、
+   * 重复态 2 派单）复用同一 promise——同会话不重复触发第二次全量重建。任务终态后由
+   * runRebuildJob finally 清槽。
+   */
+  private readonly rebuildJobs = new Map<string, RebuildJob>()
+  /**
+   * [态 3] 待启动登记（缓存 miss + 进程不在 + 非 btw 线）：getHistory 分派自身不消费槽
+   * 不 spawn（查看路径永不消费执行槽），由并行的 switch 侧进程获取完成事件
+   *（onSessionActivated 挂点 → startPendingRebuild）驱动启动。会话删除时清出。
+   */
+  private readonly pendingRebuilds = new Set<string>()
+  /**
+   * 后台任务 FIFO 排队（跨会话并发上限 1，设计 §3.3-1 资源边界：连续查看多个大会话时
+   * 后台成本不叠加）。登记序 ≈ 最近使用序（getHistory 消费驱动触发），FIFO 出队即按
+   * 最近使用排序的简化实现。
+   */
+  private readonly rebuildQueue: string[] = []
+  /** 在途后台任务数（全局并发帽 1 的计数器）。 */
+  private activeRebuilds = 0
 
   /**
    * @param historyCache 缓存实例注入（测试缝：容量帽可注入）；缺省默认帽（8 session）。
@@ -410,16 +471,159 @@ export class SessionHistoryReader {
       return await this.getCursorWindow(sessionId, query, client)
     }
     if (client) {
-      return await this.getLatestWindow(sessionId, query, client)
+      // ── [session-cold-switch-perf §3.3-1 态 1] 缓存命中 → 现状快路径，不变 ──
+      //（增量 + fallback 同步全量；缓存命中但 leafId null 的异常条目也留在本路径——
+      // 行为与改造前逐点等价）
+      if (this.historyCache.get(sessionId) !== undefined) {
+        return await this.getLatestWindow(sessionId, query, client)
+      }
+      // ── [态 2 / 态 4] 缓存 miss + 进程在场（缓存逐出后重切的常见态）：尾读首屏
+      // 立即返回 + 后台用在场进程全量重建（不消费预热槽——查看路径永不消费执行槽）。
+      // 尾读 IO 失败（态 4）→ 挂后台任务等全量（有终态，不无限等待）。
+      return await this.getTailFirstWindow(sessionId, query)
     }
-    // 无 RPC client（离线 session）：走尾读（分块扩窗预算窗口，D5②），
-    // 避免大文件全量读（不读不写缓存——文件路径无 RPC leafId，活跃路径以窗口末条
-    // entry 推导，见 session-history convertWindowEntries 的裁剪接入）。
-    // [U8 重启中断标记] 仅本分支（最新窗口请求 ∧ 会话未附着）开启尾部中断判定——
-    // 联合判定的「未附着」半边由此构造性保证：RPC 失败降级文件读（getLatestWindow/
-    // getCursorWindow 的 catch）走 tailReadOffline 缺省关闭，防活会话生成中文件尾 =
-    // user entry 的误标；游标翻页返回锚前区域，语义上也不适用。
-    return await this.tailReadOffline(sessionId, query, { detectInterrupted: true })
+    // ── [态 3 / 态 4] 缓存 miss + 进程不在（冷启动首点态）：尾读首屏立即返回；主会话
+    // 后台全量任务登记为待启动，由并行 switch 侧进程获取完成事件驱动启动
+    //（onSessionActivated 挂点）；btw 线不登记（回放不经切入链、无 switch 侧，登记必成
+    // 无完成时点的无主条目）。尾读 IO 失败 → 按现状失败语义返回（不无限等待）。
+    return await this.getTailFirstOfflineWindow(sessionId, query)
+  }
+
+  /**
+   * [session-cold-switch-perf §3.3-1 态 2 / 态 4] 尾读首屏 + 后台全量重建（进程在场）：
+   * 尾读成功 → 首屏立即返回 + ensureRebuildJob 触发（fire-and-forget，单例）；尾读抛错
+   *（IO 失败，态 4）→ 挂同一在途任务等待，任务成功返回全量窗口、失败按现状失败语义
+   * 上抛（promise 恒有终态 = 不无限等待的机制保证）。空文件/断尾是合法空页（尾读内部
+   * 静默语义），不触发态 4（设计注）。
+   */
+  private async getTailFirstWindow(sessionId: string, query?: HistoryWindowQuery): Promise<HistoryWindowResult> {
+    const windowOpts = { limitTurns: query?.limitTurns, maxBytes: query?.maxBytes }
+    let tailResult: HistoryWindowResult
+    try {
+      tailResult = await this.tailReadOffline(sessionId, query)
+    } catch (e) {
+      console.warn(`[session-service] tail read failed for ${sessionId}: ${toErrorMessage(e)}, awaiting background full rebuild`)
+      const outcome = await this.ensureRebuildJob(sessionId).promise
+      if (!outcome.ok) throw new Error(`[session-history] background rebuild failed for ${sessionId}: ${outcome.error}`)
+      return applyHistoryBudgetWindow(outcome.messages, windowOpts)
+    }
+    // 态 2：后台全量重建（写缓存 → historyCacheReady 帧）。不 await——首屏返回不被
+    // 重建阻塞；任务失败不自动重起（失败帧显式上报，下次派单按四态重新决策）。
+    this.ensureRebuildJob(sessionId)
+    return tailResult
+  }
+
+  /**
+   * [session-cold-switch-perf §3.3-1 态 3 / 态 4] 离线尾读首屏 + 待启动登记（进程不在）：
+   * 行为与改造前的 tailReadOffline 直调逐点等价（含 detectInterrupted 联合判定），叠加
+   * 态 3 登记——主会话（非 btw 线）登记待启动任务，由 onSessionActivated 事件驱动启动；
+   * btw 线排除（判别器 = resolveBtwThreadFile 成员查询，零新增接线）。尾读抛错（IO
+   * 失败，态 4）→ 主会话登记后按现状失败语义 rethrow（待启动无完成时点，不等待）。
+   */
+  private async getTailFirstOfflineWindow(sessionId: string, query?: HistoryWindowQuery): Promise<HistoryWindowResult> {
+    // btw 线判别（注册表纯查询；与 tailReadOffline 内部分支判定双调冗余——同款既有先例）
+    const isBtw = this.deps.resolveBtwThreadFile?.(sessionId) !== undefined
+    try {
+      const result = await this.tailReadOffline(sessionId, query, { detectInterrupted: true })
+      if (!isBtw) this.pendingRebuilds.add(sessionId)
+      return result
+    } catch (e) {
+      if (!isBtw) this.pendingRebuilds.add(sessionId)
+      throw e
+    }
+  }
+
+  /**
+   * [态 3 挂点] 待启动任务的进程获取事件驱动启动（session-service onSessionActivated
+   * 注册——switch 成功时该会话进程已获取，据此启动登记中的任务）。非登记会话 no-op；
+   * 启动走 ensureRebuildJob 单例（client 由 runRebuildJob 启动时经 pm.getClient 取——
+   * 排队等待期间进程变化的形态由该取点覆盖）。
+   */
+  startPendingRebuild(sessionId: string): void {
+    if (!this.pendingRebuilds.delete(sessionId)) return
+    this.ensureRebuildJob(sessionId)
+  }
+
+  /**
+   * [session-cold-switch-perf §3.3-1] 后台全量重建任务单例入口：同 sessionId 已有任务
+   *（在途或排队）复用，否则登记新任务并入队。跨会话并发帽 1（pumpRebuildQueue 出队）。
+   */
+  private ensureRebuildJob(sessionId: string): RebuildJob {
+    const existing = this.rebuildJobs.get(sessionId)
+    if (existing) return existing
+    let resolve!: (outcome: RebuildOutcome) => void
+    const promise = new Promise<RebuildOutcome>((r) => { resolve = r })
+    const job: RebuildJob = { promise, resolve, disposed: false }
+    this.rebuildJobs.set(sessionId, job)
+    this.rebuildQueue.push(sessionId)
+    this.pumpRebuildQueue()
+    return job
+  }
+
+  /** 跨会话并发帽 1 的出队点：无在途任务时启动队头。 */
+  private pumpRebuildQueue(): void {
+    if (this.activeRebuilds > 0) return
+    const sessionId = this.rebuildQueue.shift()
+    if (sessionId === undefined) return
+    const job = this.rebuildJobs.get(sessionId)
+    if (!job) return this.pumpRebuildQueue()
+    this.activeRebuilds++
+    void this.runRebuildJob(sessionId, job)
+  }
+
+  /**
+   * 后台任务执行体：get_entries 全量 → entry 树重建（与同步全量路径同一 fetchAndRebuildFull
+   * 核心）→ 编排段间让出 → 终态守卫（disposed / 过期快照）→ 写缓存 → historyCacheReady
+   * 帧。失败 resolve(ok:false) + 失败帧（不自动重起——失败显式上报、首败即停；下次
+   * getHistory 派单按四态重新决策）。
+   */
+  private async runRebuildJob(sessionId: string, job: RebuildJob): Promise<void> {
+    try {
+      const client = this.deps.pm.getClient(sessionId)
+      if (!client) throw new Error('pi client unavailable for background full rebuild')
+      const full = await this.fetchAndRebuildFull(sessionId, client)
+      await yieldToEventLoop()
+      // 会话删除 / 撤回失效：丢弃在途结果——不写缓存、不发帧；挂靠方按失败语义收敛
+      //（promise 恒有终态，态 4 不无限等待）。
+      if (job.disposed) {
+        job.resolve({ ok: false, error: 'session disposed or reclaimed during background rebuild' })
+        return
+      }
+      if (full === null) {
+        // R-12 同语义：活跃 session 权威空视图（get_entries 空响应）。不写缓存（与同步
+        // 全量路径现状一致），成功帧照发（空快照基线）。
+        this.publishCacheReady(sessionId, '')
+        job.resolve({ ok: true, snapshotLeafId: '', messages: [] })
+        return
+      }
+      // 过期快照守卫（snapshotLeafId 版本对账的 runtime 侧）：任务在途期间缓存已被活跃链
+      // 写入（增量/另一重建——leafId 非 null 的新鲜基线）→ 本次快照（拉取时点定格）不覆盖；
+      // 缓存缺失或 leafId null 残缺条目（不可增量基线）→ 写入。帧照发（renderer 按
+      // snapshotLeafId 自行对账是否重拉）。
+      const existing = this.historyCache.get(sessionId)
+      if (existing === undefined || existing.leafId === null) {
+        this.historyCache.set(sessionId, { leafId: full.leafId, messages: full.messages, truncated: false })
+      }
+      this.publishCacheReady(sessionId, full.leafId ?? '')
+      job.resolve({ ok: true, snapshotLeafId: full.leafId ?? '', messages: full.messages })
+    } catch (e) {
+      const error = toErrorMessage(e)
+      console.warn(`[session-service] background full rebuild failed for ${sessionId}: ${error}`)
+      this.publishCacheReady(sessionId, '', error)
+      job.resolve({ ok: false, error })
+    } finally {
+      this.activeRebuilds--
+      this.rebuildJobs.delete(sessionId)
+      this.pumpRebuildQueue()
+    }
+  }
+
+  /** session.historyCacheReady 轻通知帧（成功/失败都推，失败带 error；协议 SSOT = shared protocol.ts）。 */
+  private publishCacheReady(sessionId: string, snapshotLeafId: string, error?: string): void {
+    this.deps.publishToBus?.(sessionId, {
+      type: 'session.historyCacheReady',
+      payload: { sessionId, snapshotLeafId, ...(error !== undefined && { error }) },
+    })
   }
 
   /**
@@ -449,6 +653,16 @@ export class SessionHistoryReader {
     }
     if (!client) {
       // 离线 session 游标翻页：文件读游标窗口（与离线尾读同链，cursorId 定位）
+      return await this.tailReadOffline(sessionId, query)
+    }
+    // [session-cold-switch-perf §3.3-1] 态 2 叠加点：与在途后台全量任务并发时挂到在途
+    // promise 复用（不重复触发第二次全量重建）。任务成功 → 快照切前缀；失败 → 现状降级
+    //（文件读游标窗口，与下方 catch 同链）。
+    const inflightJob = this.rebuildJobs.get(sessionId)
+    if (inflightJob) {
+      const outcome = await inflightJob.promise
+      if (outcome.ok) return cursorPrefix(outcome.messages)
+      console.warn(`[session-service] cursor getHistory awaiting background rebuild failed: ${outcome.error}, falling back to file cursor read`)
       return await this.tailReadOffline(sessionId, query)
     }
     try {
@@ -507,6 +721,28 @@ export class SessionHistoryReader {
     sessionId: string,
     client: NonNullable<ReturnType<IProcessManager['getClient']>>,
   ): Promise<Message[] | null> {
+    const full = await this.fetchAndRebuildFull(sessionId, client)
+    if (full === null) return null
+    // leafId 是 session 当前叶子 entry id，记录为下次增量拉取的 since 基准（D6-1）——
+    // 存 pi 真实 leafId（非裁剪派生尾），增量 delta 首条 parent 与之配对（W20 Fix-2 不变量）。
+    // 缓存基线 = 完整活跃路径派生视图（全量重建裁剪后落缓存——「全量」指未切预算窗的完整
+    // 活跃路径，非全文件；增量合并正确性依赖基线为完整活跃路径）；返回值按双预算切窗（D4）。
+    this.historyCache.set(sessionId, { leafId: full.leafId, messages: full.messages, truncated: false })
+    return full.messages
+  }
+
+  /**
+   * [session-cold-switch-perf] 全量重建共享核心（同步路径 rebuildFullHistoryAndCache 与
+   * 后台任务 runRebuildJob 单源）：get_entries 拉取 → 活跃路径裁剪 → segments sidecar 读
+   * → entry 树重建。不写缓存、不发帧——落定语义由调用方承载（同步路径直接写；后台路径
+   * 过守卫后写 + 发帧）。
+   *
+   * @returns null = pi RPC 成功但 entries 为空（R-12：活跃 session 的权威空视图）。
+   */
+  private async fetchAndRebuildFull(
+    sessionId: string,
+    client: NonNullable<ReturnType<IProcessManager['getClient']>>,
+  ): Promise<{ leafId: string | null; messages: Message[] } | null> {
     const result = await client.getEntries() as GetEntriesResult
     const entries = result.data?.entries ?? []
     if (entries.length === 0) return null
@@ -521,12 +757,7 @@ export class SessionHistoryReader {
     // 文件缺失/损坏 → null（rebuildHistoryFromEntries 全降级为占位文本，非硬错误）。
     const segmentsMetadata = await readSegmentsMetadataFile(sessionId)
     const rebuilt = this.deps.sessionStore.rebuildHistoryFromEntries(scopedEntries, segmentsMetadata)
-    // leafId 是 session 当前叶子 entry id，记录为下次增量拉取的 since 基准（D6-1）——
-    // 存 pi 真实 leafId（非裁剪派生尾），增量 delta 首条 parent 与之配对（W20 Fix-2 不变量）。
-    // 缓存基线 = 完整活跃路径派生视图（全量重建裁剪后落缓存——「全量」指未切预算窗的完整
-    // 活跃路径，非全文件；增量合并正确性依赖基线为完整活跃路径）；返回值按双预算切窗（D4）。
-    this.historyCache.set(sessionId, { leafId, messages: rebuilt.messages, truncated: false })
-    return rebuilt.messages
+    return { leafId, messages: rebuilt.messages }
   }
 
   /**
@@ -565,14 +796,21 @@ export class SessionHistoryReader {
     // interrupted——「会话未附着」是判定的成立前提，与线类型无关（F1 修复：早退分支
     // 曾绕过剥除行，把 tailReadHistory 判出的 interrupted 原样出场）。
     // btw 线文件只解析一次，分支判定与线下读共用同一结果（注册表纯查询，双调冗余）。
+    // [session-cold-switch-perf §3.3-1 实现项①] 尾读路径补 segments sidecar 回填：两条
+    // 尾读链（通用 / btw）都注入 sidecar 元数据（runtime 直接读文件，缺失 → null 全降级
+    // 纯文本——与全量路径降级语义一致），窗口消息内容对齐全量重建路径（图片/文件/技能
+    // chip），回填判定链单源 backfillConvertedSegments（session-history convertWindowEntries）。
+    const segmentsMetadata = await readSegmentsMetadataFile(sessionId)
+    const sidecar: TailReadSidecarOpts = { segmentsMetadata }
     const btwFile = this.deps.resolveBtwThreadFile?.(sessionId)
     const result = btwFile !== undefined
-      ? await this.tailReadBtwOffline(sessionId, btwFile, query)
+      ? await this.tailReadBtwOffline(sessionId, btwFile, query, sidecar)
       : await getHistoryTailFromFile(
         sessionId,
         this.deps.sessionStore,
         query?.limitTurns ?? HISTORY_BUDGET.RECENT_TURNS,
         { cursor: query?.cursor, maxBytes: query?.maxBytes ?? HISTORY_BUDGET.MAX_BYTES },
+        sidecar,
       )
     // 开关关闭时剥除（tailReadHistory 内 cursor 翻页本就不判，此处防未来判定面扩大后
     // 降级路径误透传；字段可选，剥除 = 不出场而非 false——消费方按「无判定」处理）
@@ -594,6 +832,7 @@ export class SessionHistoryReader {
     sessionId: string,
     file: string,
     query?: HistoryWindowQuery,
+    sidecar?: TailReadSidecarOpts,
   ): Promise<HistoryWindowResult> {
     const emptyPage: HistoryWindowResult = { messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 }
     if (!file) {
@@ -615,6 +854,7 @@ export class SessionHistoryReader {
       this.deps.sessionStore,
       query?.limitTurns ?? HISTORY_BUDGET.RECENT_TURNS,
       { cursor: query?.cursor, maxBytes: query?.maxBytes ?? HISTORY_BUDGET.MAX_BYTES },
+      sidecar,
     )
   }
 
@@ -708,6 +948,12 @@ export class SessionHistoryReader {
    */
   onSessionDisposed(sessionId: string): void {
     this.historyCache.delete(sessionId)
+    // [session-cold-switch-perf §3.3-1] 两张新增内存表同步清出：态 3 待启动登记删除
+    //（该会话进程永不注册的无主条目由本挂点清出）；在途后台任务不中断但置 disposed——
+    // 完成时丢弃结果（不写缓存防删除后写回残留、不发帧），挂靠方按失败语义收敛。
+    this.pendingRebuilds.delete(sessionId)
+    const job = this.rebuildJobs.get(sessionId)
+    if (job) job.disposed = true
   }
 
   /**
@@ -719,6 +965,13 @@ export class SessionHistoryReader {
    */
   onSessionReclaimed(sessionId: string): void {
     this.historyCache.delete(sessionId)
+    // [session-cold-switch-perf] 撤回同样使在途后台快照失效（job 置 disposed）：撤回经
+    // pi append label entry 改树，任务在途快照（label 前 get_entries 定格）完成后若写入，
+    // 缓存会含被撤分支（message-revoke U6a「旧分支不渲染」被绕过）——丢弃结果，与缓存
+    // 驱逐同因。态 3 待启动登记保留（撤回需活跃 turn，进程不在的会话不可撤回，登记与
+    // 撤回无交集——保守不动）。
+    const job = this.rebuildJobs.get(sessionId)
+    if (job) job.disposed = true
   }
 
   /**

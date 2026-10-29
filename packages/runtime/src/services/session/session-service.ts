@@ -483,7 +483,14 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       pm: this.pm,
       sessionStore: this.sessionStore,
       resolveBtwThreadFile: (sessionId) => this.btwService?.getLine?.(sessionId)?.sessionFilePath,
+      // [session-cold-switch-perf §3.3-1] historyCacheReady 帧出口（session 级 publish，
+      // 与 session.deliveryHandled 同形态；bus 未注入时 no-op——存量测试构造形态）。
+      publishToBus: (sessionId, msg) => this.messageBus?.publish(sessionId, msg),
     })
+    // [session-cold-switch-perf §3.3-1 态 3] 待启动任务的事件驱动启动挂点：唯一触发点 =
+    // switch 成功分支的 notifySessionActivated（此刻进程已获取；getHistory 分派自身不消费
+    // 槽不 spawn——查看路径永不消费执行槽）。回调异常由 notifySessionActivated 逐个隔离。
+    this.onSessionActivatedHandlers.push((summary) => this.historyReader.startPendingRebuild(summary.id))
     // 状态派生视图域（S5 迁出至 session-state-projection.ts）：deps 窄注入——session 查询经
     // lifecycle（Map 所有者）只读侧，messageBus 经 getter 每次调用动态读（setter 晚期注入
     // 语义与原 Facade 字段直读逐字等价）；fetchContext / persistSessionOutcome /

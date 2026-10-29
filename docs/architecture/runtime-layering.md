@@ -81,6 +81,7 @@ transport 层的磁盘读侧居 infra、经组合根注入：remote-access 的 r
 | ③e | `infra/pi/argv-redact.ts` | **kernel 类纯函数**（无状态、无 IO、无副作用，纯字符串/数组遮蔽）：spawn 日志行与 crash journal 摘要出口共用的「日志回显前蔽值」变换 | reap-orphan-pi（crash journal 摘要；另一消费方 `infra/pi/rpc-client.ts` 本就在 infra 层） |
 | ③f | `infra/crash-correlation.ts` | 崩溃时刻的机器检查侧只读取证查询（无状态只读、best-effort 永不 reject），mem-pressure 同款横切关注点——定义 port 只会增加无意义间接层 | session-service pi crash 登记行（另一消费方 `infra/pi/rpc-client.ts` 本就在 infra 层） |
 | ③g | `infra/pi/pi-protocol.ts` + `infra/pi/pi-rejection.ts` + `infra/pi/event-adapter.ts` + `infra/pi/thinking-levels.ts` | **kernel 类纯函数/纯常量门面族**（无状态、无 IO、无副作用）：协议常量与解析（PI_EVENT 事件名词表 + 命令清单解析 + disposition 归一）、拒绝分型文案、结构化字段派生、thinking 档位词表——pi 1.0 对齐设计的 pi 词汇合法持有点清单（翻译层本体），为纯常量/纯函数定义 port 只会增加无意义间接层 | session-delivery-registry（命令识别/拒绝分型/disposition）、event-interpreter（事件名常量）、handoff-service（turn-end 帧）、model-capability（档位词表） |
+| ③h | `infra/pi/entry-tree-builder.ts` | **kernel 类纯函数**（无状态、无 IO、无副作用，输入全参数注入的内存数组变换）：entry 树 → Message[] 重建与 segments.json sidecar 回填（backfillConvertedSegments 窗口级组合，单源复用全量路径 backfillSegments 三件套防双轨漂移），为纯内存变换定义 port 只会增加无意义间接层，argv-redact 同裁决形态 | session-history 尾读窗口（segments 回填；另一消费方全量路径 rebuildHistoryFromEntries 本就在 `infra/pi/entry-tree-builder.ts` 内部） |
 
 ### ④ node:fs 直用——基线债登记（非合规例外）
 

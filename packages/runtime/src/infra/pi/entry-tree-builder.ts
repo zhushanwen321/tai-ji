@@ -184,6 +184,33 @@ function backfillSegments(
 }
 
 /**
+ * 窗口级 segments 回填（session-cold-switch-perf 尾读快路径）：对已转换的 Message[]
+ * 执行与 rebuildHistoryFromEntries 第 2-4 步同一判定链（clientUuid 链先、deferEntryId
+ * 直查兜底、非空 segments 才覆盖）的 segments.json sidecar 回填。
+ *
+ * 为什么导出独立组合而非让调用方重走 rebuildHistoryFromEntries：文件尾读窗口
+ *（collectRecentTurnEntriesFromTail → convertWindowEntries）已用 mapSessionEntries +
+ * convertHistory 产出 Message[]（文件路径读链，无 entry 树重建语义），只缺 segments
+ * 回填一步——复用同一私有三件（buildClientUuidMap / buildDeferEntryIdMap /
+ * backfillSegments），保证尾读与全量两条路径的消息内容判定链单源（防双轨实现漂移）。
+ *
+ * @param converted convertHistory 产出的 Message[]（就地回填）
+ * @param customDataEntries mapSessionEntries 返回的 custom entry 集（clientUuid 映射源）
+ * @param scopedEntries 剥 session header 后的窗口 entries（defer 裸标记提取源；与
+ * rebuildHistoryFromEntries 传裁剪后 scoped 不同，此处传未裁剪窗口——多出的被撤分支
+ * 映射无消费方（backfill 按 msg.piEntryId 查，被撤消息不在 converted），无害）
+ * @param segmentsMetadata segments.json sidecar（null = 无 sidecar，全降级不回填）
+ */
+export function backfillConvertedSegments(
+  converted: Message[],
+  customDataEntries: PiSessionCustomEntry[],
+  scopedEntries: PiSessionEntry[],
+  segmentsMetadata: SegmentsMetadataFile | null,
+): void {
+  backfillSegments(converted, buildClientUuidMap(customDataEntries), segmentsMetadata, buildDeferEntryIdMap(scopedEntries))
+}
+
+/**
  * 从 pi get_entries 返回的 entry 树重建 taiji Message[]。
  *
  * 三步（两遍扫 entry + 一遍回填），主函数只留编排：

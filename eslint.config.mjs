@@ -941,8 +941,10 @@ export default [
     // [2026-09-25 架构审查 MF-1-7 装配收编] 投递注册表/撤回信号广播路径改构造-后置注入
     // （两进程内活动槽删除），Facade 净代码行 659 > 650 → 提额 665（微超即提额先例：
     // provider-config-helper / engine-client 同型）。提额而非 off：保留软上限告警，超限即再暴露。
+    // [session-cold-switch-perf u1] historyReader 帧出口/激活挂点两行接线，净代码行 667 > 665
+    // → 提额 670（同款微超即提额；软上限保留）。
     rules: {
-      'max-lines': ['warn', { max: 665, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 670, skipBlankLines: true, skipComments: true }],
     },
   },
   // [HISTORICAL] [u7a 生产补挂 2026-09-12] EngineClient 是引擎协议客户端唯一聚合点
