@@ -218,7 +218,7 @@ export interface DeliveryStoreRecord {
 }
 
 /**
- * 持久化存储端口（v3，统一语言词条「持久化存储端口」）：内核与耐久面的唯一接口。
+ * 持久化存储端口（v3，统一语言词条「持久化存储端口」）：内核与耐久层的唯一接口。
  * 两个实现在两半区适配层（本包零 fs 零 pi 知识）：runtime 半区 = 磁盘 outbox 文件
  * （文本投递路径，波 4 接线）；port 半区 = session entry 读写（通知投递路径，波 2 接线）。
  *
@@ -287,7 +287,7 @@ export interface DeliveryConfig {
    */
   onSettled?: (msg: DeliveryMessage, outcome: 'delivered' | 'rejected') => void
   /**
-   * 持久化存储端口（v3）。缺省 undefined = 无耐久面（v2 行为：纯内存条目集）——
+   * 持久化存储端口（v3）。缺省 undefined = 无耐久层（v2 行为：纯内存条目集）——
    * 既有 runtime 装配不传 = 逐字节不变（波 1 零行为变化锚）。提供时内核行为契约见
    * DeliveryStore（受理前 persist / 终局 ack / forget 失败 discard / 构造期
    * loadTerminalIds 播种判重索引）。

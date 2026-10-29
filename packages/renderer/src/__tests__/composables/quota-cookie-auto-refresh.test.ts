@@ -14,7 +14,7 @@
  * mock 策略：vi.mock quota RPC 域（getCached / fetchQuota / refreshQuota）与 '@/lib/ipc'
  * （refreshQuotaCookie）；configureQuota 经 provideSettingsTransport(makeSettingsTransportStub)
  * 注入桩（保存链走真实 transport seam）；settings store 为 core 惰性单例，直接
- * setProviders / setQuotaPresets 灌数（无 transport 依赖面）。冷却窗用 vi.useFakeTimers +
+ * setProviders / setQuotaPresets 灌数（不依赖 transport）。冷却窗用 vi.useFakeTimers +
  * setSystemTime 推进墙钟（续期链自身无 setTimeout，微任务 flush 不受影响）。
  *
  * 冷却注册表是 useQuotaQuery 模块级状态，跨用例持久——各用例使用互不相同的

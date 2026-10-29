@@ -61,7 +61,7 @@ const logger = getLogger("pi-host-run-store");
 const LEGACY_JOURNAL_SUFFIX = ".events.jsonl";
 
 /**
- * WorkflowRun 枚举 store 窄口（run 枚举读侧对 run 持久化域的最小依赖面，结构
+ * WorkflowRun 枚举 store 窄口（run 枚举读侧对 run 持久化域的最小依赖集，结构
  * 类型——调用方传符合形态的枚举实现即可，不 import orchestration 具体类，
  * 保持本模块可独立编译 + 单测）。
  *

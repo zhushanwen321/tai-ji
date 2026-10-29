@@ -25,7 +25,7 @@
  * 合并让全部用例共享一份组件树装载与环境初始化。未并入：thinking-md-variant.test.ts
  * （其 `@vitest-environment jsdom` pragma 与包默认 happy-dom 环境冲突，且本文件 quota 区
  * 用例的 portal 断言设计依赖 happy-dom 行为——环境实质冲突，保持独立）。detail 节的
- * useDetailPane/useCopy/useChatViewDeps 等 mock 只覆盖 DetailPane 依赖面（DetailPane
+ * useDetailPane/useCopy/useChatViewDeps 等 mock 只覆盖 DetailPane 依赖集（DetailPane
  * 不直接 import '@/api'，与 quota 节 @/api 全量 mock 无交互）；block 节经 mockChatProvide
  * 注入，不经模块 mock。各节以裸块隔离节内 helper。
  *
@@ -74,7 +74,7 @@ vi.mock('@/i18n', () => ({
   default: { global: { t: (key: string) => key } },
 }))
 
-// ── detail-selection-bubble 节的 mock（useDetailPane 可控 state + 选区 bubble 依赖面）──
+// ── detail-selection-bubble 节的 mock（useDetailPane 可控 state + 选区 bubble 依赖集）──
 // 可配置的 detail state（测试切换 viewMode/content）
 const detailState = ref({
   path: 'src/foo.ts',

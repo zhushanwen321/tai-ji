@@ -506,7 +506,7 @@ export function createDelivery(
   const changeSubs = new Set<() => void>()
 
   // ─── v3 DeliveryStore 装配（设计 §3.5.1）───────────────────
-  // 缺省 undefined = 无耐久面（v2 行为）；提供时构造期播种判重索引（启动 / 重放
+  // 缺省 undefined = 无耐久层（v2 行为）；提供时构造期播种判重索引（启动 / 重放
   // 语义：把持久终局记录构建为内存索引，对齐账本 ackedIds 播种）。loadTerminalIds
   // 抛错不吞——装配错误 fail-fast 早暴露（与 persist 的承诺语义同侧）。
   const store: DeliveryStore | undefined = config?.store

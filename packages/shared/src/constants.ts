@@ -290,13 +290,13 @@ export const ENGINE_ENV_DENY_LIST: readonly string[] = [
   // 此处按字面量镜像：guard 只提取引号条目，且本常量声明先于该对象）。模式回落事实是
   // runtime 直接 spawn 的那个 pi 的「本进程本次运行」事实；引擎一跳（主 pi → 引擎 CLI
   // → 子 agent pi）继承陈旧值会让子 agent pi 的 trace 扩展记一个从未发生的
-  // presetFallback 假披露——故在引擎出站面一律剥除。
+  // presetFallback 假披露——故在引擎出站环节一律剥除。
   'TAIJI_PRESET_FALLBACK_FROM',
   'TAIJI_PRESET_FALLBACK_TO',
   // [connection-datasync-ssot §6.1] runtime 实例标识（env 名 SSOT = 下方 RUNTIME_ID_ENV，
   // 此处按字面量镜像，形态对齐上方 PRESET_FALLBACK 两键）：supervisor 每次 spawn 签发、
   // 只有 runtime 进程自身消费（auth 成功应答回传）。引擎一跳继承陈旧值 = 后代进程持有
-  // 已死实例标识——生命周期标志族同害，引擎出站面一并剥除。
+  // 已死实例标识——生命周期标志族同害，引擎出站环节一并剥除。
   'TAIJI_RUNTIME_ID',
 ]
 

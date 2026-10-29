@@ -3,7 +3,7 @@
 // [subagent-observability u-foundation] FailureCause 词表枚举完整性测试锚
 // （设计 §3.3.2 + §3.4「同款枚举完整性测试锚」三词表之一的 sdk 侧）。
 //
-// 锁定面：
+// 锁定范围：
 //   ① class×kind 合法组合矩阵逐行可构造（判别联合矩阵的可满足性——每行至少一个
 //      合法实例编译期 + 运行时双验证）；
 //   ② kind 闭合词表常量与联合同步（FAILURE_CAUSE_KIND_VOCAB_LOCK 编译锁的运行时

@@ -4,7 +4,7 @@
 // （设计 §3.4「FailureCause.kind 词表与 SettlementReason 结清枚举同款枚举完整性
 // 测试锚」——run-vocabulary 同位；覆盖两词表 + RunOutcome 第五值）。
 //
-// 锁定面：
+// 锁定范围：
 //   ① SettlementReason 结清枚举封闭五值（completed/failed/cancelled/lost/no_result，
 //      §3.3.6）+ 解析缺省 unknown 的 fail-visible 类型面（词表外 reason 不落五值）
 //      + 与 extension-protocol SETTLEMENT_REASONS 的跨包对拍（词表漂移防线）；

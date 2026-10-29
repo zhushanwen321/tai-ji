@@ -224,7 +224,7 @@ describe("computeCollectWaitKeys（collect_results 缺省等待集，工具侧�
 
 	it("[共享函数缺省语义不动] countActiveFromEntries 仍计 lifetime 为活跃（goal/subagent-workflow 零变化）", () => {
 		// 排除只发生在 computeCollectWaitKeys（工具侧减法）——countActiveFromEntries
-		// 缺省语义不变是任务书机械判据③与设计 §3.4 排除归属显式约定的锁定面。
+		// 缺省语义不变是任务书机械判据③与设计 §3.4 排除归属显式约定的锁定范围。
 		const entries = [makeRegisterEntry("sm-life", { type: "session", kind: "lifetime" })];
 		expect(countActiveFromEntries(entries).ids).toEqual(["sm-life"]);
 	});

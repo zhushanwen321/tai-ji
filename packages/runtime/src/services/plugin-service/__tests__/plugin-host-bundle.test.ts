@@ -103,7 +103,7 @@ function loadLoaderHooks(): LoaderHooks {
       case './plugin-fs-guard.cjs':
         return nodeRequire(join(__dirname, '..', 'plugin-fs-guard.cjs'))
       default:
-        throw new Error(`plugin-esm-loader.cjs 出现未预期的 require('${id}')（依赖面变化须同步本桩）`)
+        throw new Error(`plugin-esm-loader.cjs 出现未预期的 require('${id}')（依赖集变化须同步本桩）`)
     }
   }
   const moduleObj: { exports: unknown } = { exports: undefined }
@@ -529,7 +529,7 @@ describe('plugin-esm-loader', () => {
         case './plugin-fs-guard.cjs':
           return fsGuard
         default:
-          throw new Error(`plugin-esm-loader.cjs 出现未预期的 require('${id}')（依赖面变化须同步本桩）`)
+          throw new Error(`plugin-esm-loader.cjs 出现未预期的 require('${id}')（依赖集变化须同步本桩）`)
       }
     }
     const moduleObj: { exports: unknown } = { exports: undefined }

@@ -127,7 +127,7 @@ export function composeChildEnvBase(opts: BuildOutboundChildEnvOptions): Record<
 /**
  * 在已构建的 env 副本上执行 deny 清单兜底剥除（原地删键）。模块私有分层：唯一调用方
  * 是本文件 buildOutboundChildEnv；对外不暴露——外部接线点必须走含兜底的完整终态接口，
- * 禁止单独消费 deny 步骤造成半成品出站面。
+ * 禁止单独消费 deny 步骤造成半成品 env 出站。
  */
 function applyOutboundDenyList(env: Record<string, string>): void {
   for (const denied of SPAWN_ENV_OUTBOUND_DENY_LIST) {
