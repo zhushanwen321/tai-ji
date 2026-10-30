@@ -236,7 +236,7 @@
 
 > 本节是「bash 前台命令空闲转后台机制」设计交付（fix-chat-flow-stuck，D1 开发中）的
 > 七个 L3 剧本登记（第一批核心组 4 个 + 第二批非核心组 3 个）——**前置创作于开发进行中**，
-> D3 时点经 run.mjs 全量重跑判绿。
+> D3 已完成（2026-10-31 第二轮 160/160 断言 pass；第一轮 verify-a1 暴露 killProcessTree 转后台形态缺陷，修复 commit ded112065 后全绿，ADR-0182）。
 > 装配/驱动/清理链路已由 A2 的脚手架冒烟实跑验证（2026-10-31，runId
 > `scaffold-20261031-023733`，18 断言 15 绿：launch/ready/doctor/session/双 bash 调用/
 > turn complete/dispose/证据幸存全绿 + **转后台标记已实测生效**——`sleep 45` 30s 静默
@@ -254,10 +254,10 @@
 
 | 剧本 | 验收场景 | 状态 | 覆盖要点 |
 |---|---|---|---|
-| `p0-bash-idle-to-background` | V1（A1） | **前置创作，待 D3 实跑**（转后台标记经 A2 冒烟旁证已生效；时序带/登记/终止链路待全量实跑） | 事故同构命令（cd 失败 + 静默挂住）idle 30s 转后台：工具调用 25–45s 通过带返回、结果含 [TAIJI-FG-BG] 标记行 + Full log 路径 + cd 报错行、turn complete 恢复推进、进程存活（ps）、registry/backgroundTask.list 登记 running、backgroundTask.kill 后进程消失 + 条目终态 |
+| `p0-bash-idle-to-background` | V1（A1） | **D3 已实跑 pass（2026-10-31 第二轮，fix-chat-flow-stuck@ded112065）**（转后台标记经 A2 冒烟旁证已生效；时序带/登记/终止链路待全量实跑） | 事故同构命令（cd 失败 + 静默挂住）idle 30s 转后台：工具调用 25–45s 通过带返回、结果含 [TAIJI-FG-BG] 标记行 + Full log 路径 + cd 报错行、turn complete 恢复推进、进程存活（ps）、registry/backgroundTask.list 登记 running、backgroundTask.kill 后进程消失 + 条目终态 |
 | `p0-bash-idle-notify-once` | V2+N2（A2） | **前置创作，脚手架冒烟已实跑**（15/18 绿：转后台标记已生效；3 红 = 通知链路 D1 未完成，属预期） | 基线普通前台命令结果到达（脚手架锚点，冒烟绿）；`sleep 45 && echo done` 30s 静默转后台（冒烟绿：标记行 + Full log 路径逐字符合设计）；45s 自然完成 → 完成通知恰好 1 条（finished (exit code unknown + 耗时 + Last lines 含 done + Full output 指引）；通知 steer 唤醒新 run complete#2；+8s 静默窗无第二条 |
-| `p0-bash-abort-process-group` | V6（A7） | **前置创作，待 D3 实跑**（中止/整组终止/无登记/恢复四断言对官方 abort 语义恒适用——D3 前后行为对照面；包装面待实跑） | 包装执行中 message.abort：reply aborted + complete{stopReason:aborted}（官方式结果）、包装脚本与真实命令同进程组整组消失（ps 无 taiji-fg-wrap / 哨兵残留）、registry 无登记、中止后立刻再发并正常收尾 |
-| `p0-bash-wrapper-crash-fallback` | V9（A10） | **前置创作，待 D3 实跑**（包装脚本 bin/taiji-fg-wrap 已在 D1 工作树在位，兜底登记链路待实跑） | 场景外部 SIGKILL 包装脚本（留活命令不杀）：官方拿到错误结果且尾部补 [TAIJI-FG-BG] 标记行（B5 兜底）、留活命令登记 running（进程存活）、模型侧 bash_output list 可见（tool_search 激活 deferred 工具后编排）、backgroundTask.output 可查、backgroundTask.kill 可杀 |
+| `p0-bash-abort-process-group` | V6（A7） | **D3 已实跑 pass（2026-10-31 第二轮，fix-chat-flow-stuck@ded112065）**（中止/整组终止/无登记/恢复四断言对官方 abort 语义恒适用——D3 前后行为对照面；包装面待实跑） | 包装执行中 message.abort：reply aborted + complete{stopReason:aborted}（官方式结果）、包装脚本与真实命令同进程组整组消失（ps 无 taiji-fg-wrap / 哨兵残留）、registry 无登记、中止后立刻再发并正常收尾 |
+| `p0-bash-wrapper-crash-fallback` | V9（A10） | **D3 已实跑 pass（2026-10-31 第二轮，fix-chat-flow-stuck@ded112065）**（包装脚本 bin/taiji-fg-wrap 已在 D1 工作树在位，兜底登记链路待实跑） | 场景外部 SIGKILL 包装脚本（留活命令不杀）：官方拿到错误结果且尾部补 [TAIJI-FG-BG] 标记行（B5 兜底）、留活命令登记 running（进程存活）、模型侧 bash_output list 可见（tool_search 激活 deferred 工具后编排）、backgroundTask.output 可查、backgroundTask.kill 可杀 |
 | `p1-bash-foreground-zero-perception` | V3（A4） | **前置创作（第二批），待 D3 实跑**（装配底座经 A2 冒烟旁证；零感知四断言在 HEAD 天然绿，须与「包装在场」锚合读判有效性） | 机制在场（idle 30s 注入非 null）时短命令包装跑走 B2：`ls` / `pnpm -v` + 3s 窗口锚点命令（ps 抓 taiji-fg-wrap 证明走了包装路径——无此锚则 HEAD 官方直跑与 B2 清理同形全绿）；断言结果透传到达、无 [TAIJI-FG-BG] 标记行、registry 零条目、JSONL 零 [background-bash] 通知（+8s 静默窗）、background-tasks 目录无 *.sh/*.pid/*.log 三文件残留（目录枚举，registry.json 不计） |
 | `p1-bash-sidebar-converted-task` | V10（A11） | **前置创作（第二批），待 D3 实跑**（UI 锚对 fix-chat-flow-stuck 源码逐一核实；交互链路——托盘 pin/drawer 开合——待实跑校准） | A1 同构转后台（静默命令 + idle 30s）→ CDP 驱动现行用户可见可控面：托盘条目出现（composer-tray）、bash 面板行（tray-bash-row 命令文本 + tray-bash-icon spinner 运行态）、drawer 详情（bash-task-command 命令全文 + bash-task-output 输出尾部）、行内两段式终止（tray-bash-kill → -confirm）、终态一致（ps 哨兵消失 + registry 终态 + tray-panel-tab-count-ended ≥ 1）；UI 步骤全包 uiStep 防御壳（UIError 转断言红不中断取证） |
 | `p1-bash-pool-full-register` | N4（A15） | **前置创作（第二批），待 D3 实跑**（占池轮 = 现有机制恒绿锚；转后台登记与拒绝文案断言待实跑） | ext-config 双键注入（maxConcurrentBackground=1 + idleBackgroundSec=30，lib `writeExtConfig`）：显式 background:true 占池（恒绿锚）→ 静默命令转后台登记不被拒（标记行 + registry 两条 running 共存——转后台不过并发门语义）→ tool_search 激活后 bash_output list 含转后台任务 → 第三个显式 background 被并发门拒（文案含 limit reached / Oldest task: bt- / bash_kill {task_id: + ps 无哨兵 = 未 spawn） |

@@ -58,7 +58,7 @@ const OCCUPY_COMMAND = OCCUPY_SENTINEL
 const CONVERT_COMMAND = `echo FGBG-A15-OUT-9f41; ${CONVERT_SENTINEL}`
 /** 第三命令（显式后台——应被并发门拒绝）。 */
 const DENIED_COMMAND = DENIED_SENTINEL
-/** 并发门拒绝文案锚（spawn-background.ts:131-138 已核实）。 */
+/** 并发门拒绝文案锚（spawn-background.ts:132-138 已核实；文案不含被拒命令）。 */
 const GATE_REACHED = 'Background task limit reached'
 const GATE_OLDEST = /Oldest task:\s*(bt-[A-Za-z0-9_-]+)/
 const GATE_KILL_HINT = 'bash_kill {task_id:'
@@ -188,9 +188,13 @@ export async function run(ctx) {
 			actual: convertStart ? `at=${new Date(convertStart.receivedAt).toISOString()}` : '60s 内未观察到（faux 轮 1 未返回？）',
 		})
 		if (!convertStart) await cleanupIfNeeded('轮 2 未发起（占池轮异常）')
+		// 命中条件仅锚 [TAIJI-FG-BG] 标记行——转后台标记文案不含原始命令（a15 首跑
+		// 附件 convert-tool-result.txt 全文无 '3100142'），带哨兵号条件会 45s 空转误触发
+		// cleanup。定位无歧义：显式后台（轮 1）结果文案是 task_id/pid 形态
+		// （bash-tool.ts:140-143），不含该标记；标记产出点仅转后台分支（bash-tool.ts:159/351）。
 		const { entries: eConvert, hit: convertHit } = await pollSessionFile(
 			sessionFile,
-			(es) => toolResultsFor(es, 'bash').some((r) => r.text.includes('[TAIJI-FG-BG]') && r.text.includes('3100142')),
+			(es) => toolResultsFor(es, 'bash').some((r) => r.text.includes('[TAIJI-FG-BG]')),
 			{ timeoutMs: CONVERT_WAIT_MS },
 		)
 		const convertResult = toolResultsFor(eConvert, 'bash').find((r) => r.text.includes('[TAIJI-FG-BG]')) ?? null
@@ -200,6 +204,15 @@ export async function run(ctx) {
 			actual: convertResult ? convertResult.text.slice(0, 300) : `${CONVERT_WAIT_MS / 1000}s 内无标记行（实现前 HEAD 形态：前台挂死）`,
 		})
 		if (convertResult) ev.attach('convert-tool-result', convertResult.text)
+		// 进程存活断言必须在 cleanup 触发点之前——cleanup（abortStuckTurn）按哨兵串
+		// killByPattern SIGKILL 转后台进程（fg-bg-lib.mjs:245-248），断言放其后即便进程
+		// 健康也必红（a15 首跑实证：cleanup 误触发 killed=[58123] 后 ps 断言红）
+		const convertAlive = psFind(CONVERT_SENTINEL)
+		ev.assert('C: 转后台进程存活（ps 哨兵 ② 可见）', convertAlive.length > 0, {
+			channel: 'C',
+			expected: `ps 含 ${CONVERT_SENTINEL}`,
+			actual: convertAlive.length > 0 ? `pid=${convertAlive.map((p) => p.pid).join(',')}` : '不可见（未转后台或进程死亡）',
+		})
 		if (!convertHit) await cleanupIfNeeded('轮 2 未转后台（实现前 HEAD 形态）')
 
 		// ── 4. 等 turn 收尾（覆盖轮 3/4/5/6） ───────────────────────
@@ -248,16 +261,12 @@ export async function run(ctx) {
 		})
 		if (outputListResult) ev.attach('bash-output-list-result', outputListResult.text.slice(0, 800))
 
-		// ── 7. 进程侧：转后台存活 + 被拒未 spawn ────────────────────
-		const convertAlive = psFind(CONVERT_SENTINEL)
-		ev.assert('C: 转后台进程存活（ps 哨兵 ② 可见）', convertAlive.length > 0, {
-			channel: 'C',
-			expected: `ps 含 ${CONVERT_SENTINEL}`,
-			actual: convertAlive.length > 0 ? `pid=${convertAlive.map((p) => p.pid).join(',')}` : '不可见（未转后台或进程死亡）',
-		})
+		// ── 7. 进程侧：被拒未 spawn（转后台存活断言已前移到 cleanup 触发点之前） ──
 
-		// 轮 5：并发门拒绝（文案 + 未 spawn）
-		const deniedResult = toolResultsFor(parsedFinal, 'bash').find((r) => r.text.includes('3100143')) ?? null
+		// 轮 5：并发门拒绝（文案 + 未 spawn）。定位锚 = 拒绝文案串 GATE_REACHED——
+		// 拒绝文案不含被拒命令（spawn-background.ts:132-138 只回显最老任务的截断命令，
+		// 此处最老 = 占池哨兵① 'sleep 3100141'），includes('3100143') 永远 miss
+		const deniedResult = toolResultsFor(parsedFinal, 'bash').find((r) => r.text.includes(GATE_REACHED)) ?? null
 		const deniedText = deniedResult?.text ?? ''
 		ev.assert('C: 第三个显式 background 命令被并发门拒绝（文案含 limit reached）', Boolean(deniedResult && deniedText.includes(GATE_REACHED)), {
 			channel: 'C',

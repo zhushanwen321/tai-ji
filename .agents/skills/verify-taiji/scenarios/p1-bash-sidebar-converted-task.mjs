@@ -9,7 +9,9 @@
  * ② 右抽屉 bashTask tab（BackgroundTaskDetailPanel.vue，详情 + 输出尾部）。
  * 本剧本按现行形态驱动（testid 均已对源码核实，非虚构）：
  *   A1 同构场景转后台（静默命令 + idle 30s）→ registry running →
- *   UI：托盘条目出现（composer-tray → bash 入口 pin → tray-native-panel →
+ *   UI：点侧栏会话行激活（协议建的 session 不改变 renderer 激活态，ComposerTray
+ *   v-if="sessionId" 在 landing 态不渲染——同 p0-chat-stream-ui 先例）→ 托盘条目出现
+ *   （composer-tray → bash 入口 pin → tray-native-panel →
  *   tray-bash-row 命令文本 + tray-bash-icon spinner 运行态）→
  *   点行开 drawer：bash-task-detail 命令全文 + bash-task-output 输出尾部 →
  *   托盘行内两段式终止（tray-bash-kill → tray-bash-kill-confirm，触发 kill 回路）→
@@ -95,6 +97,8 @@ export async function run(ctx) {
 	const uncovered = []
 	const gotchas = [
 		'现行入口形态：侧边栏 L2 列表已退役（2026-09-16），列表/终止 = composer 任务托盘 bash 面板（TrayNativePanel），输出尾部 = drawer bashTask tab（BackgroundTaskDetailPanel）——testid 均对源码核实',
+		'协议建会话不改变 renderer 激活态：UI 断言前必须点侧栏会话行激活（css=.session-item）——否则 landing 态 ComposerTray 整体不渲染（Composer.vue v-if="sessionId"），托盘断言全连锁红',
+		'托盘行内 kill 按钮渲染条件 = pinned 且 running（hover 预览态刻意不渲染行内按钮防误触）——必须点击入口按钮进入 pin 态后 tray-bash-kill 才可见',
 		'托盘行内 kill 按钮渲染条件 = pinned 且 running（hover 预览态刻意不渲染行内按钮防误触）——必须点击入口按钮进入 pin 态后 tray-bash-kill 才可见',
 		'托盘入口按钮有密度档差异：expanded 档 = tray-builtin-button[data-kind=bash]，aggregated 档 = tray-aggregate-button（单图标聚合入口）——先试前者、超时 fallback 后者',
 		'托盘面板 pin 态点面板外（如 drawer）会收起——drawer 断言后需重新点入口按钮 re-pin，行内终止按钮才回来',
@@ -202,7 +206,15 @@ export async function run(ctx) {
 		const taskId = registryEntry?.taskId ?? extractTaskId(converted?.text ?? '')
 		ev.step({ step: 'evidence.registry', command: `read registry ${sid}`, exitCode: registryEntry ? 0 : 1, stats: { taskId: taskId ?? null, state: registryEntry?.state ?? null } })
 
-		// ── 5. UI：托盘条目出现 + 打开 bash 面板 ─────────────────────
+		// ── 5. UI：激活会话 + 托盘条目出现 + 打开 bash 面板 ───────────
+		// 协议建的 session 不改变 renderer 激活态（同库先例 p0-chat-stream-ui ui.activate）：
+		// landing 态下 ComposerTray 整体不渲染（Composer.vue v-if="sessionId"——无 session
+		// 无任务面），UI 断言前必须点侧栏会话行激活；dataDir 全新仅一个会话，first() 语义安全。
+		await uiStep('A: 点击侧栏会话行激活协议创建的会话（css=.session-item——协议建会话不改变 renderer 激活态）', 'css=.session-item', async () => {
+			await ui.click('css=.session-item', { timeoutMs: 30_000 })
+			ev.step({ step: 'ui.activate', command: 'click css=.session-item', exitCode: 0, stats: { sid } })
+			return 'session activated via sidebar'
+		})
 		await uiStep('A: 托盘条目出现（composer-tray 可见——登记驱动渲染）', 'composer-tray', () => ui.expectVisible('testid=composer-tray', { timeoutMs: 20_000 }))
 		const entryKind = await uiStep('A: 托盘 bash 面板打开（点击入口按钮 pin）', `${TRAY_BASH_BUTTON} | ${TRAY_AGG_BUTTON}`, () => openTrayBashPanel())
 		await uiStep('A: 托盘 bash 面板容器可见（tray-native-panel）', 'tray-native-panel', () => ui.expectVisible('testid=tray-native-panel', { timeoutMs: 10_000 }))
