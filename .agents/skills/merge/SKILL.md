@@ -352,7 +352,11 @@ STAMP=$(date +%Y%m%d-%H%M)
 # git 关键操作纪律见阶段 4 顶部 [MANDATORY]：单命令 + 重定向 + 显式退出码 + tag 指向 push 前核对
 # ⚠️ extensions 包在两层目录下（universal/taiji 分组），glob 必须写两层——zsh 零匹配会中止整条命令
 #    另加 .changeset 记录 apply-version 消费掉的 changeset 删除，避免脏工作区
+# ⚠️ packages/subagent-core/src/index.ts 必须显式列入：CORE_PACKAGE_VERSION 与 package.json
+#    双写（smoke 测试守护一致性），apply-version bump subagent-core 时会同步改它——
+#    不列入则该文件遗留在工作区、版本 commit 缺一半（tarball 与声明版本漂移）
 git add extensions/universal/*/package.json extensions/taiji/*/package.json extensions/shared/*/package.json packages/*/package.json \
+        packages/subagent-core/src/index.ts \
         '**/CHANGELOG.md' .changeset
 TAIJI_ALLOW_MAIN_COMMIT=1 git commit -m "chore: version bump — <包与版本摘要>" > /tmp/merge-4n-commit.log 2>&1; echo "exit=$?"; tail -5 /tmp/merge-4n-commit.log
 
