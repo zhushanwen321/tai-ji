@@ -21,8 +21,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-/** 与 run.mjs 同款 flag 解析（只认带值 flag；值不允许以 -- 开头）。 */
-function flagOf(argv, name, fallback) {
+/** 与 run.mjs 同款 flag 解析（只认带值 flag；值不允许以 -- 开头）。导出供 scenario 顶层解析 --repo 等 runner flag（probe-containers fixture 种子用）。 */
+export function flagOf(argv, name, fallback) {
   const i = argv.indexOf(`--${name}`)
   if (i === -1) return fallback
   const v = argv[i + 1]

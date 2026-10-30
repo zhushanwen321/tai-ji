@@ -31,9 +31,19 @@ import json
 import shutil
 import subprocess
 import sys
+import tempfile
+import time
 from pathlib import Path
 
 DEFAULTS = {"maxCyclomatic": 15, "maxCognitive": 15, "maxCrap": 30.0}
+
+# fallow audit 基线快照自清参数（fallow 工具跑完不自清，包装层收尾兜底）。
+# 快照 = fallow 为区分「本次新引入 / 历史已有」在 $TMPDIR 下 checkout 的
+# detached worktree（fallow-audit-base-cache-*），每次 gates 运行积累一批。
+# 年龄门槛保证并行 dev-merge gates（两线并行已裁决）正在使用的快照不被误删：
+# 快照在 checkout 完成时 mtime 定格，审计分钟级完成，24h 余量充足。
+FALLOW_SNAPSHOT_GLOB = "fallow-audit-base-cache-*"
+FALLOW_SNAPSHOT_MAX_AGE_H = 24
 
 # 除 complexity/circular/unresolved 外，introduced 后计入 WARN 的 dead-code 类别
 WARN_DEAD_CODE_KINDS = [
@@ -147,6 +157,39 @@ def run_audit(repo_root: Path, base: str) -> dict:
     except json.JSONDecodeError:
         print(f"ERROR: fallow 输出非 JSON（exit={proc.returncode}）：{proc.stderr.strip()[:500]}", file=sys.stderr)
         sys.exit(2)
+
+
+def cleanup_fallow_snapshots() -> None:
+    """收尾自清 fallow audit 的基线快照残留（tmp worktree，工具本身跑完不清理）。
+
+    只删 mtime 超龄（FALLOW_SNAPSHOT_MAX_AGE_H）的快照目录 + `git worktree prune`
+    （幂等，只清目录已消失的登记，目录仍在的登记不受影响）。所有失败静默降级——
+    清理是收尾兜底，不得影响门禁主流程与退出码。
+    """
+    cutoff = time.time() - FALLOW_SNAPSHOT_MAX_AGE_H * 3600
+    removed = 0
+    try:
+        for d in Path(tempfile.gettempdir()).glob(FALLOW_SNAPSHOT_GLOB):
+            try:
+                if d.stat().st_mtime >= cutoff:
+                    continue
+                shutil.rmtree(d, ignore_errors=True)
+                if d.exists():
+                    continue  # 删除未完成的保留待下轮
+                removed += 1
+            except OSError:
+                continue
+    except OSError:
+        pass
+    if removed:
+        print(f"cleanup: 已自清 {removed} 个超龄（>{FALLOW_SNAPSHOT_MAX_AGE_H}h）fallow 基线快照")
+    try:
+        repo_root = subprocess.run(["git", "rev-parse", "--show-toplevel"],
+                                   capture_output=True, text=True).stdout.strip()
+        if repo_root:
+            subprocess.run(["git", "worktree", "prune"], cwd=repo_root, capture_output=True)
+    except OSError:
+        pass
 
 
 def judge(report: dict, thresholds: dict, real_cov: dict[str, dict] | None) -> dict:
@@ -275,6 +318,15 @@ def parse_argv(args: list[str]) -> None:
 
 
 def main() -> None:
+    # finally 兜底自清 fallow 基线快照：sys.exit（含 run_audit 内 exit 2）抛 SystemExit
+    # 同样触发 finally，清理不漏任何退出路径；清理自身静默降级，不影响退出码
+    try:
+        main_inner()
+    finally:
+        cleanup_fallow_snapshots()
+
+
+def main_inner() -> None:
     parse_argv(sys.argv[1:])
     base = "main"
     if "--base" in sys.argv:
