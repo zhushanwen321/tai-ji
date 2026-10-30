@@ -120,6 +120,9 @@ export async function run(ctx) {
 
 	// ── 2. 建会话（临时 cwd，不污染 repo） ────────────────────────
 	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-fgbg-a4-'))
+	// mkdtemp 造的是空目录，裸 `ls` 在其中零输出（实测 actual="FGBG-A4-LS-9f21\n"），
+	// 「目录列表非空」断言在此 fixture 上恒红——预置一个条目使 ls 的 toolResult 含目录内容
+	fs.writeFileSync(path.join(cwd, 'fgbg-a4-fixture.txt'), 'fgbg-a4 fixture entry\n')
 	const created = await protocol.call('session.create', { cwd, label: 'p1-fgbg-a4' }, { timeoutMs: 120_000 })
 	const sid = created.session?.id
 	ev.assert('B: session.create 返回 sessionId', Boolean(sid), {

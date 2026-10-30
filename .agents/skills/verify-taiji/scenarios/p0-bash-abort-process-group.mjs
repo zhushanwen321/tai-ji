@@ -7,16 +7,13 @@
  *
  * 路径：
  *   faux 发起前台挂住命令（sleep 哨兵）→ 执行窗口内观察包装脚本进程在场
- *   （ps：taiji-fg-wrap，设计 §5 部件 1——实现前 HEAD 无包装进程，断言红是预期）→
+ *   （ps：taiji-fg-wrap，设计 §5 部件 1——A5 包装格生效证据，红 = wrapper 未 spawn 的真异常）→
  *   B：message.abort（用户点停止的真实协议通道）→ reply status=aborted +
- *   广播 message.complete{stopReason:'aborted'}（官方式中止结果）→
+ *   dispatcher 广播 message.complete{stopReason:'aborted'}（官方式中止结果的契约帧，
+ *   pi 侧中止收官的降级帧 stop=error 先到属正常时序，不作判据）→
  *   C：包装脚本与真实命令（同进程组）整组消失（ps 无哨兵/无 wrapper 残留）→
  *   C：无登记条目（registry 无本命令条目）→
  *   B：中止后会话不卡死——立刻再发一条并得到正常回复（occupancy 回落）。
- *
- * 实现前 HEAD 形态：官方原生执行无包装——wrapper 在场断言红（预期）；abort 杀
- * 官方进程组、哨兵同灭、无登记、可再发——这些断言在 HEAD 即绿（官方 abort 语义
- * 既有），正好构成 D3 前后的行为对照面。
  */
 import fs from 'node:fs'
 import os from 'node:os'
@@ -70,7 +67,7 @@ export async function run(ctx) {
 	const { protocol, ev, log, dataDir } = ctx
 	const uncovered = []
 	const gotchas = [
-		'包装脚本进程按名 taiji-fg-wrap 识别（设计 §5 部件 1 bin/taiji-fg-wrap）——实现前 HEAD 无该进程，「在场」断言红是预期（D1 开发中）',
+		'包装脚本进程按名 taiji-fg-wrap 识别（设计 §5 部件 1 bin/taiji-fg-wrap）；进程不在场 = wrapper 未 spawn 或已提前退出，断言红属真异常',
 		'中止后「无登记」的判据 = registry 文件不存在或不含本哨兵命令条目（中止发生在转后台判定之前，设计矩阵 B4）',
 		'中止后会话恢复的断言消费 faux 轮 2——响应脚本必须排恢复应答步',
 	]
@@ -101,11 +98,20 @@ export async function run(ctx) {
 		if (!startEvt) throw new Error('bash tool_call_start 未到达')
 
 		// ── 3. 执行窗口内观察包装进程（A5 包装格生效证据） ──────────
-		const wrapperSeen = await pollUntil(() => psFind(WRAPPER_NAME), { timeoutMs: 15_000, intervalMs: 300 })
+		// 谓词必须判 .length 再返回非空数组或 null：pollUntil 以 truthy 判命中，裸返回
+		// psFind 数组时空数组 [] 也是 truthy、首轮即返回，15s 窗口从未等待（wrapper
+		// spawn 窗口 ~100ms 内必在场，正常轮询 1-2 个间隔即命中）。
+		const wrapperSeen = await pollUntil(
+			() => {
+				const hits = psFind(WRAPPER_NAME)
+				return hits.length > 0 ? hits : null
+			},
+			{ timeoutMs: 15_000, intervalMs: 300 },
+		)
 		ev.assert('C: 执行窗口内包装脚本进程在场（taiji-fg-wrap）', (wrapperSeen ?? []).length > 0, {
 			channel: 'C',
 			expected: `ps 含 ${WRAPPER_NAME}（A5 格命令被包装）`,
-			actual: (wrapperSeen ?? []).length > 0 ? JSON.stringify(wrapperSeen).slice(0, 300) : '15s 内未见包装进程（实现前 HEAD 形态：官方原生执行）',
+			actual: (wrapperSeen ?? []).length > 0 ? JSON.stringify(wrapperSeen).slice(0, 300) : '15s 内未见包装进程（wrapper 未 spawn 或已提前退出——真异常）',
 		})
 		if (wrapperSeen) ev.attach('wrapper-ps-pre-abort', JSON.stringify(wrapperSeen, null, 2))
 		const preAbort = {
@@ -128,9 +134,19 @@ export async function run(ctx) {
 			expected: "{status:'aborted'}",
 			actual: abortReply ? JSON.stringify(abortReply).slice(0, 200) : 'RPC 未达',
 		})
+		// 契约帧 = dispatcher 中止成功后的主动广播（runtime message-dispatcher.ts abort
+		// 成功分支 publish complete{stopReason:'aborted'}——注释明言不能依赖 pi 自发
+		// agent_end）。pi 侧中止后 finishTurn 收官先到（空 messages 经 event-adapter 降级
+		// 为 stop=error），该帧不是中止结果的契约帧——先于 aborted 广播到达属正常时序，
+		// 故不能用 waitTurnEnd（取第一帧终态）判本断言，须按谓词等 aborted 帧本身。
+		// 不走 pi 侧产 'aborted' 的路径（那会消耗 faux 轮 2，与步骤 7 恢复断言互斥）。
 		let endAborted = null
 		try {
-			endAborted = await protocol.waitTurnEnd(sid, { since, timeoutMs: 45_000 })
+			const evtAborted = await protocol.waitFor(
+				(e) => e.type === 'message.complete' && e.payload?.stopReason === 'aborted',
+				{ sessionId: sid, timeoutMs: 45_000, since },
+			)
+			endAborted = { type: evtAborted.type, payload: evtAborted.payload }
 		} catch (e) {
 			ev.attach('abort-end-miss', String(e?.message ?? e).slice(0, 400))
 		}
@@ -180,8 +196,8 @@ export async function run(ctx) {
 		})
 		ev.step({ step: 'chat.send.recover', channel: 'B', exitCode: endRecover?.ok ? 0 : 1, stats: { stopReason: endRecover?.payload?.stopReason } })
 
-		if (!wrapperSeen || (wrapperSeen ?? []).length === 0) {
-			uncovered.push('V6 的「包装进程组」面在当前 HEAD 不可验（无 taiji-fg-wrap 进程——D1 开发中）；中止/整组终止/无登记/恢复链路在 HEAD 已绿（官方 abort 语义），D3 重跑补包装面判绿')
+		if ((wrapperSeen ?? []).length === 0) {
+			uncovered.push('V6 的「包装进程组」面未观察到 taiji-fg-wrap 进程（D1/D3 已实现生效，属真异常——看 wrapper spawn 失败原因）')
 		}
 		log(`done sid=${sid} wrapperSeen=${(wrapperSeen ?? []).length > 0}`)
 	} finally {

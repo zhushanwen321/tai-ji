@@ -15,6 +15,13 @@
  *   通知唤醒新 run（faux 轮 4 应答）→ message.complete#2 →
  *   段 4 负面：+8s 静默窗后复查通知计数仍 = 1（N2 无第二条）。
  *
+ * 计数口径：通知按注入 entry 行统计（unified-delivery 主路径每条通知在会话 JSONL
+ * 结构性落两行——delivery-port-outbox 投递日志行（payload 携带完整通知文本）+
+ * 注入的 custom entry（customType=background-bash），日志行不计数）。
+ * 唤醒时序：唤醒等待与通知文件轮询并发执行——waitFor 全历史扫描 + 事件时间戳晚于
+ * turn#1 收尾时刻过滤，消除「通知检出（500ms 轮询粒度）晚于注入唤醒（faux 轮
+ * 实测 ≈226ms）→ 游标后才取已漏帧」的结构性竞态（首跑实测 complete#2 落在游标前）。
+ *
  * 实现前 HEAD 形态（预期红）：sleep 45 在前台跑满 45s 自然返回（结果含 done、
  * 无标记行、无通知）——转后台/通知断言红是预期；段 1 基线恒绿证明装配链路可用。
  */
@@ -37,8 +44,16 @@ const IDLE_SEC = 30
 const LONG_COMMAND = 'sleep 45 && echo done'
 /** 基线命令哨兵（普通前台命令，两世界恒绿）。 */
 const BASELINE_TEXT = 'FGBG-A2-BASELINE-OK'
-/** 完成通知「结果未知」形态头行（设计 §5 部件 5：natural + null 退出码修订；match(/g) 统计用）。 */
-const NOTIFY_UNKNOWN_RE = /\[background-bash\][^\n]*finished \(exit code unknown[^\n]*\)/g
+/** 完成通知「结果未知」形态头行（设计 §5 部件 5：natural + null 退出码修订；单行匹配用）。 */
+const NOTIFY_UNKNOWN_RE = /\[background-bash\][^\n]*finished \(exit code unknown[^\n]*\)/
+/** 投递端口 outbox 日志条目的 customType（delivery-port src/journal.ts OUTBOX_CUSTOM_TYPE）。
+ * unified-delivery 主路径每条通知在会话 JSONL 结构性落两行：outbox 日志行（payload
+ * 携带完整通知文本）+ 注入的 custom entry（customType=background-bash）——通知计数
+ * 只认注入 entry 行，排除 outbox 日志行（按原文头行计数会每条双计）。 */
+const OUTBOX_CUSTOM_TYPE = 'delivery-port-outbox'
+/** turn 收尾事件类型（与 protocol.mjs waitTurnEnd 内部集合一致——唤醒等待需时间戳
+ * 过滤谓词，不经 waitTurnEnd 直接用 waitFor）。 */
+const TURN_END_TYPES = new Set(['message.complete', 'message.error', 'message.stream_error', 'session.exited'])
 
 export const meta = {
 	id: 'p0-bash-idle-notify-once',
@@ -94,12 +109,28 @@ async function pollRawText(sessionFile, predicate, { timeoutMs, intervalMs = 500
 	}
 }
 
+/** 注入通知 entry 行清单：逐行解析会话 JSONL，排除 customType="delivery-port-outbox"
+ * 的投递日志行（payload 携带完整通知文本，按原文统计会每条双计），其余行按通知头行
+ * 形态匹配——每条通知恰一行（注入 entry），计数 = 行数。JSON.parse 失败（写入中的
+ * 部分行）跳过，下一轮询再试。 */
+function notifyEntryLines(raw) {
+	return raw.split('\n').filter((line) => {
+		if (!line.includes('[background-bash]')) return false
+		try {
+			return JSON.parse(line)?.customType !== OUTBOX_CUSTOM_TYPE && NOTIFY_UNKNOWN_RE.test(line)
+		} catch {
+			return false
+		}
+	})
+}
+
 export async function run(ctx) {
 	const { protocol, ev, log, dataDir } = ctx
 	const uncovered = []
 	const gotchas = [
 		'完成通知经 pi.sendMessage steer + triggerTurn 注入——会唤醒新 run 并消耗一个 faux step，响应脚本必须排通知应答步（轮 4），否则该轮以 faux 耗尽 error 收尾',
-		'通知计数按会话 JSONL 原文的头行形态统计（/[background-bash]…finished \\(exit code unknown/ 每条通知恰一行）——不依赖 custom entry 的结构形态（与 pi 版本解耦）',
+		'通知计数按注入 entry 行统计，排除 delivery-port-outbox 投递日志行——unified-delivery 主路径每条通知在会话 JSONL 结构性落两行（outbox 日志行 payload 携带完整通知文本 + 注入的 custom entry），按原文头行计数会每条双计（首跑实测 count=2 即日志行双计，非产品重复通知；+8s 静默窗 count 不增佐证产品 taskId 幂等正常）',
+		'唤醒等待必须与通知检出并发（waitFor 全历史扫描 + 事件时间戳晚于 turn#1 收尾时刻过滤）——若在通知检出（500ms 文件轮询粒度）后才取游标，注入唤醒的 faux 轮（实测 ≈226ms）可能已落事件流，waitFor 只扫游标后帧 → complete#2 结构性漏检（首跑实测：turn2-end-miss「waitFor 超时（60000ms，已扫 67 帧）」）；时间戳过滤同时避免提前的游标误命中 turn#1 自己的 complete#1',
 		'工具结果判定必须锚结构化 toolResult entry（message.role=toolResult）——原文子串谓词会被 assistant toolCall 的 arguments 里的命令文本抢先命中（首跑实测：toolCall 落盘早于 toolResult 数百毫秒，哨兵在命令里即假命中）',
 		'实现前 HEAD 形态：sleep 45 前台跑满自然返回，无标记行、无通知——段 2/3/4 断言红是预期（D1 开发中），段 1 基线恒绿证明装配/驱动/清理链路可用（脚手架冒烟形态）',
 	]
@@ -187,18 +218,32 @@ export async function run(ctx) {
 
 	// ── 4. 段 3：完成通知恰好一条（结果未知形态 + steer 唤醒） ─────
 	// 任务自 longSleepStartAt 起 45s 完成 + 守望 2s 轮询 + 注入开销；此处从当前时刻
-	// 起给 60s 预算（覆盖 HEAD 形态下等待超时的完整窗口）
-	const rawNotified = await pollRawText(sessionFile, (raw) => (raw.match(NOTIFY_UNKNOWN_RE) ?? []).length >= 1, { timeoutMs: 60_000, intervalMs: 500 })
-	const heads = rawNotified.match(NOTIFY_UNKNOWN_RE) ?? []
-	const firstHead = heads[0] ?? null
-	ev.assert('C: 完成通知到达且为「结果未知」形态（finished (exit code unknown, 耗时)）', heads.length >= 1, {
+	// 起给 60s 预算（覆盖 HEAD 形态下等待超时的完整窗口）。唤醒等待与通知文件轮询
+	// 并发执行：通知检出（500ms 轮询粒度）可能晚于注入唤醒（faux 轮实测 ≈226ms），
+	// 检出后才取游标会让 waitFor 只扫游标后帧而漏掉已落事件的 complete#2（首跑实测
+	// 竞态漏检）。改用 waitFor 全历史扫描 + 事件时间戳晚于 turn#1 收尾时刻过滤——
+	// complete#2 因果上晚于 turn#1 收尾（注入由任务完成守望触发，任务完成 ≈45s 晚于
+	// 转后台后 ≈30s 的 turn#1 收尾），谓词不会误命中 turn#1 自己的 complete#1。
+	const end1At = end1?.at ?? 0
+	const notifyPoll = pollRawText(sessionFile, (raw) => notifyEntryLines(raw).length >= 1, { timeoutMs: 60_000, intervalMs: 500 })
+	let end2 = null
+	try {
+		end2 = await protocol.waitFor((e) => TURN_END_TYPES.has(e.type) && e.receivedAt > end1At, { sessionId: sid, timeoutMs: 90_000 })
+	} catch (e) {
+		ev.attach('turn2-end-miss', String(e?.message ?? e).slice(0, 600))
+	}
+	const rawNotified = await notifyPoll
+	const notifyLines = notifyEntryLines(rawNotified)
+	const firstNotifyLine = notifyLines[0] ?? null
+	const firstHead = firstNotifyLine ? (NOTIFY_UNKNOWN_RE.exec(firstNotifyLine)?.[0] ?? null) : null
+	ev.assert('C: 完成通知到达且为「结果未知」形态（finished (exit code unknown, 耗时)）', notifyLines.length >= 1, {
 		channel: 'C',
-		expected: '[background-bash] bt-… finished (exit code unknown, …)',
-		actual: heads.length > 0 ? `${firstHead}（sleep 启动→通知检出 ${((Date.now() - longSleepStartAt) / 1000).toFixed(1)}s）` : '60s 内无该形态通知（实现前 HEAD 形态：无转后台即无通知）',
+		expected: '[background-bash] bt-… finished (exit code unknown, …)（注入 entry 行）',
+		actual: firstHead ? `${firstHead}（sleep 启动→通知检出 ${((Date.now() - longSleepStartAt) / 1000).toFixed(1)}s）` : '60s 内无该形态通知（实现前 HEAD 形态：无转后台即无通知）',
 	})
-	if (firstHead) {
-		const headIdx = rawNotified.indexOf(firstHead)
-		const window = rawNotified.slice(headIdx, headIdx + 1200)
+	if (firstNotifyLine) {
+		const headIdx = firstNotifyLine.indexOf(firstHead)
+		const window = firstNotifyLine.slice(headIdx, headIdx + 1200)
 		ev.assert('C: 通知含 Last lines 输出尾部（done）', window.includes('Last lines:') && window.includes('done'), {
 			channel: 'C',
 			expected: 'Last lines: …done…（输出尾部）',
@@ -212,33 +257,31 @@ export async function run(ctx) {
 		ev.attach('notification-window', window)
 	}
 
-	// 通知唤醒新 run（complete#2；游标在 turn#1 收尾等待之后）
-	let end2 = null
-	const since2 = protocol.events.length
-	try {
-		end2 = await protocol.waitTurnEnd(sid, { since: since2, timeoutMs: 60_000 })
-	} catch (e) {
-		ev.attach('turn2-end-miss', String(e?.message ?? e).slice(0, 600))
-	}
-	ev.assert('B: 通知唤醒新 run 并以 message.complete#2 收尾（steer 自动唤醒）', end2?.type === 'message.complete' && end2.ok, {
+	// 唤醒断言（ok 口径与 protocol.waitTurnEnd 一致：message.complete 且停因非 error）
+	const end2Ok = end2?.type === 'message.complete' && end2.payload?.stopReason !== 'error'
+	ev.assert('B: 通知唤醒新 run 并以 message.complete#2 收尾（steer 自动唤醒）', end2Ok, {
 		channel: 'B',
 		expected: '第二次 message.complete（faux 轮 4 应答）',
-		actual: end2 ? `${end2.type} stop=${String(end2.payload?.stopReason)}` : '未等到新 run（无通知即无唤醒——实现前 HEAD 形态）',
+		actual: end2
+			? `${end2.type} stop=${String(end2.payload?.stopReason)}`
+			: notifyLines.length >= 1
+				? '有通知注入但未等到新 run 收尾——排查产品唤醒链路（pi.sendMessage steer + triggerTurn idle 唤醒）'
+				: '未等到新 run（无通知即无唤醒——实现前 HEAD 形态）',
 	})
-	ev.step({ step: 'chat.wait.turn2-notify', channel: 'B', exitCode: end2?.ok ? 0 : 1, stats: { stopReason: end2?.payload?.stopReason } })
+	ev.step({ step: 'chat.wait.turn2-notify', channel: 'B', exitCode: end2Ok ? 0 : 1, stats: { stopReason: end2?.payload?.stopReason } })
 
 	// ── 5. 段 4（N2 负面）：+8s 静默窗后通知计数仍恰好 1 ───────────
 	await new Promise((r) => setTimeout(r, 8_000))
-	const headsAfter = readRaw(sessionFile).match(NOTIFY_UNKNOWN_RE) ?? []
-	ev.assert('C: 通知恰好 1 条（N2：+8s 静默窗后无第二条）', headsAfter.length === 1, {
+	const notifyLinesAfter = notifyEntryLines(readRaw(sessionFile))
+	ev.assert('C: 通知恰好 1 条（N2：+8s 静默窗后无第二条）', notifyLinesAfter.length === 1, {
 		channel: 'C',
-		expected: 'count=1',
-		actual: `count=${headsAfter.length}${headsAfter.length > 1 ? ` 多余条目：${headsAfter.slice(1).join(' / ').slice(0, 200)}` : ''}`,
+		expected: 'count=1（注入 entry 行口径；delivery-port-outbox 投递日志行不计）',
+		actual: `count=${notifyLinesAfter.length}${notifyLinesAfter.length > 1 ? ` 多余条目：${(NOTIFY_UNKNOWN_RE.exec(notifyLinesAfter[1])?.[0] ?? notifyLinesAfter[1]).slice(0, 200)}` : ''}`,
 	})
 
-	if (!longResult || headsAfter.length !== 1) {
+	if (!longResult || notifyLinesAfter.length !== 1) {
 		uncovered.push('V2/N2 完整链路（转后台→自然完成→恰好一条通知）在当前 HEAD 未生效——新行为断言按预期红（D1 开发中，D3 全量重跑本剧本判绿）；段 1 基线（普通 bash 命令结果到达）已验装配/驱动/清理链路可用')
 	}
-	log(`done sid=${sid} notifyCount=${headsAfter.length}`)
+	log(`done sid=${sid} notifyCount=${notifyLinesAfter.length}`)
 	return { uncovered, gotchas }
 }
