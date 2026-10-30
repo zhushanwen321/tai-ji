@@ -572,9 +572,18 @@ curl -sL -o /dev/null -w '%{http_code}\n' -r 0-1048575 --max-time 60 \
 **自动化执行阶段 7 时，调用 remove-worktree.sh 的那条 bash 命令必须自包含 `cd $WS_ROOT/main &&`**（见阶段 0 cwd 隔离）。即便如此，删除后 session 启动目录已不存在，**后续任何 bash 调用仍可能 ENOENT**——因此阶段 7 必须是流程最后一步，删除后立即收尾，不再调 bash（手动终端执行则脚本内部的 cd 足够，因为终端 shell 的 cwd 会跟随 cd）。这与 AGENTS.md §8「multi-workspace cwd 不跨调用持久」是同一类陷阱。
 
 ```bash
-# 阶段 0.5 做过 commit 整理时：先删其备份分支（机械校验已用毕，须在删 worktree 前执行）；
-# 无备份分支时 glob 不展开、git 报错由 || true 兜住，属正常跳过
-git branch -D backup/pre-squash-* 2>/dev/null || true
+# 阶段 0.5 做过 commit 整理时：先删其备份分支（机械校验已用毕，须在删 worktree 前执行）。
+# 逐个判定而非 glob 全删：backup 分支可能由并行会话在途创建（2026-10-30 实证漏删竞态——
+# 本管线阶段 7 的 glob 跑在先、并行会话的 backup 打在后，永远删不到）——
+# ahead-of-main = 0（全历史已在 main）删之零损失；非零 = 可能是并行在途备份，保留并在总结呈报
+git for-each-ref 'refs/heads/backup*' --format='%(refname:short)' | while read -r b; do
+  ahead=$(git rev-list --count "main..$b")
+  if [ "$ahead" = "0" ]; then
+    git branch -D "$b" && echo "已删备份分支 $b（ahead=0，全历史已在 main）"
+  else
+    echo "保留 backup 分支 $b（领先 main ${ahead} 笔——并行在途或未吸收，随总结呈报）"
+  fi
+done
 cd $WS_ROOT/main && bash .agents/skills/merge/scripts/remove-worktree.sh <branch-name> --force --skip-sync
 ```
 

@@ -1,9 +1,12 @@
 /**
  * probe-containers —— 容器扩展点统一核心验收（设计 §8.2 S1/S2/S3/S4/S7/S8；impl-plan A1-A4、A7、A8）。
  *
- * 装配：探针插件 probe-container-plugin（resources/plugins/ 内置形态，声明
- * drawer.tab/overlay.content 两视图 + nonexistent.slot 反例 + headerAction
- * activation 直开浮层；推树含 list-tree hostAction 双向导航与 unknown-params 反例）。
+ * 装配：探针插件 probe-container-plugin——fixture 源 = <repo>/packages/runtime/test/
+ * fixtures/plugins/probe-container-plugin/（随仓库测试基建分发），本模块 import 阶段
+ * 种子进 <dataDir>/plugins/（external sandbox 形态装载，宿主按来源强制 sandbox，
+ * 权限批准后激活）；声明 drawer.tab/overlay.content 两视图 + nonexistent.slot 反例 +
+ * headerAction activation 直开浮层；推树含 list-tree hostAction 双向导航与
+ * unknown-params 反例。
  *
  * 覆盖：
  *   S1：插件声明新抽屉标签页 → 派生出现、点入见推树文本；probe.bad（未注册位）不派生（S4）
@@ -12,6 +15,35 @@
  *   S7：scheduler-manager headerAction 徽标按钮与探针共存（静态表覆盖反向验证）
  *   S8：禁用 → 标签页消失且选中态不残留；启用 → 重放回来
  */
+import fs from 'node:fs'
+import path from 'node:path'
+
+import { approveAndAwaitActive, flagOf, resolveDataDirFromArgv } from './lib-plugin-fixtures.mjs'
+
+// ── fixture 种子（runner import 阶段执行，先于 instance.launch）──────────────
+// 宿主插件扫描含 <dataDir>/plugins/（external 形态）；dataDir 派生契约见
+// lib-plugin-fixtures.mjs（必须与 runner 同源，缺 --run-id 响亮退出）。repo 定位
+// 与 runner 同款：--repo flag 优先，缺省 cwd；fixture 文件缺失 = 不在 worktree 根
+// 运行或仓库缺搬迁后 fixture，响亮报错不猜。
+{
+  const repo = path.resolve(flagOf(process.argv.slice(2), 'repo', process.cwd()))
+  const fixtureDir = path.join(repo, 'packages', 'runtime', 'test', 'fixtures', 'plugins', 'probe-container-plugin')
+  const fixtureFiles = ['package.json', 'index.js']
+  for (const name of fixtureFiles) {
+    if (!fs.existsSync(path.join(fixtureDir, name))) {
+      throw new Error(
+        `[probe-containers] fixture 缺失：${path.join(fixtureDir, name)}——` +
+          '确认在 taiji worktree 根运行 runner（fixture 源 = 仓库测试基建目录，随仓库分发）',
+      )
+    }
+  }
+  const dest = path.join(resolveDataDirFromArgv(), 'plugins', 'probe-container-plugin')
+  fs.mkdirSync(dest, { recursive: true })
+  for (const name of fixtureFiles) {
+    fs.copyFileSync(path.join(fixtureDir, name), path.join(dest, name))
+  }
+}
+
 export const meta = {
   id: 'probe-containers',
   priority: 'P0',
@@ -67,6 +99,15 @@ export async function run(ctx) {
     log('页面加载门通过（探针注册信号出现）')
     step('page.ready')
   }
+
+  // 探针为 external sandbox 形态：声明权限后激活停在审批门，先批准再继续
+  // （helper 轮询 plugin.list 到 status=active；permissions 与 fixture manifest
+  // 声明一致——sandbox fail-closed，不批准则后续推树断言全部超时）
+  await approveAndAwaitActive(protocol, ev, {
+    'probe-container-plugin': ['sessions.readState', 'views.update'],
+  })
+  log('探针插件已批准并激活（external sandbox 形态）')
+  step('fixture.activated')
 
   // 诊断：直接持 page 对象分层探针（evaluate 层 vs locator 层）
   {
