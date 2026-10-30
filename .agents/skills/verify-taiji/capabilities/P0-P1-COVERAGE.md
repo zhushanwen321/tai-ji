@@ -201,7 +201,7 @@
 
 > 远程访问移动壳（packages/mobile-renderer v2）为独立功能面（FEATURE-PRIORITIES 远程访问行），与本表桌面 P0/P1 行不重叠。11 个场景全部 `scenario` 态（D3 正式验收实跑 exit 0，runId `<nodeId>-20261026-d3`，证据 `~/.agents/skill-data/dev-flow/refactor-remote-use-ui-22acbeb9/verify-nodes/<nodeId>/`）；装配底座 = `scenarios/lib/mobile-shell-helper.mjs`（remote-access 预置 + iPhone 13 仿真 + token 交接）+ `lib/mobile-task-flow.mjs`（建会话/发送/轮询）+ `lib/mobile-drive.mjs`（开壳落位/分组未读读侧/滚动几何）+ run.mjs `meta.remoteAccess` 预置钩子。移动壳验身的真实用户路径 = runtime HTTP 静态托管 dist（非 vite dev），剧本前必 `pnpm --filter @taiji/mobile-renderer build`。
 
-| 场景 | 断言 | 覆盖面 | 备注 |
+| 场景 | 断言 | 覆盖要点 | 备注 |
 |---|---|---|---|
 | `mobile-shell-boot-three-states` | 17 | 首屏三态/token 抹除/坏 token 不毁凭据 | |
 | `mobile-sessions-grouping-unread` | 23 | 分组双源谓词/未读双触发帧级取证/点入即清 | |
@@ -231,3 +231,61 @@
 **形态与打包面（不入确定性剧本，L4 inspect 承载）**：S2 形态走查 + P6 判定 = inspect-a3（pass：forced reflow=0，测量支后备演进不触发）；S9 无半截形态 = inspect-a11（pass：4 观察窗零半截，含 bash 工具回合中段 append）；生产构建抽查 = inspect-a13（⚠️ degraded：构建链被既有缺陷拦断——`bundle-extensions.mjs` workflows 资源拷贝未排除双平台 `.ts`，`prepare-builtin-extensions.sh` R3 校验 exit 1，独立修复单）。
 
 **已知坑（剧本作者登记）**：① 末条贴底判据用「钉住」形态（gap ≤ 视口常量），不用固定 px 容差——尾部结构高度（~146px）会把结构量误当行为量；② 「加载更早」可达性依赖 runtime 截断窗口 + hydrate 刷新两前置，多回合历史需 ≥6 条短消息铺垫；③ CDP evaluate 传字符串函数体不会被调用，须传真实函数（faux 采样器三处同款坑）；④ 流式中滚轮脱离后有动量惯性，脱离断言须等惯性衰减（动量顶头坑）。
+
+## 九、foreground-idle-to-background 交付新增剧本（2026-10-30 前置创作，D3 验收批次）
+
+> 本节是「bash 前台命令空闲转后台机制」设计交付（fix-chat-flow-stuck，D1 开发中）的
+> 七个 L3 剧本登记（第一批核心组 4 个 + 第二批非核心组 3 个）——**前置创作于开发进行中**，
+> D3 时点经 run.mjs 全量重跑判绿。
+> 装配/驱动/清理链路已由 A2 的脚手架冒烟实跑验证（2026-10-31，runId
+> `scaffold-20261031-023733`，18 断言 15 绿：launch/ready/doctor/session/双 bash 调用/
+> turn complete/dispose/证据幸存全绿 + **转后台标记已实测生效**——`sleep 45` 30s 静默
+> 转后台、标记行与 Full log 路径逐字符合设计 §3.2、idleBackgroundSec 配置注入热重载生效；
+> 3 红 = 完成通知链路（C1 守望 + unknown 形态）D1 未完成，属预期待实现项。证据根 =
+> `~/.agents/skill-data/dev-flow/fix-chat-flow-stuck-84f23fa0/foreground-idle-to-background.acceptance/scenario-scaffold-smoke/`）。
+> 第二批三剧本不做 dev 实例冒烟（核心组已实证装配底座；避免与开发争资源），验收标准 =
+> node --check 语法 + 模块加载自检 + 与 lib/首批样例静态对齐 + testid 对源码核实。
+> 设计依据 = `~/.agents/skill-data/tech-design/fix-chat-flow-stuck-84f23fa0/foreground-idle-to-background.md`
+> §6.2 验收场景 V1/V2/V3/V6/V9/N2/N4/V10。共享设施 = `scenarios/lib/fg-bg-lib.mjs`
+> （扩展配置注入 / 会话 JSONL 取证 / ps 哨兵定位 / 卡死回合收尾）。
+> 装配通道均为 faux；idleBackgroundSec（与 maxConcurrentBackground）经
+> `<dataDir>/agent/config/base-tool-enhance-ext-config.json` 热重载注入（非 settings.json，
+> 冒烟已实证 30s 阈值生效）。
+
+| 剧本 | 验收场景 | 状态 | 覆盖要点 |
+|---|---|---|---|
+| `p0-bash-idle-to-background` | V1（A1） | **前置创作，待 D3 实跑**（转后台标记经 A2 冒烟旁证已生效；时序带/登记/终止链路待全量实跑） | 事故同构命令（cd 失败 + 静默挂住）idle 30s 转后台：工具调用 25–45s 通过带返回、结果含 [TAIJI-FG-BG] 标记行 + Full log 路径 + cd 报错行、turn complete 恢复推进、进程存活（ps）、registry/backgroundTask.list 登记 running、backgroundTask.kill 后进程消失 + 条目终态 |
+| `p0-bash-idle-notify-once` | V2+N2（A2） | **前置创作，脚手架冒烟已实跑**（15/18 绿：转后台标记已生效；3 红 = 通知链路 D1 未完成，属预期） | 基线普通前台命令结果到达（脚手架锚点，冒烟绿）；`sleep 45 && echo done` 30s 静默转后台（冒烟绿：标记行 + Full log 路径逐字符合设计）；45s 自然完成 → 完成通知恰好 1 条（finished (exit code unknown + 耗时 + Last lines 含 done + Full output 指引）；通知 steer 唤醒新 run complete#2；+8s 静默窗无第二条 |
+| `p0-bash-abort-process-group` | V6（A7） | **前置创作，待 D3 实跑**（中止/整组终止/无登记/恢复四断言对官方 abort 语义恒适用——D3 前后行为对照面；包装面待实跑） | 包装执行中 message.abort：reply aborted + complete{stopReason:aborted}（官方式结果）、包装脚本与真实命令同进程组整组消失（ps 无 taiji-fg-wrap / 哨兵残留）、registry 无登记、中止后立刻再发并正常收尾 |
+| `p0-bash-wrapper-crash-fallback` | V9（A10） | **前置创作，待 D3 实跑**（包装脚本 bin/taiji-fg-wrap 已在 D1 工作树在位，兜底登记链路待实跑） | 场景外部 SIGKILL 包装脚本（留活命令不杀）：官方拿到错误结果且尾部补 [TAIJI-FG-BG] 标记行（B5 兜底）、留活命令登记 running（进程存活）、模型侧 bash_output list 可见（tool_search 激活 deferred 工具后编排）、backgroundTask.output 可查、backgroundTask.kill 可杀 |
+| `p1-bash-foreground-zero-perception` | V3（A4） | **前置创作（第二批），待 D3 实跑**（装配底座经 A2 冒烟旁证；零感知四断言在 HEAD 天然绿，须与「包装在场」锚合读判有效性） | 机制在场（idle 30s 注入非 null）时短命令包装跑走 B2：`ls` / `pnpm -v` + 3s 窗口锚点命令（ps 抓 taiji-fg-wrap 证明走了包装路径——无此锚则 HEAD 官方直跑与 B2 清理同形全绿）；断言结果透传到达、无 [TAIJI-FG-BG] 标记行、registry 零条目、JSONL 零 [background-bash] 通知（+8s 静默窗）、background-tasks 目录无 *.sh/*.pid/*.log 三文件残留（目录枚举，registry.json 不计） |
+| `p1-bash-sidebar-converted-task` | V10（A11） | **前置创作（第二批），待 D3 实跑**（UI 锚对 fix-chat-flow-stuck 源码逐一核实；交互链路——托盘 pin/drawer 开合——待实跑校准） | A1 同构转后台（静默命令 + idle 30s）→ CDP 驱动现行用户可见可控面：托盘条目出现（composer-tray）、bash 面板行（tray-bash-row 命令文本 + tray-bash-icon spinner 运行态）、drawer 详情（bash-task-command 命令全文 + bash-task-output 输出尾部）、行内两段式终止（tray-bash-kill → -confirm）、终态一致（ps 哨兵消失 + registry 终态 + tray-panel-tab-count-ended ≥ 1）；UI 步骤全包 uiStep 防御壳（UIError 转断言红不中断取证） |
+| `p1-bash-pool-full-register` | N4（A15） | **前置创作（第二批），待 D3 实跑**（占池轮 = 现有机制恒绿锚；转后台登记与拒绝文案断言待实跑） | ext-config 双键注入（maxConcurrentBackground=1 + idleBackgroundSec=30，lib `writeExtConfig`）：显式 background:true 占池（恒绿锚）→ 静默命令转后台登记不被拒（标记行 + registry 两条 running 共存——转后台不过并发门语义）→ tool_search 激活后 bash_output list 含转后台任务 → 第三个显式 background 被并发门拒（文案含 limit reached / Oldest task: bt- / bash_kill {task_id: + ps 无哨兵 = 未 spawn） |
+
+**编排裁决（剧本作者登记，驱动复用前必读）**：
+① **模型侧 bash_kill 的动态 task_id 不可编排**——faux 是静态脚本演员，无法把转后台后才生成的
+task_id 填进脚本步骤；终止链路由 runtime `backgroundTask.kill` RPC 承载（真实用户路径 = 桌面后台
+任务侧边栏终止按钮，与 bash_kill 同一 killProcessTree 终止单点），剧本族 notProvable 一致登记。
+② **bash_output 是 deferred 工具**（tool-declaration-slimming D4）——模型侧查询编排前必须先
+`tool_search` 激活（已知空洞 #9 同族），无参 list 模式是唯一无需动态 task_id 的编排形态。
+③ **完成通知消耗 faux step**——通知经 pi.sendMessage steer + triggerTurn 注入会唤醒新 run，
+响应脚本必须排通知应答步（否则该轮以 faux 耗尽 error 收尾，污染「恰好一条」的计数语境）。
+④ **实现前 HEAD 的挂死防孤儿**——转后台未实现时 bash 前台调用真挂死，剧本内置观察超时 +
+message.abort 官方中止 + 哨兵 pid 精确清理（`abortStuckTurn`，禁 pkill 宽匹配）。
+⑤ **V10「侧边栏」按现行入口驱动（第二批裁决）**——设计文档所述后台任务侧边栏 L2 列表已于
+2026-09-16 随任务观察入口唯一化退役，现行 = composer 任务托盘 bash 面板
+（TrayNativePanel.vue，testid `tray-bash-*`）+ 右抽屉 bashTask tab
+（BackgroundTaskDetailPanel.vue，testid `bash-task-*`）；机制语义（列表/运行态/输出尾部/
+终止/终态）逐项对齐 V10 验收点。托盘入口按钮有密度档差异：expanded 档 =
+`tray-builtin-button[data-kind="bash"]`，aggregated 档 = `tray-aggregate-button`（先试前者
+超时 fallback）；行内 kill 按钮渲染条件 = **pinned 且 running**（hover 预览态不渲染），
+点击入口按钮进 pin 态后 `tray-bash-kill` 才可见，两段式确认态切 `tray-bash-kill-confirm`。
+⑥ **V3 零感知断言必须搭配「包装在场」锚（第二批裁决）**——三文件清理/零登记/零通知在
+实现前 HEAD（无包装、目录本来空）与 B2 生效同形全绿；剧本内置 3s 窗口锚点命令 +
+ps 抓 taiji-fg-wrap 证明走了包装路径，否则剧本失去红灯能力。V3 的官方直跑 vs 包装跑
+逐字对比归 M2 透传等价测试族（单测），真机侧只验包装跑一侧。
+⑦ **ext-config 多键注入走 lib `writeExtConfig`（第二批新增导出）**——N4 需要
+maxConcurrentBackground + idleBackgroundSec 双键合并写；lib 新增通用合并写函数，
+单键便捷形态 `writeIdleConfig` 委托它（首批四剧本的调用形态与行为逐字不变）。
+并发门拒绝文案锚对 spawn-background.ts 现行文案（`Background task limit reached` /
+`Oldest task: bt-…` / `bash_kill {task_id:`），文案改版时该断言先红，属契约断言登记。
