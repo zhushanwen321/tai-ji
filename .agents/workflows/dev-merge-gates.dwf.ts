@@ -523,6 +523,12 @@ async function main(): Promise<Record<string, unknown>> {
   }
   const repoRoot = rootProbe.stdout.trim();
 
+  // 后续所有 git 调用一律经 -C 钉在探测到的 worktree 根：world.run 的 cwd 继承宿主 bash
+  // 持久 cwd，宿主切目录（或两条 dev-merge 线并行时切换 cwd）会让裸 git 静默操作错树/直接
+  // exit 128（2026-10-31 事故：终态清扫裸 git status 在非仓库 cwd 失败，run 被误判 failed）。
+  // 唯一例外 = 上面的 toplevel 探测本身（契约要求发起时 cwd 在该 worktree 根）。
+  const gitAt = (argv: string[]): Promise<WorldRunResult> => world.run("git", ["-C", repoRoot, ...argv]);
+
   // 分支身份 preflight：本 workflow 只在 feature 线 worktree 内运行——gates 口径 = 分支增量、
   // branch-review 的 diff 与 committer/fixer 的 commit 落点全部以该检出为对象。world.run cwd
   // 继承宿主 bash 持久 cwd，不保证停在 feat 根：2026-10-25 事故形态 = committer agent 的 git
@@ -530,7 +536,7 @@ async function main(): Promise<Record<string, unknown>> {
   // 94ea75386，事后 reset 恢复）。提示词级"提交前核实 worktree"依赖 agent 遵守；此处与
   // pre-commit 的 main 直提交守卫（.githooks/install-hooks.sh，TAIJI_ALLOW_MAIN_COMMIT
   //  bypass）构成双闸——本闸挡在派发任何 agent 之前。分支类型口径 = DEV-WORKFLOW.md §1。
-  const branchProbe = await world.run("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
+  const branchProbe = await gitAt(["rev-parse", "--abbrev-ref", "HEAD"]);
   const wfBranch = branchProbe.exitCode === 0 ? branchProbe.stdout.trim() : "";
   if (!/^(feat|fix|refactor|chore|docs|test|perf|hotfix|verify)-/.test(wfBranch)) {
     throw new Error(
@@ -550,7 +556,7 @@ async function main(): Promise<Record<string, unknown>> {
 
   // porcelain 过滤 .review/.tmp（脚本自持目录），与 pr-lifecycle dirtyWorktree 同源
   async function dirtyFiles(): Promise<string[]> {
-    const st = await world.run("git", ["status", "--porcelain"]);
+    const st = await gitAt(["status", "--porcelain"]);
     if (st.exitCode !== 0) {
       throw new Error(`git status --porcelain 失败（exit ${st.exitCode}）：${st.stderr.trim() || "无 stderr"}；确认 cwd 是有效 git 仓库`);
     }
@@ -826,7 +832,7 @@ async function main(): Promise<Record<string, unknown>> {
       const res = results.get(gid)!;
       if (res.committed) {
         contentQueue.shift();
-        const h = await world.run("git", ["rev-parse", "--short", "HEAD"]);
+        const h = await gitAt(["rev-parse", "--short", "HEAD"]);
         const hash = h.exitCode === 0 ? h.stdout.trim() : "未知";
         disclosures.push({
           item: `commit-repair-r${round}-${gid}`,
@@ -859,7 +865,7 @@ async function main(): Promise<Record<string, unknown>> {
   // base 解析（与 quality-gates.mjs resolveBase 的 dev-merge 侧同口径：显式 > merge-base github/main HEAD > main）
   let base = typeof args.base === "string" ? args.base.trim() : "";
   if (base === "") {
-    const mb = await world.run("git", ["merge-base", "github/main", "HEAD"]);
+    const mb = await gitAt(["merge-base", "github/main", "HEAD"]);
     base = mb.exitCode === 0 ? mb.stdout.trim() : "main";
   }
   log(`[gates] base=${base}（分支增量口径，显式传值恒优先）`);
@@ -1167,7 +1173,7 @@ async function main(): Promise<Record<string, unknown>> {
 
   await runStep("branch-review", async () => {
     // 触及非测试源码判定（SKILL 1.7 触发条件：未触及源码 → 披露跳过；测试文件与 .md 文档不计入）
-    const df = await world.run("git", ["diff", `${base}...HEAD`, "--name-only"]);
+    const df = await gitAt(["diff", `${base}...HEAD`, "--name-only"]);
     if (df.exitCode !== 0) {
       throw new Error(`git diff ${base}...HEAD --name-only 失败（exit ${df.exitCode}）：${df.stderr.trim()}——确认 base ref 有效后重新发起`);
     }
@@ -1217,11 +1223,11 @@ async function main(): Promise<Record<string, unknown>> {
       }
     }
 
-    const headRes = await world.run("git", ["rev-parse", "--short", "HEAD"]);
+    const headRes = await gitAt(["rev-parse", "--short", "HEAD"]);
     const topic = `dmg-${headRes.exitCode === 0 ? headRes.stdout.trim() : "run"}`;
     // 报告根（skill-data，impl-spec §2.1）：projectRoot 取 git toplevel（在 worktree 根发起；
     // realpath 由 slug 探针内部规范化，解析失败报错不静默）
-    const reportTopRes = await world.run("git", ["rev-parse", "--show-toplevel"]);
+    const reportTopRes = await gitAt(["rev-parse", "--show-toplevel"]);
     if (reportTopRes.exitCode !== 0 || reportTopRes.stdout.trim() === "") {
       throw new Error(`无法解析项目根（git rev-parse --show-toplevel 失败，exit ${reportTopRes.exitCode}）：${reportTopRes.stderr.trim() || "无 stderr"}；确认在 worktree 根发起后重新发起`);
     }
@@ -1244,12 +1250,12 @@ async function main(): Promise<Record<string, unknown>> {
     // projectRoot 与 worktreePath 同值（git toplevel：worktree 场景即本 run 的工作树绝对
     // 路径，R4 多 worktree 并行的区分依据）
     const runProjectRoot = reportTopRes.stdout.trim();
-    const brMetaRes = await world.run("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
+    const brMetaRes = await gitAt(["rev-parse", "--abbrev-ref", "HEAD"]);
     const runBranch = brMetaRes.exitCode === 0 ? brMetaRes.stdout.trim() : "";
-    const headMetaRes = await world.run("git", ["rev-parse", "HEAD"]);
+    const headMetaRes = await gitAt(["rev-parse", "HEAD"]);
     const runHeadCommit = headMetaRes.exitCode === 0 ? headMetaRes.stdout.trim() : "";
     // baseCommit 解析为 hash（base 可能是显式 ref 名；解析失败降级 base 字面量）
-    const baseHashRes = await world.run("git", ["rev-parse", base]);
+    const baseHashRes = await gitAt(["rev-parse", base]);
     const baseCommit = baseHashRes.exitCode === 0 ? baseHashRes.stdout.trim() : base;
     // startedAt（run.json 轮转归档判据；探针结果经 journal 记录，resume/重放值稳定）
     const runNowRes = await world.run("node", ["-e", NODE_ISO_NOW]);
