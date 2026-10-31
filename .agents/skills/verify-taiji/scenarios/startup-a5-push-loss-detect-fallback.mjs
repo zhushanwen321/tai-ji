@@ -39,7 +39,7 @@ export const meta = {
     '推送丢失形态成立：注入前查询返回 watch record status=running（终态事件已在盘、投影未消费）',
     '触发一次列表查询后 watch record status=idle 且 stopReason=stop（检测补上，与注入行一致）',
     '查询后全列表无 running 停留记录（idle × 4）',
-    'UI 面板同屏复核：进行中桶 = 0、已结束桶 = 4',
+    'UI 面板同屏复核：subagent 托盘 widget 面板显示 watch record（slug 在场）',
   ],
   notProvable: [
     '「无长期停留 running」的时间维度（长期性）——单次剧本验证补全语义（查询后状态正确即蕴含不长期停留），长期停留看守由补全后状态正确承载',
@@ -120,21 +120,23 @@ export async function run(ctx) {
   })
 
   // ── 段 4：UI 同屏复核（用户可见面）──────────────────────────────────────
+  // subagent 面板现行宿主 = 托盘协议 widget 区（pi-subagent-workflow 扩展注册，
+  // viewId='subagent'——docs/testing/02 的 tray-builtin-button[data-kind=subagent]
+  // 形态已随容器扩展点统一 §6.6/U9+U10 迁移退役；面板行 = agent · slug 文本）
   await page.locator('.session-item').first().waitFor({ state: 'visible', timeout: 60_000 })
   await page.locator('.session-item').first().click()
-  const trayBtn = page.locator('[data-testid="tray-builtin-button"][data-kind="subagent"]')
-  await trayBtn.waitFor({ state: 'visible', timeout: 30_000 })
-  await trayBtn.click()
-  await page.locator('[data-testid="tray-native-panel"]').waitFor({ state: 'visible', timeout: 10_000 })
-  const runningBucket = await page.locator('[data-testid="tray-panel-tab-count-running"]').first().textContent().catch(() => '')
-  const endedBucket = await page.locator('[data-testid="tray-panel-tab-count-ended"]').first().textContent().catch(() => '')
+  const subagentWidgetBtn = page.locator('[data-testid="tray-widget-button"][data-widget-key="subagent"]')
+  await subagentWidgetBtn.waitFor({ state: 'visible', timeout: 30_000 })
+  await subagentWidgetBtn.click()
+  await page.locator('[data-testid="tray-widget-panel"]').waitFor({ state: 'visible', timeout: 10_000 })
+  const panelText = await page.locator('[data-testid="tray-widget-panel"]').first().innerText()
   ev.assert(
-    'A 通道复核: 面板进行中桶 = 0、已结束桶 = 4（补全后用户可见面）',
-    Number.parseInt(String(runningBucket).trim(), 10) === 0 && Number.parseInt(String(endedBucket).trim(), 10) === 4,
+    'A 通道复核: 补全后面板显示 watch record（slug 在场，非运行态消失面）',
+    panelText.includes('fixture-sa-a5-watch'),
     {
       channel: 'A',
-      expected: 'running=0 ended=4',
-      actual: `running=${String(runningBucket).trim()} ended=${String(endedBucket).trim()}`,
+      expected: "面板文本含 'fixture-sa-a5-watch'",
+      actual: `面板文本头 200 字: ${JSON.stringify(panelText.slice(0, 200))}`,
     },
   )
   await ev.shot(page, 'a5-after-detect')

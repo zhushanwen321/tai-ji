@@ -8,10 +8,11 @@
  *
  * 关键事实（源码核对，勿凭示例硬写）：
  * - 主会话文件落点 `<dataDir>/agent/sessions/<encodeCwd(cwd)>/<sid>.jsonl`，首行
- *   session header `{id, cwd, timestamp}`（packages/runtime/src/infra/pi/session-file-utils.ts
- *   的 parseSessionHeader / isSessionHeaderEntry；scanSessions 与 scanPiSessions 的
- *   扫描发现面）——encodeCwd 公式 = shared/session-store-paths.ts:70 `--` + 去
- *   首斜杠 + `[/\\:]`→`-` + `--`。
+ *   session header `{type:'session', id, cwd, timestamp}`（type:'session' 是
+ *   isSessionHeaderEntry 的判定键——缺 type 按 noHeader 降级、会话不进扫描面；
+ *   packages/runtime/src/infra/pi/session-file-utils.ts 的 parseSessionHeader /
+ *   scanSessions 与 scanPiSessions 的扫描发现面）——encodeCwd 公式 =
+ *   shared/session-store-paths.ts:70 `--` + 去首斜杠 + `[/\\:]`→`-` + `--`。
  * - project 绑定 sidecar `<sid>.jsonl.project.json` = `{"projectId": "..."}`
  *   （lib-conn-datasync 先例同款）；projects.json = `{projects:[{id,name,lastUsedAt}]}`。
  * - record 事件文件落点 `<dataDir>/ext-sessions/<sid>/subagents/records/<sa-id>.events`
@@ -63,7 +64,9 @@ export function seedSessionFile(dataDir, { sessionId, cwd, projectId }) {
   fs.mkdirSync(dir, { recursive: true })
   const sessionFile = path.join(dir, `${sessionId}.jsonl`)
   if (!fs.existsSync(sessionFile)) {
-    const header = { id: sessionId, cwd, timestamp: new Date().toISOString() }
+    // header 判定键 = entry.type === 'session'（session-file-utils.ts
+    // isSessionHeaderEntry——缺 type 的首行按 noHeader 降级、会话不进扫描面）
+    const header = { type: 'session', id: sessionId, cwd, timestamp: new Date().toISOString() }
     fs.writeFileSync(sessionFile, `${JSON.stringify(header)}\n`)
   }
   if (projectId !== undefined) {

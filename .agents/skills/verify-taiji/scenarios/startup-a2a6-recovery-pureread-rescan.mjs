@@ -100,7 +100,8 @@ export async function run(ctx) {
     actual: `total=${baseSubs.subagents?.length ?? 0} idle=${baseIdle} running=${baseRunning}`,
   })
 
-  // UI 激活：会话行出现 → 点击 → 托盘 subagent 面板有 55 条
+  // UI 激活：会话行出现 → 点击 → subagent 托盘 widget 面板有 records
+  // （面板现行宿主 = 托盘协议 widget 区，viewId='subagent'，行 = agent · slug）
   const sessionRow = await pollUntil(
     async () => {
       const count = await page.locator('.session-item').count()
@@ -109,16 +110,21 @@ export async function run(ctx) {
     { timeoutMs: 60_000, intervalMs: 400, label: '侧栏 fixture 会话行渲染' },
   )
   await page.locator('.session-item').first().click()
-  const trayBtn = page.locator('[data-testid="tray-builtin-button"][data-kind="subagent"]')
-  await trayBtn.waitFor({ state: 'visible', timeout: 30_000 })
-  await trayBtn.click()
-  await page.locator('[data-testid="tray-native-panel"]').waitFor({ state: 'visible', timeout: 10_000 })
-  const endedCountText = await page.locator('[data-testid="tray-panel-tab-count-ended"]').first().textContent().catch(() => '')
-  ev.assert(`A6 基线: 面板已结束桶计数 = ${RECORD_IDLE}`, Number.parseInt(String(endedCountText).trim(), 10) === RECORD_IDLE, {
-    channel: 'A',
-    expected: String(RECORD_IDLE),
-    actual: String(endedCountText).trim(),
-  })
+  const subagentWidgetBtn = page.locator('[data-testid="tray-widget-button"][data-widget-key="subagent"]')
+  await subagentWidgetBtn.waitFor({ state: 'visible', timeout: 60_000 })
+  await subagentWidgetBtn.click()
+  const widgetPanel = page.locator('[data-testid="tray-widget-panel"]')
+  await widgetPanel.waitFor({ state: 'visible', timeout: 10_000 })
+  const basePanelText = await widgetPanel.first().innerText()
+  ev.assert(
+    `A6 基线: 面板显示大会话 records（idle 与 running 行 slug 均在场）`,
+    basePanelText.includes('fixture-sa-idle-01') && basePanelText.includes('fixture-sa-run-01'),
+    {
+      channel: 'A',
+      expected: "含 'fixture-sa-idle-01' 与 'fixture-sa-run-01'",
+      actual: `面板文本头 200 字: ${JSON.stringify(basePanelText.slice(0, 200))}`,
+    },
+  )
   await ev.shot(page, 'a2a6-baseline-panel')
   const logMarkBeforeKill = readRuntimeLog(dataDir).length
 
@@ -141,8 +147,6 @@ export async function run(ctx) {
   ev.step({ step: 'restart.succeeded', channel: 'C', exitCode: 0, stats: { atMs: tRestart } })
 
   // ── 段 3：A2——Restart succeeded 后 2s 内纯读 RPC 全部正常返回 ────────────
-  let a2Ok = false
-  let a2Detail = ''
   try {
     const freshProto = await createProtocol({ dataDir, runtimePort: readRuntimePort(dataDir) })
     try {
@@ -151,8 +155,8 @@ export async function run(ctx) {
       const gitStatus = await freshProto.call('git.status', { sessionId: SID })
       const elapsed = Date.now() - tRestart
       const readmeHit = (search.files ?? []).some((f) => String(f.path ?? '').includes('README'))
-      a2Ok = (tree.tree?.length ?? 0) > 0 && (search.files?.length ?? 0) > 0 && Array.isArray(gitStatus.files) && readmeHit
-      a2Detail = `elapsed=${elapsed}ms tree=${tree.tree?.length ?? 0} search=${search.files?.length ?? 0} gitFiles=${gitStatus.files?.length} readmeHit=${readmeHit}`
+      const a2Ok = (tree.tree?.length ?? 0) > 0 && (search.files?.length ?? 0) > 0 && Array.isArray(gitStatus.files) && readmeHit
+      const a2Detail = `elapsed=${elapsed}ms tree=${tree.tree?.length ?? 0} search=${search.files?.length ?? 0} gitFiles=${gitStatus.files?.length} readmeHit=${readmeHit}`
       ev.assert(`A2: Restart succeeded 后 2000ms 内纯读 RPC 正常返回（tree>0 / search 含 README / git.files 数组）`, a2Ok && elapsed <= 2000, {
         channel: 'B',
         expected: '三 RPC 成功且 elapsed ≤ 2000ms',
@@ -219,16 +223,19 @@ export async function run(ctx) {
     ev.attach('a6-rescan-log', rescanEvidence.join('\n') || '（无）')
 
     // UI：面板重开显示同一会话 records（第二视角复核）
-    const trayBtn2 = page.locator('[data-testid="tray-builtin-button"][data-kind="subagent"]')
-    await trayBtn2.waitFor({ state: 'visible', timeout: 30_000 })
-    await trayBtn2.click()
-    await page.locator('[data-testid="tray-native-panel"]').waitFor({ state: 'visible', timeout: 10_000 })
-    const endedAfter = await page.locator('[data-testid="tray-panel-tab-count-ended"]').first().textContent().catch(() => '')
-    ev.assert(`A6: 重启后面板已结束桶计数仍 = ${RECORD_IDLE}`, Number.parseInt(String(endedAfter).trim(), 10) === RECORD_IDLE, {
-      channel: 'A',
-      expected: String(RECORD_IDLE),
-      actual: String(endedAfter).trim(),
-    })
+    await subagentWidgetBtn.waitFor({ state: 'visible', timeout: 30_000 })
+    await subagentWidgetBtn.click()
+    await widgetPanel.waitFor({ state: 'visible', timeout: 10_000 })
+    const afterPanelText = await widgetPanel.first().innerText()
+    ev.assert(
+      `A6: 重启后面板仍显示大会话 records（idle 与 running 行 slug 回来）`,
+      afterPanelText.includes('fixture-sa-idle-01') && afterPanelText.includes('fixture-sa-run-01'),
+      {
+        channel: 'A',
+        expected: "含 'fixture-sa-idle-01' 与 'fixture-sa-run-01'",
+        actual: `面板文本头 200 字: ${JSON.stringify(afterPanelText.slice(0, 200))}`,
+      },
+    )
     await ev.shot(page, 'a2a6-after-rescan-panel')
   } finally {
     await protoAfter.close().catch(() => {})
