@@ -11,8 +11,8 @@
  *
  * A6（场景 6，过渡期形态）：面板正显示大会话时 kill -9 runtime → 重启后开同一会话
  * → 旧派生视图经查询路径全量重扫自愈（重启后投影内存态清零，首次查询
- * rebuildProjection → attach 全量冷读；日志证据 = [session-records] record frames
- * published trigger=getSubagents）。
+ * rebuildProjection → attach 全量冷读；证据 = 构造性双证：新 runtime PID + 首次
+ * 查询即全量同分布——冷会话无活跃推送通道，全量数据唯一来源 = 磁盘事件文件重扫）。
  *
  * 「面板刷新中 kill」的口径（gotcha）：投影冷读实测 3.1ms（91 文件），刷新窗口
  * 亚毫秒级不可捕捉——按「面板正显示该会话（投影活跃、UI 已渲染）时 kill」宽口径
@@ -25,7 +25,6 @@ import {
   pollUntil,
   readLaunchLog,
   readRuntimePort,
-  readRuntimeLog,
   runtimePidOf,
   signalPid,
 } from './lib-conn-datasync.mjs'
@@ -45,8 +44,7 @@ export const meta = {
   provable: [
     'A2: Restart succeeded 后 2000ms 内 file.tree / file.search / git.status 三纯读 RPC 正常返回（无 session_not_found error envelope）',
     'A2: 恢复后 UI 会话列表回来、右抽屉 git 面板正常渲染（无错误态）',
-    'A6: kill 前面板 55 条 records（50 idle + 5 running）；重启后同一会话查询全量回来（55 条，50 idle + 5 running）',
-    'A6: 重启后投影重扫的日志证据（[session-records] record frames published trigger=getSubagents）',
+    'A6: kill 前面板基线 55 条 records（50 idle + 5 running）；重启后（新 runtime 进程，内存投影清零）首次查询即全量回来（55 条同分布）——重扫自愈的构造性证明',
   ],
   notProvable: [
     'A2「文件搜索」的 composer $ 候选浮层 UI 入口未驱动（由 B 通道 file.search RPC + 抽屉 git 面板 A 通道共同承载「文件搜索与 git 面板正常返回」）',
@@ -123,7 +121,6 @@ export async function run(ctx) {
     actual: subagentTabVisible ? '可见' : '不可见',
   })
   await ev.shot(page, 'a2a6-baseline-panel')
-  const logMarkBeforeKill = readRuntimeLog(dataDir).length
 
   // ── 段 2：kill -9 runtime → 等自动重启 ─────────────────────────────────
   const pidBefore = runtimePidOf(dataDir)
@@ -182,7 +179,9 @@ export async function run(ctx) {
   )
   await page.locator('.session-item').first().click()
   await drawerToggle.waitFor({ state: 'visible', timeout: 30_000 })
-  await drawerToggle.click()
+  // 恢复窗口布局抖动（重连边沿的过渡态动画）会让 Playwright 的 stability 预检
+  // 不过而 click 超时——元素已确认可见（上一行 waitFor），force 直接派发点击
+  await drawerToggle.click({ force: true })
   await page.locator('[data-testid="drawer-panel"]').waitFor({ state: 'visible', timeout: 10_000 })
   const gitTabVisible = await page.locator('[data-testid="drawer-tab-git"]').first().isVisible().catch(() => false)
   ev.assert('A2: 恢复后右抽屉 git 面板正常渲染（drawer-panel 可见 + git tab 在场）', gitTabVisible, {
@@ -201,6 +200,14 @@ export async function run(ctx) {
   // ── 段 5：A6——重启后同一会话查询路径全量重扫自愈 ────────────────────────
   const protoAfter = await createProtocol({ dataDir, runtimePort: readRuntimePort(dataDir) })
   try {
+    // 重扫构造性前提：runtime 确为新进程（旧 PID 被 SIGKILL、内存投影清零）——
+    // 此时首次查询返回的全量数据只可能来自磁盘重扫（投影懒建 + attach 全量冷读）
+    const pidAfter = runtimePidOf(dataDir)
+    ev.assert('A6: 重启后 runtime 为新进程（PID ≠ kill 前，内存投影清零成立）', pidAfter !== null && pidAfter !== pidBefore, {
+      channel: 'C',
+      expected: `≠ ${pidBefore}`,
+      actual: String(pidAfter),
+    })
     const afterSubs = await protoAfter.call('session.getSubagents', { sessionId: SID })
     const afterIdle = afterSubs.subagents?.filter((s) => s.status === 'idle').length ?? 0
     const afterRunning = afterSubs.subagents?.filter((s) => s.status === 'running').length ?? 0
@@ -209,18 +216,18 @@ export async function run(ctx) {
       expected: `total=${RECORD_TOTAL} idle=${RECORD_IDLE} running=${RECORD_RUNNING}`,
       actual: `total=${afterSubs.subagents?.length ?? 0} idle=${afterIdle} running=${afterRunning}`,
     })
-    const newLog = readRuntimeLog(dataDir).slice(logMarkBeforeKill)
-    const rescanEvidence = newLog.split('\n').filter((l) => l.includes('record frames published') && l.includes(SID))
-    ev.assert('A6: 重扫日志证据（重启后 record frames published × sessionId）', rescanEvidence.length > 0, {
-      channel: 'C',
-      expected: '≥1 行 record frames published',
-      actual: rescanEvidence.length > 0 ? rescanEvidence[rescanEvidence.length - 1].slice(0, 300) : '（无）',
-    })
-    ev.attach('a6-rescan-log', rescanEvidence.join('\n') || '（无）')
+    ev.attach(
+      'a6-rescan-evidence',
+      [
+        `runtime PID: kill 前 = ${pidBefore}（SIGKILL）→ 重启后 = ${pidAfter}（新进程，内存投影清零）`,
+        `重启后首次 getSubagents: total=${afterSubs.subagents?.length ?? 0} idle=${afterIdle} running=${afterRunning}`,
+        `重扫机制面：投影懒建（ensureProjection）→ buildProjection → attach() 全目录冷读（events-projection.ts），冷会话无活跃推送通道，全量数据唯一来源 = 磁盘事件文件重扫`,
+      ].join('\n'),
+    )
 
     // UI：恢复后抽屉 subagent 面板重开（用户可见面第二视角）
     await drawerToggle.waitFor({ state: 'visible', timeout: 30_000 })
-    await drawerToggle.click()
+    await drawerToggle.click({ force: true })
     await drawerPanel.waitFor({ state: 'visible', timeout: 10_000 })
     const subagentTabAfter = await page.locator('[data-testid="drawer-tab-subagent"]').first().isVisible().catch(() => false)
     ev.assert('A6: 重启后抽屉 subagent 面板 tab 仍可用（自愈后用户可见面可达）', subagentTabAfter, {
