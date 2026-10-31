@@ -43,7 +43,7 @@ export const meta = {
   provable: [
     'A3: 发消息后立即开面板，click 后 200ms 内面板可见，随后会话 records 完整可查（55 条）',
     'A3: 发出的消息真实进入 LLM 轮（mock server 收到主模型请求）',
-    'A3: 常驻事件循环滞后遥测可观测（负载后稳态窗口行落盘 count>0；50ms 阈值实测 ~105ms 两轮复现，登记 gotcha 上交裁决）',
+    'A3: 常驻事件循环滞后遥测可观测（负载后稳态窗口行落盘 count>0；50ms 阈值实测稳态 maxMs=25.92 达标——r5/r7 两轮 ~105ms 复现系 100ms 分辨率量化假象，e26d5104f 降 20ms 闭环）',
     'A3: 负载期无 kill decision（装配/运行日志零命中）',
     'A4: 第二会话冷读全量返回 55 条（未激活会话投影懒建 → attach 全量冷读）',
     'A4: RPC reply 携带 additive batchInProgress 标志（boolean 在场，批外 = false）',
@@ -62,7 +62,7 @@ export async function run(ctx) {
   ]
   const gotchas = [
     'A4 冷读装配用「第二会话」形态（impl-plan A4 行：重启实例或第二会话进入冷读）——第二连接先于 UI 订阅并触发首次查询，帧计数不被 renderer 抢跑污染',
-    '遥测 50ms 阈值判据上交裁决：r5/r7 两轮独立实测稳态窗口 maxMs ≈ 105ms（108.33 / 105.25，均不含 pi spawn——spawn 窗口隔离后仍超），dev 全家桶稳态 ~100ms 周期尖峰与投影冷读（3.1ms/91 文件）不同源，归因待查；投影冷读本身的滞后由 D1 V1 计时单测（<1000ms 断言入 CI）看守',
+    '遥测 50ms 阈值已闭环：r5/r7 两轮独立实测稳态窗口 maxMs ≈ 105ms（108.33 / 105.25，均不含 pi spawn——spawn 窗口隔离后仍超）的根因 = 直方图分辨率 100ms 的量化假象（空闲稳态自然 tick 被量化为 ≈ 分辨率值，非真实事件循环滞后），修复 = e26d5104f 分辨率降 Node 默认 20ms，修后实测稳态 maxMs=25.92 < 50（impl-plan §4 登记「已接受」）；投影冷读本身的滞后由 D1 V1 计时单测（<1000ms 断言入 CI）看守',
     'A3「面板」断言对象 = 右抽屉 subagent tab（renderer 链路）：托盘 subagent widget（pi-subagent-workflow viewId=subagent）由扩展在活跃 pi 会话 session_start 后推送自身进程内 collectRecords 的 records——fixture 磁盘预置 records 不进该 widget（probe 实测 2026-10-31），records 内容完整性以 B 通道 RPC 承载；真实 dispatch 的 widget 观测已有 p0-subagent-workflow-dispatch 剧本承载',
     'mock-http 单轮后 pi 会话文件不落盘（r3/r4 实测 30s 等待未出现）——活跃会话投影重建（mtime 对账）的 e2e 触发在本装配下不可稳定构造，RL5 帧断言因此登记 uncovered',
   ]
@@ -223,14 +223,16 @@ export async function run(ctx) {
     'a3-telemetry-lines',
     JSON.stringify({ transientWindow: transientLine, steadyWindow: steadyLine }, null, 2),
   )
-  // 50ms 阈值判据登记上交（不在此断红）：r5/r7 两轮独立实测稳态窗口 maxMs ≈ 105ms
-  //（108.33 / 105.25，均不含 pi spawn），dev 全家桶（vite dev server + Electron +
-  // runtime）稳态存在 ~100ms 周期尖峰，与投影冷读（3.1ms/91 文件，D1 V1 计时单测
-  // 看守）不同源——归因待查（候选：vite HMR / Electron 主进程桥 / 遥测 emit 自身）。
-  // 此处断言降为「常驻遥测可观测」（窗口行落盘 + count>0），实测值随证据呈报。
+  // 50ms 阈值已闭环（不在此断红，实测值随证据呈报）：r5/r7 两轮独立实测稳态窗口
+  // maxMs ≈ 105ms（108.33 / 105.25，均不含 pi spawn）的根因 = 直方图分辨率 100ms
+  // 的量化假象——空闲稳态的自然 tick 被量化为 ≈ 分辨率值，呈现为 dev 全家桶
+  // 稳态 ~100ms 周期尖峰，非真实事件循环滞后（投影冷读实测 3.1ms/91 文件，由
+  // D1 V1 计时单测看守）。修复 = e26d5104f 分辨率降 Node 默认 20ms，修后实测
+  // 稳态 maxMs=25.92 < 50（impl-plan §4 登记「已接受」）。此处断言 =「常驻遥测
+  // 可观测」（窗口行落盘 + count>0）。
   const steadyMaxMs = steadyLine?.maxMs ?? -1
   ev.assert(
-    'A3: 常驻事件循环滞后遥测可观测（稳态窗口行落盘，count > 0；maxMs 实测值登记 gotcha 上交裁决）',
+    'A3: 常驻事件循环滞后遥测可观测（稳态窗口行落盘，count > 0；50ms 阈值已闭环——量化假象修复后实测稳态 25.92ms 达标）',
     typeof steadyMaxMs === 'number' && steadyMaxMs >= 0 && (steadyLine?.count ?? 0) > 0,
     {
       channel: 'C',
