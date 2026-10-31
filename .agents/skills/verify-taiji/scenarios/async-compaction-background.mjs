@@ -169,16 +169,24 @@ const SUMMARY_SENTINEL = 'SUMMARY-KEEPS-FACT-CODE-7703'
 const TOOL_ACK_BUDGET_MS = 1_000
 /** 单回合完成预算。 */
 const TURN_BUDGET_MS = 60_000
-/** 压缩在途轮询预算（后台摘要节流窗口 + 余量）。 */
-const COMPACT_INFLIGHT_MS = 45_000
-/** 原生同步压缩完成预算。 */
-const NATIVE_COMPACT_MS = 30_000
+/**
+ * 压缩在途轮询预算。执行窗口实测（r4）：cross-model 生成走 split-turn 双调用时为两次
+ * 串行 SSE（2×30s @BG_SUMMARY_CHARS=1200）≈60s——预算按双调用上限给 90s。
+ */
+const COMPACT_INFLIGHT_MS = 90_000
+/** 原生同步压缩完成预算（同步接管 cross-model：split-turn 双调用 ≈2×5s + 余量）。 */
+const NATIVE_COMPACT_MS = 45_000
 /** mock 流式节流（tps：内容按 4 字符≈1 token 切块；mock-llm.mjs perCharMs=1000/(tps*4)）。 */
 const MOCK_TPS = 10
-/** 后台摘要 step 文本长度（1200 chars × 25ms/char @tps10 ≈ 30s 执行窗口）。 */
+/**
+ * 后台摘要单步文本长度（1200 chars × 25ms/char @tps10 = 30s/步）。
+ * 与 NATIVE_SUMMARY_CHARS 的步长差承载 V3/V5 竞态方向：后台生成 30-60s，原生同步压缩
+ * 5-10s 且启动晚 ~8s——保证原生先落盘、session_compact 先行取消后台（恰 1 条 entry 的
+ * 前提；反向时序会产生第二条 entry，设计 V3 通过标准要求不出现）。
+ */
 const BG_SUMMARY_CHARS = 1_200
-/** 原生同步摘要 step 文本长度（≈400 chars ≈ 10s，同步阻塞期预算内）。 */
-const NATIVE_SUMMARY_CHARS = 400
+/** 原生同步摘要单步文本长度（200 chars ≈ 5s/步；双步 ≈10s，同步阻塞期预算内）。 */
+const NATIVE_SUMMARY_CHARS = 200
 /** 造上下文单条消息字符量（48_000 chars ≈ 12_000 tokens；三条布局见文件头「硬约束」）。 */
 const CONTEXT_MSG_CHARS = 48_000
 /** 造上下文消息条数（三条布局：切点落第二条 user entry，被压段 = 第一条，非空）。 */
@@ -257,18 +265,28 @@ function buildMainQueue() {
   ]
 }
 
-/** mock-compact 压缩演员队列（每次压缩恰消费 1 步：三条消息布局下切点 = turn 起点 user
- *  entry → isSplitTurn=false → nativeCompact 单次生成调用，pi compaction.js compact() 实码；
- *  步序 = 请求到达序（FIFO）：各竞态段内「后台生成先发起→长文本 step（拉出执行窗口），
- *  原生/手动压缩后到→短文本 step（控制同步阻塞期，保证原生先落盘、后台后被取消/放弃）」）。 */
+/**
+ * mock-compact 压缩演员队列。消费步数按压缩形态浮动：非 split-turn = 1 步；
+ * split-turn（pi compact() 双调用，history + turnPrefix 串行，r4 实测存在）= 2 步。
+ * 队列给「每压缩 2 步」的满额余量（12 步）；步文本同形态（均含 SUMMARY_SENTINEL），
+ * tag 仅作诊断标记——消费错位对断言无害，只需队列不耗尽。
+ * 各竞态段内「后台生成长文本步在前、原生/手动压缩短文本步在后」：保证同步压缩先完成、
+ * 后台任务后被取消/放弃（竞态了结方向确定）。
+ */
 function buildCompactQueue() {
   return [
-    bgSummaryStep('v1'), // 段 1：V1 后台压缩生成（长文本 = ≈30s 执行窗口）
-    bgSummaryStep('v3-bg'), // 段 3：V3 后台压缩生成（先到，长文本窗口）
-    nativeSummaryStep('v3-native'), // 段 3：V3 threshold 同步压缩（后到，先完成 → session_compact 取消后台）
-    bgSummaryStep('v4'), // 段 4：V4 后台压缩生成（回退不取消，正常落盘）
-    bgSummaryStep('v5-bg'), // 段 5：V5 后台压缩生成（先到；被 /compact 抢先后放弃）
-    nativeSummaryStep('v5-compact'), // 段 5：V5 session.compact 同步压缩（后到，先完成）
+    bgSummaryStep('v1-a'), // 段 1：V1 后台压缩生成（第 1 步）
+    bgSummaryStep('v1-b'), // 段 1：V1 split-turn 第 2 步余量（非 split 则留给下一段，文本同形态无害）
+    bgSummaryStep('v3-bg-a'), // 段 3：V3 后台压缩生成
+    bgSummaryStep('v3-bg-b'),
+    nativeSummaryStep('v3-native-a'), // 段 3：V3 threshold 同步压缩（短文本，先完成 → 取消后台）
+    nativeSummaryStep('v3-native-b'),
+    bgSummaryStep('v4-a'), // 段 4：V4 后台压缩生成（回退不取消，正常落盘）
+    bgSummaryStep('v4-b'),
+    bgSummaryStep('v5-bg-a'), // 段 5：V5 后台压缩生成（被 /compact 抢先后放弃）
+    bgSummaryStep('v5-bg-b'),
+    nativeSummaryStep('v5-compact-a'), // 段 5：V5 session.compact 同步压缩（短文本，先完成）
+    nativeSummaryStep('v5-compact-b'),
   ]
 }
 
@@ -526,6 +544,17 @@ function readSmartContextLog(dataDir) {
     .join('\n')
 }
 
+/** mock 请求体 model 是裸 id（pi-ai openai-completions buildParams；mock-llm.mjs 实测注释），
+ *  过滤主模型请求须同时容忍裸 id 与 provider/id 全形。 */
+function isMainModelReq(r) {
+  return r.status === 200 && (r.model === 'mock-main' || r.model?.endsWith('/mock-main'))
+}
+
+/** mock 请求体 model 是裸 id，过滤压缩模型请求同上。 */
+function isCompactModelReq(r) {
+  return r.status === 200 && (r.model === 'mock-compact' || r.model?.endsWith('/mock-compact'))
+}
+
 /** 统计子串出现次数（提醒注入计数口径：nextTurn 提醒注入后常驻请求上下文，比出现次数不增）。 */
 function countOccurrences(haystack, needle) {
   if (typeof haystack !== 'string' || haystack === '') return 0
@@ -569,11 +598,8 @@ export async function run(ctx) {
         const f = findSessionJsonl(dataDir, sid)
         const scLog = readSmartContextLog(dataDir)
         const logTail = scLog.split('\n').filter(Boolean).slice(-12).join(' ⏎ ')
-        // mock 请求体的 model 是裸 id（pi-ai openai-completions buildParams；mock-llm.mjs 实测），
-        // 匹配须同时容忍裸 id 与 provider/id 全形。
-        const isCompactReq = (r) => r.model === 'mock-compact' || r.model?.endsWith('/mock-compact')
         const compactReqs = (instance.mockLlm?.requests ?? [])
-          .filter(isCompactReq)
+          .filter(isCompactModelReq)
           .map((r) => ({
             status: r.status,
             stepIndex: r.stepIndex,
@@ -712,8 +738,7 @@ export async function run(ctx) {
       exitCode: ackMs >= 0 ? 0 : 1,
       stats: {
         ackMs,
-        // mock 请求体 model 是裸 id（pi-ai buildParams），匹配容忍裸 id 与全形
-        compactRequests: instance.mockLlm.requests.filter((r) => (r.model === 'mock-compact' || r.model?.endsWith('/mock-compact')) && r.status === 200).length,
+        compactRequests: instance.mockLlm.requests.filter(isCompactModelReq).length,
       },
       channel: 'C',
     })
@@ -808,10 +833,10 @@ export async function run(ctx) {
     })
 
     // ③下一请求上下文 = 摘要 + 保留段 + 完成通知：发依赖早期上下文的问题，查请求体。
-    const mainCountBeforeV2 = instance.mockLlm.requests.filter((r) => r.model?.endsWith('/mock-main') && r.status === 200).length
+    const mainCountBeforeV2 = instance.mockLlm.requests.filter(isMainModelReq).length
     await proto.send(sid1, `${SHADOW_SENTINEL} 对应的关键事实是什么？请依据上下文回答。`)
     await proto.waitTurnEnd(sid1, { timeoutMs: TURN_BUDGET_MS })
-    const v2Reqs = instance.mockLlm.requests.filter((r) => r.model?.endsWith('/mock-main') && r.status === 200)
+    const v2Reqs = instance.mockLlm.requests.filter(isMainModelReq)
     const v2Request = v2Reqs[mainCountBeforeV2]
     const v2Ctx = requestMessagesText(v2Request)
     ev.assert('V2/GL3: 压缩后请求上下文含摘要（摘要哨兵进入消息列表）', v2Ctx.includes(SUMMARY_SENTINEL), {
@@ -949,16 +974,19 @@ export async function run(ctx) {
       actual: `${v4Snap.comps.length} 条`,
     })
     // 落盘后验证轮：投影 = 摘要 + 回退后新分支，无被撤子树内容、无被压段原文复活。
-    const mainCountBeforeV4F = instance.mockLlm.requests.filter((r) => r.model?.endsWith('/mock-main') && r.status === 200).length
+    const mainCountBeforeV4F = instance.mockLlm.requests.filter(isMainModelReq).length
     await proto.send(sid4, 'V4 落盘后验证：请概括当前上下文。')
     await proto.waitTurnEnd(sid4, { timeoutMs: TURN_BUDGET_MS })
-    const v4CtxAfter = instance.mockLlm.requests.filter((r) => r.model?.endsWith('/mock-main') && r.status === 200)[mainCountBeforeV4F]
+    const v4CtxAfter = instance.mockLlm.requests.filter(isMainModelReq)[mainCountBeforeV4F]
     const v4CtxText = requestMessagesText(v4CtxAfter)
-    const v4Leak = [shadowPrefix('V4-B'), shadowPrefix('V4-C'), 'V4 回退后新分支消息'].filter((t) => v4CtxText.includes(t))
-    ev.assert('V4/GL4: 落盘后请求投影无被撤子树内容（V4-B/V4-C 原文不复活）', v4Leak.length === 0, {
+    // 设计 V4 通过标准：落盘后投影 = 摘要 + 回退后新条目，无错位——被撤子树（V4-B/V4-C）
+    // 原文不复活（负向探针），回退后新分支消息在场（正向探针，证明新条目在投影里）。
+    const v4Leak = [shadowPrefix('V4-B'), shadowPrefix('V4-C')].filter((t) => v4CtxText.includes(t))
+    const v4NewBranchIn = v4CtxText.includes('V4 回退后新分支消息')
+    ev.assert('V4/GL4: 落盘后请求投影 = 摘要 + 回退后新分支（被撤内容不复活、新分支条目在场）', v4Leak.length === 0 && v4NewBranchIn, {
       channel: 'B',
-      expected: '请求 messages 不含被回退消息（V4-B/V4-C 原文）',
-      actual: `leak=${JSON.stringify(v4Leak)}，messages=${v4CtxAfter?.messages?.length ?? 0} 条`,
+      expected: '请求 messages 不含 V4-B/V4-C 原文（被撤）且含「V4 回退后新分支消息」（新条目）',
+      actual: `leak=${JSON.stringify(v4Leak)}, newBranchIn=${v4NewBranchIn}，messages=${v4CtxAfter?.messages?.length ?? 0} 条`,
     })
     // C 通道：session_tree 观测告警（回退不取消的机制证据）。
     const scLog4 = readSmartContextLog(dataDir)
@@ -970,8 +998,8 @@ export async function run(ctx) {
     ev.step({
       step: 's4.revoke-during-compact',
       command: 'session.revokeMessage + waitTurnEnd',
-      exitCode: v4Snap.comps.length === 1 && v4Leak.length === 0 ? 0 : 1,
-      stats: { compactions: v4Snap.comps.length, leaks: v4Leak.length },
+      exitCode: v4Snap.comps.length === 1 && v4Leak.length === 0 && v4NewBranchIn ? 0 : 1,
+      stats: { compactions: v4Snap.comps.length, leaks: v4Leak.length, newBranchIn: v4NewBranchIn },
       channel: 'B',
     })
     gotchas.push('V4 后台 entry 的 firstKeptEntryId（V4-B）已被回退带离活跃链——pi 投影对该形态的处理属设计 A1 已登记差异（快照集合判定落盘），本剧本以「落盘恰 1 条 + 投影无被撤内容」为验收口径。')
@@ -1051,10 +1079,10 @@ export async function run(ctx) {
       actual: `messages=${hist1AfterLen}`,
     })
     // 继续对话：restore 重建的 pi 从 JSONL 现算投影 → 请求仍为压缩后形态。
-    const mainCountBeforeV6 = instance.mockLlm.requests.filter((r) => r.model?.endsWith('/mock-main') && r.status === 200).length
+    const mainCountBeforeV6 = instance.mockLlm.requests.filter(isMainModelReq).length
     await proto.send(sid1, 'V6 切回后继续对话：请确认上下文正常。')
     await proto.waitTurnEnd(sid1, { timeoutMs: TURN_BUDGET_MS })
-    const v6Reqs = instance.mockLlm.requests.filter((r) => r.model?.endsWith('/mock-main') && r.status === 200)
+    const v6Reqs = instance.mockLlm.requests.filter(isMainModelReq)
     const v6Request = v6Reqs[mainCountBeforeV6]
     const v6Ctx = requestMessagesText(v6Request)
     ev.assert('V6/GL3: 切回后请求仍为压缩后形态（含摘要哨兵、不含被压段原文）', v6Ctx.includes(SUMMARY_SENTINEL) && !v6Ctx.includes(shadowPrefix('V1-A')), {
@@ -1077,7 +1105,7 @@ export async function run(ctx) {
     const reminderCountAt6a = countOccurrences(requestMessagesText(v6Reqs.at(-1)), REMINDER_TEXT_MARK)
     await proto.send(sid1, 'V6 档位复燃检查：请直接确认。')
     await proto.waitTurnEnd(sid1, { timeoutMs: TURN_BUDGET_MS })
-    const v6ReqsAfter = instance.mockLlm.requests.filter((r) => r.model?.endsWith('/mock-main') && r.status === 200)
+    const v6ReqsAfter = instance.mockLlm.requests.filter(isMainModelReq)
     const reminderCountAt6b = countOccurrences(requestMessagesText(v6ReqsAfter.at(-1)), REMINDER_TEXT_MARK)
     ev.assert('V6/GL4: 切回后同一档位不重复告警（相邻两请求的提醒注入数相等，无新增）', reminderCountAt6b === reminderCountAt6a, {
       channel: 'B',
@@ -1086,17 +1114,22 @@ export async function run(ctx) {
     })
     // 压缩检查点 UI 可见（A 通道锚 + 截图）：UI 侧栏点击切到会话 1，对话流渲染压缩分隔行
     // （testid system-notice-text，文案「已压缩上下文」——docs/testing/02 与 panel.ts locale）。
+    // 等待纪律：waitFor（状态出现）——isVisible 即时查询会输给 history 拉取 + 渲染延迟。
     const page = await instance.page()
     const sid1Row = page.locator('.session-item', { hasText: 'async-compaction-s1' }).first()
     await sid1Row.click({ timeout: 15_000 })
-    const checkpointVisible = await page
-      .locator(`[data-testid="system-notice-text"]`, { hasText: '已压缩上下文' })
+    const checkpoint = page
+      .locator('[data-testid="system-notice-text"]', { hasText: '已压缩上下文' })
       .first()
-      .isVisible()
-      .catch(() => false)
+    let checkpointVisible = true
+    try {
+      await checkpoint.waitFor({ state: 'visible', timeout: 15_000 })
+    } catch {
+      checkpointVisible = false
+    }
     ev.assert('V6/GL4: 对话流压缩检查点可见（UI 分隔行）', checkpointVisible, {
       channel: 'A',
-      expected: '[data-testid="system-notice-text"] 含「已压缩上下文」',
+      expected: '[data-testid="system-notice-text"] 含「已压缩上下文」（15s 内渲染）',
       actual: `visible=${checkpointVisible}`,
     })
     await ev.shot(page, 'v6-checkpoint-after-switch-back')
