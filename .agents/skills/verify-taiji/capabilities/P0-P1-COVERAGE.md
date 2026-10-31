@@ -90,6 +90,7 @@
 | 11 | `p1-tool-call-render` | P1-2 | ✅ 16 断言 degraded（工具块可视待补 testid，B/C 硬证据全过） |
 | 12 | `p1-chat-revoke` | P1-4 | ✅ 15 断言 pass |
 | 13 | `p1-permission-approval` | P1-3 | ❌ 实测未通（fail 存档：激活链 + strict 配置契约两未知），矩阵保持 capability-only → **2026-10-24 更新**：两未知已由 `p1-permission-deny-flow` 实跑消解（配置 = session.create 前写入即可；激活链 = 环境抖动），approval 剧本待按 deny-flow 装配重写 |
+| 14 | `p0-stall-kill9-crash-baseline` | 停滞检测 V7（第 0 层回归对照，设计包 pi-stall-detection 新增功能行——停滞检测原不在矩阵） | ✅ 20 断言 pass（2026-10-31 D0 基线实跑 @fd7276351，runId=a7-d0-final）：kill -9 生成中 pi → session.exited.reason 人类可读 + occupancy full-reset 复位 + 宽限期无自动恢复广播/无新 pi + restore 后历史完整与新消息收发。停滞检测交付后本剧本必须保持绿（进程死亡形态收尾时序回归对照）；pi 定位 = ps 三锚定（`--mode rpc` + `mockllm/` + worktree 路径），restore 后 pi 在位以功能证据承载（restore spawn argv 形态与首建不同，ps 锚不适用） |
 
 **剩余工作**（后续排期，非本技能缺口）：`p0-settings-others`（五面抽样）、`p0-session-isolation-stream`（并发流式隔离）、P0-12 结构层 overlay UI 面、`p1-permission-approval` 待配置契约核实后重跑。
 
