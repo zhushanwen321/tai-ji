@@ -290,3 +290,13 @@ maxConcurrentBackground + idleBackgroundSec 双键合并写；lib 新增通用�
 单键便捷形态 `writeIdleConfig` 委托它（首批四剧本的调用形态与行为逐字不变）。
 并发门拒绝文案锚对 spawn-background.ts 现行文案（`Background task limit reached` /
 `Oldest task: bt-…` / `bash_kill {task_id:`），文案改版时该断言先红，属契约断言登记。
+
+## 十、async-compaction 交付新增剧本（2026-11-01，D3 验收批次）
+
+| 剧本 | 功能面 | verdict | 覆盖要点 |
+|---|---|---|---|
+| `async-compaction-background` | `compact_context` 工具纯触发化 + 后台压缩全生命周期（触发/互斥/事件取消/落盘/竞态/重载） | ✅实跑 pass 42 断言（mock-http cross-model 双演员；引擎 verify 节点复跑 exit 0） | V1 触发 10ms 回执 + 执行期两回合零拒绝且早于落盘完成 + parentId 链完整；V2 落盘 entry details/fromHook/摘要哨兵/保留段树序 + 压缩后请求 = 摘要+保留段；V3 撞限原生兜底 + 恰 1 条 entry（cancelled: session_compact）；V4 回退不取消 + 投影无泄漏 + 新分支在场；V5 /compact 竞争收场恰 1 条；V6 live ≡ reload（18=18）+ 档位不复燃。装配与 mock 步数编排见剧本头注；notProvable 6 条（真实模型智能/真实耗时/overflow 400/整机重启半边/agent_settled 自动路径（窄窗口反转，设计 AS10 已登记）/失败通知呈现） |
+
+已知缺口登记（A 类缺陷，2026-11-01 D3 inspect-v8）：live 对话流检查点仅在重载路径进入视图（对话流消息域无下一回合自愈实装——trace/record 触发源不喂消息域），后台落盘后 live=0/reload=1；修复路径 = 设计 D6 预留升级（扩展侧落盘后触发等价通知/拉取），待用户裁决。用量读数在压缩 entry 落盘后为无值形态（pi 保守设计，真实 usage 到达后恢复；mock 装配无 usage 字段故自愈点缺席，mock 特有登记）。
+
+落点偏差登记：设计 RL4/RL5 补建项原文「挂进 smart-context 域的 e2e 触发规则（e2e-map.json）」——按本技能边界「不写 spec、不进 CI、不登记 e2e-map」改为覆盖矩阵行登记（本节），触发依赖 = 改 extensions/universal/smart-context 时随交付收尾重跑本剧本。
