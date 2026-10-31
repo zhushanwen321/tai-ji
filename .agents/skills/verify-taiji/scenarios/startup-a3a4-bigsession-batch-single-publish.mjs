@@ -91,7 +91,9 @@ export async function run(ctx) {
   seedRecordEvents(dataDir, sidLive, liveRecords)
   ev.step({ step: 'a3.live-session', channel: 'B', exitCode: 0, stats: { sessionId: sidLive, presetRecords: RECORD_TOTAL } })
 
-  // UI 激活：会话行（新建会话 LRU 置顶）→ store 拉取 → 托盘 subagent 计数出现
+  // UI 激活：会话行（新建会话 LRU 置顶）→ store 拉取 → subagent 托盘 widget 出现
+  // （面板现行宿主 = 托盘协议 widget 区，viewId='subagent'，行 = agent · slug；
+  //  widget 行上限 50——内容断言用首行 slug 而非总行数）
   await pollUntil(
     async () => {
       const count = await page.locator('.session-item').count()
@@ -100,21 +102,20 @@ export async function run(ctx) {
     { timeoutMs: 60_000, intervalMs: 400, label: '侧栏会话行渲染' },
   )
   await page.locator('.session-item').first().click()
-  const trayBtn = page.locator('[data-testid="tray-builtin-button"][data-kind="subagent"]')
-  await trayBtn.waitFor({ state: 'visible', timeout: 60_000 })
-  const trayCountBaseline = await trayBtn.textContent().catch(() => '')
+  const subagentWidgetBtn = page.locator('[data-testid="tray-widget-button"][data-widget-key="subagent"]')
+  await subagentWidgetBtn.waitFor({ state: 'visible', timeout: 60_000 })
+  const widgetPanel = page.locator('[data-testid="tray-widget-panel"]')
 
   // 发一条普通消息，立即开面板（不等 turn 完成）
   await proto.send(sidLive, 'startup-a3a4 面板响应性验证')
-  await trayBtn.click()
+  await subagentWidgetBtn.click()
   const tClickDone = Date.now()
-  const panel = page.locator('[data-testid="tray-native-panel"]')
   const appearMs = await pollUntil(
     async () => {
-      const visible = await panel.isVisible().catch(() => false)
+      const visible = await widgetPanel.isVisible().catch(() => false)
       return visible ? Date.now() : null
     },
-    { timeoutMs: PANEL_APPEAR_BUDGET_MS, intervalMs: 20, label: `托盘面板 ${PANEL_APPEAR_BUDGET_MS}ms 内可见` },
+    { timeoutMs: PANEL_APPEAR_BUDGET_MS, intervalMs: 20, label: `subagent 面板 ${PANEL_APPEAR_BUDGET_MS}ms 内可见` },
   ).then(
     (v) => v - tClickDone,
     () => -1,
@@ -124,7 +125,6 @@ export async function run(ctx) {
     expected: `≤ ${PANEL_APPEAR_BUDGET_MS}ms`,
     actual: appearMs >= 0 ? `${appearMs}ms` : '超时未出现',
   })
-  ev.attach('a3-tray-baseline-count', `tray 按钮文本: ${String(trayCountBaseline).trim()}`)
 
   // turn 收尾（mock 单轮）+ 面板内容完整
   const turnEnd = await proto.waitTurnEnd(sidLive, { timeoutMs: 120_000 })
@@ -133,12 +133,17 @@ export async function run(ctx) {
     expected: 'message.complete',
     actual: `${turnEnd.type} stopReason=${turnEnd.payload?.stopReason ?? '—'}`,
   })
-  const endedCountText = await page.locator('[data-testid="tray-panel-tab-count-ended"]').first().textContent().catch(() => '')
-  ev.assert(`A3: 面板已结束桶计数 = ${RECORD_TOTAL}（内容完整显示）`, Number.parseInt(String(endedCountText).trim(), 10) === RECORD_TOTAL, {
-    channel: 'A',
-    expected: String(RECORD_TOTAL),
-    actual: String(endedCountText).trim(),
-  })
+  await new Promise((r) => setTimeout(r, 500))
+  const panelTextLive = await widgetPanel.first().innerText()
+  ev.assert(
+    `A3: 面板显示大会话 records（slug 行在场，widget 概览面上限 50 行）`,
+    panelTextLive.includes('fixture-sa-live-01') && panelTextLive.includes('general-purpose'),
+    {
+      channel: 'A',
+      expected: "含 'fixture-sa-live-01' 与 'general-purpose'",
+      actual: `面板文本头 200 字: ${JSON.stringify(panelTextLive.slice(0, 200))}`,
+    },
+  )
   await ev.shot(page, 'a3a4-panel-content')
 
   // ── 段 2（A3）：负载期事件循环滞后遥测 ≤ 50ms + 无 kill decision ─────────
@@ -198,19 +203,22 @@ export async function run(ctx) {
       actual: `batchInProgress=${String(frameFlag)}`,
     })
 
-    // UI：切到冷读会话 → 面板整表显示（桌面段）
-    const coldRow = page.locator('.session-item', { hasText: 'startup-a4' }).first()
-    const coldRowAlt = (await coldRow.count()) > 0 ? coldRow : page.locator('.session-item').nth(1)
-    await coldRowAlt.click()
-    await trayBtn.waitFor({ state: 'visible', timeout: 30_000 })
-    await trayBtn.click()
-    await panel.waitFor({ state: 'visible', timeout: 10_000 })
-    const endedCold = await page.locator('[data-testid="tray-panel-tab-count-ended"]').first().textContent().catch(() => '')
-    ev.assert(`A4: 桌面壳冷读会话面板已结束桶 = ${RECORD_TOTAL}`, Number.parseInt(String(endedCold).trim(), 10) === RECORD_TOTAL, {
-      channel: 'A',
-      expected: String(RECORD_TOTAL),
-      actual: String(endedCold).trim(),
-    })
+    // UI：切到冷读会话 → 面板整表显示（桌面段；fixture 会话行 = 非 live 会话的那行）
+    const coldRow = page.locator('.session-item').filter({ hasNotText: 'startup-a3a4-live' }).first()
+    await coldRow.click()
+    await subagentWidgetBtn.waitFor({ state: 'visible', timeout: 30_000 })
+    await subagentWidgetBtn.click()
+    await widgetPanel.waitFor({ state: 'visible', timeout: 10_000 })
+    const panelTextCold = await widgetPanel.first().innerText()
+    ev.assert(
+      `A4: 桌面壳冷读会话面板显示 records（slug 行在场）`,
+      panelTextCold.includes('fixture-sa-cold-01'),
+      {
+        channel: 'A',
+        expected: "含 'fixture-sa-cold-01'",
+        actual: `面板文本头 200 字: ${JSON.stringify(panelTextCold.slice(0, 200))}`,
+      },
+    )
     await ev.shot(page, 'a3a4-cold-panel')
   } finally {
     await protoB.close().catch(() => {})
