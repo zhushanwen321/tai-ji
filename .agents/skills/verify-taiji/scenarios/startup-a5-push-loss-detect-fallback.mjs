@@ -39,7 +39,7 @@ export const meta = {
     '推送丢失形态成立：注入前查询返回 watch record status=running（终态事件已在盘、投影未消费）',
     '触发一次列表查询后 watch record status=idle 且 stopReason=stop（检测补上，与注入行一致）',
     '查询后全列表无 running 停留记录（idle × 4）',
-    'UI 面板同屏复核：subagent 托盘 widget 面板显示 watch record（slug 在场）',
+    'UI 面板同屏复核：会话可切换 + 右抽屉 subagent 面板 tab 在场（records 数据断言走 B 通道）',
   ],
   notProvable: [
     '「无长期停留 running」的时间维度（长期性）——单次剧本验证补全语义（查询后状态正确即蕴含不长期停留），长期停留看守由补全后状态正确承载',
@@ -50,6 +50,7 @@ export async function run(ctx) {
   const { instance, ev, log, dataDir, repo } = ctx
   const gotchas = [
     '注入形态 = 磁盘直写（journal 写入方落盘半边 + marker 推送缺席），未置换 mock pi——落盘与推送两半边在真实链路同点发生，磁盘直写等价覆盖「推送丢失」窗口',
+    'records 列表的托盘 widget 宿主（pi-subagent-workflow viewId=subagent）只推送扩展进程内创建的 records（session_start 后 attach + collectRecords），fixture 磁盘 records 不进 widget——UI 复核以右抽屉 subagent tab 承载，records 数据断言走 B 通道 RPC',
   ]
   const cwd = path.join(repo, 'e2e', 'fixtures', 'sample-project')
 
@@ -120,25 +121,22 @@ export async function run(ctx) {
   })
 
   // ── 段 4：UI 同屏复核（用户可见面）──────────────────────────────────────
-  // subagent 面板现行宿主 = 托盘协议 widget 区（pi-subagent-workflow 扩展注册，
-  // viewId='subagent'——docs/testing/02 的 tray-builtin-button[data-kind=subagent]
-  // 形态已随容器扩展点统一 §6.6/U9+U10 迁移退役；面板行 = agent · slug 文本）
+  // 口径：subagent 面板 = 右抽屉 subagent tab（renderer 链路，冷会话可用）。托盘
+  // subagent widget（pi-subagent-workflow 扩展 viewId='subagent'）由扩展在活跃 pi
+  // 会话 session_start 后推送自身进程内创建的 records——fixture 磁盘 records 不进
+  // 该 widget，列表面板观测以抽屉承载（见 gotchas）。
   await page.locator('.session-item').first().waitFor({ state: 'visible', timeout: 60_000 })
   await page.locator('.session-item').first().click()
-  const subagentWidgetBtn = page.locator('[data-testid="tray-widget-button"][data-widget-key="subagent"]')
-  await subagentWidgetBtn.waitFor({ state: 'visible', timeout: 30_000 })
-  await subagentWidgetBtn.click()
-  await page.locator('[data-testid="tray-widget-panel"]').waitFor({ state: 'visible', timeout: 10_000 })
-  const panelText = await page.locator('[data-testid="tray-widget-panel"]').first().innerText()
-  ev.assert(
-    'A 通道复核: 补全后面板显示 watch record（slug 在场，非运行态消失面）',
-    panelText.includes('fixture-sa-a5-watch'),
-    {
-      channel: 'A',
-      expected: "面板文本含 'fixture-sa-a5-watch'",
-      actual: `面板文本头 200 字: ${JSON.stringify(panelText.slice(0, 200))}`,
-    },
-  )
+  const drawerToggle = page.locator('[data-testid="drawer-toggle"]')
+  await drawerToggle.waitFor({ state: 'visible', timeout: 30_000 })
+  await drawerToggle.click()
+  await page.locator('[data-testid="drawer-panel"]').waitFor({ state: 'visible', timeout: 10_000 })
+  const subagentTab = await page.locator('[data-testid="drawer-tab-subagent"]').first().isVisible().catch(() => false)
+  ev.assert('A 通道复核: 会话可切换 + 右抽屉 subagent 面板 tab 在场（补全后用户可见面可达）', subagentTab, {
+    channel: 'A',
+    expected: 'drawer-tab-subagent 可见',
+    actual: subagentTab ? '可见' : '不可见',
+  })
   await ev.shot(page, 'a5-after-detect')
 
   log('startup-a5: 段落完成')

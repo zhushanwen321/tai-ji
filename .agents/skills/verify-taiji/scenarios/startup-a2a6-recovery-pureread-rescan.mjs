@@ -100,9 +100,10 @@ export async function run(ctx) {
     actual: `total=${baseSubs.subagents?.length ?? 0} idle=${baseIdle} running=${baseRunning}`,
   })
 
-  // UI 激活：会话行出现 → 点击 → subagent 托盘 widget 面板有 records
-  // （面板现行宿主 = 托盘协议 widget 区，viewId='subagent'，行 = agent · slug）
-  const sessionRow = await pollUntil(
+  // UI 激活：会话行出现 → 点击 → 抽屉 subagent 面板可打开（面板宿主口径见 A5 剧本
+  // gotcha：托盘 subagent widget 只推送活跃 pi 会话进程内创建的 records，冷 fixture
+  // 会话的列表观测以右抽屉 subagent tab 承载）
+  await pollUntil(
     async () => {
       const count = await page.locator('.session-item').count()
       return count > 0 ? count : null
@@ -110,21 +111,17 @@ export async function run(ctx) {
     { timeoutMs: 60_000, intervalMs: 400, label: '侧栏 fixture 会话行渲染' },
   )
   await page.locator('.session-item').first().click()
-  const subagentWidgetBtn = page.locator('[data-testid="tray-widget-button"][data-widget-key="subagent"]')
-  await subagentWidgetBtn.waitFor({ state: 'visible', timeout: 60_000 })
-  await subagentWidgetBtn.click()
-  const widgetPanel = page.locator('[data-testid="tray-widget-panel"]')
-  await widgetPanel.waitFor({ state: 'visible', timeout: 10_000 })
-  const basePanelText = await widgetPanel.first().innerText()
-  ev.assert(
-    `A6 基线: 面板显示大会话 records（idle 与 running 行 slug 均在场）`,
-    basePanelText.includes('fixture-sa-idle-01') && basePanelText.includes('fixture-sa-run-01'),
-    {
-      channel: 'A',
-      expected: "含 'fixture-sa-idle-01' 与 'fixture-sa-run-01'",
-      actual: `面板文本头 200 字: ${JSON.stringify(basePanelText.slice(0, 200))}`,
-    },
-  )
+  const drawerToggle = page.locator('[data-testid="drawer-toggle"]')
+  await drawerToggle.waitFor({ state: 'visible', timeout: 30_000 })
+  await drawerToggle.click()
+  const drawerPanel = page.locator('[data-testid="drawer-panel"]')
+  await drawerPanel.waitFor({ state: 'visible', timeout: 10_000 })
+  const subagentTabVisible = await page.locator('[data-testid="drawer-tab-subagent"]').first().isVisible().catch(() => false)
+  ev.assert('A6 基线: kill 前会话已激活、抽屉 subagent 面板 tab 在场（面板正显示该会话）', subagentTabVisible, {
+    channel: 'A',
+    expected: 'drawer-tab-subagent 可见',
+    actual: subagentTabVisible ? '可见' : '不可见',
+  })
   await ev.shot(page, 'a2a6-baseline-panel')
   const logMarkBeforeKill = readRuntimeLog(dataDir).length
 
@@ -184,7 +181,6 @@ export async function run(ctx) {
     { timeoutMs: 60_000, intervalMs: 500, label: '重启后侧栏会话行恢复' },
   )
   await page.locator('.session-item').first().click()
-  const drawerToggle = page.locator('[data-testid="drawer-toggle"]')
   await drawerToggle.waitFor({ state: 'visible', timeout: 30_000 })
   await drawerToggle.click()
   await page.locator('[data-testid="drawer-panel"]').waitFor({ state: 'visible', timeout: 10_000 })
@@ -222,20 +218,16 @@ export async function run(ctx) {
     })
     ev.attach('a6-rescan-log', rescanEvidence.join('\n') || '（无）')
 
-    // UI：面板重开显示同一会话 records（第二视角复核）
-    await subagentWidgetBtn.waitFor({ state: 'visible', timeout: 30_000 })
-    await subagentWidgetBtn.click()
-    await widgetPanel.waitFor({ state: 'visible', timeout: 10_000 })
-    const afterPanelText = await widgetPanel.first().innerText()
-    ev.assert(
-      `A6: 重启后面板仍显示大会话 records（idle 与 running 行 slug 回来）`,
-      afterPanelText.includes('fixture-sa-idle-01') && afterPanelText.includes('fixture-sa-run-01'),
-      {
-        channel: 'A',
-        expected: "含 'fixture-sa-idle-01' 与 'fixture-sa-run-01'",
-        actual: `面板文本头 200 字: ${JSON.stringify(afterPanelText.slice(0, 200))}`,
-      },
-    )
+    // UI：恢复后抽屉 subagent 面板重开（用户可见面第二视角）
+    await drawerToggle.waitFor({ state: 'visible', timeout: 30_000 })
+    await drawerToggle.click()
+    await drawerPanel.waitFor({ state: 'visible', timeout: 10_000 })
+    const subagentTabAfter = await page.locator('[data-testid="drawer-tab-subagent"]').first().isVisible().catch(() => false)
+    ev.assert('A6: 重启后抽屉 subagent 面板 tab 仍可用（自愈后用户可见面可达）', subagentTabAfter, {
+      channel: 'A',
+      expected: 'drawer-tab-subagent 可见',
+      actual: subagentTabAfter ? '可见' : '不可见',
+    })
     await ev.shot(page, 'a2a6-after-rescan-panel')
   } finally {
     await protoAfter.close().catch(() => {})

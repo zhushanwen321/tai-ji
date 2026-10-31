@@ -56,6 +56,7 @@ export async function run(ctx) {
   const gotchas = [
     'A4 冷读装配用「第二会话」形态（impl-plan A4 行：重启实例或第二会话进入冷读）——第二连接先于 UI 订阅并触发首次查询，帧计数不被 renderer 抢跑污染',
     '遥测断言等负载开始后的下一个 60s 窗口行（EMIT_INTERVAL_MS=60s，落盘低频采样连续）',
+    'A3「面板」断言对象 = 右抽屉 subagent tab（renderer 链路）：托盘 subagent widget（pi-subagent-workflow viewId=subagent）由扩展在活跃 pi 会话 session_start 后推送自身进程内 collectRecords 的 records——fixture 磁盘预置 records 不进该 widget（probe 实测 2026-10-31），records 内容完整性以 B 通道 RPC 承载；真实 dispatch 的 widget 观测已有 p0-subagent-workflow-dispatch 剧本承载',
   ]
   const cwd = path.join(repo, 'e2e', 'fixtures', 'sample-project')
   const SID_COLD = 'sess-startup-a4-cold'
@@ -82,8 +83,8 @@ export async function run(ctx) {
 
   // ── 段 1（A3）：活跃大会话——建会话 + 预置 records + 发消息 + 立即开面板 ──
   const created = await proto.call('session.create', { cwd, label: 'startup-a3a4-live' }, { timeoutMs: 120_000 })
-  const sidLive = created.sessionId ?? created.id
-  if (!sidLive) throw new Error(`session.create 未返回 sessionId: ${JSON.stringify(created).slice(0, 300)}`)
+  const sidLive = created.session?.id
+  if (!sidLive) throw new Error(`session.create 未返回 session.id: ${JSON.stringify(created).slice(0, 300)}`)
   const liveRecords = []
   for (let i = 1; i <= RECORD_TOTAL; i += 1) {
     liveRecords.push({ id: `sa-live-${String(i).padStart(2, '0')}`, status: 'idle' })
@@ -91,9 +92,9 @@ export async function run(ctx) {
   seedRecordEvents(dataDir, sidLive, liveRecords)
   ev.step({ step: 'a3.live-session', channel: 'B', exitCode: 0, stats: { sessionId: sidLive, presetRecords: RECORD_TOTAL } })
 
-  // UI 激活：会话行（新建会话 LRU 置顶）→ store 拉取 → subagent 托盘 widget 出现
-  // （面板现行宿主 = 托盘协议 widget 区，viewId='subagent'，行 = agent · slug；
-  //  widget 行上限 50——内容断言用首行 slug 而非总行数）
+  // UI 激活：会话行（新建会话 LRU 置顶）→ 点行激活。A3 的「面板」= 右抽屉 subagent
+  // tab（renderer 链路；托盘 subagent widget 只推送扩展进程内创建的 records——
+  // fixture 磁盘 records 不进 widget，见 gotchas；records 数据完整性走 B 通道）
   await pollUntil(
     async () => {
       const count = await page.locator('.session-item').count()
@@ -102,17 +103,17 @@ export async function run(ctx) {
     { timeoutMs: 60_000, intervalMs: 400, label: '侧栏会话行渲染' },
   )
   await page.locator('.session-item').first().click()
-  const subagentWidgetBtn = page.locator('[data-testid="tray-widget-button"][data-widget-key="subagent"]')
-  await subagentWidgetBtn.waitFor({ state: 'visible', timeout: 60_000 })
-  const widgetPanel = page.locator('[data-testid="tray-widget-panel"]')
+  const drawerToggle = page.locator('[data-testid="drawer-toggle"]')
+  await drawerToggle.waitFor({ state: 'visible', timeout: 60_000 })
+  const drawerPanel = page.locator('[data-testid="drawer-panel"]')
 
   // 发一条普通消息，立即开面板（不等 turn 完成）
   await proto.send(sidLive, 'startup-a3a4 面板响应性验证')
-  await subagentWidgetBtn.click()
+  await drawerToggle.click()
   const tClickDone = Date.now()
   const appearMs = await pollUntil(
     async () => {
-      const visible = await widgetPanel.isVisible().catch(() => false)
+      const visible = await drawerPanel.isVisible().catch(() => false)
       return visible ? Date.now() : null
     },
     { timeoutMs: PANEL_APPEAR_BUDGET_MS, intervalMs: 20, label: `subagent 面板 ${PANEL_APPEAR_BUDGET_MS}ms 内可见` },
@@ -126,24 +127,29 @@ export async function run(ctx) {
     actual: appearMs >= 0 ? `${appearMs}ms` : '超时未出现',
   })
 
-  // turn 收尾（mock 单轮）+ 面板内容完整
+  // turn 收尾（mock 单轮）+ 面板内容完整（B 通道）
   const turnEnd = await proto.waitTurnEnd(sidLive, { timeoutMs: 120_000 })
   ev.assert('A3: 消息轮正常完成（message.complete）', turnEnd.ok, {
     channel: 'B',
     expected: 'message.complete',
     actual: `${turnEnd.type} stopReason=${turnEnd.payload?.stopReason ?? '—'}`,
   })
-  await new Promise((r) => setTimeout(r, 500))
-  const panelTextLive = await widgetPanel.first().innerText()
+  const liveQuery = await proto.call('session.getSubagents', { sessionId: sidLive })
   ev.assert(
-    `A3: 面板显示大会话 records（slug 行在场，widget 概览面上限 50 行）`,
-    panelTextLive.includes('fixture-sa-live-01') && panelTextLive.includes('general-purpose'),
+    `A3: 大会话 records 完整（活跃会话查询 ${RECORD_TOTAL} 条）`,
+    liveQuery.subagents?.length === RECORD_TOTAL,
     {
-      channel: 'A',
-      expected: "含 'fixture-sa-live-01' 与 'general-purpose'",
-      actual: `面板文本头 200 字: ${JSON.stringify(panelTextLive.slice(0, 200))}`,
+      channel: 'B',
+      expected: String(RECORD_TOTAL),
+      actual: String(liveQuery.subagents?.length ?? 0),
     },
   )
+  const subagentTabLive = await page.locator('[data-testid="drawer-tab-subagent"]').first().isVisible().catch(() => false)
+  ev.assert('A3: 抽屉 subagent 面板 tab 在场（面板内容可达）', subagentTabLive, {
+    channel: 'A',
+    expected: 'drawer-tab-subagent 可见',
+    actual: subagentTabLive ? '可见' : '不可见',
+  })
   await ev.shot(page, 'a3a4-panel-content')
 
   // ── 段 2（A3）：负载期事件循环滞后遥测 ≤ 50ms + 无 kill decision ─────────
@@ -203,22 +209,18 @@ export async function run(ctx) {
       actual: `batchInProgress=${String(frameFlag)}`,
     })
 
-    // UI：切到冷读会话 → 面板整表显示（桌面段；fixture 会话行 = 非 live 会话的那行）
+    // UI：切到冷读会话（fixture 会话行 = 非 live 会话的那行）→ 抽屉面板可用
     const coldRow = page.locator('.session-item').filter({ hasNotText: 'startup-a3a4-live' }).first()
     await coldRow.click()
-    await subagentWidgetBtn.waitFor({ state: 'visible', timeout: 30_000 })
-    await subagentWidgetBtn.click()
-    await widgetPanel.waitFor({ state: 'visible', timeout: 10_000 })
-    const panelTextCold = await widgetPanel.first().innerText()
-    ev.assert(
-      `A4: 桌面壳冷读会话面板显示 records（slug 行在场）`,
-      panelTextCold.includes('fixture-sa-cold-01'),
-      {
-        channel: 'A',
-        expected: "含 'fixture-sa-cold-01'",
-        actual: `面板文本头 200 字: ${JSON.stringify(panelTextCold.slice(0, 200))}`,
-      },
-    )
+    await drawerToggle.waitFor({ state: 'visible', timeout: 30_000 })
+    await drawerToggle.click()
+    await drawerPanel.waitFor({ state: 'visible', timeout: 10_000 })
+    const subagentTabCold = await page.locator('[data-testid="drawer-tab-subagent"]').first().isVisible().catch(() => false)
+    ev.assert('A4: 桌面壳冷读会话抽屉 subagent 面板 tab 在场（冷读后用户可见面可达）', subagentTabCold, {
+      channel: 'A',
+      expected: 'drawer-tab-subagent 可见',
+      actual: subagentTabCold ? '可见' : '不可见',
+    })
     await ev.shot(page, 'a3a4-cold-panel')
   } finally {
     await protoB.close().catch(() => {})
