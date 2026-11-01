@@ -98,8 +98,8 @@ node $SK/scripts/run.mjs $SK/scenarios/p0-session-chat.mjs \
 | ~~`hidden?: boolean`~~ **已退役**（W5 协议收缩，session-identity-visibility-state 交付）：`session.create.hidden` 协议字段与内部 CreateOptions.hidden 已整体删除，「隐藏会话」语义由 `surface` 归属（sidebar/btw）承接。验收不得再以 hidden 为参数造会话。 | 退役后无此参数；断言「建线不进侧栏」改用 surface 口径（线在 `session.list {surface:'btw'}`、不在 sidebar 集合）。 |
 | `presetId?: string` | 会话创建时锁定的 pi 启动预设（模式）id；runtime 写 `.preset.json` sidecar，restore 据此重建 pi args。省略 = 默认预设。 | C：断言 `<sessionFile>.preset.json` 的 `presetId`；B：`config.sessions` 广播的 summary 带 `launchPresetId`（扫描期读 sidecar）。**不要**用 payload 里的 `presetId` 断言生效（它只是请求值）。 |
 | `projectId?: string` | 归属 project（与 cwd 无关）；空 = 未归类（读取侧兜底默认项目），**空值不写 sidecar**。 | C：`<sessionFile>.project.json`；B：session summary 的 `projectId`；A：侧栏分组归属。 |
-| `modelOverride?: string` | Landing 模型 chip 的覆盖值（`'provider/id'`），优先级 `override > preset.modelOverride > 全局默认`（protocol 注释 + `resolveCreateLaunch`）。Landing 路径恒传 **`resolveLaunchConfig` 解析终值**（D5 契约快照化）。 | 断言 reply 的 `session.modelId` = 覆盖值；C：**pi 进程 argv 含 `--model <provider/id>`**（spawn 参数，`packages/pi-rpc/src/spawn-args.ts` `buildPiMainAgentArgs`；`ps -o command= -p <pid>`）。注意 JSONL 的 `model_change` entry **只在后续切换时**才写（初始模型不写）。 |
-| `thinkingOverride?: ThinkingLevel` | 思考档位覆盖（`PI_THINKING_LEVELS` 七值全集，`packages/shared/src/pi-preset.ts`）。pi 可能钳制到模型族支持档。 | 断言 reply `session.thinkingLevel`；C：**pi 进程 argv 含 `--thinking <level>`**（同上）；`thinking_level_change` entry 也是后续改动才写（PS-04：值未变不发事件也不写 entry）。注意 faux-1（reasoning:false）只有 `off`，要验多档需 `faux-1-reasoning`。 |
+| `modelOverride?: string` | Landing 模型 chip 的覆盖值（`'provider/id'`），优先级 `override > preset.modelOverride > 全局默认`（protocol 注释 + `resolveCreateLaunch`）。Landing 路径恒传 **`resolveLaunchConfig` 解析终值**（D5 契约快照化）。 | C：**pi 进程 argv 含 `--model <provider/id>`**（spawn 参数，`packages/pi-rpc/src/spawn-args.ts` `buildPiMainAgentArgs`；`ps -o command= -p <pid>`）——reply 的 `session.modelId` 断言已随 W3 字段删除退役（`modelId` / `thinkingLevel` / `tokenCount` 已从 SessionSummary 协议删除，见 `session-service.ts` `toSummary` 注释）。注意 JSONL 的 `model_change` entry **只在后续切换时**才写（初始模型不写）。 |
+| `thinkingOverride?: ThinkingLevel` | 思考档位覆盖（`PI_THINKING_LEVELS` 七值全集，`packages/shared/src/pi-preset.ts`）。pi 可能钳制到模型族支持档。 | C：**pi 进程 argv 含 `--thinking <level>`**（同上）——reply 的 `session.thinkingLevel` 断言已随 W3 字段删除退役（同上）；`thinking_level_change` entry 也是后续改动才写（PS-04：值未变不发事件也不写 entry）。注意 faux-1（reasoning:false）只有 `off`，要验多档需 `faux-1-reasoning`。 |
 | `clientUuid?: string` | **create 幂等键**（发现 B）：同一次「新建任务」的网络重试复用同一 uuid；runtime 用 in-flight Promise 共用 + 成功短 TTL 记录，重复到达返回已建 session，不重复 spawn/建号。与 `message.send.clientUuid` 是互不相干的键空间。 | 连发两次同 `clientUuid` 的 create：两次 reply 的 `session.id` 必须相同；C：`ext-sessions/` 只多一棵树、`ps` 只有一个新 pi 子进程。发不同 uuid = 两个 session。 |
 
 ### 驱动
@@ -129,7 +129,7 @@ await p.call('session.switch', { sessionId: session.id }, { replyType: 'session.
 ### 断言（期望终态 / 失败信号）
 
 - **B 成功**：reply `session.created.session` 含
-  `{ id, label, cwd, status, modelId, thinkingLevel?, sessionFile?, launchPresetId?, projectId? }`；
+  `{ id, label, cwd, gitBranch?, gitIsWorktree?, isBareWorkspace?, status, lastActiveAt, sessionFile?, projectId?, launchPresetId? }`（W3 起 `modelId` / `thinkingLevel` / `tokenCount` 已从 SessionSummary 删除，不得再断言）；
   `config.sessions` 广播的 `groups[].sessions[]` 中出现同 id。
 - **B 失败信号**：
   - `error` envelope `code='MODEL_NOT_CONFIGURED'` → 没配 provider/model（create 根本没 spawn）。
@@ -181,8 +181,8 @@ await p.call('session.switch', { sessionId: session.id }, { replyType: 'session.
    提示，但协议层看不出来——B 路径建会话必须显式传 cwd。
 6. **`modelOverride`/`thinkingOverride` 是「快照终值」不是「chip 当前值」**：Landing 恒传
    `resolveLaunchConfig` 的解析结果（preset/全局默认都已折进去）。要验 chip 覆盖链路，就在
-   Landing 上真的切 chip（`model-picker-item-<id>` / 档位行），再首发，断言 reply 的
-   `session.modelId` / `thinkingLevel`。
+   Landing 上真的切 chip（`model-picker-item-<id>` / 档位行），再首发，断言 pi 进程 argv 的
+   `--model` / `--thinking`（reply 的 `session.modelId` / `thinkingLevel` 断言已随 W3 字段删除退役）。
 7. **扩展未装载完就 create**：端口在位但扩展没装完时会话缺命令/工具（doctor 的第三条判据就是防这个）。
 
 ---
@@ -220,7 +220,7 @@ const { groups, archiveCount } = await p.call('config.sessions', {}, { replyType
 
 ### 断言（期望终态 / 失败信号）
 
-- 期望：目标 session 出现在 `groups` 中，`cwd` 正确、`status/lastActiveAt/modelId` 合理；
+- 期望：目标 session 出现在 `groups` 中，`cwd` 正确、`status/lastActiveAt` 合理（`modelId` 已从 SessionSummary 删除，不再断言）；
   `archiveCount` 与归档列表条目数一致（归档域广播同源）。
 - 失败信号：`session-list-error` 出现（`session.listLoadError` 非空）+ `session-list-retry` 可点；
   协议侧 `config.sessions` reject 或超时（runtime 死）。
@@ -706,7 +706,7 @@ jq -r .type <sessionFile> | sort | uniq -c   # entry 类型分布
 ### 证据（A/B/C 各抓什么）
 
 - A：重启前后同一会话的对话流截图（用于与 B/C 对照）。
-- B：重启后 `config.sessions` 的该条 summary（`sessionFile` / `lastActiveAt` / `modelId`）+
+- B：重启后 `config.sessions` 的该条 summary（`sessionFile` / `lastActiveAt`）+
   `session.history` 文本。
 - C：上面的 `ls` / `jq` 输出；`stat -f %m` 对比文件 mtime（续写 vs 重建）。
 
