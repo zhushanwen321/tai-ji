@@ -114,13 +114,19 @@ await instance.dispose()   // 同时关 mock server + 删自建数据目录
 
 ### 1.3 mock pi 置换（替代通道）
 
-适用：需要伪造 pi 进程级行为（进程崩溃、异常退出、非 LLM 的协议行为）而 faux 覆盖不到时。方法 = 文件级置换 runtime 解析到的 pi 可执行文件：
+适用：需要伪造 pi 进程级行为（进程崩溃、异常退出、非 LLM 的协议行为）而 faux 覆盖不到时。方法 = 文件级置换 runtime 解析到的 pi 可执行文件。
 
-1. `mv node_modules/.bin/pi node_modules/.bin/pi.bak`（保留原 symlink）；
-2. 放入自编 mock 可执行脚本（node shebang，stdin/stdout 按 pi RPC 协议应答）；
-3. 新 session 起 pi 子进程时生效（runtime 缓存路径，旧 session 不受影响）。
+**置换位 = `<repo>/apps/electron/resources/pi/pi-<platform>-<arch>`**（dev 装配形态的 pi 实际解析点，`find-pi-executable.ts:29-32`：dev 优先 resources/pi 下 prepare 的二进制，与打包版统一；`node_modules/.bin/pi` 不在 dev 解析链上，对它 mv 不生效）。注意 worktree 内该位置可能是 git-cwt 建树时指向 workspace 级缓存的逐文件 symlink——置换前 `ls -l` 核对形态，备份与复原都对准这个真实解析点：
 
-窗口结束**必须恢复**，三项核对全部通过才算恢复完成：`mv` 回原 symlink；`node_modules/.bin/pi --version` 输出真实版本号；`ls -l` 形态核对（symlink 指向真实包）。恢复完成前禁起依赖真实 pi 的新场景。
+1. 备份真实 pi：`mv apps/electron/resources/pi/pi-<platform>-<arch> pi-<platform>-<arch>.bak`（同目录备份，恢复用）；
+2. 放入自编 mock 可执行脚本（node shebang，stdin/stdout 按 pi RPC 协议应答），文件名与原二进制一致；
+3. 新 session 起 pi 子进程时生效（runtime 缓存解析路径，旧 session 不受影响）。
+
+mock 的行为契约见 TROUBLESHOOTING「mock pi 必须写合法 session 文件」条目：恢复链场景 mock 必须按 pi 真实布局把最小合法 session 文件写进 `<agentDir>/sessions/--<cwd>--/` 标准树，否则判死强杀后的 restore 前置校验扫不到、恢复段全红。
+
+窗口结束**必须恢复**，三项核对全部通过才算恢复完成：备份 `mv` 回原位；恢复后的 pi `--version` 输出真实版本号；`ls -l` 形态核对（与建树时形态一致——symlink 或真实文件）。恢复完成前禁起依赖真实 pi 的新场景。
+
+**并行验收纪律**：置换位是同一 worktree 的单点资源——并行验收时注入类场景必须串行持有置换位，一次只允许一个节点置换，其余轮询等空窗；采信本实例证据前先按 TROUBLESHOOTING「mock pi 置换点并行争用」条目做环境锚（PI_CODING_AGENT_DIR）与请求记录逐 pid 对照。
 
 ## 2. Doctor
 
@@ -150,6 +156,16 @@ node .agents/skills/verify-taiji/scripts/doctor.mjs <repo> [--data-dir <dir>]
 - Popover / Modal 经 reka-ui portal 挂到 `<body>`：查询全局找，别限定在触发组件内。
 - 等待纪律：等状态出现（`toBeVisible({timeout})` / 特定 testid 出现），禁固定 sleep。runtime 起动慢（pi 子进程 spawn）按 30s 量级给预算。
 - 会话级状态在切换/创建 session 后要主动拉取才可靠（runtime 广播可能早于 renderer 订阅）——断言侧表现为：切 session 后多等一次主动刷新出的数据，不假设广播已到。
+
+### 3.1 真机验收耗时与观测纪律
+
+原则级，适用于一切真机验收节点（L3 verify / L4 inspect 同样遵守）：
+
+- **观测通路先于观测断言**：断言「没收到 X」之前先核对观测通路完整时序——订阅是否在目标窗口开始前建立、subscribe 应答快照是否已消费、恢复/清场边沿是否清了订阅。通路断了，「没收到」只是「没看见」（判别方法见 TROUBLESHOOTING「恢复后观测假红」条目）。
+- **共享单点资源注入类必须串行**：pi 可执行文件置换位这类全 worktree 单点，并行验收必须互斥持有、一次一个节点；互踩产生的假红假绿，浪费的复跑轮次远大于串行等待（判别见 TROUBLESHOOTING「mock pi 置换点并行争用」条目）。
+- **失败现场保全优先于重试**：剧本失败先保住现场——runtime/pi 日志、mock 请求记录用 try/finally 抢救到 artifacts 目录，再谈重试；一次性数据目录随 dispose 删失后，归因只能靠猜。
+- **循环类场景 1 轮全链 + 重复轮只验增量不变量**：第一轮跑完整业务链，重复轮只断言轮间不变量（状态复位、无残留、幂等），不为重复轮重跑全部断言——墙钟预算花在链路覆盖上。
+- **失败先归因再重试**：复跑前先读 TROUBLESHOOTING 对应条目 + 保全日志完成归因；同因失败连跑多轮说明剧本/环境有系统性问题，不是运气，禁止无归因重试。
 
 ## 4. Evidence
 

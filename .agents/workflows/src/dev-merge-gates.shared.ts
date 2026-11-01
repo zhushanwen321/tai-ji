@@ -37,7 +37,12 @@
 //   仍是终态对象）且裸解析可过。改循环语义须同步 review-fix-loop / pr-lifecycle 对应机制。
 
 // ── 参数窄化 + 白名单（拼错键静默回落默认值比报错危险，fail-fast） ──
-const VALID_ARG_KEYS = new Set(["base", "maxRounds"]);
+// taskId/executionId/sampleType 是阶段观测（workflow-observability）参数：可选，缺省不
+// 启用观测（旧调用零变化）；taskId + executionId 同时给出才启用——只给其一时提示后按
+// 未启用处理。sampleType 合法值 production|selftest（默认 production）。观测实现（事件
+// 写盘）由壳拼接的公共观测层（observability.shared.ts）承载，本文件只声明阶段边界
+//   （obsBegin/obsEnd/withStage/obsEmit/obsCloseExecution）。
+const VALID_ARG_KEYS = new Set(["base", "maxRounds", "taskId", "executionId", "sampleType"]);
 for (const key of Object.keys(args)) {
   if (!VALID_ARG_KEYS.has(key)) {
     throw new Error(`未知参数: ${key}（合法参数: ${[...VALID_ARG_KEYS].join("/")}）`);
@@ -50,6 +55,10 @@ if (args.maxRounds !== undefined && (typeof args.maxRounds !== "number" || !Numb
   throw new Error(`参数 maxRounds 非法：${String(args.maxRounds)}（应为 ≥1 的数字，上界 50 自动截断）`);
 }
 const maxRounds = args.maxRounds === undefined ? 10 : Math.min(50, Math.floor(args.maxRounds));
+
+// 观测启用（O 区形态层）：先于参数窄化——已传合法观测 ID 的执行（含参数校验失败
+// 早退）都有 execution 边界（合法性校验在 initObservation 内，告警并关闭不 fail-fast）
+obsCtx = initObservation("dev-merge-gates", "dev-merge-gates", null);
 
 // ── 常量 ──
 const MAX_GATE_ROUNDS = 3; // gates FAIL 修复子循环上限（dev-merge SKILL 1.6 口径：≤3 轮）
@@ -458,8 +467,11 @@ function reconcileGroups(raw: FixGroup[] | undefined | null, active: { id: strin
 // ── step wrapper：失败记 failure 短路后续 step（终态完整披露） ──
 async function runStep<T>(id: string, fn: () => Promise<T>): Promise<T | null> {
   if (failure) return null;
+  // 阶段边界由公共观测层 withStage 承载（fn 抛异常时其 finally 自动补 end
+  // (outcome=script-error)）；因前序失败短路的 step 不产生事件
   try {
-    return await fn();
+    const r = await withStage(id, null, fn);
+    return r;
   } catch (e) {
     failure = { step: id, error: e instanceof Error ? e.message : String(e) };
     return null;
@@ -468,6 +480,13 @@ async function runStep<T>(id: string, fn: () => Promise<T>): Promise<T | null> {
 
 async function main(): Promise<Record<string, unknown>> {
   report({ stage: "start", base: args.base ?? "auto(merge-base github/main HEAD)" });
+
+  // 观测落盘路径装配（O 区；home 探针独立于业务 REPORT_ROOT 探针——装配须先于全部阶段事件）
+  {
+    const obsHomeRes = await world.run("node", ["-e", "process.stdout.write(require('os').homedir())"]);
+    if (obsHomeRes.exitCode === 0 && obsHomeRes.stdout.trim() !== "") obsAttachHome(obsHomeRes.stdout.trim());
+    await obsEmit("execution", null, "start", null);
+  }
 
   async function existsViaNode(path: string): Promise<boolean> {
     const r = await world.run("node", ["-e", EXISTS, path]);
@@ -1249,6 +1268,9 @@ async function main(): Promise<Record<string, unknown>> {
       } catch (e) {
         log(`WARN: [branch-review] run.json 落盘异常（不影响流程结果）：${e instanceof Error ? e.message : String(e)}`);
       }
+      // 阶段观测终态出口：finishBr 是 branch-review 全部终态返回的汇聚点——最后一轮的
+      // round 边界在此统一收尾（round 为直发事件不占打开槽；子阶段中断由 round end 表达）
+      await obsEmit("round", rounds, "end", null);
       return {
         terminated: term,
         rounds,
@@ -1911,21 +1933,29 @@ async function main(): Promise<Record<string, unknown>> {
     let prevActive = Number.MAX_SAFE_INTEGER;
     try {
       for (round = 1; round <= maxRounds; round++) {
+        // 阶段观测：轮边界 + 轮内 review/aggregate/fix 三段；attempt 恒 null（本循环无
+        // attempt 重试维度）。end 出口 = 轮尾正常续跑、申述核实 continue、finishBr（终态
+        // 汇聚）——review/aggregate/fix 中断轮由 round end 表达中断，不单独补子段 end
+        await obsEmit("round", round, "start", null);
         const activeAll = records.filter((r) => r.status === "open" || r.status === "fix-claimed");
         // disputed 条目参与维度派发：must-fix 已清的纯申述核实轮不因维度集为空而跳过审查
         const pendingDisputes = records.filter((r) => r.status === "disputed");
         const activeDims = round === 1 ? dims : [...new Set([...activeAll, ...pendingDisputes].flatMap((r) => (r.sourceDims.length > 0 ? r.sourceDims : [r.dimension])))];
         // phase 名须编译期字面量：循环体复用同名 marker = GUI 单节点；轮次/维度信息归 log/report（下方两行已承载）
         phase("branch-review 审查修复循环（每轮重审活跃维度）");
+        await obsBegin("review", round);
         const verdicts = await mapBatch(activeDims, REVIEWER_BATCH, async (dim) => ({
           dim,
           v: await dispatchReviewer(dim, round, activeAll),
         }));
+        await obsEnd("review", round);
 
         // 聚合裁决（reviewer 全部返回后）+ 问题清单重建（含对账申报套用）
         phase("聚合裁决（跨维度合并与修复分组）");
+        await obsBegin("aggregate", round);
         const agg = await runAggregator(round, verdicts, activeAll);
         await rebuildLedger(round, agg, verdicts);
+        await obsEnd("aggregate", round);
 
         // commitBlocked 条目仍处 open（对账未过回 open，或被拦组内本就未被 fixer 认领的条目）
         // → 立即升 needs-human（改造点 1 防无效重修）：代码未修好或未修且提交持续被拦，不再
@@ -1948,6 +1978,7 @@ async function main(): Promise<Record<string, unknown>> {
           const disputesToVerify = records.filter((r) => r.status === "disputed");
           if (disputesToVerify.length > 0 && round < maxRounds) {
             log(`[branch-review] must-fix 已清，待核实申述 ${disputesToVerify.length} 条（${disputesToVerify.map((r) => r.id).join("、")}）——不收敛，第 ${round + 1} 轮 reviewer 对账核实`);
+            await obsEmit("round", round, "end", null);
             continue;
           }
           // 终态清扫（改造点 3）：收敛出口前显式路径提交全部可归责残留（两条过滤）；失败出口
@@ -1990,7 +2021,10 @@ async function main(): Promise<Record<string, unknown>> {
         // 执行段（改码+跑测试+提交，最长耗时段）——分属不同性质，GUI 观测时修复段的长时间
         // 在途不再伪装成「聚合很慢」
         phase("修复执行（分组修复 + 组级提交）");
+        await obsBegin("fix", round);
         await runFixGroups(groups, round, agg.reportFile);
+        await obsEnd("fix", round);
+        await obsEmit("round", round, "end", null);
       }
     } catch (e) {
       if (e instanceof TerminalError) {
@@ -2041,6 +2075,9 @@ async function main(): Promise<Record<string, unknown>> {
   } catch {
     log("WARN: 终态摘要 artifact 发布失败（不影响流程结果）");
   }
+
+  // 终态统一补记（O 区）：给打开中的 step 补 end + execution end（带 outcome 终态词）
+  await obsCloseExecution(ok ? "done" : "failed");
 
   let terminal: Record<string, unknown>;
   if (!ok) {

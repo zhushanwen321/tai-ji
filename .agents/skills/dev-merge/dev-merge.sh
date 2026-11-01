@@ -22,10 +22,32 @@
 #   匹配误把 ZCode 宿主当占用者杀死致会话断开）
 # - 删除用显式两步 rm -rf + worktree prune（先删目录后清登记，顺序与 git worktree remove 内部相反，
 #   后者先删登记，目录删除失败时留下登记已失、目录内 git 全废的半删态且曾被误诊，2026-09 事故后改此）
+#
+# 阶段观测：merge / cleanup 阶段边界经统一命令 ~/.agents/scripts/workflow-observe.mjs
+# （zsw 仓 scripts/workflow-observe.mjs 的安装 symlink）写入 workflow-observability JSONL，
+# 事件契约与 dev-merge-gates workflow 内建观测（公共观测层）完全一致。观测可选：env
+# WORKFLOW_OBS_TASK_ID + WORKFLOW_OBS_EXECUTION_ID 都设置才启用（主 agent 发起
+# dev-merge-gates workflow 时传的 taskId/executionId 在跑本脚本前 export 同值即可贯通两段，
+# env 透传由本函数包装为 CLI 参数）；未设置时 CLI 按参数缺失报用法错误，obs() 经
+# || true 吞退出码不阻断（辅助通道；CLI 的 stderr 用法提示原样透出可见）。
 
 set -euo pipefail
 
 die() { echo "ERROR: $*" >&2; exit 1; }
+
+# obs <start|end> <stage> <step> [附加 CLI 参数...] — 阶段边界事件（统一命令，不另造事件实现）
+OBS_CLI="$HOME/.agents/scripts/workflow-observe.mjs"
+obs() {
+  # 未启用（id 未配置）直接返回——避免 CLI 用法错误输出污染脚本结果
+  [[ -n "${WORKFLOW_OBS_TASK_ID:-}" && -n "${WORKFLOW_OBS_EXECUTION_ID:-}" ]] || return 0
+  local event="$1" stage="$2" step="$3"
+  shift 3
+  local obsArgs=()
+  [[ -n "${WORKFLOW_OBS_TASK_ID:-}" ]] && obsArgs+=(--task-id "$WORKFLOW_OBS_TASK_ID")
+  [[ -n "${WORKFLOW_OBS_EXECUTION_ID:-}" ]] && obsArgs+=(--execution-id "$WORKFLOW_OBS_EXECUTION_ID")
+  [[ -n "${WORKFLOW_OBS_SAMPLE_TYPE:-}" ]] && obsArgs+=(--sample-type "$WORKFLOW_OBS_SAMPLE_TYPE")
+  node "$OBS_CLI" "$event" --skill dev-merge --stage "$stage" --step "$step" "${obsArgs[@]}" "$@" >/dev/null || true
+}
 
 SUBCMD="${1:-}"
 DEV_BRANCH="${2:-}"
@@ -125,8 +147,10 @@ case "$SUBCMD" in
     check_clean "$CUR_DIR" "当前 worktree ($CUR_BRANCH)"
     check_clean "$DEV_DIR" "$DEV_BRANCH"
 
+    obs start merge merge
     if is_merged; then
       echo "SKIP: $CUR_BRANCH 已是 $DEV_BRANCH 的祖先（已合并过），无需重复 merge，可直接跑 cleanup"
+      obs end merge merge
       exit 0
     fi
 
@@ -134,10 +158,12 @@ case "$SUBCMD" in
     if git -C "$DEV_DIR" merge --no-ff "$CUR_BRANCH"; then
       echo "OK: $CUR_BRANCH 已合并进 ${DEV_BRANCH}（--no-ff 保留分支历史）"
       echo "NEXT: 确认无误后运行 bash $0 cleanup $DEV_BRANCH 清理源 worktree"
+      obs end merge merge
     else
       echo "CONFLICT: 以下文件需要解决（在 $DEV_DIR 内处理）：" >&2
       git -C "$DEV_DIR" diff --name-only --diff-filter=U >&2 || true
       echo "HINT: 解决冲突后 cd $DEV_DIR && git add <files> && git commit 完成 merge，再跑 cleanup 子命令" >&2
+      obs end merge merge
       exit 2
     fi
     ;;
@@ -191,6 +217,7 @@ $OCCUPANTS
 
     # 先 cd 出待删目录（macOS 删除 cwd 所在目录后 shell cwd 悬空，后续命令无法执行）
     cd "$DEV_DIR"
+    obs start cleanup cleanup
     # 显式两步删除：先删目录、后清登记。git worktree remove 内部顺序相反（先删登记后删目录），
     # 目录删除失败时留下半删态；本顺序下任何一步中途失败，登记与分支都未动，状态永远可从 dev 侧诊断重试
     echo ">> rm -rf $CUR_DIR && git worktree prune（显式两步，登记不先于目录消失）"
@@ -207,6 +234,7 @@ rm -rf $CUR_DIR && git -C $DEV_DIR worktree prune && git -C $DEV_DIR branch -D $
     git branch -D "$CUR_BRANCH" \
       || die "分支 $CUR_BRANCH 删除失败。恢复命令：git -C $DEV_DIR branch -D $CUR_BRANCH"
     echo "OK: worktree $CUR_DIR 与分支 $CUR_BRANCH 已清理"
+    obs end cleanup cleanup
     echo "NOTE: 原 worktree 目录已删除，会话默认 cwd 已悬空。手动终端：显式 cd 到 ${DEV_DIR} 继续；agent 会话：见 SKILL.md「bash 会话报废信号解码」，停止 bash 调用直接收尾"
     ;;
 esac

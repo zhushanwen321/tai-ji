@@ -44,7 +44,7 @@ description: >-
 | 级别 | 判据（任一命中） | 动作 |
 |------|----------------|------|
 | **打回**（不进第 2 步合并） | quality-gates FAIL 经 3 轮修复子循环仍红；branch-review 终态 needs-human / stuck / max-rounds / review-failure / aggregator-failure / fix-failure（CR 门 fail-fast 语义，见 1.7；fix-failure 判据 = 结构化返回校验失败（重试后仍败）/ per-fixer 任务文档写盘失败；终态清扫失败改判 needs-human，同属打回级）；must-fix 未全修；传播检查红灯 | 停在合并之外，按各步失败输出的恢复指引处置后重跑对应步 |
-| **组级提交待办**（仅 zcode dev-merge-gates 主路径；pi 宿主手工编排走 review-fix-loop，无此通道） | 组 commit 撞 pre-commit 拦截经三分类处置（env 类环境恢复就地重试 / content 类补修 fixer 补全后重试、每组每轮 ≤2 次 / blocked 类）后仍失败 → 该组转提交待办随终态 deferredCommits 呈报，不终止 workflow | deferredCommits 非空时终态为 needs-human：主 agent 逐组判定补提交或还原后再进第 2 步；待办组文件不进终态清扫、保持工作区形态 |
+| **组级提交待办**（dev-merge-gates 主路径，两宿主同走——单源生成语义一致） | 组 commit 撞 pre-commit 拦截经三分类处置（env 类环境恢复就地重试 / content 类补修 fixer 补全后重试、每组每轮 ≤2 次 / blocked 类）后仍失败 → 该组转提交待办随终态 deferredCommits 呈报，不终止 workflow | deferredCommits 非空时终态为 needs-human：主 agent 逐组判定补提交或还原后再进第 2 步；待办组文件不进终态清扫、保持工作区形态 |
 | **随分支带走** | branch-review minor（suggestion）残余；metrics/coverage 的 warn 档机器报告 | 不阻塞合并，登记进 commit message 或 TODO，终局 PR 期复核 |
 | **呈报后继续** | 传播检查软提示（兄弟线线粒度呈报 + 文件交集）；gates / changeset-check / cross-branch-overlap 脚本缺失的存在性检查披露；changeset WARN（自动分类处置，理由列明）；fixer 未申报的残留改动留工作区并逐文件披露（WARN，不终止——下轮审查两路覆盖可见后处置） | 呈报或披露后继续流程，不静默跳过 |
 
@@ -66,7 +66,7 @@ node "$(git rev-parse --show-toplevel)/.agents/skills/dev-merge/scripts/pi-exten
 
 **存在性检查（zcode/pi 两侧通用）**：跑前 `test -f scripts/quality-gates.mjs` 检查脚本存在——脚本随 git 分支传播，skill 实体经 symlink 即时生效，feature 分支未含新脚本 commit 时必然缺失（介质错速）。缺失 → 显式输出「quality-gates 脚本不存在（该分支未含 U1 commit），本轮跳过 gates 并披露」，继续第 1.7 步；不崩溃、不静默。changeset-check.mjs 缺失同款处置。恢复通道：源 worktree `git merge dev-0.10.5`（或发布后 merge main）主动吸收后重跑。pi-extension-smoke.mjs 不同：它在 skill 实体内（workspace 根 `.agents/skills/dev-merge/scripts/` 共享，不入 git、无介质错速窗口），缺失 = skill 实体损坏（worktree 内 `.agents` symlink 断裂等），按 exit 2 环境错误处置（恢复：检查 workspace 根 skill 目录完整性），不得按介质错速语义静默跳过——那是关掉 gate 的假绿。
 
-**宿主分工**：zcode 宿主 = 发起项目 workflow（CreateWorkflow path 指向 `.agents/workflows/dev-merge-gates.dwf.ts`），一次承载本步 + 第 1.7 步（gates + branch-review 两步前置，存在性检查内建，失败以 failed 终态返回）；pi 宿主无对应 workflow（dev-merge 使用频率低，不维护双宿主镜像），主 agent 按本步与第 1.7 步手工编排——gates 走上述 node 脚本 + changeset WARN 起草指令，branch-review 走 review-fix-loop。
+**宿主分工**：两宿主同走 `dev-merge-gates` 单 workflow（单源生成：zcode 产物 `<workspace>/.agents/workflows/dev-merge-gates.dwf.ts`，pi 产物 `<workspace>/.agents/workflows/dev-merge-gates.js`，由 `.agents/workflows/scripts/build-workflows.mjs` 从 `src/dev-merge-gates.shared.ts` 生成，语义一致，均一次承载本步 + 第 1.7 步，存在性检查内建，失败以 failed 终态返回）。zcode 宿主 = `CreateWorkflow` path 指向 dwf.ts；pi 宿主 = workflow 工具 `action:"run"` + `name=<本脚本绝对路径>`（从 `<available_workflows>` 清单的 location 取）。发起前 cwd 必须已在待合并 feat worktree 根。阶段观测（可选）：发起时传 `taskId` + `executionId`（两 id 同给才启用，缺省零行为差异）——后续第 1.8/2/3/4 步的手工命令接入同一观测（`export WORKFLOW_OBS_TASK_ID=<taskId> WORKFLOW_OBS_EXECUTION_ID=<executionId>` 后跑 dev-merge.sh 与传播检查，事件与 workflow 阶段落进同一 JSONL）。
 
 ### 第 1.7 步：合入点横切审查（3+3 维，触及源码即跑）
 
@@ -77,7 +77,7 @@ feature 分支的 diff 完整、上下文集中，是横切维度审查的天然
 **执行**（审查对象 = 分支增量 diff，非全 PR）：
 
 1. 约束动态加载：`node scripts/select-constraints.mjs --base $(git merge-base github/main HEAD)` 落 pr-review 产物目录 `~/.agents/skill-data/pr-review/<project-slug>/` 的 constraints.md（实际目录经 `node scripts/skill-data-dir.mjs pr-review` 解析）；脚本失败 = 本步终止不进合并（与 CR 门同语义），不得在无约束清单状态下派审查
-2. 派恒派 3 维 reviewer（agent 定义在本 skill `agents/review-<维度>.md`，重语义审查的资产所有权归 dev-merge，pr-cr-fix 侧仅经其显式 reviewers 逃生舱引用同一批文件）：`business-logic`（含降级策略红线，判据本体 = agent 定义内 read 引用的 code-harden）/ `arch-boundary` / `data-governance`——agent 定义结构为三层：编排契约 + 通用判据 read 引用（指向 `~/.agents/skills/` 用户级技能 code-domain-review / code-harden / architecture-decay-audit / code-arch-review，缺失时 dev-merge-gates 的在盘检查 fail-fast，不静默降级为无判据审查）+ 项目特化检查（消费 pr-review 产物目录的 constraints.md 与项目文档）。pi 宿主用 `pi workflow run review-fix-loop --args '{targetType:"git-diff", target:"<merge-base-hash>", batch1:"<选中的 review-<维度>.md 绝对路径（本 skill agents/ 下），逗号分隔>", autoCommit:true, ...}'`（batch1 点名上述 3 维）；zcode 宿主已由 dev-merge-gates.dwf.ts 的 branch-review 步承载（第 1.6 步一并发起），单独补审时用原生 `review-fix-loop` saved workflow（reviewers 传选中的 agent .md 绝对路径子集）
+2. 派恒派 3 维 reviewer（agent 定义在本 skill `agents/review-<维度>.md`，重语义审查的资产所有权归 dev-merge，pr-cr-fix 侧仅经其显式 reviewers 逃生舱引用同一批文件）：`business-logic`（含降级策略红线，判据本体 = agent 定义内 read 引用的 code-harden）/ `arch-boundary` / `data-governance`——agent 定义结构为三层：编排契约 + 通用判据 read 引用（指向 `~/.agents/skills/` 用户级技能 code-domain-review / code-harden / architecture-decay-audit / code-arch-review，缺失时 dev-merge-gates 的在盘检查 fail-fast，不静默降级为无判据审查）+ 项目特化检查（消费 pr-review 产物目录的 constraints.md 与项目文档）。两宿主的本步均由 dev-merge-gates workflow 承载（第 1.6 步一并发起）；脱离全链单独补审时：zcode 宿主用原生 `review-fix-loop` saved workflow、pi 宿主用 pi 内置 `review-fix-loop`（reviewers/batch1 传选中的 agent .md 绝对路径子集）
 3. 触发式追加 3 维：diff 触及打包/构建配置（tsup/electron-builder/CI）→ 加 `electron-build`；触及包结构/发布线（package.json / pnpm-workspace.yaml / .changeset/ 下任何变更）→ 加 `monorepo-impact`；触及 `extensions/**/src/**` → 加 `extension-api`（tool/command schema、SDK 契约、spec 偏差登记与 data-governance 同属 dev-flow 审不到的横切关注点，且是本仓高频改动范围；SDK 签名核对要对照 node_modules dist、成本中等，故不恒派只触发）；pr-cr-fix 侧回退集对 `extensions/**`（不限 src）宽派是终局兜底定位的保守取向，本侧收窄到 src 是合入点定位的有意差异、非谓词漂移。`electron-build` 本步只挂构建/发布配置面是有意收窄：runtime/electron **源码**改动的 CJS 兼容（`import.meta.url`）与 bundle 完整性由 pre-commit 的 `validate-runtime-bundle.sh` 机器门在每次 commit（含本步之后的 merge commit）拦截，LLM 维度不重审机器门已覆盖项；pr-cr-fix 回退集对 `packages/runtime/**` 宽派是终局兜底定位的保守取向（宁可多派不漏派），与本步收窄是两层定位差异、非谓词漂移
 4. 终态处置：must-fix 全修后才进第 2 步合并；minor 残余随分支带走（commit message 或 TODO 登记），不阻塞。收敛出口前 workflow 执行终态清扫——范围两条过滤（排除提交待办组文件 + 逐文件归属对账，无主改动不代提交），通过者一笔 residual sweep commit、清单随终态 sweptFiles 披露；deferredCommits 非空时即使问题清单全部收敛终态也改判 needs-human（逐组判定补提交或还原后再进第 2 步）。reviewer 审查范围两路覆盖（先 `git diff <base>...HEAD` 已提交改动，再 `git status --porcelain` 与 `git diff` 未提交工作区改动），上轮修复或提交拦截的残留对 reviewer 可见。主 agent 对补修披露条目（commit-repair）负核对义务：每条列全部补修文件，明显超出报错点名范围（越权改业务文件）的呈报用户并在合并前处置
 
@@ -87,7 +87,7 @@ feature 分支的 diff 完整、上下文集中，是横切维度审查的天然
 
 ### 第 1.8 步：传播检查前置（目标线 ⊇ main + 兄弟线未传播呈报）
 
-进入合并（第 2 步）前对**目标集成线**跑传播检查（纪律与约束 SSOT：ADR-0076 / C-proc-30）。硬检查语义 = **目标线 ⊇ main**（合并产物的落点线不得落后 main），**不以源 feature 线为检查对象**——源线落后而目标线不落后时合并产物仍 ⊇ main，拦截即过度；源线开发基线新旧是 ADR-0076 纪律①的治理面，不是本检查语义。
+进入合并（第 2 步）前对**目标集成线**跑传播检查（纪律与约束 SSOT：ADR-0076 / C-proc-30）。硬检查语义 = **目标线 ⊇ main**（合并产物的落点线不得落后 main），**不以源 feature 线为检查对象**——源线落后而目标线不落后时合并产物仍 ⊇ main，拦截即过度；源线开发基线新旧是 ADR-0076 纪律①的治理面，不是本检查语义。本步与第 2/3/4 步的阶段观测接入：第 1.6 步发起 workflow 时传了 `taskId`/`executionId` 的，先 `export WORKFLOW_OBS_TASK_ID=<taskId> WORKFLOW_OBS_EXECUTION_ID=<executionId>`（同一 shell 会话内），dev-merge.sh 的 merge/cleanup 阶段边界自动落同一 JSONL；传播检查自身需要记边界时调统一记录命令 `node ~/.agents/scripts/workflow-observe.mjs start --task-id <taskId> --execution-id <executionId> --skill dev-merge --stage propagation --step propagation`（结束时同款 `end` 子命令；`~/.agents/scripts/workflow-observe.mjs` 为 zsw 仓脚本的安装 symlink，未 export id 时该命令按参数缺失退出，零行为差异）。
 
 ```bash
 # 目标集成 worktree 已存在（常态）——命令自包含 cd：

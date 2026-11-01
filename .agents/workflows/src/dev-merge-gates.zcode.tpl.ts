@@ -24,9 +24,9 @@ description: dev-merge 的前置两步 workflow（gates + branch-review）。①
   范围两路覆盖可见后处置）；收敛出口终态清扫（排除待办组文件 + 归属对账两条过滤）后随
   sweptFiles 披露；deferredCommits 非空时收敛终态改判 needs-human；问题清单每轮落盘
   {runDir}/ledger.json。merge/cleanup 机械步骤不进本 workflow
-  （走 dev-merge.sh）；传播检查与兄弟线交集呈报在 dev-merge SKILL 第 1.8 步编排。pi 宿主无
-  本 workflow——按 dev-merge SKILL.md 手工编排（node 跑 gates 脚本 + changeset WARN 起草 +
-  branch-review 走 review-fix-loop）。
+  （走 dev-merge.sh）；传播检查与兄弟线交集呈报在 dev-merge SKILL 第 1.8 步编排。单源生成：
+  本文件由 src/dev-merge-gates.shared.ts + 本壳经 .agents/workflows/scripts/
+  build-workflows.mjs 生成（勿手工维护；pi 版同源 = .agents/workflows/dev-merge-gates.js）。
 whenToUse: zcode 主 agent 执行 dev-merge skill 第 1.6/1.7 步时发起（CreateWorkflow path
   指向本文件 + args）。发起前 cwd 必须已在待合并 feat worktree 根（对齐 dev-merge SKILL
   调用约束——gates 脚本存在性、审查 diff 口径、fixer commit 全部以该检出为对象）。
@@ -40,5 +40,36 @@ args:
     type: number
     description: branch-review review→fix 循环轮次上限
     default: 10
+  taskId:
+    type: string
+    description: 阶段观测任务 id（可选；与 executionId 同时给出才启用观测，缺省零行为差异）
+  executionId:
+    type: string
+    description: 阶段观测执行 id（可选；与 taskId 同时给出才启用；事件落
+      ~/.agents/skill-data/workflow-observability/<task-id>/<execution-id>.jsonl）
+  sampleType:
+    type: string
+    description: 观测事件采样标记（production | selftest，默认 production；自动化验证用 selftest）
 */
+
+// ── 阶段观测平台钩子（O 区；公共观测层 observability.shared.ts 经构建器拼入本产物，
+//    业务正文只声明阶段边界）──
+// 事件契约与落盘路径由公共层单一承载：{execution_id, task_id, skill, stage, step, round,
+// attempt, event, timestamp, sample_type[, outcome]} →
+// ~/.agents/skill-data/workflow-observability/<task-id>/<execution-id>.jsonl（append）。
+// 本壳只提供两个平台钩子：obsNow（时间戳探针；world.run journal 语义，resume 重放回放
+// 首次记录值）与 obsAppend（追加写；argv 传参无 shell 注入面）。观测为辅助通道：写失败
+// 由公共层统一告警（同文件一次）不改业务终态（与 pi 壳同契约）。
+const OBS_APPEND_SCRIPT =
+  "require('fs').mkdirSync(require('path').dirname(process.argv[1]),{recursive:true});" +
+  "require('fs').appendFileSync(process.argv[1],process.argv[2]+'\n')";
+async function obsNow(): Promise<string | null> {
+  const r = await world.run("node", ["-e", "process.stdout.write(new Date().toISOString())"]);
+  return r.exitCode === 0 && r.stdout.trim() !== "" ? r.stdout.trim() : null;
+}
+async function obsAppend(filePath: string, line: string): Promise<string | null> {
+  const w = await world.run("node", ["-e", OBS_APPEND_SCRIPT, filePath, line]);
+  return w.exitCode === 0 ? null : `exit ${w.exitCode}：${tailLines(w.stderr, 2)}`;
+}
+
 @@STITCH@@

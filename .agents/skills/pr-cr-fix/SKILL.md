@@ -20,6 +20,7 @@ description: >-
 - 全局安装 fallow（`npm i -g fallow`）——阶段 1.5 度量门禁依赖
 - pi 环境走路径 1（原生 workflow）：完整生命周期 = workflow 工具 `action:"run"` + `name=<repo 根>/.agents/workflows/pr-lifecycle.js 绝对路径>`（从 `<available_workflows>` 清单的 location 取路径；实体在 workspace 根共享，ADR-0074）+ args；只跑 review+fix 循环（不进门禁、不开 PR）时用内置 `review-fix-loop`
 - zcode 环境走路径 2（原生 workflow）：完整生命周期 = `CreateWorkflow` 以 `path` 指向本仓自带的 `.agents/skills/pr-cr-fix/workflows/pr-lifecycle.dwf.ts`（实体在 workspace 根共享，ADR-0074）+ args；只跑 review+fix 循环（不进门禁、不开 PR）时用全局 saved workflow `review-fix-loop`（`~/.zcode/workflows/`，无需额外安装）
+- 两平台 pr-lifecycle 产物均由单源生成（`<workspace 根>/.agents/workflows/src/pr-lifecycle.shared.ts` + 各平台壳模板，构建入口 `node <workspace 根>/.agents/workflows/scripts/build-workflows.mjs`，`--check` 校验产物未过期）；产物不得手工维护，改语义改共享源后重建。两平台均可选传观测参数 `taskId` + `executionId`（同给才启用阶段观测，缺省零行为差异；pi 侧为平铺字符串承载）
 
 ## 调用约定
 
@@ -202,17 +203,17 @@ node scripts/select-constraints.mjs --base "$PR_BASE"
 
 ### [MANDATORY] 路径选择
 
-**两版本 + 手工兜底**（完整 PR 生命周期 workflow 有 pi 版与 zcode 原生版两个实现）：
+**两版本 + 手工兜底**（完整 PR 生命周期 workflow 两平台产物由单源共享体生成，语义完全一致）：
 
 - **pi 主 agent** → 路径 1（pi 版 pr-lifecycle 单 workflow 全链，项目 `.agents/workflows/`）；只跑 review+fix 循环时用内置 `review-fix-loop`
 - **zcode 主 agent** → 路径 2（zcode 版 pr-lifecycle 单 workflow 全链）；只跑 review+fix 循环时用全局 saved `review-fix-loop`
 - **无 workflow 能力环境** → 路径 3（手工编排，上限 2 轮）
 
-**review-fix-loop 宿主路由（循环本体）**：只跑 review+fix 循环（不进门禁、不开 PR）时按宿主路由——pi 主 agent 用 **pi 内置版** `review-fix-loop`（subagent-workflow extension 的 workflow 工具，`action:"run"`）；zcode 主 agent 用 **zcode 原生 saved workflow `review-fix-loop`**（全局注册 `~/.zcode/workflows/`，经 CreateWorkflow `saved: { name: "review-fix-loop", args: {...} }` 发起；`args.reviewers` = agent .md 绝对路径数组，等价 pi 版 `batch1`；`base` 等价 `target=main`；**`reviewers` 参数同名异义注意**：saved 版 = agent .md 绝对路径数组（必需），pr-lifecycle 版 = 路径子串白名单（可选，不传 = cr-fix 代码审查不派，见「审查维度集」节））。这两个「只跑循环」实体之间存在分叉（见下方差异登记表）；**完整 PR 生命周期的循环本体不分叉**——两版 pr-lifecycle 的 cr-fix 内联循环（pi 版 + zcode 版 prl 内联）与 zcode saved 版三镜像同语义，改任一侧须同步另两份。
+**review-fix-loop 宿主路由（循环本体）**：只跑 review+fix 循环（不进门禁、不开 PR）时按宿主路由——pi 主 agent 用 **pi 内置版** `review-fix-loop`（subagent-workflow extension 的 workflow 工具，`action:"run"`）；zcode 主 agent 用 **zcode 原生 saved workflow `review-fix-loop`**（全局注册 `~/.zcode/workflows/`，经 CreateWorkflow `saved: { name: "review-fix-loop", args: {...} }` 发起；`args.reviewers` = agent .md 绝对路径数组，等价 pi 版 `batch1`；`base` 等价 `target=main`；**`reviewers` 参数同名异义注意**：saved 版 = agent .md 绝对路径数组（必需），pr-lifecycle 版 = 路径子串白名单（可选，不传 = cr-fix 代码审查不派，见「审查维度集」节））。这两个「只跑循环」实体之间存在分叉（见下方差异登记表）；**完整 PR 生命周期的循环本体不分叉**——两版 pr-lifecycle 的 cr-fix 内联循环由同一份共享体单源生成（pi 产物 + zcode 产物天然同语义），与 zcode saved 版构成两份实现，改 saved 版或共享体的循环语义时须同步另一份。
 
-两版 **pr-lifecycle 全链 workflow 语义完全一致**（9 step：preflight / static-gate(含条件 skill-yaml 校验) / pr-meta(changeset 复核，缺失时按 Gate-1a.5 原逻辑补起草兜底) / pr-submit / constraints / gate-suite / cr-fix(条件——默认不派，显式 reviewers 才派，见「审查维度集」节) / simplify / final-gates），仅宿主发起形态不同（pi = workflow 工具 action=run + 脚本绝对路径；zcode = CreateWorkflow path 发起）。共用的并行化与数据传递约定：review 阶段 **4 个一批分批并行**；聚合（独立 phase）去重合并各维度问题与修复指南（guidance）并按相关性与独立性**分组**；fix 阶段**按组并行派发（同时最多 3 组）**，commit 由循环统一显式路径执行（并行 fixer 不各自 commit）。数据传递 = **文件总线**：各角色产物全部落盘 run 目录（reviewer 报告 / aggregated.md / per-fixer 任务文档 `aggregate-4-fixer-<k>.md`，由循环从聚合分组数据确定性渲染——修复指南随文档直达 fixer），agent 之间不内联传递内容；结构化返回值只承载控制数据（计数/对账/分组 id）。
+两版 **pr-lifecycle 全链 workflow 语义完全一致**（同一份共享体单源生成，一致性由构建 + 对账测试保证；9 step：preflight / static-gate(含条件 skill-yaml 校验) / pr-meta(changeset 复核，缺失时按 Gate-1a.5 原逻辑补起草兜底) / pr-submit / constraints / gate-suite / cr-fix(条件——默认不派，显式 reviewers 才派，见「审查维度集」节) / simplify / final-gates），仅宿主发起形态不同（pi = workflow 工具 action=run + 脚本绝对路径；zcode = CreateWorkflow path 发起）。共用的并行化与数据传递约定：review 阶段 **4 个一批分批并行**；聚合（独立 phase）去重合并各维度问题与修复指南（guidance）并按相关性与独立性**分组**；fix 阶段**按组并行派发（同时最多 3 组）**，commit 由循环统一显式路径执行（并行 fixer 不各自 commit）。数据传递 = **文件总线**：各角色产物全部落盘 run 目录（reviewer 报告 / aggregated.md / per-fixer 任务文档 `aggregate-4-fixer-<k>.md`，由循环从聚合分组数据确定性渲染——修复指南随文档直达 fixer），agent 之间不内联传递内容；结构化返回值只承载控制数据（计数/对账/分组 id）。
 
-**循环本体行为差异登记表**（作用域 = pi **内置通用** `review-fix-loop` ↔ zcode 循环镜像——只跑 review+fix 循环场景的两个实体间的已知语义分叉，改任一侧前先查此表。**完整 PR 生命周期的 cr-fix 内联循环不分叉**：pi 版 prl 内联 + zcode 版 prl 内联 + zcode saved 三镜像同语义，共同熔断与复活语义：fixAttempts = 修复失败次数（仅 regressed 申报时 +1）、needs-redesign 要求条目 regressed（修了又坏）、deferred 条目跨轮保留台账且唯一复活入口 = reviewer 对注入清单的结构化 escalate 申报）：
+**循环本体行为差异登记表**（作用域 = pi **内置通用** `review-fix-loop` ↔ zcode 循环镜像——只跑 review+fix 循环场景的两个实体间的已知语义分叉，改任一侧前先查此表。**完整 PR 生命周期的 cr-fix 内联循环不分叉**：两版 prl 内联由同一份共享体单源生成 + zcode saved 版为另一份实现，共同熔断与复活语义：fixAttempts = 修复失败次数（仅 regressed 申报时 +1）、needs-redesign 要求条目 regressed（修了又坏）、deferred 条目跨轮保留台账且唯一复活入口 = reviewer 对注入清单的结构化 escalate 申报）：
 
 | 差异点 | pi 内置 review-fix-loop（只跑循环） | prl 系循环镜像（zcode saved + 两版 prl 内联） | 备注 |
 |---|---|---|---|
@@ -258,7 +259,7 @@ cr-fix 内联循环的熔断语义与路径 2 完全一致：某 agent `mustFix 
 
 **适用条件**：当前主 agent 是 zcode（有 `CreateWorkflow` 工具）。无需任何插件依赖。
 
-pr-lifecycle（`.agents/skills/pr-cr-fix/workflows/pr-lifecycle.dwf.ts`）把本 skill 的阶段 1（preflight / static gate 含条件 skill-yaml 校验 / pr-meta = changeset 复核 + PR 元数据起草 / pr-submit）→ 阶段 2 前置（constraints）→ 阶段 1.5/1.6（gate-suite：coverage + metrics 聚合门禁 + PR 规模披露）→ 阶段 2（cr-fix：内联循环本体，与全局 saved `review-fix-loop` 及 pi 版 prl 内联三镜像同源；默认不派，显式 `reviewers` 时执行）→ code-simplify（simplify step，固化契约见 `agents/simplify-apply.md`）→ 阶段 3a（final-gates 三道联动 + 收尾防线 + e2e 影响面披露）全部编排进单一原生 workflow 脚本（9 step）。**agent 上下文重合度合并约定**：两个会话各自必须加载的工作上下文重合高且无独立性要求的合并为一个 agent 一次处理——changeset 与 pr-meta 输入全同（commits + diff stat + changeset 清单）合为一个会话；coverage 与 metrics 失败常同文件同源，gate-suite 每轮聚合两道明细派单个修复会话（同文件多类问题一次修完）。独立视角要求的会话不合并（显式 reviewers 模式下各维度 reviewer 各自 fresh eyes 读同一份 diff 是 review 的对价）。主 agent 一次发起，只做「等终态 → 披露 → 请求 push 授权」。
+pr-lifecycle（`.agents/skills/pr-cr-fix/workflows/pr-lifecycle.dwf.ts`）把本 skill 的阶段 1（preflight / static gate 含条件 skill-yaml 校验 / pr-meta = changeset 复核 + PR 元数据起草 / pr-submit）→ 阶段 2 前置（constraints）→ 阶段 1.5/1.6（gate-suite：coverage + metrics 聚合门禁 + PR 规模披露）→ 阶段 2（cr-fix：内联循环本体，与全局 saved `review-fix-loop` 同源双份，改任一侧须同步；默认不派，显式 `reviewers` 时执行）→ code-simplify（simplify step，固化契约见 `agents/simplify-apply.md`）→ 阶段 3a（final-gates 三道联动 + 收尾防线 + e2e 影响面披露）全部编排进单一 workflow 脚本（9 step）。**agent 上下文重合度合并约定**：两个会话各自必须加载的工作上下文重合高且无独立性要求的合并为一个 agent 一次处理——changeset 与 pr-meta 输入全同（commits + diff stat + changeset 清单）合为一个会话；coverage 与 metrics 失败常同文件同源，gate-suite 每轮聚合两道明细派单个修复会话（同文件多类问题一次修完）。独立视角要求的会话不合并（显式 reviewers 模式下各维度 reviewer 各自 fresh eyes 读同一份 diff 是 review 的对价）。主 agent 一次发起，只做「等终态 → 披露 → 请求 push 授权」。
 
 **发起（CreateWorkflow）**：
 
@@ -491,12 +492,17 @@ push 了发布 tag（`v*`/`npm-*`）时必须等 CI 构建完成并验证产物�
 ├── references/           # 触发场景才 read：coverage-industry-research.md（覆盖率调研）/ cot-leakage.md（CoT Leakage）/ mutation-testing.md（Mutation 深检）
 ├── scripts/              # metrics-gate.py / coverage-gate.py（含 --extra-packages）/ validate-skill-yaml.py
 └── workflows/
-    └── pr-lifecycle.dwf.ts  # 路径 2（zcode 原生）PR 全生命周期单 workflow（/* zcode-workflow */ 块声明 args；CreateWorkflow path 调用）
+    └── pr-lifecycle.dwf.ts  # 路径 2（zcode）PR 全生命周期单 workflow 产物（/* zcode-workflow */ 块
+                            # 声明 args；CreateWorkflow path 调用）。生成物勿手工维护——由
+                            # <workspace 根>/.agents/workflows/scripts/build-workflows.mjs 从
+                            # src/pr-lifecycle.shared.ts + src/pr-lifecycle.zcode.tpl.ts 生成，
+                            # --check 可校验产物未过期
 
-（路径 1 的 pi 版全链 workflow 位于 workspace 根 `.agents/workflows/pr-lifecycle.js`
+（路径 1 的 pi 版全链 workflow 产物位于 workspace 根 `.agents/workflows/pr-lifecycle.js`
 （pi workflow discovery 的 project-agents 源——workspace 根共享实体，各 worktree 经
-symlink 共享、即时生效，不入 git，ADR-0074）；其 cr-fix 内联循环与 zcode 版 prl 内联 +
-全局 saved review-fix-loop.dwf.ts 三镜像同源，改任一侧须同步另两份循环语义）
+symlink 共享、即时生效，不入 git，ADR-0074），由同一共享体 + src/pr-lifecycle.pi.tpl.js
+生成；其 cr-fix 内联循环与 zcode 产物同源（同一份共享体），与全局 saved
+review-fix-loop.dwf.ts 为两份实现，改 saved 版或共享体的循环语义时须同步另一份）
 ```
 
 ---

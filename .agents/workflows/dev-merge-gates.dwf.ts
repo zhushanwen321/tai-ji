@@ -24,9 +24,9 @@ description: dev-merge 的前置两步 workflow（gates + branch-review）。①
   范围两路覆盖可见后处置）；收敛出口终态清扫（排除待办组文件 + 归属对账两条过滤）后随
   sweptFiles 披露；deferredCommits 非空时收敛终态改判 needs-human；问题清单每轮落盘
   {runDir}/ledger.json。merge/cleanup 机械步骤不进本 workflow
-  （走 dev-merge.sh）；传播检查与兄弟线交集呈报在 dev-merge SKILL 第 1.8 步编排。pi 宿主无
-  本 workflow——按 dev-merge SKILL.md 手工编排（node 跑 gates 脚本 + changeset WARN 起草 +
-  branch-review 走 review-fix-loop）。
+  （走 dev-merge.sh）；传播检查与兄弟线交集呈报在 dev-merge SKILL 第 1.8 步编排。单源生成：
+  本文件由 src/dev-merge-gates.shared.ts + 本壳经 .agents/workflows/scripts/
+  build-workflows.mjs 生成（勿手工维护；pi 版同源 = .agents/workflows/dev-merge-gates.js）。
 whenToUse: zcode 主 agent 执行 dev-merge skill 第 1.6/1.7 步时发起（CreateWorkflow path
   指向本文件 + args）。发起前 cwd 必须已在待合并 feat worktree 根（对齐 dev-merge SKILL
   调用约束——gates 脚本存在性、审查 diff 口径、fixer commit 全部以该检出为对象）。
@@ -40,7 +40,247 @@ args:
     type: number
     description: branch-review review→fix 循环轮次上限
     default: 10
+  taskId:
+    type: string
+    description: 阶段观测任务 id（可选；与 executionId 同时给出才启用观测，缺省零行为差异）
+  executionId:
+    type: string
+    description: 阶段观测执行 id（可选；与 taskId 同时给出才启用；事件落
+      ~/.agents/skill-data/workflow-observability/<task-id>/<execution-id>.jsonl）
+  sampleType:
+    type: string
+    description: 观测事件采样标记（production | selftest，默认 production；自动化验证用 selftest）
 */
+
+// ── 阶段观测平台钩子（O 区；公共观测层 observability.shared.ts 经构建器拼入本产物，
+//    业务正文只声明阶段边界）──
+// 事件契约与落盘路径由公共层单一承载：{execution_id, task_id, skill, stage, step, round,
+// attempt, event, timestamp, sample_type[, outcome]} →
+// ~/.agents/skill-data/workflow-observability/<task-id>/<execution-id>.jsonl（append）。
+// 本壳只提供两个平台钩子：obsNow（时间戳探针；world.run journal 语义，resume 重放回放
+// 首次记录值）与 obsAppend（追加写；argv 传参无 shell 注入面）。观测为辅助通道：写失败
+// 由公共层统一告警（同文件一次）不改业务终态（与 pi 壳同契约）。
+const OBS_APPEND_SCRIPT =
+  "require('fs').mkdirSync(require('path').dirname(process.argv[1]),{recursive:true});" +
+  "require('fs').appendFileSync(process.argv[1],process.argv[2]+'\n')";
+async function obsNow(): Promise<string | null> {
+  const r = await world.run("node", ["-e", "process.stdout.write(new Date().toISOString())"]);
+  return r.exitCode === 0 && r.stdout.trim() !== "" ? r.stdout.trim() : null;
+}
+async function obsAppend(filePath: string, line: string): Promise<string | null> {
+  const w = await world.run("node", ["-e", OBS_APPEND_SCRIPT, filePath, line]);
+  return w.exitCode === 0 ? null : `exit ${w.exitCode}：${tailLines(w.stderr, 2)}`;
+}
+
+// ============================================================================
+// observability.shared.ts — workflow 阶段事件观测层（单一构建输入）
+// 已接入观测的 workflow（正文含 initObservation 调用点）由 scripts/build-workflows.mjs
+// 把本文件全文拼进其两侧产物（先于业务正文——obsCtx 为 let，业务顶层赋值依赖声明在前）；
+// 未接入的 workflow 不拼。本文件与业务 shared 一起过词法改写与 TS 剥离管线，无 import。
+//
+// 事件契约（改字段须同步 scripts/build-workflows.mjs 的 OBS_EVENT_FIELDS 与
+// scripts/workflow-observe.mjs）：
+//   {execution_id, task_id, skill, stage, step, round, attempt, event, timestamp,
+//    sample_type[, outcome]}
+// 落点 ~/.agents/skill-data/workflow-observability/<task-id>/<execution-id>.jsonl——
+// 每次执行独立文件，并发执行互不干扰。
+// 启用条件 = args.taskId 与 args.executionId 同时提供；都不传 = 观测关闭（可选兼容，
+// 业务照常）；只传其一 / ID 含路径不安全字符 / sampleType 非法 → 告警并关闭（错误可
+// 操作，不静默吞）；写失败 → 告警（同文件只告警一次）不改业务终态——观测是辅助功能，
+// 故障不拖垮主流程。观测只记归属与边界，不采集 token。
+// IO 通道经壳的 obsNow/obsAppend 平台钩子（zcode = world.run journal 语义，resume 重放
+// 回放首次记录值；pi = world.run，其 shim 内为 spawnSync，无 journal 重放语义，每次
+// run 实写）。
+// attempt 字段语义 = 事件发生时点的重发起序号：启动早期（自动检测未完成）为 null，
+// 检测确定后由调用方回填 obsCtx.attempt，其后的事件带值。
+// ============================================================================
+
+interface ObsCtx {
+  executionId: string;
+  taskId: string;
+  skill: string;
+  stage: string;
+  attempt: number | null;
+  sampleType: "production" | "selftest";
+  /** JSONL 落盘绝对路径；home 探针完成前为空串（obsEmit 遇空串告警并跳过该条） */
+  filePath: string;
+  /** 已开始未结束的 step（obsBegin 与 obsEnd/obsCloseExecution 之间的打开窗口） */
+  openStep: { step: string; round: number | null } | null;
+  /** 同一文件的写失败只告警一次（多轮循环不刷屏） */
+  warnedWrite: boolean;
+}
+let obsCtx: ObsCtx | null = null;
+
+/** ID 路径安全窄化：task-id 是观测根下的目录名、execution-id 是文件名主干——仅放行
+ *  字母数字开头、只含字母/数字/点/连字符/下划线、≤128 字符、无连续点与结尾点的值，
+ *  路径穿越形态（..、分隔符、空白、引号）一律拒绝 */
+function obsSafeId(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const s = v.trim();
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(s) && !s.includes("..") && !s.endsWith(".") ? s : null;
+}
+
+/** 观测启用（形态层，纯同步，不依赖 home）：参数形态校验 + 上下文组装。先于业务参数
+ *  窄化调用，保证已传合法观测 ID 的执行（含后续参数校验失败早退）都有 execution 边界。
+ *  返回 null = 本次关闭（合法关闭不告警，告警关闭经 log 输出恢复动作——关闭本身不静默）。
+ *  attempt 未知时传 null，检测确定后回填 obsCtx.attempt */
+function initObservation(skill: string, stage: string, attempt: number | null): ObsCtx | null {
+  const hasTask = typeof args.taskId === "string" && args.taskId.trim() !== "";
+  const hasExec = typeof args.executionId === "string" && args.executionId.trim() !== "";
+  if (!hasTask && !hasExec) return null;
+  if (hasTask !== hasExec) {
+    log(
+      `WARN: 观测参数不完整（taskId=${hasTask ? "已传" : "缺"}、executionId=${hasExec ? "已传" : "缺"}）——两参须同时提供才记录观测，本次不写观测事件。恢复动作：同时传 taskId 与 executionId，或都不传`,
+    );
+    return null;
+  }
+  const taskId = obsSafeId(args.taskId);
+  const executionId = obsSafeId(args.executionId);
+  if (taskId === null || executionId === null) {
+    log(
+      `WARN: 观测参数含路径不安全字符（taskId=${JSON.stringify(args.taskId)}、executionId=${JSON.stringify(args.executionId)}——合法形态：字母/数字开头，只含字母、数字、点、连字符、下划线，≤128 字符，禁「..」与结尾点）——本次不写观测事件。恢复动作：改用安全 ID 后重新发起`,
+    );
+    return null;
+  }
+  const rawSampleType = typeof args.sampleType === "string" ? args.sampleType.trim() : "";
+  if (rawSampleType !== "" && rawSampleType !== "production" && rawSampleType !== "selftest") {
+    log(
+      `WARN: 观测参数 sampleType=${JSON.stringify(args.sampleType)} 非法（合法值：production / selftest）——本次不写观测事件。恢复动作：修正 sampleType 后重新发起`,
+    );
+    return null;
+  }
+  const sampleType: "production" | "selftest" = rawSampleType === "selftest" ? "selftest" : "production";
+  return {
+    executionId,
+    taskId,
+    skill,
+    stage,
+    attempt,
+    sampleType,
+    filePath: "",
+    openStep: null,
+    warnedWrite: false,
+  };
+}
+
+/** 观测落盘路径装配（home 探针成功后调用一次）；obsCtx 关闭时无操作 */
+function obsAttachHome(home: string): void {
+  const c = obsCtx;
+  if (c === null) return;
+  c.filePath = `${home}/.agents/skill-data/workflow-observability/${c.taskId}/${c.executionId}.jsonl`;
+}
+
+/** 写一条观测事件。时间戳经壳钩子取（zcode journal 语义下跨 resume 确定性回放）；
+ *  时间戳探针失败、落盘路径未装配（home 未就绪）或写入失败只告警（写失败同文件一次），
+ *  不改变业务终态 */
+async function obsEmit(step: string, round: number | null, event: "start" | "end", outcome: string | null): Promise<void> {
+  const c = obsCtx;
+  if (c === null) return;
+  if (c.filePath === "") {
+    log("WARN: 观测落盘路径未装配（home 探针未完成或失败）——本条观测事件未记录，业务不受影响。恢复动作：确认 node 可执行后重跑");
+    return;
+  }
+  const timestamp = await obsNow();
+  if (timestamp === null) {
+    log("WARN: 观测时间戳探针失败（node 子进程无输出）——本条观测事件未记录，业务不受影响。恢复动作：确认 node 可执行后重跑");
+    return;
+  }
+  const rec: Record<string, unknown> = {
+    execution_id: c.executionId,
+    task_id: c.taskId,
+    skill: c.skill,
+    stage: c.stage,
+    step,
+    round,
+    attempt: c.attempt,
+    event,
+    timestamp,
+    sample_type: c.sampleType,
+  };
+  if (outcome !== null) rec.outcome = outcome;
+  const err = await obsAppend(c.filePath, JSON.stringify(rec));
+  if (err !== null && !c.warnedWrite) {
+    c.warnedWrite = true;
+    log(`WARN: 观测事件写入失败（${c.filePath}）：${err}——同类失败不再重复告警，业务不受影响。恢复动作：确认该路径父目录可写（或换 executionId）后重跑`);
+  }
+}
+
+/** 阶段边界：串行阶段开始记 start（同一时刻至多一个打开 step）。上一阶段尚未结束即
+ *  开新阶段 = 观测序列异常：显式告警并给前一阶段补记 end（outcome=abandoned），不静默
+ *  覆盖——业务流程不受影响，事件序列仍完整可对账 */
+async function obsBegin(step: string, round: number | null): Promise<void> {
+  const c = obsCtx;
+  if (c === null) return;
+  if (c.openStep !== null) {
+    const prev = c.openStep;
+    c.openStep = null;
+    log(
+      `WARN: 观测阶段重叠：step「${prev.step}」尚未结束即开始「${step}」——已给前一阶段补记 end（outcome=abandoned），业务不受影响。恢复动作：检查前一阶段的 obsEnd 配对（提前离开的路径是否漏补记）`,
+    );
+    await obsEmit(prev.step, prev.round, "end", "abandoned");
+  }
+  c.openStep = { step, round };
+  await obsEmit(step, round, "start", null);
+}
+
+/** 阶段边界：自然完成记 end（无 outcome——outcome 只出现在终态统一补记或异常补记的
+ *  end 上，值 = 本次执行的 terminated 词或 abandoned/script-error）。
+ *  配对检查：step/round 与打开阶段不符，或当前无打开阶段时——显式告警（可操作恢复
+ *  动作）；无打开阶段不写任何事件（无 start 不伪造 end），阶段错位给实际打开阶段补
+ *  abandoned end（收到的错名 end 不落盘）。业务流程不受影响 */
+async function obsEnd(step: string, round: number | null): Promise<void> {
+  const c = obsCtx;
+  if (c === null) return;
+  if (c.openStep === null) {
+    log(
+      `WARN: 观测配对异常：收到 step「${step}」（round=${round}）的 obsEnd，但当前无打开中的阶段——未写 end 事件（无 start 不伪造 end），业务不受影响。恢复动作：检查该 step 的 obsBegin/obsEnd 配对（是否重复调用或 start 路径提前离开）`,
+    );
+    return;
+  }
+  if (c.openStep.step !== step || c.openStep.round !== round) {
+    const open = c.openStep;
+    c.openStep = null;
+    log(
+      `WARN: 观测配对异常：收到 step「${step}」（round=${round}）的 obsEnd，但当前打开的是「${open.step}」（round=${open.round}）——已给实际打开阶段补记 end（outcome=abandoned），收到的 end 未写（无对应 start 不伪造），业务不受影响。恢复动作：检查两处调用的 step/round 实参是否写反或错位`,
+    );
+    await obsEmit(open.step, open.round, "end", "abandoned");
+    return;
+  }
+  c.openStep = null;
+  await obsEmit(step, round, "end", null);
+}
+
+/** withStage：串行阶段包装器（obsBegin → fn → obsEnd）。fn 内经收尾出口提前离开时
+ *  openStep 已被 obsCloseExecution 清空（end 已由终态统一补记），finally 不重复补
+ *  end；fn 抛异常且 step 仍打开 = 脚本级中断，finally 补 end（outcome=script-error） */
+async function withStage<T>(step: string, round: number | null, fn: () => Promise<T>): Promise<T> {
+  await obsBegin(step, round);
+  let didThrow = false;
+  try {
+    return await fn();
+  } catch (e) {
+    didThrow = true;
+    throw e;
+  } finally {
+    const c = obsCtx;
+    if (c !== null && c.openStep !== null && c.openStep.step === step) {
+      c.openStep = null;
+      await obsEmit(step, round, "end", didThrow ? "script-error" : null);
+    }
+  }
+}
+
+/** 终态统一补记：给打开中的 step 补记 end（带 outcome=本次执行终态）+ 写 execution
+ *  end。由终态统一出口调用（各 workflow 的 finish / 收尾段 / 启动期失败离开点） */
+async function obsCloseExecution(outcome: string): Promise<void> {
+  const c = obsCtx;
+  if (c === null) return;
+  const open = c.openStep;
+  c.openStep = null;
+  if (open !== null) await obsEmit(open.step, open.round, "end", outcome);
+  await obsEmit("execution", null, "end", outcome);
+}
+
 
 // dev-merge-gates — zcode 原生动态工作流版（dev-merge 前置两步）
 // 循环机制与全局 saved review-fix-loop / pr-lifecycle cr-fix 内联循环同源（问题清单 /
@@ -80,7 +320,12 @@ args:
 //   仍是终态对象）且裸解析可过。改循环语义须同步 review-fix-loop / pr-lifecycle 对应机制。
 
 // ── 参数窄化 + 白名单（拼错键静默回落默认值比报错危险，fail-fast） ──
-const VALID_ARG_KEYS = new Set(["base", "maxRounds"]);
+// taskId/executionId/sampleType 是阶段观测（workflow-observability）参数：可选，缺省不
+// 启用观测（旧调用零变化）；taskId + executionId 同时给出才启用——只给其一时提示后按
+// 未启用处理。sampleType 合法值 production|selftest（默认 production）。观测实现（事件
+// 写盘）由壳拼接的公共观测层（observability.shared.ts）承载，本文件只声明阶段边界
+//   （obsBegin/obsEnd/withStage/obsEmit/obsCloseExecution）。
+const VALID_ARG_KEYS = new Set(["base", "maxRounds", "taskId", "executionId", "sampleType"]);
 for (const key of Object.keys(args)) {
   if (!VALID_ARG_KEYS.has(key)) {
     throw new Error(`未知参数: ${key}（合法参数: ${[...VALID_ARG_KEYS].join("/")}）`);
@@ -93,6 +338,10 @@ if (args.maxRounds !== undefined && (typeof args.maxRounds !== "number" || !Numb
   throw new Error(`参数 maxRounds 非法：${String(args.maxRounds)}（应为 ≥1 的数字，上界 50 自动截断）`);
 }
 const maxRounds = args.maxRounds === undefined ? 10 : Math.min(50, Math.floor(args.maxRounds));
+
+// 观测启用（O 区形态层）：先于参数窄化——已传合法观测 ID 的执行（含参数校验失败
+// 早退）都有 execution 边界（合法性校验在 initObservation 内，告警并关闭不 fail-fast）
+obsCtx = initObservation("dev-merge-gates", "dev-merge-gates", null);
 
 // ── 常量 ──
 const MAX_GATE_ROUNDS = 3; // gates FAIL 修复子循环上限（dev-merge SKILL 1.6 口径：≤3 轮）
@@ -501,8 +750,11 @@ function reconcileGroups(raw: FixGroup[] | undefined | null, active: { id: strin
 // ── step wrapper：失败记 failure 短路后续 step（终态完整披露） ──
 async function runStep<T>(id: string, fn: () => Promise<T>): Promise<T | null> {
   if (failure) return null;
+  // 阶段边界由公共观测层 withStage 承载（fn 抛异常时其 finally 自动补 end
+  // (outcome=script-error)）；因前序失败短路的 step 不产生事件
   try {
-    return await fn();
+    const r = await withStage(id, null, fn);
+    return r;
   } catch (e) {
     failure = { step: id, error: e instanceof Error ? e.message : String(e) };
     return null;
@@ -512,36 +764,11 @@ async function runStep<T>(id: string, fn: () => Promise<T>): Promise<T | null> {
 async function main(): Promise<Record<string, unknown>> {
   report({ stage: "start", base: args.base ?? "auto(merge-base github/main HEAD)" });
 
-  // world.run cwd 继承宿主 bash 持久 cwd（zcode 宿主不保证停在 worktree 根）——repo 相对
-  // 路径的脚本/文件引用一律经 repoRoot 拼绝对路径执行；探测失败 fail-fast（cwd 不在仓库内
-  // 时 diff/审查/commit 全部口径失效，猜根 = 静默错审）
-  const rootProbe = await world.run("git", ["rev-parse", "--show-toplevel"]);
-  if (rootProbe.exitCode !== 0 || rootProbe.stdout.trim() === "") {
-    throw new Error(
-      `git rev-parse --show-toplevel 失败（exit ${rootProbe.exitCode}）：${rootProbe.stderr.trim() || "无 stderr"}——workflow 执行 cwd 不在待合并 worktree 内。恢复：宿主 bash cd 到 worktree 根后重新发起本 workflow`,
-    );
-  }
-  const repoRoot = rootProbe.stdout.trim();
-
-  // 后续所有 git 调用一律经 -C 钉在探测到的 worktree 根：world.run 的 cwd 继承宿主 bash
-  // 持久 cwd，宿主切目录（或两条 dev-merge 线并行时切换 cwd）会让裸 git 静默操作错树/直接
-  // exit 128（2026-10-31 事故：终态清扫裸 git status 在非仓库 cwd 失败，run 被误判 failed）。
-  // 唯一例外 = 上面的 toplevel 探测本身（契约要求发起时 cwd 在该 worktree 根）。
-  const gitAt = (argv: string[]): Promise<WorldRunResult> => world.run("git", ["-C", repoRoot, ...argv]);
-
-  // 分支身份 preflight：本 workflow 只在 feature 线 worktree 内运行——gates 口径 = 分支增量、
-  // branch-review 的 diff 与 committer/fixer 的 commit 落点全部以该检出为对象。world.run cwd
-  // 继承宿主 bash 持久 cwd，不保证停在 feat 根：2026-10-25 事故形态 = committer agent 的 git
-  // 命令在 main worktree 执行，把一轮分支审查修复误提交进 main（main 从 e8b7bafbe 被推到
-  // 94ea75386，事后 reset 恢复）。提示词级"提交前核实 worktree"依赖 agent 遵守；此处与
-  // pre-commit 的 main 直提交守卫（.githooks/install-hooks.sh，TAIJI_ALLOW_MAIN_COMMIT
-  //  bypass）构成双闸——本闸挡在派发任何 agent 之前。分支类型口径 = DEV-WORKFLOW.md §1。
-  const branchProbe = await gitAt(["rev-parse", "--abbrev-ref", "HEAD"]);
-  const wfBranch = branchProbe.exitCode === 0 ? branchProbe.stdout.trim() : "";
-  if (!/^(feat|fix|refactor|chore|docs|test|perf|hotfix|verify)-/.test(wfBranch)) {
-    throw new Error(
-      `分支身份 preflight 失败：当前分支 = ${wfBranch || "(detached 或探测失败)"}——dev-merge-gates 只允许在 feature 线 worktree（分支名 feat-/fix-/refactor-/chore-/docs-/test-/perf-/hotfix-/verify- 前缀，DEV-WORKFLOW.md §1）内运行；main / dev-* / detached 一律 fail-fast。恢复：宿主 bash cd 到待合并 feat worktree 根后重新发起本 workflow`,
-    );
+  // 观测落盘路径装配（O 区；home 探针独立于业务 REPORT_ROOT 探针——装配须先于全部阶段事件）
+  {
+    const obsHomeRes = await world.run("node", ["-e", "process.stdout.write(require('os').homedir())"]);
+    if (obsHomeRes.exitCode === 0 && obsHomeRes.stdout.trim() !== "") obsAttachHome(obsHomeRes.stdout.trim());
+    await obsEmit("execution", null, "start", null);
   }
 
   async function existsViaNode(path: string): Promise<boolean> {
@@ -549,14 +776,9 @@ async function main(): Promise<Record<string, unknown>> {
     return r.exitCode === 0;
   }
 
-  // repo 相对路径存在性探测（绝对路径原样放行；相对一律按 repoRoot 解析——存在性判定与
-  // 后续执行用同一绝对路径，防「检查 cwd A、执行 cwd B」劈叉）
-  const existsRepoPath = async (p: string): Promise<boolean> =>
-    p.startsWith("/") ? existsViaNode(p) : existsViaNode(`${repoRoot}/${p}`);
-
   // porcelain 过滤 .review/.tmp（脚本自持目录），与 pr-lifecycle dirtyWorktree 同源
   async function dirtyFiles(): Promise<string[]> {
-    const st = await gitAt(["status", "--porcelain"]);
+    const st = await world.run("git", ["status", "--porcelain"]);
     if (st.exitCode !== 0) {
       throw new Error(`git status --porcelain 失败（exit ${st.exitCode}）：${st.stderr.trim() || "无 stderr"}；确认 cwd 是有效 git 仓库`);
     }
@@ -832,7 +1054,7 @@ async function main(): Promise<Record<string, unknown>> {
       const res = results.get(gid)!;
       if (res.committed) {
         contentQueue.shift();
-        const h = await gitAt(["rev-parse", "--short", "HEAD"]);
+        const h = await world.run("git", ["rev-parse", "--short", "HEAD"]);
         const hash = h.exitCode === 0 ? h.stdout.trim() : "未知";
         disclosures.push({
           item: `commit-repair-r${round}-${gid}`,
@@ -865,7 +1087,7 @@ async function main(): Promise<Record<string, unknown>> {
   // base 解析（与 quality-gates.mjs resolveBase 的 dev-merge 侧同口径：显式 > merge-base github/main HEAD > main）
   let base = typeof args.base === "string" ? args.base.trim() : "";
   if (base === "") {
-    const mb = await gitAt(["merge-base", "github/main", "HEAD"]);
+    const mb = await world.run("git", ["merge-base", "github/main", "HEAD"]);
     base = mb.exitCode === 0 ? mb.stdout.trim() : "main";
   }
   log(`[gates] base=${base}（分支增量口径，显式传值恒优先）`);
@@ -890,7 +1112,7 @@ async function main(): Promise<Record<string, unknown>> {
     // ── 存在性检查（zcode/pi 两侧通用行为，设计 §5 时序约束 3）：脚本随 git 分支传播、
     //    skill 实体 symlink 即时生效——feature 分支未含脚本 commit 时必然缺失。缺失 =
     //    显式披露跳过，不崩溃、不静默（跳过必须披露，不构成静默降级）。
-    if (!(await existsRepoPath(GATES_SCRIPT))) {
+    if (!(await existsViaNode(GATES_SCRIPT))) {
       gatesStatus = "skipped";
       disclosures.push({ item: "gates", reason: "quality-gates 脚本不存在（该分支未含 U1 commit），本轮跳过 gates 并披露" });
       log(`[gates] quality-gates 脚本不存在（该分支未含 U1 commit），本轮跳过 gates 并披露；恢复通道：源 worktree git merge dev-0.10.5 主动吸收后重跑`);
@@ -906,7 +1128,7 @@ async function main(): Promise<Record<string, unknown>> {
     for (let round = 1; round <= MAX_GATE_ROUNDS; round++) {
       // timeoutMs 必设：quality-gates 全量（typecheck 三处 + 增量 coverage + metrics）
       // 真机耗时在分钟级，300s 默认上限会把正常执行误判为超时拒绝（连续两跑实证）
-      const last = await world.run("node", [`${repoRoot}/${GATES_SCRIPT}`, "--side", "dev-merge", "--base", base, "--json"], { timeoutMs: 7_200_000 }); // 2026-10-26 用户裁决：≥1h
+      const last = await world.run("node", [GATES_SCRIPT, "--side", "dev-merge", "--base", base, "--json"], { timeoutMs: 1_800_000 });
       const lastJson = parseGatesJson(last.stdout);
       if (last.exitCode === 0) {
         gatesStatus = "pass";
@@ -939,7 +1161,7 @@ async function main(): Promise<Record<string, unknown>> {
           `workflow dev-merge-gates 第 ${round} 轮质量门失败（quality-gates --side dev-merge，base=${base}），失败门与详情（每门 detail 已截断）：`,
           lastSummary,
           "",
-          `需要全量输出时可自行重跑：node ${repoRoot}/scripts/quality-gates.mjs --side dev-merge --base ${base}。`,
+          `需要全量输出时可自行重跑：node scripts/quality-gates.mjs --side dev-merge --base ${base}。`,
           "",
           "要求：",
           "1. 修复上述失败门的全部问题，只改与失败直接相关的文件。",
@@ -978,12 +1200,12 @@ async function main(): Promise<Record<string, unknown>> {
     // 入口经 pi 真实加载一遍（--mode rpc + stdin EOF，零 LLM 调用），抓 main 声明指向缺失
     // 文件 / 入口加载期即崩——装进 pi 宿主才暴露的问题前置到合并边界。脚本宿主无 pi 或无
     // 可加载入口时自身 skip（exit 0 + status skip），照常披露不阻塞
-    if (!(await existsRepoPath(SMOKE_SCRIPT))) {
-      throw new Error(`pi-extension-smoke 脚本不存在：${repoRoot}/${SMOKE_SCRIPT}（skill 实体损坏或 worktree 内 .agents symlink 断裂）。恢复：检查 workspace 根 .agents/skills/dev-merge/scripts/ 完整性后重新发起本 workflow`);
+    if (!(await existsViaNode(SMOKE_SCRIPT))) {
+      throw new Error(`pi-extension-smoke 脚本不存在：${SMOKE_SCRIPT}（skill 实体损坏或 worktree 内 .agents symlink 断裂）。恢复：检查 workspace 根 .agents/skills/dev-merge/scripts/ 完整性后重新发起本 workflow`);
     }
     const smokeRoundFails: string[] = [];
     for (let round = 1; round <= MAX_GATE_ROUNDS; round++) {
-      const sm = await world.run("node", [`${repoRoot}/${SMOKE_SCRIPT}`, "--json"], { timeoutMs: 7_200_000 }); // 2026-10-26 用户裁决：≥1h（真机剧本可长跑）
+      const sm = await world.run("node", [SMOKE_SCRIPT, "--json"], { timeoutMs: 300_000 });
       let smJson: { status?: unknown; reason?: unknown; entryCount?: unknown } | null = null;
       try {
         // catch 分支必 throw，此处实指非空载荷；as 非 null 形态让控制流收窄生效
@@ -1023,10 +1245,10 @@ async function main(): Promise<Record<string, unknown>> {
       );
       const reply = await fixer.ask<string>(
         [
-          `workflow dev-merge-gates 第 ${round} 轮 pi extension 启动冒烟失败（${repoRoot}/${SMOKE_SCRIPT}），失败明细：`,
+          `workflow dev-merge-gates 第 ${round} 轮 pi extension 启动冒烟失败（${SMOKE_SCRIPT}），失败明细：`,
           failDetail,
           "",
-          `需要全量输出时可自行重跑：node ${repoRoot}/${SMOKE_SCRIPT} --json。`,
+          `需要全量输出时可自行重跑：node ${SMOKE_SCRIPT} --json。`,
           "",
           "要求：",
           "1. 修复失败涉及的全部问题（package.json main 声明指向缺失文件 → 修声明或补文件；入口加载期报错 → 修对应源码），只改与失败直接相关的文件。",
@@ -1049,7 +1271,7 @@ async function main(): Promise<Record<string, unknown>> {
     }
 
     // changeset 检查（与 quality-gates 同批落盘的独立脚本；缺失时同款检查披露）
-    if (!(await existsRepoPath(CHANGESET_SCRIPT))) {
+    if (!(await existsViaNode(CHANGESET_SCRIPT))) {
       disclosures.push({ item: "changeset-check", reason: "changeset-check 脚本不存在（该分支未含 U1 commit），本轮跳过 changeset 检查并披露" });
       log(`[gates] changeset-check 脚本不存在（该分支未含 U1 commit），本轮跳过 changeset 检查并披露`);
       return;
@@ -1070,7 +1292,7 @@ async function main(): Promise<Record<string, unknown>> {
       "你是 changeset 起草工程师：按 Gate-1a.5 同款分类逻辑处置 changeset 缺失，分类判断必须有 diff 证据，不弹窗问用户。",
     );
     for (let round = 1; round <= MAX_GATE_ROUNDS; round++) {
-      const cs = await world.run("node", [`${repoRoot}/${CHANGESET_SCRIPT}`, "--json"]);
+      const cs = await world.run("node", [CHANGESET_SCRIPT, "--json"]);
       if (cs.exitCode !== 0) {
         throw new Error(`changeset-check exit ${cs.exitCode}（工具错误）：\n${tailLines(`${cs.stderr}\n${cs.stdout}`, 15)}\n按输出处置后重新发起本 workflow`);
       }
@@ -1173,7 +1395,7 @@ async function main(): Promise<Record<string, unknown>> {
 
   await runStep("branch-review", async () => {
     // 触及非测试源码判定（SKILL 1.7 触发条件：未触及源码 → 披露跳过；测试文件与 .md 文档不计入）
-    const df = await gitAt(["diff", `${base}...HEAD`, "--name-only"]);
+    const df = await world.run("git", ["diff", `${base}...HEAD`, "--name-only"]);
     if (df.exitCode !== 0) {
       throw new Error(`git diff ${base}...HEAD --name-only 失败（exit ${df.exitCode}）：${df.stderr.trim()}——确认 base ref 有效后重新发起`);
     }
@@ -1189,7 +1411,7 @@ async function main(): Promise<Record<string, unknown>> {
     }
 
     // 约束动态加载（SKILL 1.7 第 1 步；失败按 CR 门语义终止，不降级空跑）
-    const sc = await world.run("node", [`${repoRoot}/scripts/select-constraints.mjs`, "--base", base]);
+    const sc = await world.run("node", ["scripts/select-constraints.mjs", "--base", base]);
     if (sc.exitCode !== 0) {
       throw new Error(`select-constraints 失败（exit ${sc.exitCode}）：${tailLines(`${sc.stderr}\n${sc.stdout}`, 10)}\n先恢复约束加载（脚本/权限/git 状态）再重新发起本 workflow`);
     }
@@ -1203,7 +1425,7 @@ async function main(): Promise<Record<string, unknown>> {
 
     // agent 定义在盘性检查（.agents 实体缺失/滞后时 fail-fast 指明路径，不静默变维）
     for (const dim of dims) {
-      const p = `${repoRoot}/${AGENT_DIR}/review-${dim}.md`;
+      const p = `${AGENT_DIR}/review-${dim}.md`;
       if (!(await existsViaNode(p))) {
         throw new Error(`review agent 定义缺失：${p}——.agents 实体缺失或滞后，恢复通道 = refs/skills-snapshot 备份 ref；恢复后重新发起本 workflow`);
       }
@@ -1223,11 +1445,11 @@ async function main(): Promise<Record<string, unknown>> {
       }
     }
 
-    const headRes = await gitAt(["rev-parse", "--short", "HEAD"]);
+    const headRes = await world.run("git", ["rev-parse", "--short", "HEAD"]);
     const topic = `dmg-${headRes.exitCode === 0 ? headRes.stdout.trim() : "run"}`;
     // 报告根（skill-data，impl-spec §2.1）：projectRoot 取 git toplevel（在 worktree 根发起；
     // realpath 由 slug 探针内部规范化，解析失败报错不静默）
-    const reportTopRes = await gitAt(["rev-parse", "--show-toplevel"]);
+    const reportTopRes = await world.run("git", ["rev-parse", "--show-toplevel"]);
     if (reportTopRes.exitCode !== 0 || reportTopRes.stdout.trim() === "") {
       throw new Error(`无法解析项目根（git rev-parse --show-toplevel 失败，exit ${reportTopRes.exitCode}）：${reportTopRes.stderr.trim() || "无 stderr"}；确认在 worktree 根发起后重新发起`);
     }
@@ -1250,12 +1472,12 @@ async function main(): Promise<Record<string, unknown>> {
     // projectRoot 与 worktreePath 同值（git toplevel：worktree 场景即本 run 的工作树绝对
     // 路径，R4 多 worktree 并行的区分依据）
     const runProjectRoot = reportTopRes.stdout.trim();
-    const brMetaRes = await gitAt(["rev-parse", "--abbrev-ref", "HEAD"]);
+    const brMetaRes = await world.run("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
     const runBranch = brMetaRes.exitCode === 0 ? brMetaRes.stdout.trim() : "";
-    const headMetaRes = await gitAt(["rev-parse", "HEAD"]);
+    const headMetaRes = await world.run("git", ["rev-parse", "HEAD"]);
     const runHeadCommit = headMetaRes.exitCode === 0 ? headMetaRes.stdout.trim() : "";
     // baseCommit 解析为 hash（base 可能是显式 ref 名；解析失败降级 base 字面量）
-    const baseHashRes = await gitAt(["rev-parse", base]);
+    const baseHashRes = await world.run("git", ["rev-parse", base]);
     const baseCommit = baseHashRes.exitCode === 0 ? baseHashRes.stdout.trim() : base;
     // startedAt（run.json 轮转归档判据；探针结果经 journal 记录，resume/重放值稳定）
     const runNowRes = await world.run("node", ["-e", NODE_ISO_NOW]);
@@ -1329,6 +1551,9 @@ async function main(): Promise<Record<string, unknown>> {
       } catch (e) {
         log(`WARN: [branch-review] run.json 落盘异常（不影响流程结果）：${e instanceof Error ? e.message : String(e)}`);
       }
+      // 阶段观测终态出口：finishBr 是 branch-review 全部终态返回的汇聚点——最后一轮的
+      // round 边界在此统一收尾（round 为直发事件不占打开槽；子阶段中断由 round end 表达）
+      await obsEmit("round", rounds, "end", null);
       return {
         terminated: term,
         rounds,
@@ -1450,7 +1675,7 @@ async function main(): Promise<Record<string, unknown>> {
     // 该类失败最常见形态是报告已写好、JSON 尾部字段错（计数漂移），重试只需重出有效 JSON；
     // 仍败才 review-failure 终态（无降级完成形态的 CR 门语义不变）
     async function dispatchReviewer(dim: string, round: number, activeAll: DmgRecord[]): Promise<ReviewerVerdict> {
-      const agentPath = `${repoRoot}/${AGENT_DIR}/review-${dim}.md`;
+      const agentPath = `${AGENT_DIR}/review-${dim}.md`;
       const reportPath = `${runDir}/round-${round}/review-${dim}.md`;
       const promptLines: string[] = [
         `workflow dev-merge-gates branch-review 第 ${round} 轮——维度 ${dim}。`,
@@ -1528,7 +1753,7 @@ async function main(): Promise<Record<string, unknown>> {
         '2. 逐条证据裁决三档：有真实代码证据 → adjudication="evidence"；reviewer 未给实证 → "unverified"；臆测或纯风格指控 → "downgraded" + note。unverified/downgraded 同样写进聚合报告供人复核，但只有 evidence 条目进修复队列。',
         round >= 2 ? "3. 跨轮身份对齐：延续上轮的条目必须复用问题清单条目 id；新条目不填 id（workflow 统一分配）。" : "3. 全部为新问题，不填 id（workflow 统一分配）。",
         "4. 修复分组：把 evidence 条目按相关性和独立性分组——同文件/同模块/同根因归同组（一个 agent 修一组）；不同组的文件集必须不相交（组间可并行修复、互不冲突）；单条问题独立成组即可，无关联不强行合并。",
-        `5. 拦截前置消解检查（content 类 commit 拦截第一道防线，设计 §4.1）：亲跑只读门禁复现检查 node ${repoRoot}/scripts/select-affected-e2e.mjs --check --base ${base}（e2e 资产防漏登记门禁）。若报出看护目录文件缺 rule 覆盖且该文件在本轮任一修复分组涉及文件中：把报错写明的恢复动作（按报错原文，如在 docs/testing/e2e-map.json 为该文件补 rule）并入涉及该文件的分组表最前一组（提交按分组表顺序执行）的对应条目 guidance，并注明该登记须与修复同批提交——拦截条件在提交时点被消解。报错与全部修复分组文件无关时不处理（既有欠账由补修链在该文件下次提交时承接）。`,
+        `5. 拦截前置消解检查（content 类 commit 拦截第一道防线，设计 §4.1）：亲跑只读门禁复现检查 node scripts/select-affected-e2e.mjs --check --base ${base}（e2e 资产防漏登记门禁）。若报出看护目录文件缺 rule 覆盖且该文件在本轮任一修复分组涉及文件中：把报错写明的恢复动作（按报错原文，如在 docs/testing/e2e-map.json 为该文件补 rule）并入涉及该文件的分组表最前一组（提交按分组表顺序执行）的对应条目 guidance，并注明该登记须与修复同批提交——拦截条件在提交时点被消解。报错与全部修复分组文件无关时不处理（既有欠账由补修链在该文件下次提交时承接）。`,
         "",
         `产出——聚合总报告 ${reportPath}（先建目录）：## Summary（一句话）+ Must-fix/Suggestions 计数 + 问题表（ID|严重度|来源维度|文件|证据|修复方向）+ 修复分组表（组ID|问题ID|涉及文件|分组依据）+ 裁决说明（unverified/downgraded 及原因）。`,
         "工作流会从你返回的 groups + issues 数据确定性渲染每组的修复任务文档（aggregate-4-fixer-<k>.md）——返回 JSON 里的 guidance 务必具体可执行。",
@@ -1912,7 +2137,7 @@ async function main(): Promise<Record<string, unknown>> {
         const files: string[] = [];
         const skipped: string[] = [];
         for (const p of tokens) {
-          if (await existsRepoPath(p)) files.push(p);
+          if (await existsViaNode(p)) files.push(p);
           else skipped.push(p);
         }
         if (skipped.length > 0) {
@@ -1991,21 +2216,29 @@ async function main(): Promise<Record<string, unknown>> {
     let prevActive = Number.MAX_SAFE_INTEGER;
     try {
       for (round = 1; round <= maxRounds; round++) {
+        // 阶段观测：轮边界 + 轮内 review/aggregate/fix 三段；attempt 恒 null（本循环无
+        // attempt 重试维度）。end 出口 = 轮尾正常续跑、申述核实 continue、finishBr（终态
+        // 汇聚）——review/aggregate/fix 中断轮由 round end 表达中断，不单独补子段 end
+        await obsEmit("round", round, "start", null);
         const activeAll = records.filter((r) => r.status === "open" || r.status === "fix-claimed");
         // disputed 条目参与维度派发：must-fix 已清的纯申述核实轮不因维度集为空而跳过审查
         const pendingDisputes = records.filter((r) => r.status === "disputed");
         const activeDims = round === 1 ? dims : [...new Set([...activeAll, ...pendingDisputes].flatMap((r) => (r.sourceDims.length > 0 ? r.sourceDims : [r.dimension])))];
         // phase 名须编译期字面量：循环体复用同名 marker = GUI 单节点；轮次/维度信息归 log/report（下方两行已承载）
         phase("branch-review 审查修复循环（每轮重审活跃维度）");
+        await obsBegin("review", round);
         const verdicts = await mapBatch(activeDims, REVIEWER_BATCH, async (dim) => ({
           dim,
           v: await dispatchReviewer(dim, round, activeAll),
         }));
+        await obsEnd("review", round);
 
         // 聚合裁决（reviewer 全部返回后）+ 问题清单重建（含对账申报套用）
         phase("聚合裁决（跨维度合并与修复分组）");
+        await obsBegin("aggregate", round);
         const agg = await runAggregator(round, verdicts, activeAll);
         await rebuildLedger(round, agg, verdicts);
+        await obsEnd("aggregate", round);
 
         // commitBlocked 条目仍处 open（对账未过回 open，或被拦组内本就未被 fixer 认领的条目）
         // → 立即升 needs-human（改造点 1 防无效重修）：代码未修好或未修且提交持续被拦，不再
@@ -2028,6 +2261,7 @@ async function main(): Promise<Record<string, unknown>> {
           const disputesToVerify = records.filter((r) => r.status === "disputed");
           if (disputesToVerify.length > 0 && round < maxRounds) {
             log(`[branch-review] must-fix 已清，待核实申述 ${disputesToVerify.length} 条（${disputesToVerify.map((r) => r.id).join("、")}）——不收敛，第 ${round + 1} 轮 reviewer 对账核实`);
+            await obsEmit("round", round, "end", null);
             continue;
           }
           // 终态清扫（改造点 3）：收敛出口前显式路径提交全部可归责残留（两条过滤）；失败出口
@@ -2070,7 +2304,10 @@ async function main(): Promise<Record<string, unknown>> {
         // 执行段（改码+跑测试+提交，最长耗时段）——分属不同性质，GUI 观测时修复段的长时间
         // 在途不再伪装成「聚合很慢」
         phase("修复执行（分组修复 + 组级提交）");
+        await obsBegin("fix", round);
         await runFixGroups(groups, round, agg.reportFile);
+        await obsEnd("fix", round);
+        await obsEmit("round", round, "end", null);
       }
     } catch (e) {
       if (e instanceof TerminalError) {
@@ -2121,6 +2358,9 @@ async function main(): Promise<Record<string, unknown>> {
   } catch {
     log("WARN: 终态摘要 artifact 发布失败（不影响流程结果）");
   }
+
+  // 终态统一补记（O 区）：给打开中的 step 补 end + execution end（带 outcome 终态词）
+  await obsCloseExecution(ok ? "done" : "failed");
 
   let terminal: Record<string, unknown>;
   if (!ok) {
