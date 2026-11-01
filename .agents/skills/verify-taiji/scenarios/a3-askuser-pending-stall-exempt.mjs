@@ -143,10 +143,15 @@ export async function run(ctx) {
 	const a1StateDir = process.env.TAIJI_A1_STATE_DIR
 	const a1RealPi = process.env.TAIJI_A1_REAL_PI
 	if (a1StateDir && a1RealPi) {
-		const key = cwd.replace(/[^A-Za-z0-9._-]/g, '_').slice(-80)
-		fs.mkdirSync(a1StateDir, { recursive: true })
-		fs.writeFileSync(path.join(a1StateDir, `spawn-${key}.count`), '1')
-		ev.step({ step: 'mockpi.bypass-primed', channel: 'C', exitCode: 0, stats: { stateDir: a1StateDir, countFile: `spawn-${key}.count=1`, realPi: a1RealPi } })
+		// 壳进程 process.cwd() 是 OS 真实路径形态（macOS /var → /private/var，第 4 轮实测
+		// trace 佐证）——realpath 后再算 key，与壳的 count 文件名对齐。
+		const realCwd = fs.realpathSync(cwd)
+		for (const base of new Set([cwd, realCwd])) {
+			const key = base.replace(/[^A-Za-z0-9._-]/g, '_').slice(-80)
+			fs.mkdirSync(a1StateDir, { recursive: true })
+			fs.writeFileSync(path.join(a1StateDir, `spawn-${key}.count`), '1')
+		}
+		ev.step({ step: 'mockpi.bypass-primed', channel: 'C', exitCode: 0, stats: { stateDir: a1StateDir, realPi: a1RealPi, note: 'count=1 预写（/var 与 /private/var 双形态）' } })
 		log(`mock-pi bypass primed: stateDir=${a1StateDir}`)
 	}
 	const created = await protocol.call('session.create', { cwd, label: 'a3-askuser-stall' }, { timeoutMs: 120_000 })
@@ -189,11 +194,11 @@ export async function run(ctx) {
 	ev.step({ step: 'ui.select-session', channel: 'A', exitCode: 0, stats: { selector: rowSel } })
 	await ui.expectVisible('testid=form-overlay', { timeoutMs: 120_000 })
 	const formShownAt = Date.now()
-	const q0 = await ui.expectVisible('testid=form-question-text', { timeoutMs: 10_000 })
-	ev.assert('A: ask_user 表单呈现（form-overlay + 题面文本，锚点在场的用户可见面）', Boolean(q0), {
+	const q0 = await ui.expectVisible('testid=form-question-text-multi', { timeoutMs: 15_000 })
+	ev.assert('A: ask_user 表单呈现（form-overlay + 两题 multi 题面，锚点在场的用户可见面）', Boolean(q0), {
 		channel: 'A',
-		expected: 'form-overlay + form-question-text 可见',
-		actual: q0 ? '可见' : '90s 未现（faux step1 未消费或 form 通道断）',
+		expected: 'form-overlay + form-question-text-multi 可见（多题形态；单题形态才渲染 form-question-text——FormOverlay.vue:219 v-if !multiQuestion）',
+		actual: q0 ? '可见' : '15s 未现（faux step1 未消费或 form 通道断）',
 	})
 	await ev.shot(ui.page, 'a3-form-pending')
 
