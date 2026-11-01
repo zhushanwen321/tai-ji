@@ -40,28 +40,41 @@
 // 观测（旧调用零变化）；合法性校验（两 id 同给、路径安全、sampleType 词表）在公共层
 // initObservation（告警并关闭，不 fail-fast——观测是辅助功能）。观测层的拼入与平台钩子
 // 见壳；本文件只声明阶段边界（obsBegin/obsEnd/withStage/obsEmit/obsCloseExecution）。
+// 观测启用（O 区形态层）：先于全部参数校验——已传合法观测 ID 的执行（含任意参数校验
+// 失败早退）都有 execution 边界；attempt 为 cr-fix 重发起序号，进入 cr-fix 前回填
+obsCtx = initObservation("pr-cr-fix", "pr-lifecycle", null); // skill=所属 skill 名；stage=流程阶段名（统计按 skill/stage 筛选，引擎名不进事件）
+// 观测 home 装配先于参数校验（invalid-args 等早退边界可落盘；裸 node 探针——引擎 PATH
+// 无 node 时装配失败降级为「路径未装配」告警，不阻断业务）；execution start 紧随其后
+{
+  const obsHomeRes = await world.run("node", ["-e", "process.stdout.write(require('os').homedir())"]);
+  if (obsHomeRes.exitCode === 0 && obsHomeRes.stdout.trim() !== "") obsAttachHome(obsHomeRes.stdout.trim());
+}
+await obsEmit("execution", null, "start", null);
+// 参数/装配早退的观测收尾：initObservation 之后、终态统一补记之前的 throw 一律先经
+// 本 helper 补 execution end（带 outcome）再抛——静态穷举保证无「init 后直接 throw 漏记」
+async function failObs(kind: string, msg: string): Promise<never> {
+  await obsCloseExecution(kind);
+  throw new Error(msg);
+}
 const VALID_ARG_KEYS = new Set(["base", "maxRounds", "reviewers", "simplifyMode", "skipSteps", "taskId", "executionId", "sampleType"]);
 for (const key of Object.keys(args)) {
   if (!VALID_ARG_KEYS.has(key)) {
-    throw new Error(`未知参数: ${key}（合法参数: ${[...VALID_ARG_KEYS].join("/")}）`);
+    await failObs("invalid-args", `未知参数: ${key}（合法参数: ${[...VALID_ARG_KEYS].join("/")}）`);
   }
 }
-// 观测启用（O 区形态层）：先于参数窄化——已传合法观测 ID 的执行（含后续参数校验失败
-// 早退）都有 execution 边界；attempt 为 cr-fix 重发起序号，进入 cr-fix 前回填
-obsCtx = initObservation("pr-lifecycle", "pr-lifecycle", null);
 const base = typeof args.base === "string" && args.base.trim() !== "" ? args.base.trim() : "main"; // 默认 main 仅适用 dev→main 终局 PR；feature→dev 的 PR 调用方必须传 args.base=<目标 dev 分支>（pr-cr-fix SKILL 的 PR_BASE 约定）
 // 上界 50：每轮 cr-fix 产生 ~2 条 report（逐轮 + 每 attempt 汇总），引擎 256 条/run
 // 上限会在 maxRounds ≥ ~126 时中途击穿整 run；50 已远超实际收敛轮数（stuck 阈值 3）。
 // 显式非法值（非数字/<1）fail-fast 不静默回落默认——与拼错键 fail-fast 同姿态
 if (args.maxRounds !== undefined && (typeof args.maxRounds !== "number" || !Number.isFinite(args.maxRounds) || args.maxRounds < 1)) {
-  throw new Error(`参数 maxRounds 非法：${String(args.maxRounds)}（应为 ≥1 的数字，上界 50 自动截断）——0/负数/非数字不静默回落默认 10`);
+  await failObs("invalid-args", `参数 maxRounds 非法：${String(args.maxRounds)}（应为 ≥1 的数字，上界 50 自动截断）——0/负数/非数字不静默回落默认 10`);
 }
 const maxRounds = args.maxRounds === undefined ? 10 : Math.min(50, Math.floor(args.maxRounds));
 const reviewers = Array.isArray(args.reviewers)
   ? (args.reviewers as unknown[]).filter((x): x is string => typeof x === "string" && x.trim() !== "")
   : [];
 if (args.simplifyMode !== undefined && args.simplifyMode !== "apply" && args.simplifyMode !== "report") {
-  throw new Error(`参数 simplifyMode 非法：${String(args.simplifyMode)}（应为 "apply" | "report"）——apply 是自动改码模式，拼错值静默按 apply 处理会放大授权范围，故 fail-fast`);
+  await failObs("invalid-args", `参数 simplifyMode 非法：${String(args.simplifyMode)}（应为 "apply" | "report"）——apply 是自动改码模式，拼错值静默按 apply 处理会放大授权范围，故 fail-fast`);
 }
 const simplifyMode = args.simplifyMode === "report" ? "report" : "apply";
 const STEP_IDS = [
@@ -73,7 +86,7 @@ const skipSteps = Array.isArray(args.skipSteps)
   : [];
 for (const s of skipSteps) {
   if (!(STEP_IDS as readonly string[]).includes(s)) {
-    throw new Error(`skipSteps 含未知 step id "${s}"（合法值：${STEP_IDS.join("/")}）`);
+    await failObs("invalid-args", `skipSteps 含未知 step id "${s}"（合法值：${STEP_IDS.join("/")}）`);
   }
 }
 const skipSet = new Set(skipSteps);
@@ -1540,7 +1553,7 @@ phase("环境预检");
   }
 }
 if (nodeAbs === "") {
-  throw new Error('无法定位 node 可执行文件（command -v / nvm 目录 / 常见安装位均未命中）：本 workflow 的统一 commit 经 PATH 前缀执行（pre-commit 钩子子进程需要可用的 node/npx/pnpm）。恢复动作：把 nvm node 暴露到系统级 PATH（如 sudo ln -sf "$HOME"/.nvm/versions/node/<版本>/bin/node /usr/local/bin/node，或向 /etc/paths.d/ 追加 nvm bin 目录）后重新发起。');
+  await failObs('setup-failure', '无法定位 node 可执行文件（command -v / nvm 目录 / 常见安装位均未命中）：本 workflow 的统一 commit 经 PATH 前缀执行（pre-commit 钩子子进程需要可用的 node/npx/pnpm）。恢复动作：把 nvm node 暴露到系统级 PATH（如 sudo ln -sf "$HOME"/.nvm/versions/node/<版本>/bin/node /usr/local/bin/node，或向 /etc/paths.d/ 追加 nvm bin 目录）后重新发起。');
 }
 log(`node 可执行：${nodeAbs}`);
 
@@ -1548,16 +1561,20 @@ log(`node 可执行：${nodeAbs}`);
 // projectRoot 取 git toplevel（workflow 在仓库根发起，show-toplevel 即项目根；realpath 由
 // slug 探针内部完成——symlink/尾斜杠/.. 形态全部规范化，解析失败报错不静默）。
 {
+  // （观测 home 装配与 execution start 已在参数校验前完成——本段任何 throw 的
+  // execution end 均可落盘）
+
   const topRes = await world.run("git", ["rev-parse", "--show-toplevel"]);
   if (topRes.exitCode !== 0 || topRes.stdout.trim() === "") {
-    throw new Error(`无法解析项目根（git rev-parse --show-toplevel 失败，exit ${topRes.exitCode}）：${topRes.stderr.trim() || "无 stderr"}；确认在仓库根发起后重新发起`);
+    await failObs("setup-failure", `无法解析项目根（git rev-parse --show-toplevel 失败，exit ${topRes.exitCode}）：${topRes.stderr.trim() || "无 stderr"}；确认在仓库根发起后重新发起`);
   }
   const homeRes = await runNode(["-e", NODE_HOME]);
   const slugRes = await runNode(["-e", NODE_PROJECT_SLUG, topRes.stdout.trim()]);
   const home = homeRes.exitCode === 0 ? homeRes.stdout.trim() : "";
   const slug = slugRes.exitCode === 0 ? slugRes.stdout.trim() : "";
   if (home === "" || !/^.+-[0-9a-f]{8}$/.test(slug)) {
-    throw new Error(
+    await failObs(
+      "setup-failure",
       `skillDataDir 探针失败（home=${home || "未解析"}，slug=${slug || "未解析"}）：cr-fix 报告根与 pr-review 产物根无法落定。` +
         `恢复动作：确认 node 可执行后重新发起。探针明细：home exit=${homeRes.exitCode} ${homeRes.stderr.trim()}；slug exit=${slugRes.exitCode} ${slugRes.stderr.trim()}`,
     );
@@ -1567,9 +1584,6 @@ log(`node 可执行：${nodeAbs}`);
   prReviewDir = `${skillDataRoot}/pr-review/${slug}`;
   runProjectRoot = topRes.stdout.trim();
   log(`[skill-data] cr-fix 报告根=${rflReportRoot}；pr-review 产物根=${prReviewDir}`);
-  // 观测落盘路径装配（home 探针成功）+ 执行级 start（O 区；此后事件可落盘）
-  obsAttachHome(home);
-  await obsEmit("execution", null, "start", null);
 }
 
 phase("发起前检查");

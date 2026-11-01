@@ -59,8 +59,12 @@ const OBS_CLI_PATH = join(homedir(), ".agents", "scripts", "workflow-observe.mjs
 
 // ── 观测契约（O 区）：三源同步锚──
 const OBS_EVENT_FIELDS = ["execution_id", "task_id", "skill", "stage", "step", "round", "attempt", "event", "timestamp", "sample_type"];
-// stage 词表 = workflow 名（业务正文 initObservation 第一实参）
-const OBS_STAGES = new Set(["dev-merge-gates", "pr-lifecycle"]);
+// 观测归属词表（initObservation 前两实参；统计按 skill/stage 筛选，引擎名不进事件）：
+// skill = 业务所属 skill 名；stage = 业务所属流程阶段名（gates+branch-review =
+// dev-merge-gates 承载的 dev-merge 两个流程阶段的连接标识；pr-lifecycle = pr-cr-fix 的
+// 全链阶段）
+const OBS_SKILLS = new Set(["dev-merge", "pr-cr-fix"]);
+const OBS_STAGES = new Set(["gates+branch-review", "pr-lifecycle"]);
 // step 词表 = 串行步骤名（execution = 执行级边界事件；round 为直发轮次边界，不占打开槽）
 const OBS_STEPS = new Set([
   "execution", "gates", "branch-review", "review", "aggregate", "fix", "round",
@@ -235,12 +239,16 @@ function assertNoLocalPath(product, rel) {
 //    级边界与终态统一补记出口在场、两侧产物步骤调用点与 shared 一致、ID 安全规则与
 //    workflow-observe.mjs 字面一致。未接入的 workflow 显式说明跳过（不静默漏检） ──
 function checkObservationContract(name, shared, obsLayer, zcOut, piOut, obsCli, errors) {
-  const stageHits = [...shared.matchAll(/initObservation\("([A-Za-z0-9-]+)"/g)];
+  // 双实参提取（调用形态固定为两个字面量）：组 1 = skill、组 2 = stage
+  const stageHits = [...shared.matchAll(/initObservation\("([^"]+)",\s*"([^"]+)"/g)];
   if (stageHits.length === 0) {
     console.log(`  观测契约：${name} 未接入观测（无 initObservation 调用点）——跳过观测维度（产物一致性检查照常）`);
     return;
   }
-  const stageSet = new Set(stageHits.map((m) => m[1]));
+  const stageSet = new Set(stageHits.map((m) => m[2]));
+  for (const m of stageHits) {
+    if (!OBS_SKILLS.has(m[1])) errors.push(`${name}: 观测 skill「${m[1]}」不在词表（合法：${[...OBS_SKILLS].join("/")}）——skill=业务所属 skill 名，不是引擎/workflow 名`);
+  }
   const stepExtractor = (text) =>
     [...text.matchAll(/\b(?:obsBegin|withStage)\("([A-Za-z0-9-]+)"/g)].map((m) => m[1]).sort();
   const sharedSteps = stepExtractor(shared);
@@ -272,7 +280,8 @@ function checkObservationContract(name, shared, obsLayer, zcOut, piOut, obsCli, 
   if (!sameSet(sharedSteps, zcSteps)) errors.push(`${name}: zcode 产物的观测步骤调用点（${zcSteps.join(",") || "无"}）与 shared（${sharedSteps.join(",") || "无"}）不一致`);
   if (!sameSet(sharedSteps, piSteps)) errors.push(`${name}: pi 产物的观测步骤调用点（${piSteps.join(",") || "无"}）与 shared（${sharedSteps.join(",") || "无"}）不一致——pi 改写/TS 剥离管线不应影响观测调用点`);
   if (errors.length === 0) {
-    console.log(`  观测契约：${name} stage=${[...stageSet].join("/")} steps=${sharedSteps.join("/")}（两侧调用点一致，字段齐全，ID 规则与 CLI 一致）`);
+    const skillSet = new Set(stageHits.map((m) => m[1]));
+    console.log(`  观测契约：${name} skill=${[...skillSet].join("/")} stage=${[...stageSet].join("/")} steps=${sharedSteps.join("/")}（两侧调用点一致，字段齐全，ID 规则与 CLI 一致）`);
   }
 }
 

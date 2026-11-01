@@ -608,21 +608,13 @@ async function obsCloseExecution(outcome) {
 // 写盘）由壳拼接的公共观测层（observability.shared.ts）承载，本文件只声明阶段边界
 //   （obsBegin/obsEnd/withStage/obsEmit/obsCloseExecution）。
 const VALID_ARG_KEYS = new Set(["base", "maxRounds", "taskId", "executionId", "sampleType"]);
-for (const key of Object.keys(args)) {
-    if (!VALID_ARG_KEYS.has(key)) {
-        throw new Error(`未知参数: ${key}（合法参数: ${[...VALID_ARG_KEYS].join("/")}）`);
-    }
+// 参数/装配早退的观测收尾：initObservation 之后、终态统一补记之前的 throw 一律先经
+// 本 helper 补 execution end（带 outcome）再抛——静态穷举保证无「init 后直接 throw 漏记」。
+// （参数校验在 main() 内执行：本文件为 return main() 形态，顶层不可 await）
+async function failObs(kind, msg) {
+    await obsCloseExecution(kind);
+    throw new Error(msg);
 }
-if (args.base !== undefined && (typeof args.base !== "string" || args.base.trim() === "")) {
-    throw new Error(`参数 base 非法：${String(args.base)}（应为非空 ref 名，缺省由 workflow 自解析 merge-base）`);
-}
-if (args.maxRounds !== undefined && (typeof args.maxRounds !== "number" || !Number.isFinite(args.maxRounds) || args.maxRounds < 1)) {
-    throw new Error(`参数 maxRounds 非法：${String(args.maxRounds)}（应为 ≥1 的数字，上界 50 自动截断）`);
-}
-const maxRounds = args.maxRounds === undefined ? 10 : Math.min(50, Math.floor(args.maxRounds));
-// 观测启用（O 区形态层）：先于参数窄化——已传合法观测 ID 的执行（含参数校验失败
-// 早退）都有 execution 边界（合法性校验在 initObservation 内，告警并关闭不 fail-fast）
-obsCtx = initObservation("dev-merge-gates", "dev-merge-gates", null);
 // ── 常量 ──
 const MAX_GATE_ROUNDS = 3; // gates FAIL 修复子循环上限（dev-merge SKILL 1.6 口径：≤3 轮）
 const STUCK_THRESHOLD = 3; // 连续 N 轮 must-fix 不降判 stuck
@@ -834,14 +826,33 @@ async function runStep(id, fn) {
     }
 }
 async function main() {
-    report({ stage: "start", base: args.base ?? "auto(merge-base github/main HEAD)" });
-    // 观测落盘路径装配（O 区；home 探针独立于业务 REPORT_ROOT 探针——装配须先于全部阶段事件）
+    // 观测启用（O 区形态层）：main 最前——已传合法观测 ID 的执行（含参数校验失败早退）
+    // 都有 execution 边界（合法性校验在 initObservation 内，告警并关闭不 fail-fast）
+    obsCtx = initObservation("dev-merge", "gates+branch-review", null); // skill=所属 skill 名；stage=本 workflow 承载的两流程阶段（统计按 skill/stage 筛选，引擎名不进事件）
+    // 观测 home 装配先于参数校验（invalid-args 等早退边界可落盘；探针失败降级为
+    // 「路径未装配」告警，不阻断业务）；execution start 紧随其后
     {
         const obsHomeRes = await world.run("node", ["-e", "process.stdout.write(require('os').homedir())"]);
         if (obsHomeRes.exitCode === 0 && obsHomeRes.stdout.trim() !== "")
             obsAttachHome(obsHomeRes.stdout.trim());
-        await obsEmit("execution", null, "start", null);
     }
+    await obsEmit("execution", null, "start", null);
+    // ── 参数窄化 + 白名单（fail-fast；自顶层移入——failObs 需 await，return main() 形态
+    //    的顶层不可 await）──
+    for (const key of Object.keys(args)) {
+        if (!VALID_ARG_KEYS.has(key)) {
+            await failObs("invalid-args", `未知参数: ${key}（合法参数: ${[...VALID_ARG_KEYS].join("/")}）`);
+        }
+    }
+    if (args.base !== undefined && (typeof args.base !== "string" || args.base.trim() === "")) {
+        await failObs("invalid-args", `参数 base 非法：${String(args.base)}（应为非空 ref 名，缺省由 workflow 自解析 merge-base）`);
+    }
+    if (args.maxRounds !== undefined && (typeof args.maxRounds !== "number" || !Number.isFinite(args.maxRounds) || args.maxRounds < 1)) {
+        await failObs("invalid-args", `参数 maxRounds 非法：${String(args.maxRounds)}（应为 ≥1 的数字，上界 50 自动截断）`);
+    }
+    const maxRounds = args.maxRounds === undefined ? 10 : Math.min(50, Math.floor(args.maxRounds));
+    report({ stage: "start", base: args.base ?? "auto(merge-base github/main HEAD)" });
+    // （观测 home 装配与 execution start 已在参数校验前完成）
     async function existsViaNode(path) {
         const r = await world.run("node", ["-e", EXISTS, path]);
         return r.exitCode === 0;
