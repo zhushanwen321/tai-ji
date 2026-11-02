@@ -345,7 +345,7 @@ const shellQuote = (p: string): string => `'${p.replaceAll("'", "'\\''")}'`;
 // 命令名不可变量化）：wt 为空时脚本为 exec "$@" 直执行（语义 = 环境 cwd 透传），
 // 非空时前置 cd。业务参数走位置参数（"$@"），零 shell 转义面。opts 省略时不得显式传
 // undefined 第三参（引擎将其规范化为 null 后拒绝：arg 3 must be options or omitted）。
-const runSh = (cmd: string, a: readonly string[], opts?: { timeoutMs?: number }) => {
+const runSh = (cmd: string, a: readonly string[] = [], opts?: { timeoutMs?: number }) => {
   const bashArgs = ["-c", wt === "" ? `exec "$@"` : `cd ${shellQuote(wt)} && exec "$@"`, "bash", cmd, ...a];
   return opts === undefined
     ? world.run("bash", bashArgs)
