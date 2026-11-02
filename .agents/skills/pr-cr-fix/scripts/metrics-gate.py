@@ -335,8 +335,19 @@ def main_inner() -> None:
         print("ERROR: 未找到 fallow。安装：npm i -g fallow（实测版本 2.88.2）", file=sys.stderr)
         sys.exit(2)
 
-    repo_root = Path(subprocess.check_output(
-        ["git", "rev-parse", "--show-toplevel"], text=True).strip())
+    # repo 根按当前 cwd 解析：cwd 不在 git 仓库内（典型 = 会话目录绑在 workspace 根，
+    # bare repo + worktree 容器本身不是 git 仓库）时按契约走 exit 2 工具错误——旧代码
+    # 让 CalledProcessError 裸抛，traceback + exit 1 会被读成「门禁不通过」而非「跑错
+    # 目录」，排查方向被带偏（与 coverage-gate.py 同族同一修复）
+    root_probe = subprocess.run(["git", "rev-parse", "--show-toplevel"],
+                                capture_output=True, text=True)
+    if root_probe.returncode != 0 or root_probe.stdout.strip() == "":
+        print(f"ERROR: 当前目录不在 git 仓库内（git rev-parse --show-toplevel exit "
+              f"{root_probe.returncode}）——repo 根按当前 cwd 解析，本脚本必须在待测 "
+              f"feature worktree 根目录运行。恢复：cd 到目标 worktree 根后重跑",
+              file=sys.stderr)
+        sys.exit(2)
+    repo_root = Path(root_probe.stdout.strip())
     thresholds = load_thresholds(repo_root)
     real_cov = load_real_coverage(repo_root, base)
     report = run_audit(repo_root, base)

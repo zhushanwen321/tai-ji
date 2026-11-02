@@ -526,7 +526,19 @@ def main() -> None:
     extra_arg = args[args.index("--extra-packages") + 1] if "--extra-packages" in args else None
     DEBUG = "--debug" in args
 
-    repo_root = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
+    # repo 根按当前 cwd 解析：cwd 不在 git 仓库内（典型 = 会话目录绑在 workspace 根，
+    # bare repo + worktree 容器本身不是 git 仓库）时按契约走 exit 2 工具错误——旧代码
+    # 让 CalledProcessError 裸抛，traceback + exit 1 会被读成「门禁不通过」而非「跑错
+    # 目录」，排查方向被带偏（2026-11-02 dev-merge-gates dwfrun-0aa1e74b 同族事故的
+    # 手工路径侧）
+    root_probe = sh(["git", "rev-parse", "--show-toplevel"])
+    if root_probe.returncode != 0 or root_probe.stdout.strip() == "":
+        print(f"ERROR: 当前目录不在 git 仓库内（git rev-parse --show-toplevel exit "
+              f"{root_probe.returncode}）——repo 根按当前 cwd 解析，本脚本必须在待测 "
+              f"feature worktree 根目录运行。恢复：cd 到目标 worktree 根后重跑",
+              file=sys.stderr)
+        sys.exit(2)
+    repo_root = Path(root_probe.stdout.strip())
     review_dirs = resolve_review_dirs(repo_root)
     # head 锚（design.md §7 风险 3）：写进 coverage.json 供 pr-pre-merge.sh 双比对——
     # worktree 删除重建可复用同一 project-slug，base 相同 ≠ 产物新鲜；解析失败写空串，
