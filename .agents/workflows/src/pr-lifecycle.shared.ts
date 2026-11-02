@@ -1967,11 +1967,15 @@ async function metricsFixContext(metPassed: boolean): Promise<string> {
 // 大 diff 下 gate 脚本 stdout 可超引擎 world.run 256KB 捕获上限（2026-10-28 实测
 // coverage-gate 单次 318KB 判 failed）——全量输出重定向日志文件（.tmp/，gitignore），
 // stdout 只回传尾部供失败摘要消费；exit code 原样透传（gate 判定唯一权威通道，
-// 失败明细走 coverage.json / metrics.json 产物文件，不经 stdout 解析）
+// 失败明细走 coverage.json / metrics.json 产物文件，不经 stdout 解析）。
+// 重定向前先建 .tmp：gitignore 只声明不入库，不保证目录存在——新 worktree 无 .tmp 时
+// bash 重定向直接失败、gate 命令不执行，ec=1 被误读成 gate 失败且产物明细停留在旧
+// 文件（2026-11-02 dev-0.12.2 实测）。mkdir 失败 = 磁盘/权限级环境故障，exit 2 走
+// 工具错误分支（不冒充 gate 判定）
 const GATE_STDOUT_TAIL_BYTES = 60_000;
 const runGateCapped = (label: string, argv: string[]) => {
   const logPath = `.tmp/prl-gate-${label}.log`;
-  const inner = `${argv.map((a) => shq(a)).join(" ")} > ${shq(logPath)} 2>&1; ec=$?; echo "gate-exit=$ec（完整日志 ${logPath}）"; tail -c ${GATE_STDOUT_TAIL_BYTES} ${shq(logPath)}; exit $ec`;
+  const inner = `mkdir -p .tmp || exit 2; ${argv.map((a) => shq(a)).join(" ")} > ${shq(logPath)} 2>&1; ec=$?; echo "gate-exit=$ec（完整日志 ${logPath}）"; tail -c ${GATE_STDOUT_TAIL_BYTES} ${shq(logPath)}; exit $ec`;
   return runSh("bash", ["-c", inner], { timeoutMs: 7_200_000 });
 };
 
