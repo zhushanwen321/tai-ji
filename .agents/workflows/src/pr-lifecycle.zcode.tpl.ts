@@ -19,6 +19,9 @@ args:
     type: number
     description: cr-fix review→fix 循环轮次上限
     default: 10
+  worktree:
+    type: string
+    description: feature worktree 绝对路径（可选）。宿主会话目录即该 worktree 时可省（命令按环境 cwd 执行）；zcode 会话目录绑 workspace 根（bare 容器，非 git 仓库）时必须传——全部命令经 bash -c 'cd <worktree> && exec "$@"' 包装执行
   reviewers:
     type: json
     description: review 维度白名单（字符串数组，对 .agents/skills/dev-merge/agents/review-*.md 按路径子串匹配裁剪；资产所有权归 dev-merge，本流程仅经此显式逃生舱引用）；缺省不传 = cr-fix 代码审查维度不派（默认，与分支无关）；显式传入 = 按白名单派发审查

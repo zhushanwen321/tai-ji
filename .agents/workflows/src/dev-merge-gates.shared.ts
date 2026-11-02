@@ -42,7 +42,27 @@
 // 未启用处理。sampleType 合法值 production|selftest（默认 production）。观测实现（事件
 // 写盘）由壳拼接的公共观测层（observability.shared.ts）承载，本文件只声明阶段边界
 //   （obsBegin/obsEnd/withStage/obsEmit/obsCloseExecution）。
-const VALID_ARG_KEYS = new Set(["base", "maxRounds", "taskId", "executionId", "sampleType"]);
+const VALID_ARG_KEYS = new Set(["base", "maxRounds", "worktree", "taskId", "executionId", "sampleType"]);
+
+// ── 显式 worktree 根（可选参数 worktree，绝对路径）──
+// zcode 宿主的命令执行 cwd 绑会话工作目录；会话目录是 workspace 根（bare 容器，非
+// git 仓库）时本 workflow 的相对路径脚本与 git 调用全部失效（exit 128 not a git
+// repository）——该形态必须传 worktree，全部命令经 bash -c 'cd <worktree> && exec
+// "$@"' 包装执行；不传 = 沿用环境 cwd（宿主目录即 feat worktree 的形态，pi 宿主常态）。
+// 业务参数走位置参数（"$@"），零 shell 转义面。wt 在参数校验段赋值；赋值前的观测
+// home 探针（cwd 无关）以空值走透传分支。
+let wt = "";
+const shellQuote = (p: string): string => `'${p.replaceAll("'", "'\\''")}'`;
+// 恒经 world.run("bash", ...) 字面量命令（zcode 编译器要求 world.run 首参为编译期字面量，
+// 命令名不可变量化）：wt 为空时脚本为 exec "$@" 直执行（语义 = 环境 cwd 透传），
+// 非空时前置 cd。业务参数走位置参数（"$@"），零 shell 转义面。opts 省略时不得显式传
+// undefined 第三参（引擎将其规范化为 null 后拒绝：arg 3 must be options or omitted）。
+const runSh = (cmd: string, a: readonly string[], opts?: { timeoutMs?: number }) => {
+  const bashArgs = ["-c", wt === "" ? `exec "$@"` : `cd ${shellQuote(wt)} && exec "$@"`, "bash", cmd, ...a];
+  return opts === undefined
+    ? world.run("bash", bashArgs)
+    : world.run("bash", bashArgs, opts);
+};
 
 // 参数/装配早退的观测收尾：initObservation 之后、终态统一补记之前的 throw 一律先经
 // 本 helper 补 execution end（带 outcome）再抛——静态穷举保证无「init 后直接 throw 漏记」。
@@ -478,7 +498,7 @@ async function main(): Promise<Record<string, unknown>> {
   // 观测 home 装配先于参数校验（invalid-args 等早退边界可落盘；探针失败降级为
   // 「路径未装配」告警，不阻断业务）；execution start 紧随其后
   {
-    const obsHomeRes = await world.run("node", ["-e", "process.stdout.write(require('os').homedir())"]);
+    const obsHomeRes = await runSh("node", ["-e", "process.stdout.write(require('os').homedir())"]);
     if (obsHomeRes.exitCode === 0 && obsHomeRes.stdout.trim() !== "") obsAttachHome(obsHomeRes.stdout.trim());
   }
   await obsEmit("execution", null, "start", null);
@@ -493,23 +513,32 @@ async function main(): Promise<Record<string, unknown>> {
   if (args.base !== undefined && (typeof args.base !== "string" || args.base.trim() === "")) {
     await failObs("invalid-args", `参数 base 非法：${String(args.base)}（应为非空 ref 名，缺省由 workflow 自解析 merge-base）`);
   }
-  if (args.maxRounds !== undefined && (typeof args.maxRounds !== "number" || !Number.isFinite(args.maxRounds) || args.maxRounds < 1)) {
-    await failObs("invalid-args", `参数 maxRounds 非法：${String(args.maxRounds)}（应为 ≥1 的数字，上界 50 自动截断）`);
+  const rawMaxRounds: unknown = args.maxRounds;
+  if (rawMaxRounds !== undefined && (typeof rawMaxRounds !== "number" || !Number.isFinite(rawMaxRounds) || rawMaxRounds < 1)) {
+    await failObs("invalid-args", `参数 maxRounds 非法：${String(rawMaxRounds)}（应为 ≥1 的数字，上界 50 自动截断）`);
   }
-  const maxRounds = args.maxRounds === undefined ? 10 : Math.min(50, Math.floor(args.maxRounds));
+  const maxRounds =
+    typeof rawMaxRounds === "number" && rawMaxRounds >= 1
+      ? Math.min(50, Math.floor(rawMaxRounds))
+      : 10;
+  const rawWorktree = typeof args.worktree === "string" ? args.worktree.trim() : "";
+  if (rawWorktree !== "" && !rawWorktree.startsWith("/")) {
+    await failObs("invalid-args", `参数 worktree 非法：${rawWorktree}（应为 feat worktree 绝对路径；宿主会话目录不是该 worktree 时必传）`);
+  }
+  wt = rawWorktree;
 
   report({ stage: "start", base: args.base ?? "auto(merge-base github/main HEAD)" });
 
   // （观测 home 装配与 execution start 已在参数校验前完成）
 
   async function existsViaNode(path: string): Promise<boolean> {
-    const r = await world.run("node", ["-e", EXISTS, path]);
+    const r = await runSh("node", ["-e", EXISTS, path]);
     return r.exitCode === 0;
   }
 
   // porcelain 过滤 .review/.tmp（脚本自持目录），与 pr-lifecycle dirtyWorktree 同源
   async function dirtyFiles(): Promise<string[]> {
-    const st = await world.run("git", ["status", "--porcelain"]);
+    const st = await runSh("git", ["status", "--porcelain"]);
     if (st.exitCode !== 0) {
       throw new Error(`git status --porcelain 失败（exit ${st.exitCode}）：${st.stderr.trim() || "无 stderr"}；确认 cwd 是有效 git 仓库`);
     }
@@ -785,7 +814,7 @@ async function main(): Promise<Record<string, unknown>> {
       const res = results.get(gid)!;
       if (res.committed) {
         contentQueue.shift();
-        const h = await world.run("git", ["rev-parse", "--short", "HEAD"]);
+        const h = await runSh("git", ["rev-parse", "--short", "HEAD"]);
         const hash = h.exitCode === 0 ? h.stdout.trim() : "未知";
         disclosures.push({
           item: `commit-repair-r${round}-${gid}`,
@@ -818,7 +847,7 @@ async function main(): Promise<Record<string, unknown>> {
   // base 解析（与 quality-gates.mjs resolveBase 的 dev-merge 侧同口径：显式 > merge-base github/main HEAD > main）
   let base = typeof args.base === "string" ? args.base.trim() : "";
   if (base === "") {
-    const mb = await world.run("git", ["merge-base", "github/main", "HEAD"]);
+    const mb = await runSh("git", ["merge-base", "github/main", "HEAD"]);
     base = mb.exitCode === 0 ? mb.stdout.trim() : "main";
   }
   log(`[gates] base=${base}（分支增量口径，显式传值恒优先）`);
@@ -859,7 +888,7 @@ async function main(): Promise<Record<string, unknown>> {
     for (let round = 1; round <= MAX_GATE_ROUNDS; round++) {
       // timeoutMs 必设：quality-gates 全量（typecheck 三处 + 增量 coverage + metrics）
       // 真机耗时在分钟级，300s 默认上限会把正常执行误判为超时拒绝（连续两跑实证）
-      const last = await world.run("node", [GATES_SCRIPT, "--side", "dev-merge", "--base", base, "--json"], { timeoutMs: 1_800_000 });
+      const last = await runSh("node", [GATES_SCRIPT, "--side", "dev-merge", "--base", base, "--json"], { timeoutMs: 1_800_000 });
       const lastJson = parseGatesJson(last.stdout);
       if (last.exitCode === 0) {
         gatesStatus = "pass";
@@ -936,7 +965,7 @@ async function main(): Promise<Record<string, unknown>> {
     }
     const smokeRoundFails: string[] = [];
     for (let round = 1; round <= MAX_GATE_ROUNDS; round++) {
-      const sm = await world.run("node", [SMOKE_SCRIPT, "--json"], { timeoutMs: 300_000 });
+      const sm = await runSh("node", [SMOKE_SCRIPT, "--json"], { timeoutMs: 300_000 });
       let smJson: { status?: unknown; reason?: unknown; entryCount?: unknown } | null = null;
       try {
         // catch 分支必 throw，此处实指非空载荷；as 非 null 形态让控制流收窄生效
@@ -1023,7 +1052,7 @@ async function main(): Promise<Record<string, unknown>> {
       "你是 changeset 起草工程师：按 Gate-1a.5 同款分类逻辑处置 changeset 缺失，分类判断必须有 diff 证据，不弹窗问用户。",
     );
     for (let round = 1; round <= MAX_GATE_ROUNDS; round++) {
-      const cs = await world.run("node", [CHANGESET_SCRIPT, "--json"]);
+      const cs = await runSh("node", [CHANGESET_SCRIPT, "--json"]);
       if (cs.exitCode !== 0) {
         throw new Error(`changeset-check exit ${cs.exitCode}（工具错误）：\n${tailLines(`${cs.stderr}\n${cs.stdout}`, 15)}\n按输出处置后重新发起本 workflow`);
       }
@@ -1126,7 +1155,7 @@ async function main(): Promise<Record<string, unknown>> {
 
   await runStep("branch-review", async () => {
     // 触及非测试源码判定（SKILL 1.7 触发条件：未触及源码 → 披露跳过；测试文件与 .md 文档不计入）
-    const df = await world.run("git", ["diff", `${base}...HEAD`, "--name-only"]);
+    const df = await runSh("git", ["diff", `${base}...HEAD`, "--name-only"]);
     if (df.exitCode !== 0) {
       throw new Error(`git diff ${base}...HEAD --name-only 失败（exit ${df.exitCode}）：${df.stderr.trim()}——确认 base ref 有效后重新发起`);
     }
@@ -1142,7 +1171,7 @@ async function main(): Promise<Record<string, unknown>> {
     }
 
     // 约束动态加载（SKILL 1.7 第 1 步；失败按 CR 门语义终止，不降级空跑）
-    const sc = await world.run("node", ["scripts/select-constraints.mjs", "--base", base]);
+    const sc = await runSh("node", ["scripts/select-constraints.mjs", "--base", base]);
     if (sc.exitCode !== 0) {
       throw new Error(`select-constraints 失败（exit ${sc.exitCode}）：${tailLines(`${sc.stderr}\n${sc.stdout}`, 10)}\n先恢复约束加载（脚本/权限/git 状态）再重新发起本 workflow`);
     }
@@ -1165,7 +1194,7 @@ async function main(): Promise<Record<string, unknown>> {
     // 通用判据技能在盘检查（agent 定义「通用判据 read 引用」节声明的技能；缺失 fail-fast
     // 指明路径——静默降级为无判据审查会让口径悄悄变窄，比失败更危险）
     async function existsUnderHome(rel: string): Promise<boolean> {
-      const r = await world.run("node", ["-e", EXISTS_UNDER_HOME, rel]);
+      const r = await runSh("node", ["-e", EXISTS_UNDER_HOME, rel]);
       return r.exitCode === 0;
     }
     for (const dim of dims) {
@@ -1176,16 +1205,16 @@ async function main(): Promise<Record<string, unknown>> {
       }
     }
 
-    const headRes = await world.run("git", ["rev-parse", "--short", "HEAD"]);
+    const headRes = await runSh("git", ["rev-parse", "--short", "HEAD"]);
     const topic = `dmg-${headRes.exitCode === 0 ? headRes.stdout.trim() : "run"}`;
     // 报告根（skill-data，impl-spec §2.1）：projectRoot 取 git toplevel（在 worktree 根发起；
     // realpath 由 slug 探针内部规范化，解析失败报错不静默）
-    const reportTopRes = await world.run("git", ["rev-parse", "--show-toplevel"]);
+    const reportTopRes = await runSh("git", ["rev-parse", "--show-toplevel"]);
     if (reportTopRes.exitCode !== 0 || reportTopRes.stdout.trim() === "") {
       throw new Error(`无法解析项目根（git rev-parse --show-toplevel 失败，exit ${reportTopRes.exitCode}）：${reportTopRes.stderr.trim() || "无 stderr"}；确认在 worktree 根发起后重新发起`);
     }
-    const reportHomeRes = await world.run("node", ["-e", NODE_HOME]);
-    const reportSlugRes = await world.run("node", ["-e", NODE_PROJECT_SLUG, reportTopRes.stdout.trim()]);
+    const reportHomeRes = await runSh("node", ["-e", NODE_HOME]);
+    const reportSlugRes = await runSh("node", ["-e", NODE_PROJECT_SLUG, reportTopRes.stdout.trim()]);
     const reportHome = reportHomeRes.exitCode === 0 ? reportHomeRes.stdout.trim() : "";
     const reportSlug = reportSlugRes.exitCode === 0 ? reportSlugRes.stdout.trim() : "";
     if (reportHome === "" || !/^.+-[0-9a-f]{8}$/.test(reportSlug)) {
@@ -1203,15 +1232,15 @@ async function main(): Promise<Record<string, unknown>> {
     // projectRoot 与 worktreePath 同值（git toplevel：worktree 场景即本 run 的工作树绝对
     // 路径，R4 多 worktree 并行的区分依据）
     const runProjectRoot = reportTopRes.stdout.trim();
-    const brMetaRes = await world.run("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
+    const brMetaRes = await runSh("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
     const runBranch = brMetaRes.exitCode === 0 ? brMetaRes.stdout.trim() : "";
-    const headMetaRes = await world.run("git", ["rev-parse", "HEAD"]);
+    const headMetaRes = await runSh("git", ["rev-parse", "HEAD"]);
     const runHeadCommit = headMetaRes.exitCode === 0 ? headMetaRes.stdout.trim() : "";
     // baseCommit 解析为 hash（base 可能是显式 ref 名；解析失败降级 base 字面量）
-    const baseHashRes = await world.run("git", ["rev-parse", base]);
+    const baseHashRes = await runSh("git", ["rev-parse", base]);
     const baseCommit = baseHashRes.exitCode === 0 ? baseHashRes.stdout.trim() : base;
     // startedAt（run.json 轮转归档判据；探针结果经 journal 记录，resume/重放值稳定）
-    const runNowRes = await world.run("node", ["-e", NODE_ISO_NOW]);
+    const runNowRes = await runSh("node", ["-e", NODE_ISO_NOW]);
     const startedAt = runNowRes.exitCode === 0 ? runNowRes.stdout.trim() : "";
     // mustFixTrajectory：逐轮活跃 must-fix 计数序列（该循环词表 must-fix = critical+major，
     // 见 activeMustFix 口径；与 run.json/final 消费侧同源）。推点 = 每轮聚合裁决后的活跃
@@ -1254,7 +1283,7 @@ async function main(): Promise<Record<string, unknown>> {
       // run.json：统一 run manifest（设计 §5.1）。attempt 恒 1——本 workflow 无 attempt 机制，
       // 同 HEAD 重跑覆盖写 round 产物属既有预期，run.json 防覆盖由 WRITE_RUN_JSON 轮转归档
       // 承担；model 脚本内不可得（run 级 subagent_model 承载，zcode 无脚本侧读取口）置 null
-      const nowRes = await world.run("node", ["-e", NODE_ISO_NOW]);
+      const nowRes = await runSh("node", ["-e", NODE_ISO_NOW]);
       const runDoc = {
         workflow: "dev-merge-gates",
         segment: "dev-merge",
@@ -1273,7 +1302,7 @@ async function main(): Promise<Record<string, unknown>> {
         mustFixTrajectory: [...mustFixTrajectory],
       };
       try {
-        const wRun = await world.run("node", ["-e", WRITE_RUN_JSON, `${runDir}/run.json`, JSON.stringify(runDoc)]);
+        const wRun = await runSh("node", ["-e", WRITE_RUN_JSON, `${runDir}/run.json`, JSON.stringify(runDoc)]);
         if (wRun.exitCode !== 0) {
           log(`WARN: [branch-review] run.json 落盘失败（不影响流程结果，run manifest 缺失）：${tailLines(`${wRun.stderr}\n${wRun.stdout}`, 3)}`);
         } else {
@@ -1719,7 +1748,7 @@ async function main(): Promise<Record<string, unknown>> {
       // 的上下文（G5）；不做 run 内续跑（决策 4：轮次/条目 id/对账状态恢复语义复杂且无需求证据）
       try {
         const ledgerPath = `${runDir}/ledger.json`;
-        const w = await world.run("node", ["-e", WRITE_DOC, ledgerPath, JSON.stringify({ round, records }, null, 1)]);
+        const w = await runSh("node", ["-e", WRITE_DOC, ledgerPath, JSON.stringify({ round, records }, null, 1)]);
         if (w.exitCode !== 0) {
           log(`WARN: [branch-review] ledger.json 落盘失败（不影响流程结果，审计上下文缺失）：${tailLines(`${w.stderr}\n${w.stdout}`, 3)}`);
         } else {
@@ -1762,7 +1791,7 @@ async function main(): Promise<Record<string, unknown>> {
       for (let gi = 0; gi < groups.length; gi++) {
         const g = groups[gi]!;
         const docPath = `${runDir}/round-${round}/aggregate-4-fixer-${gi + 1}.md`;
-        const w = await world.run("node", ["-e", WRITE_DOC, docPath, renderFixerDoc(g, groupRecsOf(g))]);
+        const w = await runSh("node", ["-e", WRITE_DOC, docPath, renderFixerDoc(g, groupRecsOf(g))]);
         if (w.exitCode !== 0) {
           throw new TerminalError(
             "fix-failure",
@@ -2135,7 +2164,7 @@ async function main(): Promise<Record<string, unknown>> {
   if (br !== null && br.runDir !== null) {
     try {
       const tPath = `${br.runDir}/terminal.json`;
-      const w = await world.run("node", ["-e", WRITE_DOC, tPath, JSON.stringify(terminal, null, 1)]);
+      const w = await runSh("node", ["-e", WRITE_DOC, tPath, JSON.stringify(terminal, null, 1)]);
       if (w.exitCode !== 0) {
         log(`WARN: terminal.json 落盘失败（不影响流程结果，终态审计上下文缺失）：${tailLines(`${w.stderr}\n${w.stdout}`, 3)}`);
       } else {

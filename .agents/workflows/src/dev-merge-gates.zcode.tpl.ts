@@ -28,8 +28,10 @@ description: dev-merge 的前置两步 workflow（gates + branch-review）。①
   本文件由 src/dev-merge-gates.shared.ts + 本壳经 .agents/workflows/scripts/
   build-workflows.mjs 生成（勿手工维护；pi 版同源 = .agents/workflows/dev-merge-gates.js）。
 whenToUse: zcode 主 agent 执行 dev-merge skill 第 1.6/1.7 步时发起（CreateWorkflow path
-  指向本文件 + args）。发起前 cwd 必须已在待合并 feat worktree 根（对齐 dev-merge SKILL
-  调用约束——gates 脚本存在性、审查 diff 口径、fixer commit 全部以该检出为对象）。
+  指向本文件 + args）。命令执行目录 = 宿主会话目录（cwd 即待合并 feat worktree 时可省
+  worktree 参数）或显式 worktree 参数指定的 feat worktree（zcode 会话目录绑 workspace
+  根——bare 容器非 git 仓库——时必传）——gates 脚本存在性、审查 diff 口径、fixer commit
+  全部以该检出为对象。
 args:
   base:
     type: string
@@ -40,6 +42,9 @@ args:
     type: number
     description: branch-review review→fix 循环轮次上限
     default: 10
+  worktree:
+    type: string
+    description: feat worktree 绝对路径（可选）。宿主会话目录即该 worktree 时可省（命令按环境 cwd 执行）；zcode 会话目录绑 workspace 根（bare 容器，非 git 仓库）时必须传——全部命令经 bash -c 'cd <worktree> && exec "$@"' 包装执行
   taskId:
     type: string
     description: 阶段观测任务 id（可选；与 executionId 同时给出才启用观测，缺省零行为差异）

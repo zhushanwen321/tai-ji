@@ -59,6 +59,7 @@ const args = {};
       ? raw.maxRounds
       : /^\d+(\.\d+)?$/.test(strArg(raw.maxRounds)) ? Number(strArg(raw.maxRounds)) : raw.maxRounds;
   }
+  if (raw.worktree !== undefined) args.worktree = strArg(raw.worktree);
   if (raw.taskId !== undefined) args.taskId = strArg(raw.taskId);
   if (raw.executionId !== undefined) args.executionId = strArg(raw.executionId);
   if (raw.sampleType !== undefined) args.sampleType = strArg(raw.sampleType);

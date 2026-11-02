@@ -35,6 +35,26 @@
 // 一律 failed 人工接管（不放行）；Gate-3 三分量由 pr-submit done + final-gates done
 // + push 动作本身承接。
 
+// ── 显式 worktree 根（可选参数 worktree，绝对路径）──
+// zcode 宿主的命令执行 cwd 绑会话工作目录；会话目录是 workspace 根（bare 容器，非
+// git 仓库）时本 workflow 的相对路径脚本与 git 调用全部失效（exit 128 not a git
+// repository）——该形态必须传 worktree，全部命令经 bash -c 'cd <worktree> && exec
+// "$@"' 包装执行；不传 = 沿用环境 cwd（宿主目录即 feature worktree 的形态，pi 宿主常态）。
+// 业务参数走位置参数（"$@"），零 shell 转义面。wt 在下方参数校验段赋值；赋值前的
+// 观测 home 探针（cwd 无关）以空值走透传分支。
+let wt = "";
+const shellQuote = (p: string): string => `'${p.replaceAll("'", "'\\''")}'`;
+// 恒经 world.run("bash", ...) 字面量命令（zcode 编译器要求 world.run 首参为编译期字面量，
+// 命令名不可变量化）：wt 为空时脚本为 exec "$@" 直执行（语义 = 环境 cwd 透传），
+// 非空时前置 cd。业务参数走位置参数（"$@"），零 shell 转义面。opts 省略时不得显式传
+// undefined 第三参（引擎将其规范化为 null 后拒绝：arg 3 must be options or omitted）。
+const runSh = (cmd: string, a: readonly string[], opts?: { timeoutMs?: number }) => {
+  const bashArgs = ["-c", wt === "" ? `exec "$@"` : `cd ${shellQuote(wt)} && exec "$@"`, "bash", cmd, ...a];
+  return opts === undefined
+    ? world.run("bash", bashArgs)
+    : world.run("bash", bashArgs, opts);
+};
+
 // ── 参数窄化 + 白名单（拼错键静默回落默认值比报错危险，fail-fast） ──
 // taskId/executionId/sampleType 是阶段观测参数（O 区公共观测层消费）：可选，缺省不启用
 // 观测（旧调用零变化）；合法性校验（两 id 同给、路径安全、sampleType 词表）在公共层
@@ -46,7 +66,7 @@ obsCtx = initObservation("pr-cr-fix", "pr-lifecycle", null); // skill=所属 ski
 // 观测 home 装配先于参数校验（invalid-args 等早退边界可落盘；裸 node 探针——引擎 PATH
 // 无 node 时装配失败降级为「路径未装配」告警，不阻断业务）；execution start 紧随其后
 {
-  const obsHomeRes = await world.run("node", ["-e", "process.stdout.write(require('os').homedir())"]);
+  const obsHomeRes = await runSh("node", ["-e", "process.stdout.write(require('os').homedir())"]);
   if (obsHomeRes.exitCode === 0 && obsHomeRes.stdout.trim() !== "") obsAttachHome(obsHomeRes.stdout.trim());
 }
 await obsEmit("execution", null, "start", null);
@@ -56,12 +76,17 @@ async function failObs(kind: string, msg: string): Promise<never> {
   await obsCloseExecution(kind);
   throw new Error(msg);
 }
-const VALID_ARG_KEYS = new Set(["base", "maxRounds", "reviewers", "simplifyMode", "skipSteps", "taskId", "executionId", "sampleType"]);
+const VALID_ARG_KEYS = new Set(["base", "maxRounds", "worktree", "reviewers", "simplifyMode", "skipSteps", "taskId", "executionId", "sampleType"]);
 for (const key of Object.keys(args)) {
   if (!VALID_ARG_KEYS.has(key)) {
     await failObs("invalid-args", `未知参数: ${key}（合法参数: ${[...VALID_ARG_KEYS].join("/")}）`);
   }
 }
+const rawWorktree = typeof args.worktree === "string" ? args.worktree.trim() : "";
+if (rawWorktree !== "" && !rawWorktree.startsWith("/")) {
+  await failObs("invalid-args", `参数 worktree 非法：${rawWorktree}（应为 feature worktree 绝对路径；宿主会话目录不是该 worktree 时必传）`);
+}
+wt = rawWorktree;
 const base = typeof args.base === "string" && args.base.trim() !== "" ? args.base.trim() : "main"; // 默认 main 仅适用 dev→main 终局 PR；feature→dev 的 PR 调用方必须传 args.base=<目标 dev 分支>（pr-cr-fix SKILL 的 PR_BASE 约定）
 // 上界 50：每轮 cr-fix 产生 ~2 条 report（逐轮 + 每 attempt 汇总），引擎 256 条/run
 // 上限会在 maxRounds ≥ ~126 时中途击穿整 run；50 已远超实际收敛轮数（stuck 阈值 3）。
@@ -69,7 +94,10 @@ const base = typeof args.base === "string" && args.base.trim() !== "" ? args.bas
 if (args.maxRounds !== undefined && (typeof args.maxRounds !== "number" || !Number.isFinite(args.maxRounds) || args.maxRounds < 1)) {
   await failObs("invalid-args", `参数 maxRounds 非法：${String(args.maxRounds)}（应为 ≥1 的数字，上界 50 自动截断）——0/负数/非数字不静默回落默认 10`);
 }
-const maxRounds = args.maxRounds === undefined ? 10 : Math.min(50, Math.floor(args.maxRounds));
+const maxRounds =
+  typeof args.maxRounds === "number" && args.maxRounds >= 1
+    ? Math.min(50, Math.floor(args.maxRounds))
+    : 10;
 const reviewers = Array.isArray(args.reviewers)
   ? (args.reviewers as unknown[]).filter((x): x is string => typeof x === "string" && x.trim() !== "")
   : [];
@@ -216,7 +244,7 @@ function porcelainPath(line: string): string {
 }
 
 async function dirtyLines(): Promise<string[]> {
-  const st = await world.run("git", ["status", "--porcelain"]);
+  const st = await runSh("git", ["status", "--porcelain"]);
   if (st.exitCode !== 0) {
     // 工具错误单独分流（不折叠成「存在未提交改动」误导恢复指引）
     throw new Error(`git status --porcelain 失败（exit ${st.exitCode}）：${st.stderr.trim() || "无 stderr"}；确认当前目录是有效 git 仓库`);
@@ -241,13 +269,13 @@ async function sweepResidualChanges(): Promise<string[]> {
   const lines = await dirtyLines();
   if (lines.length === 0) return [];
   const paths = lines.map(porcelainPath);
-  const add = await world.run("git", ["add", "--", ...paths], { timeoutMs: 7_200_000 });
+  const add = await runSh("git", ["add", "--", ...paths], { timeoutMs: 7_200_000 });
   if (add.exitCode !== 0) {
     throw new Error(`终态清扫 git add 失败（exit ${add.exitCode}）：${add.stderr.trim() || add.stdout.trim()}；人工 commit 后重新发起`);
   }
   // git commit 会触发 pre-commit 全套钩子（typecheck+lint 分钟级），引擎 world.run 默认 300s 会误杀
   // （2026-10-26 用户裁决：子进程墙钟上限全部 ≥1h，下同）
-  const cm = await world.run("git", ["commit", "-m", `chore: prl end-of-run sweep (${paths.length} files)`], { timeoutMs: 7_200_000 });
+  const cm = await runSh("git", ["commit", "-m", `chore: prl end-of-run sweep (${paths.length} files)`], { timeoutMs: 7_200_000 });
   if (cm.exitCode !== 0) {
     throw new Error(`终态清扫 commit 失败（exit ${cm.exitCode}）：${cm.stderr.trim() || cm.stdout.trim()}；人工 commit 后重新发起`);
   }
@@ -293,10 +321,10 @@ const commitShScript = (argv: string[]): string =>
   `PATH=${shq(nodeAbs.slice(0, nodeAbs.lastIndexOf("/")))}:"$HOME"/Library/pnpm:"$PATH" git ${argv.map(shq).join(" ")}`;
 
 /** node 调用经 nodeAbs 绝对路径执行（结构性不依赖 PATH——引擎环境 PATH 无 nvm node
- *  时裸 world.run("node") spawn ENOENT；2026-10-12 v-zcode 实测 fix 阶段 existsViaNode
+ *  时裸 runSh("node") spawn ENOENT；2026-10-12 v-zcode 实测 fix 阶段 existsViaNode
  *  即此形态炸 fix-failure）。全部 node 调用统一走本助手。 */
 const runNode = (nodeArgs: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> =>
-  world.run("sh", ["-c", [shq(nodeAbs), ...nodeArgs.map(shq)].join(" ")]);
+  runSh("sh", ["-c", [shq(nodeAbs), ...nodeArgs.map(shq)].join(" ")]);
 
 // pre-merge marker（pr-pre-merge.sh 唯一写入方）：result="PASS" 形态
 async function readPremergeMarker(): Promise<string | null> {
@@ -676,7 +704,7 @@ const titlesCompatible = (a: string, b: string): boolean => {
 /** cr-fix 单次执行（一次完整 review→fix 循环至终态）。attempt 只影响 agent 命名段。 */
 async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: number): Promise<CrFixLoopResult> {
   const dims = batch1Paths.map((p) => ({ path: p, name: dimensionName(p) }));
-  const headRes = await world.run("git", ["rev-parse", "--short", "HEAD"]);
+  const headRes = await runSh("git", ["rev-parse", "--short", "HEAD"]);
   const topic = `prl-${headRes.exitCode === 0 ? headRes.stdout.trim() : "run"}`;
   const runDir = `${rflReportRoot}/${topic}`;
   const issues: IssueRecord[] = [];
@@ -752,7 +780,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
         // 探针与写盘同处 fail-open 保护内：git/node 探针失败降级空串，不阻断终态返回
         const nowRes = await runNode(["-e", NODE_ISO_NOW]);
         if (nowRes.exitCode === 0) runDoc.endedAt = nowRes.stdout.trim();
-        const headRes = await world.run("git", ["rev-parse", "HEAD"]);
+        const headRes = await runSh("git", ["rev-parse", "HEAD"]);
         if (headRes.exitCode === 0) runDoc.headCommit = headRes.stdout.trim();
         const wRun = await runNode(["-e", WRITE_RUN_JSON, `${runDir}/run.json`, JSON.stringify(runDoc)]);
         const wFinal = await runNode(["-e", WRITE_FILE, `${runDir}/final.json`, JSON.stringify(finalDoc, null, 2)]);
@@ -844,7 +872,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
         : "";
 
     let diffStats: DiffStats | null = null;
-    const statRes = await world.run("git", ["diff", "--numstat", `${diffBase}...HEAD`]);
+    const statRes = await runSh("git", ["diff", "--numstat", `${diffBase}...HEAD`]);
     if (statRes.exitCode === 0) diffStats = parseDiffStats(statRes.stdout);
     const plan = planReviewerOrder(running, diffStats);
     const ordered = plan.order;
@@ -1349,7 +1377,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
             skipped.push(p);
             continue;
           }
-          const r = await world.run("git", ["add", "--", p], { timeoutMs: 7_200_000 });
+          const r = await runSh("git", ["add", "--", p], { timeoutMs: 7_200_000 });
           if (r.exitCode === 0) staged.push(p);
           else skipped.push(p);
         }
@@ -1358,7 +1386,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
         }
         if (staged.length > 0) {
           const commitMsg = `fix: review round ${round} — ${mustFix} must-fix`;
-          let commitRes = await world.run("sh", ["-c", commitShScript(["commit", "-m", commitMsg])], { timeoutMs: 7_200_000 });
+          let commitRes = await runSh("sh", ["-c", commitShScript(["commit", "-m", commitMsg])], { timeoutMs: 7_200_000 });
           if (commitRes.exitCode !== 0) {
             // 提交前自动检查（pre-commit hook）拦截 → 环境恢复 agent 读报错、执行报错写明的
             // 环境恢复命令后重跑同一 commit（对齐 review-fix-loop / dev-merge-gates 同源机制
@@ -1378,7 +1406,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
               ].join("\n"),
             );
             log(`环境恢复 agent 回复（末 15 行）：\n${envReply.split("\n").slice(-15).join("\n")}`);
-            commitRes = await world.run("sh", ["-c", commitShScript(["commit", "-m", commitMsg])], { timeoutMs: 7_200_000 });
+            commitRes = await runSh("sh", ["-c", commitShScript(["commit", "-m", commitMsg])], { timeoutMs: 7_200_000 });
             if (commitRes.exitCode !== 0) {
               // ── content 补修子循环（设计 commit-content-self-heal §3.1）──
               // env 恢复后重跑仍被拦截 = 恢复需要修改仓库内文件（如 e2e-map 补登记）。
@@ -1460,9 +1488,9 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
                 const roundRepairFiles = [...new Set([...declared, ...actualNew])];
                 for (const f of roundRepairFiles) if (!allRepairFiles.includes(f)) allRepairFiles.push(f);
                 // 补修文件必须进 staged（e2e-map 等登记门禁按 --staged 模式只查暂存内容，不进 staged 则门禁原样再拦，补修白做）
-                await world.run("git", ["add", "--", ...roundRepairFiles], { timeoutMs: 7_200_000 });
+                await runSh("git", ["add", "--", ...roundRepairFiles], { timeoutMs: 7_200_000 });
                 // 重跑同一条 commit（命令与参数与首次完全一致——journal 重放确定性保持）
-                commitRes = await world.run("sh", ["-c", commitShScript(["commit", "-m", commitMsg])], { timeoutMs: 7_200_000 });
+                commitRes = await runSh("sh", ["-c", commitShScript(["commit", "-m", commitMsg])], { timeoutMs: 7_200_000 });
                 if (commitRes.exitCode === 0) {
                   log(`补修重试成功（第 ${repairTries} 次补修）：补修文件 ${allRepairFiles.join("、") || "（无）"}；报错首行：${lastContentErr.split("\n")[0] ?? ""}${lastNote !== "" ? `；补修说明：${lastNote}` : ""}`);
                   break;
@@ -1544,7 +1572,7 @@ phase("环境预检");
     "ls -1 /usr/local/bin/node /opt/homebrew/bin/node 2>/dev/null | head -1",
   ];
   for (const script of probes) {
-    const r = await world.run("sh", ["-c", script]);
+    const r = await runSh("sh", ["-c", script]);
     const p = (r.exitCode === 0 ? r.stdout : "").trim().split("\n").filter(Boolean).pop() ?? "";
     if (p.startsWith("/")) {
       nodeAbs = p;
@@ -1564,7 +1592,7 @@ log(`node 可执行：${nodeAbs}`);
   // （观测 home 装配与 execution start 已在参数校验前完成——本段任何 throw 的
   // execution end 均可落盘）
 
-  const topRes = await world.run("git", ["rev-parse", "--show-toplevel"]);
+  const topRes = await runSh("git", ["rev-parse", "--show-toplevel"]);
   if (topRes.exitCode !== 0 || topRes.stdout.trim() === "") {
     await failObs("setup-failure", `无法解析项目根（git rev-parse --show-toplevel 失败，exit ${topRes.exitCode}）：${topRes.stderr.trim() || "无 stderr"}；确认在仓库根发起后重新发起`);
   }
@@ -1592,7 +1620,7 @@ phase("发起前检查");
 // static-gate 的 skill-yaml 条件校验 / coverage 的 sharedSrcArgs / final-gates / cr-fix
 // 等消费点依赖该值，空串渗透会渲染出畸形 git 命令且空 stdout 被当「无改动」静默消费。
 // 解析失败与参数校验同类别（发起方配置错误）：throw 走 errored run，重新发起是唯一恢复路径。
-const baseLockRes = await world.run("git", ["rev-parse", base]);
+const baseLockRes = await runSh("git", ["rev-parse", base]);
 if (baseLockRes.exitCode !== 0 || baseLockRes.stdout.trim() === "") {
   await obsCloseExecution("setup-failure");
   throw new Error(`base "${base}" 无法解析为 commit（${baseLockRes.stderr.trim() || "无 stderr"}）；确认 base 分支/ref 名正确后重新发起`);
@@ -1610,18 +1638,18 @@ await step("preflight", async () => {
   }
   const dirt = await dirtyWorktree();
   if (dirt !== "") log(`[preflight] 工作区存在未提交改动（轻量模式不拦截，将随终态清扫提交并披露）：\n${dirt}`);
-  const commits = await world.run("git", ["log", `${baseHash}..HEAD`, "--oneline"]);
+  const commits = await runSh("git", ["log", `${baseHash}..HEAD`, "--oneline"]);
   if (commits.exitCode !== 0) failures.push(`git log ${baseHash}..HEAD 失败：${commits.stderr.trim()}`);
   else if (!commits.stdout.trim()) failures.push(`分支相对 base ${base} 无 commits；确认当前分支正确，或先 commit 后重新发起`);
-  const gh = await world.run("gh", ["auth", "status"]);
+  const gh = await runSh("gh", ["auth", "status"]);
   if (gh.exitCode !== 0) failures.push(`gh 未认证（${(gh.stderr || gh.stdout).trim().split("\n")[0]}）；运行 gh auth login 后重新发起`);
-  const fallow = await world.run("fallow", ["--version"]);
+  const fallow = await runSh("fallow", ["--version"]);
   if (fallow.exitCode !== 0) failures.push(`fallow 不可用（${(fallow.stderr || fallow.stdout).trim().split("\n")[0]}）；运行 npm i -g fallow 后重新发起`);
   if (failures.length > 0) throw new Error(`preflight 前置条件未过：\n${failures.map((s) => `- ${s}`).join("\n")}`);
   // 读当前分支名仅作披露（gate-suite PR 规模展示等），读取失败降级为空串（披露退化为
   // 「当前分支」），不做任何行为分流——2026-09-26 用户裁决：流程不按分支名做决策，
   // cr-fix 代码审查维度是否派发只由发起方显式 reviewers 参数决定。
-  const branchRes = await world.run("git", ["branch", "--show-current"]);
+  const branchRes = await runSh("git", ["branch", "--show-current"]);
   if (branchRes.exitCode === 0 && branchRes.stdout.trim() !== "") {
     crFixBranch = branchRes.stdout.trim();
   }
@@ -1638,7 +1666,7 @@ await step("static-gate", async () => {
   const out = await gateFixLoop(
     "static-gate",
     "pr-pre-merge.sh --skip-tests",
-    () => world.run("bash", ["scripts/pr-pre-merge.sh", "--skip-tests", "--quiet"], { timeoutMs: 7_200_000 }),
+    () => runSh("bash", ["scripts/pr-pre-merge.sh", "--skip-tests", "--quiet"], { timeoutMs: 7_200_000 }),
     (res) => res,
   );
   changesetWarn = /WARN changeset-check/.test(out.stdout);
@@ -1657,7 +1685,7 @@ await step("static-gate", async () => {
     }
     changesetWarnDetail = detailLines.join("\n");
   }
-  const names = await world.run("git", ["diff", `${baseHash}..HEAD`, "--name-only"]);
+  const names = await runSh("git", ["diff", `${baseHash}..HEAD`, "--name-only"]);
   if (names.exitCode !== 0) {
     throw new Error(`static-gate 读 diff 文件清单失败（skill-yaml 条件判定，exit ${names.exitCode}）：\n${tailLines(names.stderr, 10)}；确认仓库状态后重新发起`);
   }
@@ -1667,7 +1695,7 @@ await step("static-gate", async () => {
     return;
   }
   const skillMd = [...new Set(skillFiles.map((f) => `.agents/skills/${f.slice(".agents/skills/".length).split("/")[0]}/SKILL.md`))];
-  const res = await world.run("python3", [".agents/skills/pr-cr-fix/scripts/validate-skill-yaml.py", ...skillMd]);
+  const res = await runSh("python3", [".agents/skills/pr-cr-fix/scripts/validate-skill-yaml.py", ...skillMd]);
   if (res.exitCode !== 0) {
     throw new Error(`skill YAML 校验失败（硬校验不修，不自动重试）：\n${tailLines(`${res.stdout}\n${res.stderr}`, 15)}\n按校验输出修复 SKILL.md 后重新发起`);
   }
@@ -1684,9 +1712,9 @@ phase("PR 元数据起草与 changeset 复核");
 // 加载一遍，故合并）
 let prTitle = "";
 await step("pr-meta", async () => {
-  const commits = await world.run("git", ["log", `${baseHash}..HEAD`, "--format=%s%n%b---"]);
-  const diffStat = await world.run("git", ["diff", `${baseHash}..HEAD`, "--stat"]);
-  const names = await world.run("git", ["diff", `${baseHash}..HEAD`, "--name-only"]);
+  const commits = await runSh("git", ["log", `${baseHash}..HEAD`, "--format=%s%n%b---"]);
+  const diffStat = await runSh("git", ["diff", `${baseHash}..HEAD`, "--stat"]);
+  const names = await runSh("git", ["diff", `${baseHash}..HEAD`, "--name-only"]);
   if (commits.exitCode !== 0 || diffStat.exitCode !== 0 || names.exitCode !== 0) {
     throw new Error(`pr-meta 读分支 commits/diff 失败（log=${commits.exitCode} stat=${diffStat.exitCode} names=${names.exitCode}）：\n${tailLines(commits.stderr + diffStat.stderr + names.stderr, 10)}；确认仓库状态（preflight 被跳过时此检查是首道防线）后重新发起`);
   }
@@ -1768,12 +1796,12 @@ await step("pr-meta", async () => {
         throw new Error(`pr-meta agent 返回 action=draft 但 files 为空（起草文件路径列表必填）：${JSON.stringify(v.changeset).slice(0, 200)}`);
       }
       for (const f of drafted) {
-        const r = await world.run("git", ["add", "--", f]);
+        const r = await runSh("git", ["add", "--", f]);
         if (r.exitCode !== 0) {
           throw new Error(`changeset 文件 git add 失败（${f}，exit ${r.exitCode}）：${r.stderr.trim()}；确认 agent 实际写入了该路径`);
         }
       }
-      const commitRes = await world.run("git", ["commit", "-m", "chore: add changeset"]);
+      const commitRes = await runSh("git", ["commit", "-m", "chore: add changeset"]);
       if (commitRes.exitCode !== 0) {
         throw new Error(`changeset 统一 commit 失败（exit ${commitRes.exitCode}）：${commitRes.stderr.trim() || commitRes.stdout.trim()}；文件已 staged，人工 commit 后重新发起`);
       }
@@ -1795,11 +1823,11 @@ await step("pr-submit", async () => {
   // 脚本绝对路径 + 127 重试：实测出现过相对路径 127（bash: scripts/pr-submit.sh: No such
   // file or directory；同 run 内 git 相对操作正常、事后 snippet 同命令正常）的 worker 环境
   // 异常，形态吻合 spawn cwd 解析失败——绝对路径消除 cwd 假设，127 时打印 pwd 现场并重试
-  const topRes = await world.run("git", ["rev-parse", "--show-toplevel"]);
+  const topRes = await runSh("git", ["rev-parse", "--show-toplevel"]);
   const submitScript = topRes.exitCode === 0
     ? `${topRes.stdout.trim()}/scripts/pr-submit.sh`
     : "scripts/pr-submit.sh";
-  const runSubmit = () => world.run("bash", [
+  const runSubmit = () => runSh("bash", [
     submitScript,
     "--title-file", `${prReviewDir}/pr-workflow/pr-title.txt`,
     "--body-file", `${prReviewDir}/pr-workflow/pr-body.md`,
@@ -1807,8 +1835,8 @@ await step("pr-submit", async () => {
   ], { timeoutMs: 7_200_000 });
   let res = await runSubmit();
   if (res.exitCode === 127) {
-    const cwdRes = await world.run("pwd");
-    const lsRes = await world.run("ls", ["-la", "scripts/pr-submit.sh"]);
+    const cwdRes = await runSh("pwd");
+    const lsRes = await runSh("ls", ["-la", "scripts/pr-submit.sh"]);
     log(`[pr-submit] exit 127（bash 打不开脚本文件）：pwd=${cwdRes.stdout.trim()}，script=${submitScript}，ls exit=${lsRes.exitCode}——重试一次`);
     res = await runSubmit();
   }
@@ -1855,7 +1883,7 @@ async function readCoverageJson(): Promise<CoverageJson | null> {
   return readJsonViaNode<CoverageJson>(`${prReviewDir}/coverage.json`, READ_COVERAGE_SLIM);
 }
 async function sharedSrcArgs(): Promise<string[]> {
-  const names = await world.run("git", ["diff", `${baseHash}..HEAD`, "--name-only"]);
+  const names = await runSh("git", ["diff", `${baseHash}..HEAD`, "--name-only"]);
   if (names.exitCode !== 0) {
     // 静默降级会让 shared src 改动漏传 --extra-packages、gate 口径错——fail 与 preflight 同语义
     throw new Error(`读 diff 文件清单失败（sharedSrcArgs，exit ${names.exitCode}）：\n${tailLines(names.stderr, 10)}；确认仓库状态后重新发起`);
@@ -1944,7 +1972,7 @@ const GATE_STDOUT_TAIL_BYTES = 60_000;
 const runGateCapped = (label: string, argv: string[]) => {
   const logPath = `.tmp/prl-gate-${label}.log`;
   const inner = `${argv.map((a) => shq(a)).join(" ")} > ${shq(logPath)} 2>&1; ec=$?; echo "gate-exit=$ec（完整日志 ${logPath}）"; tail -c ${GATE_STDOUT_TAIL_BYTES} ${shq(logPath)}; exit $ec`;
-  return world.run("bash", ["-c", inner], { timeoutMs: 7_200_000 });
+  return runSh("bash", ["-c", inner], { timeoutMs: 7_200_000 });
 };
 
 const GATE_SUITE_ROUNDS = 3;
@@ -2008,7 +2036,7 @@ await step("cr-fix", async () => {
   // 根共享实体经 worktree symlink 形态）下恒空 → reviewers 逃生舱失效；改用 fs.readdirSync
   // （跟随路径 symlink）经 nodeAbs 执行，返回形态与原 glob 一致（相对路径列表）。存量缺陷
   // 2026-10-12 由 commit-content-self-heal 验证暴露后就地修复（范围外必要改动，deviations 登记）。
-  const relReviewers = (await world.run("sh", ["-c", shq(nodeAbs) + " -e " + shq("const fs=require('fs'),d='.agents/skills/dev-merge/agents';try{process.stdout.write(fs.readdirSync(d).filter(f=>/^review-.+\\.md$/.test(f)).map(f=>d+'/'+f).join('\\n'))}catch(e){}")])).stdout.split("\n").filter(Boolean).sort();
+  const relReviewers = (await runSh("sh", ["-c", shq(nodeAbs) + " -e " + shq("const fs=require('fs'),d='.agents/skills/dev-merge/agents';try{process.stdout.write(fs.readdirSync(d).filter(f=>/^review-.+\\.md$/.test(f)).map(f=>d+'/'+f).join('\\n'))}catch(e){}")])).stdout.split("\n").filter(Boolean).sort();
   let picked: string[];
   if (reviewers.length > 0) {
     // 显式 reviewers 白名单裁剪（对现存 agent 文件按路径子串匹配）
@@ -2029,7 +2057,7 @@ await step("cr-fix", async () => {
   }
   crFixRan = true;
   // reviewer prompt 消费绝对路径（Read 评审定义文件无 cwd 歧义）
-  const topRes = await world.run("git", ["rev-parse", "--show-toplevel"]);
+  const topRes = await runSh("git", ["rev-parse", "--show-toplevel"]);
   const repoRoot = topRes.exitCode === 0 ? topRes.stdout.trim() : "";
   const batch1Paths = repoRoot ? picked.map((f) => `${repoRoot}/${f}`) : picked;
   let last: CrFixLoopResult | null = null;

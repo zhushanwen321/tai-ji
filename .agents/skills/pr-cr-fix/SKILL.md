@@ -272,6 +272,8 @@ CreateWorkflow:
     maxRounds: 10         # 可选，cr-fix 轮次上限
     simplifyMode: apply   # 可选，apply | report
     skipSteps: [...]      # 可选，人工接管逃生舱（9 step id）
+    worktree: /abs/...    # 可选，feature worktree 绝对路径——宿主会话目录即该 worktree 时可省；
+                          # zcode 会话目录绑 workspace 根（bare 容器非 git 仓库）时必传
   name: "PR 生命周期"
 ```
 

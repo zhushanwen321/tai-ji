@@ -72,6 +72,7 @@ const args = {};
     const n = typeof raw.maxRounds === "number" ? raw.maxRounds : /^\d+(\.\d+)?$/.test(strArg(raw.maxRounds)) ? Number(strArg(raw.maxRounds)) : raw.maxRounds;
     args.maxRounds = n;
   }
+  if (raw.worktree !== undefined) args.worktree = strArg(raw.worktree);
   if (raw.reviewers !== undefined && String(strArg(raw.reviewers)) !== "") args.reviewers = splitList(raw.reviewers);
   if (raw.simplifyMode !== undefined) args.simplifyMode = strArg(raw.simplifyMode);
   if (raw.skipSteps !== undefined && String(strArg(raw.skipSteps)) !== "") args.skipSteps = splitList(raw.skipSteps);
