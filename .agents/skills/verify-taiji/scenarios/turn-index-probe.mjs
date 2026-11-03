@@ -26,6 +26,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 import {
+  BASELINE_ASSET_DIR,
   PROBE_MIN_BYTES,
   PROBE_PAGES,
   FIRST_BUILD_TARGET_MS,
@@ -324,27 +325,22 @@ export async function run(ctx) {
       await proto2.close().catch(() => {})
     }
 
-    // A19：统一落盘性能多输出项（runDir 证据 + 步骤行）
+    // A19：统一落盘性能多输出项（runDir 证据 + 步骤行）；基线产物落 BASELINE_ASSET_DIR
+    //（与其他基线采集文件集中，供 V10 对账与设计 ⏳ 前提对账）
     ev.attach('a19-outputs', JSON.stringify(outputs, null, 1))
     ev.step({ step: 'a19.outputs', channel: 'C', exitCode: 0, stats: outputs })
     if (baseline) {
+      fs.mkdirSync(BASELINE_ASSET_DIR, { recursive: true })
       fs.writeFileSync(
-        path.join(runDirOf(ev), 'baseline-collect.json'),
-        `${JSON.stringify(outputs, null, 1)}\n`,
+        path.join(BASELINE_ASSET_DIR, 'probe-baseline-timing.json'),
+        `${JSON.stringify({ ...outputs, collectedAt: new Date().toISOString(), collector: 'u-assets-prep @ baseline 494436875 (independent env)' }, null, 1)}\n`,
         'utf8',
       )
-      gotchas.push('基线采集模式：终态断言全部降级为数据记录（详见 baseline-collect.json）')
+      gotchas.push('基线采集模式：终态断言全部降级为数据记录（详见 baseline 资产目录 probe-baseline-timing.json）')
     }
   } finally {
     await proto.close().catch(() => {})
   }
 
   return { uncovered, gotchas }
-}
-
-/** evidence 的 runDir（attach 同目录；run.mjs 的 ev.attach 落 runDir，json 落同处）。 */
-function runDirOf(ev) {
-  // createEvidence 上下文：summary.jsonl 所在目录即 runDir——从 attach 不可反查时退回
-  // skill-data 默认根。runner 契约：ev.attach(name, content) 写 <runDir>/attachments/<name>。
-  return ev.runDir ?? path.join(process.env.HOME ?? '.', '.agents', 'skill-data', 'verify-taiji')
 }

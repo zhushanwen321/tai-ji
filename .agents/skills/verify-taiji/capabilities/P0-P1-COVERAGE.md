@@ -300,3 +300,36 @@ maxConcurrentBackground + idleBackgroundSec 双键合并写；lib 新增通用�
 已知缺口登记（A 类缺陷，2026-11-01 D3 inspect-v8）：live 对话流检查点仅在重载路径进入视图（对话流消息域无下一回合自愈实装——trace/record 触发源不喂消息域），后台落盘后 live=0/reload=1；修复路径 = 设计 D6 预留升级（扩展侧落盘后触发等价通知/拉取），待用户裁决。用量读数在压缩 entry 落盘后为无值形态（pi 保守设计，真实 usage 到达后恢复；mock 装配无 usage 字段故自愈点缺席，mock 特有登记）。
 
 落点偏差登记：设计 RL4/RL5 补建项原文「挂进 smart-context 域的 e2e 触发规则（e2e-map.json）」——按本技能边界「不写 spec、不进 CI、不登记 e2e-map」改为覆盖矩阵行登记（本节），触发依赖 = 改 extensions/universal/smart-context 时随交付收尾重跑本剧本。
+
+## 十一、turn-boundary-index 交付新增剧本（2026-11-03，前置创作批次 u-assets-prep）
+
+> turn 边界索引（session.history 索引窗口读取替代后台全量重建，设计
+> turn-boundary-index；实施计划 §4.2 A1-A10/A19）的前置创作资产：8 个剧本 + 共享库
+> `scenarios/lib/turn-index-lib.mjs`（fixture 采集 / history 计时翻页 / 文件注入 /
+> turns.json 读取 / V5 对照快照与 diff / 基线采集模式）。实施前基线采集（首屏翻页
+> 计时 + V5 对照基线腿）已随创作在基线 commit 494436875 独立环境落盘
+> `~/.agents/skill-data/verify-taiji/assets/turn-index-baseline/`（切换后旧读取路径
+> 不存在、不可复得）；采集模式开关 = env `TURN_INDEX_BASELINE_COLLECT=1`。
+>
+> **R2/on-diff 归宿（仓库外技能资产，不进 CI、不登记 e2e-map.json，同
+> TEST-STRATEGY.md 2026-11-01 async-compaction 先例）**。可判定触发条件 =
+> `packages/runtime/src/services/**`（含 session/ 域、archive/ 域与 services 根的
+> session-history.ts）、`packages/runtime/src/infra/pi/**`、
+> `packages/core/src/domain/**`、`packages/shared/src/protocol.ts` 或通知退役相关
+> 改动后重跑。跑绿门分配（impl-plan §3 DAG：编写归 u-assets-prep、断言依赖各上游
+> 单元终态）：probe/rewrite/differential → u-reader commit 门；delete-race/
+> tree-audit → u-lifecycle commit 门；invalid-inputs/btw-archive/cold-switch-primary
+> → u-retire-protocol commit 门（cold-switch-primary 的 A1 负向断言 = RL7 改写点：
+> 「60s 等补齐帧」改「首屏即终窗、无第二次全量精化」负向断言，帧到达即失败不走
+> degraded；meta.requires 回填 u-assets-prep）。
+
+| 剧本 | 验收场景 | 状态 | 覆盖要点 |
+|---|---|---|---|
+| `turn-index-probe` | V1/V2/V3 + RL4（A1/A2/A3/A19 同脚本多输出项） | 前置创作完成（node --check 过；基线计时已采集；全量断言待 u-reader 门实跑） | 42.4MB 参考会话隔离副本（生产池拷贝只读，C-proc-26）：A2 首建 <1000ms + 最大同步块 ≤50ms（ping 采样）+ turns.json turn 数/字节独立输出；A1 就绪后最近窗口与逐页 <50ms、10 页 <500ms、piEntryId 不重不漏、窗口字节有界；A3 追加恰好一次/残尾不入/补全续扫/重启重扫一致（D2 首次扫描口径单独报告）；基线模式断言降级为数据记录（baseline-collect.json 落盘） |
+| `turn-index-differential` | V5（A5，differential testing） | 前置创作完成（基线对照腿已随基线采集落盘 v5-window-*.json + v5-carrier.json；对照断言待 u-reader 门实跑） | 特征打分载体（toolCalls/compaction/撤回 label/segments ≥2 类，≤8MB）固定身份登记；固定最近窗口 + cursor 窗口逐字段 diff（role/piEntryId/toolCalls/segments/endedAt/interrupted/isError/contentDigest），totalTurnsEstimate 语义升级单独断言（精确值 ≥ 尾读下界）；重开应用再读一致；载体漂移（缺失/字节变化）fail 指引重采 |
+| `turn-index-rewrite` | V4（A4） | 前置创作完成（待 u-reader 门实跑） | 同尺寸等长重写 + mtime 回写（stat 攻击向量）：重写后窗口布局与基线一致（messageCount/piEntryId 序列不变）、恰好一条消息带 rewrite-probe- marker 且其余逐条不变（新文件内容而非旧缓存回放）、cursor 翻页同判据、第二次请求新索引复用 <1000ms |
+| `turn-index-btw-archive` | V6（A6） | 前置创作完成（待 u-retire-protocol 门实跑） | btw 线 sessionId 独立索引读取与翻页、线回放 = fork 快照内容、关线重开回放等价；session.archive 后归档单元无 history-index（归档资产闭集不索引）；unarchive 后同窗口逐字段等价（复用或重建均合法，不为复用率设指标） |
+| `turn-index-delete-race` | V7（A7） | 前置创作完成（待 u-lifecycle 门实跑） | 三删除路径 × 在途构建（delete 16-32MB / closeLine 线 / purgeArchive 6-12MB 非活跃）：紧邻序命中在途窗口、树面整树回收无写回；取消与完成双形态分支判定；history-index 目录创建被同名文件拦截时历史仍正确返回 + 日志 warn 含路径；pi SIGKILL 后读取不取消、runtime 健康 |
+| `turn-index-invalid-inputs` | V8（A8） | 前置创作完成（待 u-retire-protocol 门实跑） | 手工隔离 fixture 五类：空文件空页不崩 / 零 turn 兼容分支无 user 消息 / 合法非边界 cursor（assistant entryId）兼容链定位排除 cursor 自身 / 未知 cursor 空页 truncated=false / chmod 000 显式失败不伪装空历史、恢复后重试成功 |
+| `turn-index-tree-audit` | V10（A10） | 前置创作完成（待 u-lifecycle 门实跑） | 四树面：删除后整树回收；关线后线树回收；N=10 读取+真实追加后恰一个 turns.json 无 .tmp、磁盘字节/turn 数恒等构建快照（健康追加不回写，单调有界记录不设阈值）；归档恢复循环三次树面不增长、每次历史完整 |
+| `cold-switch-primary`（改写） | V9 + RL7（A9/A18） | A1 断言已改写为负向（前置创作）；实跑待 u-retire-protocol 门 | 原「60s historyCacheReady 帧到达 + 补齐不跳变」改「首屏即终窗：10s 稳定观测窗口内帧不再到达（到达即旧链回流 fail，不走 degraded）+ 最近消息文本稳定（无第二次全量精化）」；meta.requires = ['u-assets-prep', 'u3-renderer-merge']；A2 逐出重切与 A6 pi 不可用三断言不受影响 |

@@ -3,7 +3,10 @@
  *
  * 覆盖设计 §4.1 场景表三行（断言点按 impl-plan acceptancePlan 编号）：
  * - A1（场景 1）冷启动首点大会话：首屏（最近消息可见）≤500ms（尾读）；输入框可用
- *   ≈1-1.5s 内；10s 内更早历史补齐且无跳变闪烁。
+ *   ≈1-1.5s 内；首屏即终窗——稳定观测窗口内 session.historyCacheReady 帧不再到达
+ *   （帧到达 = 旧链回流失败），且无第二次全量精化（最近消息文本稳定）。
+ *   （A1 断言按 turn-boundary-index 设计 RL7 行改写：原「60s 等补齐帧 + 不跳变」随
+ *   后台全量重建机制整体退役改为负向断言；改写单元 = u-assets-prep。）
  * - A2（场景 2）缓存逐出后重切：依次切 9+ 会话挤出目标 → 切回目标会话，同场景 1 标准。
  * - A6（场景 6）pi 完全不可用时数据层仍可读：① getHistory 尾读 RPC 成功（reply 含
  *   预算窗口内消息、无 error）；② 显示层按现状 switch 失败语义（不切入 + toast
@@ -55,23 +58,24 @@ const FIRST_PAINT_BUDGET_MS = 500
 const COMPOSER_BUDGET_MS = 1_500
 
 /**
- * 全量补齐等待窗口上限（设计场景 1 原值 10s）。42MB/149 turn 会话的全量重建实测超 10s
- * （probe-cs1 实例重建无完成日志、historyCacheReady 帧在 10s 窗口内未到达）——这是等待
- * 窗口上限不是行为阈值，A1 断言「帧到达且不跳变」的判定语义不变。
+ * 首屏稳定观测窗口（A1 负向断言观测期）：索引终态下首屏即终窗——历史窗口读取后没有
+ * 后台全量重建，session.historyCacheReady 帧不再存在，窗口内最近消息文本稳定。窗口
+ * 长度只覆盖「若有旧链回流，帧会在此期间到达」的观测面，不是等待窗口。
  */
-const FULL_HISTORY_WINDOW_MS = 60_000
+const STABLE_WINDOW_MS = 10_000
 
 export const meta = {
   id: 'cold-switch-primary',
   priority: 'P0',
   title: '冷切换主链：冷启动首点 42MB 会话（A1）+ 缓存逐出重切（A2）+ pi 不可用数据层可读（A6）',
   covers: ['env.launch', 'env.ready', 'session.list', 'session.switch', 'session.history', 'evidence.logs'],
-  requires: ['u1-history-fastpath', 'u3-renderer-merge'],
+  requires: ['u-assets-prep', 'u3-renderer-merge'],
   estimateSec: isSmokeMode() ? 900 : 600,
   provable: [
     'A1: 冷启动后点击 42MB 会话，首屏（最近消息可见）elapsed ≤500ms（尾读快路径）',
     'A1: 点击后 ≈1.5s 内输入框可用（composer-box 未禁用）',
-    'A1: 60s 内 session.historyCacheReady 帧到达且补齐后最近消息不跳变（尾部签名一致）',
+    'A1: 首屏即终窗——稳定观测窗口内 session.historyCacheReady 帧不再到达（帧到达 = 旧链回流，直接失败）',
+    'A1: 无第二次全量精化——稳定观测窗口内最近消息文本稳定（不出现补齐替换/顶掉）',
     'A2: 依次切 9 个会话逐出目标缓存后，切回 42MB 会话同场景 1 标准（≤500ms）',
     'A6②: pi 置换为必败脚本后点击会话，按现状失败语义呈现——不切入 + toast「切换会话失败」+ 无崩溃',
     'A6③: 恢复 pi 后再次点击同一会话，切换成功且首屏尾部签名匹配',
@@ -220,51 +224,46 @@ export async function run(ctx) {
     )
     if (smoke) uncovered.push('A1 输入框 1.5s 可用断言（smoke：D3 实跑执行）')
 
-    // 60s 窗口内全量补齐：historyCacheReady 帧（u1 登记的协议帧）+ 最近消息不跳变
+    // 首屏即终窗（负向断言，turn-boundary-index 终态）：稳定观测窗口内
+    // session.historyCacheReady 帧不得到达——索引终态没有后台全量重建，该帧已整体退役，
+    // 到达即旧链回流 = fail（不走 degraded）；同时最近消息文本稳定（无第二次全量精化的
+    // 替换/顶掉）。smoke 模式下现状实现仍推旧帧，负向断言降级 uncovered。
     const tailText = bigSignature.lastUser ?? bigSignature.lastAssistant ?? ''
     const beforeFull = await readLatestTurn(page)
-    let cacheReadyArrived = false
+    let cacheReadySeen = false
     try {
       const evt = await proto.waitFor(
         (e) => e.type === 'session.historyCacheReady' && e.payload?.sessionId === big.sessionId,
-        { timeoutMs: FULL_HISTORY_WINDOW_MS },
+        { timeoutMs: STABLE_WINDOW_MS },
       )
-      cacheReadyArrived = Boolean(evt)
+      cacheReadySeen = Boolean(evt)
     } catch {
-      cacheReadyArrived = false
+      cacheReadySeen = false // 超时 = 无帧 = 终态期望形态
     }
-    const afterFull = await readLatestTurn(page)
-    // 不跳变判据 = 补齐前最后 turn 的文本在补齐后仍在（尾部窗口不被补齐顶掉/重排）。
+    const afterStable = await readLatestTurn(page)
+    // 无第二次精化判据 = 稳定窗口后最后 turn 文本仍含窗口前的文本（不被补齐顶掉/重排）。
     // 不用物理尾签名（bigSignature.lastUser/lastAssistant）：那是签名提取器渐进窗口
-    // first-wins 取到的距尾约 1MB 处文本，不随补齐出现在「最后 turn」中——用它判
-    // 「最后 turn 含签名」会把补齐正常误判成跳变（42MB 样本实测必 fail）
+    // first-wins 取到的距尾约 1MB 处文本，不随窗口更新出现在「最后 turn」中——用它判
+    // 「最后 turn 含签名」会把正常窗口读取误判成精化（42MB 样本实测必 fail）
     const beforeTail = beforeFull?.text?.slice(0, 40) ?? ''
-    const noJump = Boolean(afterFull?.text) && (!beforeTail || afterFull.text.includes(beforeTail))
+    const noRefinement = Boolean(afterStable?.text) && (!beforeTail || afterStable.text.includes(beforeTail))
     ev.step({
-      step: 'a1.full-history-window',
+      step: 'a1.stable-terminal-window',
       channel: 'B',
-      exitCode: smoke || cacheReadyArrived ? 0 : 1,
-      stats: { cacheReadyArrived, turnCountBefore: beforeFull?.turnCount ?? 0, turnCountAfter: afterFull?.turnCount ?? 0, noJump },
+      exitCode: smoke || (!cacheReadySeen && noRefinement) ? 0 : 1,
+      stats: { cacheReadySeen, stableWindowMs: STABLE_WINDOW_MS, turnCountBefore: beforeFull?.turnCount ?? 0, turnCountAfter: afterStable?.turnCount ?? 0, noRefinement },
     })
     if (smoke) {
-      ev.assert('A1(smoke): 60s 补齐帧断言降级 uncovered', true, { channel: 'B', expected: '-', actual: 'smoke 降级' })
-    } else if (!cacheReadyArrived) {
-      // D3 裁决口径（2026-10-29 attempt2 后）：帧不到达 = 后台重建无终态的机制缺口
-      //（rpc-client.ts getEntries 无墙钟超时 [ADR-0122 退役遗留]，60s 内连失败帧
-      // [history-rebuild-cache.ts 失败路径也发帧] 都未到）——记 degraded 不计 fail，
-      // 尾读首屏 + truncated 翻页入口（设计内降级语义）仍承载查看可用性。
-      uncovered.push('A1 historyCacheReady 帧 60s 未到达（D3 裁决口径记 degraded：后台重建无终态机制缺口——getEntries 无墙钟超时 [rpc-client.ts:651 ADR-0122 退役遗留]、失败帧亦未发；尾读首屏 + truncated 翻页入口仍可用）')
+      ev.assert('A1(smoke): 首屏即终窗负向断言降级 uncovered（现状实现仍推旧帧）', true, { channel: 'B', expected: '-', actual: 'smoke 降级' })
+      uncovered.push('A1 首屏即终窗负向断言（smoke：现状实现 session.historyCacheReady 帧仍存在，索引终态切换后执行）')
     } else {
-      ev.assert('A1: 60s 内 historyCacheReady 帧到达（全量补齐完成信号）', true, {
-        channel: 'B', expected: `60s 内 session.historyCacheReady（sessionId=${big.sessionId}）`, actual: '已到达',
+      ev.assert('A1: 首屏即终窗——稳定观测窗口内 session.historyCacheReady 帧不再到达（帧到达即旧链回流失败，不走 degraded）', !cacheReadySeen, {
+        channel: 'B', expected: `${STABLE_WINDOW_MS / 1000}s 内无 historyCacheReady 帧`, actual: cacheReadySeen ? '帧到达（旧链回流）' : '无帧',
       })
-    }
-    if (smoke) uncovered.push('A1 60s 补齐帧 + 无跳变断言（smoke：D3 实跑执行）')
-    else {
-      ev.assert('A1: 全量补齐后最近消息不跳变（补齐前最后 turn 文本仍在）', noJump, {
+      ev.assert('A1: 无第二次全量精化（稳定窗口内最近消息文本稳定）', noRefinement, {
         channel: 'A',
         expected: `含「${beforeTail}」`,
-        actual: afterFull?.text?.slice(0, 80) ?? '(无 turn)',
+        actual: afterStable?.text?.slice(0, 80) ?? '(无 turn)',
       })
     }
 

@@ -413,4 +413,4 @@ export function detectSessionFeatures(jsonlFile) {
 
 // ── pi 子进程观测（A7：pi 退出不取消读取） ──────────────────────────
 
-export { scanSessionPool, seedSessions, PROD_DATA_DIR } from './cold-switch-lib.mjs'
+export { scanSessionPool, seedSessions, readRuntimePort, PROD_DATA_DIR } from './cold-switch-lib.mjs'
