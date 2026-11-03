@@ -38,9 +38,9 @@ export const meta = {
   requires: ['faux', 'u-assets-prep'],
   estimateSec: 300,
   faux: {
-    responses: {
-      'faux/faux-1': [{ text: 'btw-archive-main-answer', stopReason: 'stop' }],
-    },
+    // 统一队列数组形态：btw.create fork 的线 pi 进程 argv 无 --model，model-keyed 形态
+    // 在线进程加载即炸（faux-llm-ext 形态判定）——数组形态对主会话与线进程同队列可用
+    responses: [{ text: 'btw-archive-main-answer', stopReason: 'stop' }],
   },
   provable: [
     'V6: btw 线 history 可读（线 sessionId 独立索引），翻页 cursor 正确',
@@ -185,6 +185,10 @@ export async function run(ctx) {
     })
     const afterRestore = snapshotHistoryWindow((await timedHistory(proto, mainSid, {})).reply)
     const restoreDiffs = diffHistorySnapshots(mainSnap, afterRestore)
+      // interrupted 豁免：中断判定只在未附着且最新窗口启用（设计「消息转换」段）——归档前
+      // 主会话附着 client 不判定（无字段），恢复后离线判定（false）；字段存在性差异是
+      // 附着态函数，非归档恢复造成的历史内容变化
+      .filter((d) => !d.startsWith('interrupted'))
     ev.step({
       step: 'v6.restore-history',
       channel: 'B',

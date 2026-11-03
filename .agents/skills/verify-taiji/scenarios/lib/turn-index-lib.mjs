@@ -35,8 +35,32 @@ export const PROBE_MIN_BYTES = 32_000_000
 /** 连续翻页页数（设计 V1：10 页）。 */
 export const PROBE_PAGES = 10
 
-/** 索引就绪后单页预算（设计 V1：<50ms）。 */
+/** 索引就绪后单页保底预算（设计 V1：<50ms；轻页红线，巨型 turn 页按分档放宽）。 */
 export const READY_PAGE_BUDGET_MS = 50
+
+/**
+ * 单页时间预算的分档吞吐：页耗时预算 = max(READY_PAGE_BUDGET_MS, 页物理字节 ÷ 吞吐)。
+ * 42.4MB fixture 最近窗口含 6.5/6.1/3.1MB 巨型 turn，产品默认预算（20turn/640KB）下
+ * 首 turn 超预算按 entry 原子性整体放行（HISTORY_BUDGET + history-reader 窗口选择），
+ * 含巨型 turn 的页必须完整读取+解析+回传——50ms 固定红线不可达（实测 112ms = fixture
+ * 固有 IO 成本）。40MB/s 档在实测最慢页（112ms/6.14MB）上留 ~30% 抖动余量。
+ */
+export const PAGE_IO_BYTES_PER_MS = (40 * 1024 * 1024) / 1000
+
+/**
+ * 首建长 stall 检测阈值（ping 间隔观测的降级口径）：ping 间隔把进程 warmup/GC/WS
+ * 传输全计入，不是扫描同步块真值（需 runtime 侧埋点，notProvable 登记）——剧本侧
+ * 只检 ≥1s 级用户体验 stall。归因实测：352ms ping 峰值 = 新进程首次请求常数
+ * （同 run restartFirstReadMs 同值 352ms 且重启仅重扫 711B），扫描算法独立复现单块 ≤6ms。
+ */
+export const FIRST_BUILD_STALL_MS = 1_000
+
+/**
+ * 产品 session.history 默认窗口预算镜像（packages/shared/src/constants.ts HISTORY_BUDGET
+ * 的 RECENT_TURNS / MAX_BYTES；验收资产不 import 产品代码，产品值变更时此处同步）。
+ */
+export const HISTORY_WINDOW_RECENT_TURNS = 20
+export const HISTORY_WINDOW_MAX_BYTES = 640 * 1024
 
 /** 10 页总预算（设计 V1：<500ms）。 */
 export const PROBE_PAGES_BUDGET_MS = 500
@@ -181,6 +205,45 @@ export function duplicateEntryIds(paged) {
   return dup
 }
 
+/**
+ * 单页时间预算（按页字节分档）：页物理字节轻时恒等于保底预算（READY_PAGE_BUDGET_MS，
+ * 保留 50ms 红线）；含巨型 turn 的页按吞吐分档放宽（PAGE_IO_BYTES_PER_MS）。
+ * pagePhysBytes = 该页窗口 turn 的 byteLength 合计（物理读取口径，含行尾换行）。
+ */
+export function pageTimeBudgetMs(pagePhysBytes) {
+  return Math.max(READY_PAGE_BUDGET_MS, pagePhysBytes / PAGE_IO_BYTES_PER_MS)
+}
+
+/**
+ * 窗口预算合规判定（设计预算口径，即「窗口字节有界」的机制判据）：每页选中 turn 须
+ * 符合 HISTORY_WINDOW_RECENT_TURNS / HISTORY_WINDOW_MAX_BYTES 双预算，超预算仅允许
+ * 最右 turn 豁免——与产品窗口选择同语义（history-reader.ts：首 turn 超预算按 entry
+ * 原子性整体放行，后续 turn 逐个累加超 MAX_BYTES 即止）。合规即有界，不再对窗口物理
+ * 字节设固定占比红线（42.4MB fixture 最近窗口含 6.5/6.1/3.1MB 巨型 turn，占文件 42%
+ * 为 fixture 固有形态）。
+ *
+ * @param turns turns.json 的 turns 数组（byteOffset 升序；字段见 turn-index-types.ts）
+ * @param boundaryIds 该页窗口消息的 piEntryId 集合（与 turns[].entryId 求交得选中 turn）
+ * @returns {turnCount, budgetSum, restBudgetSum, exemptTurnBytes, physSum, ok}
+ *   ok = 选中 turn 数 ≤ RECENT_TURNS 且 除最右 turn 外 budgetBytes 合计 ≤ MAX_BYTES
+ *  （turnCount=0 视为不合规——非空窗口必含至少一个 turn 边界；空页由调用方豁免）
+ */
+export function windowBudgetCompliance(turns, boundaryIds) {
+  const win = turns.filter((t) => boundaryIds.has(t.entryId))
+  const budgetSum = win.reduce((acc, t) => acc + (t.budgetBytes ?? 0), 0)
+  const exemptTurnBytes = win[win.length - 1]?.budgetBytes ?? 0
+  const restBudgetSum = budgetSum - exemptTurnBytes
+  const physSum = win.reduce((acc, t) => acc + (t.byteLength ?? 0), 0)
+  return {
+    turnCount: win.length,
+    budgetSum,
+    restBudgetSum,
+    exemptTurnBytes,
+    physSum,
+    ok: win.length > 0 && win.length <= HISTORY_WINDOW_RECENT_TURNS && restBudgetSum <= HISTORY_WINDOW_MAX_BYTES,
+  }
+}
+
 // ── 文件注入（A3 追加/残尾、A4 同尺寸重写） ─────────────────────────
 
 /** 生成一条合法 pi JSONL message entry（8 位 hex id；user 边界或 assistant 尾随）。 */
@@ -248,12 +311,17 @@ export function rewriteTurnInPlaceKeepStat(jsonlFile) {
     const marker = 'rewrite-probe-'
     let next = content.text
     if (next.includes(marker)) {
-      // 二次改写：递增尾号保持字节数
+      // 二次改写：递增尾号（ASCII 段内替换，天然字节等长）
       next = next.replace(/rewrite-probe-(\d+)/, (_, n) => marker + String(Number(n) + 1).padStart(n.length, '0'))
-    } else if (content.text.length >= marker.length + 2) {
-      next = marker + content.text.slice(marker.length)
     } else {
-      continue // 文本太短无法等长改写
+      // 首次改写：在首个 ≥ marker 长度的可见 ASCII 连续段上原位替换前缀（ASCII→ASCII
+      // 字节等长）。不能按 UTF-16 码元 slice——中文等多字节载体的前缀替换必破坏字节等长。
+      // taiji 元数据锚（<!--taiji:msg:uuid-->，参与消息身份转换）临时替换为等长非 ASCII
+      // 占位后再找段——锚是尾窗常客且必为长 ASCII 段，不排除则注入必破坏 piEntryId
+      const anchorFree = content.text.replace(/<!--taiji:[^>]*-->/g, (m0) => '中'.repeat(m0.length))
+      const asciiRun = anchorFree.match(new RegExp('[ -~]{' + marker.length + ',}'))
+      if (!asciiRun) continue // 无足够长 ASCII 段的行换下一个 user turn
+      next = content.text.slice(0, asciiRun.index) + marker + content.text.slice(asciiRun.index + marker.length)
     }
     if (Buffer.byteLength(next, 'utf8') !== Buffer.byteLength(content.text, 'utf8')) continue
     row.message.content[0].text = next

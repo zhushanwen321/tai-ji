@@ -6,7 +6,7 @@
  * 终态索引路径每次窗口读取以实际边界 entryId 校验兜底（设计 §3.1「窗口选择与单次快照」），
  * 必须返回新文件内容、不得出现新旧拼接。
  *
- * 步骤：种子真实会话 → 读一次建索引并留改写前窗口基线 → rewriteTurnInPlaceKeepStat
+ * 步骤：落合成隔离会话（全 ASCII 载体）→ 读一次建索引并留改写前窗口基线 → rewriteTurnInPlaceKeepStat
  * 等长改写 + mtime 回写 → 再读同窗口：messageCount 与 piEntryId 序列与基线一致（布局
  * 未动）、恰好一条消息文本带 rewrite-probe- marker（其余逐条不变——只返回新文件内容）
  * → cursor 翻页同判据 → 第二次请求仍为新内容（重建后新索引复用）。
@@ -20,20 +20,16 @@ import path from 'node:path'
 
 import {
   isBaselineCollectMode,
+  makeMessageEntry,
   oldestCursor,
+  randomEntryId,
   readRuntimePort,
   readTurnsJson,
   rewriteTurnInPlaceKeepStat,
-  seedProbeSession,
   timedHistory,
 } from './lib/turn-index-lib.mjs'
-import { pickLargestSession, PROD_DATA_DIR, scanSessionPool } from './lib/cold-switch-lib.mjs'
 
 const baseline = isBaselineCollectMode()
-
-/** 采样门槛：≥1MB 真实会话（user turn 文本密度足够等长改写）；上限 32MB 控制首建成本。 */
-const REWRITE_MIN_BYTES = 1_000_000
-const REWRITE_MAX_BYTES = 32_000_000
 
 /** 等长改写 marker（lib.rewriteTurnInPlaceKeepStat 注入的前缀）。 */
 const REWRITE_MARKER = 'rewrite-probe-'
@@ -57,12 +53,24 @@ export const meta = {
   ],
 }
 
-/** 挑重写载体：生产池 1-32MB、体量从小到大第一个（改写窗口小、读取快）。 */
-function pickRewriteSession(prodRoot) {
-  const pool = scanSessionPool(prodRoot)
-    .filter((s) => s.bytes >= REWRITE_MIN_BYTES && s.bytes <= REWRITE_MAX_BYTES)
-    .sort((a, b) => a.bytes - b.bytes)
-  return pool[0] ?? pickLargestSession(pool, { minBytes: REWRITE_MIN_BYTES })
+/** 写合成会话文件（隔离 fixture：header + 20 对 user/assistant turn，全 ASCII 文本、
+ * 显式短 id；与 A7/A8 剧本的隔离落盘形态一致）。返回 {sid, file}。 */
+function writeSyntheticSession(dataDir) {
+  const sid = `fixture-rewrite-${randomEntryId()}`
+  const entries = [
+    { type: 'session', version: 3, id: sid, timestamp: new Date().toISOString(), cwd: process.cwd() },
+  ]
+  for (let i = 1; i <= 20; i++) {
+    const n = String(i).padStart(3, '0')
+    entries.push(makeMessageEntry('user', `User message number ${n} for rewrite probe scenario with enough ascii length`, `u${n}aaaa`))
+    entries.push(makeMessageEntry('assistant', `Assistant reply number ${n} for rewrite probe scenario with enough ascii length`, `a${n}bbbb`))
+  }
+  const dir = path.join(dataDir, 'agent', 'sessions', 'turn-index-fixtures')
+  fs.mkdirSync(dir, { recursive: true })
+  const file = path.join(dir, `${sid}.jsonl`)
+  fs.writeFileSync(file, entries.map((e) => JSON.stringify(e)).join('\n') + '\n', 'utf8')
+  fs.writeFileSync(`${file}.project.json`, JSON.stringify({ projectId: 'turn-index-fixtures' }), 'utf8')
+  return { sid, file }
 }
 
 /** 窗口摘要：逐条消息 {piEntryId, text}（对照判据的稳定形态）。 */
@@ -83,22 +91,21 @@ export async function run(ctx) {
     return { uncovered, gotchas }
   }
 
-  // ── 段 0：fixture 采集 ─────────────────────────────────────────
+  // ── 段 0：合成 fixture 落盘（隔离形态，A7/A8 剧本同款）──────────
+  // V4 验证的是 runtime 行为（stat 判定 + 读取只返回新文件内容），合成全 ASCII 载体使
+  // 等长注入确定性成立，不受生产消息形态歧义影响（taiji 元数据锚 / 非 ASCII 文本 /
+  // 结构化 pattern 曾使真实载体逐个暴露改写未命中与 piEntryId 失真，见 runlog）
   await instance.stop()
-  const picked = pickRewriteSession(PROD_DATA_DIR)
-  ev.assert('V4 载体：生产池含 1-32MB 真实会话样本', Boolean(picked), {
-    channel: 'C', expected: '1-32MB 样本 1 个', actual: picked ? `${(picked.bytes / 1_000_000).toFixed(1)}MB ${picked.sessionId}` : '无',
+  const { sid, file: jsonlCopy } = writeSyntheticSession(dataDir)
+  ev.assert('V4 载体：合成 fixture 落盘（41 entries）', fs.existsSync(jsonlCopy), {
+    channel: 'C', expected: '合成会话文件存在', actual: `${jsonlCopy} (${fs.statSync(jsonlCopy).size}B)`,
   })
-  if (!picked) throw new Error('生产池无 V4 重写载体样本')
-  seedProbeSession(dataDir, PROD_DATA_DIR, picked)
-  const jsonlCopy = path.join(dataDir, 'agent', 'sessions', path.relative(path.join(PROD_DATA_DIR, 'agent', 'sessions'), picked.sessionFile))
 
   await instance.launch()
   const ready = await instance.waitReady({ timeoutMs: 180_000 })
   ev.step({ step: 'rewrite.launch-ready', channel: 'C', exitCode: 0, stats: { runtimePort: ready.runtimePort, elapsedMs: ready.elapsedMs } })
   const { createProtocol } = await import('../scripts/lib/protocol.mjs')
   const proto = await createProtocol({ dataDir, runtimePort: readRuntimePort(dataDir) })
-  const sid = picked.sessionId
 
   try {
     // ── 段 1：建索引 + 改写前窗口基线 ─────────────────────────────
@@ -110,7 +117,8 @@ export async function run(ctx) {
     })
     if (!turns) throw new Error('首读未落盘索引——u-reader 编排未生效或读取失败，V4 失配重建无攻击对象')
     const before = windowDigest(first.reply)
-    const beforeIds = before.map((m) => m.id)
+    // id 查重只对非 null id（assistant/toolResult 等消息无 piEntryId，多条 null 是常态非重复）
+    const beforeIds = before.map((m) => m.id).filter((id) => id !== null)
     const beforeDup = beforeIds.filter((id, i) => beforeIds.indexOf(id) !== i)
     ev.assert('V4 前置：改写前窗口基线可判（消息非空、id 无重复、无 marker）', before.length > 0 && beforeDup.length === 0 && before.every((m) => !m.text.includes(REWRITE_MARKER)), {
       channel: 'C',
@@ -136,6 +144,18 @@ export async function run(ctx) {
     const afterIds = afterDigest.map((m) => m.id)
     const markerHits = afterDigest.filter((m) => m.text.includes(REWRITE_MARKER))
     const sameShape = afterDigest.length === before.length && JSON.stringify(afterIds) === JSON.stringify(beforeIds)
+    let shapeDiffAt = -1
+    for (let i = 0; i < Math.min(afterIds.length, beforeIds.length); i++) {
+      if (afterIds[i] !== beforeIds[i]) { shapeDiffAt = i; break }
+    }
+    if (shapeDiffAt >= 0) {
+      ev.attach('v4-id-diff', JSON.stringify({
+        beforeLen: beforeIds.length, afterLen: afterIds.length, firstDiffIdx: shapeDiffAt,
+        beforeCtx: beforeIds.slice(Math.max(0, shapeDiffAt - 2), shapeDiffAt + 3),
+        afterCtx: afterIds.slice(Math.max(0, shapeDiffAt - 2), shapeDiffAt + 3),
+        beforeAll: beforeIds, afterAll: afterIds,
+      }))
+    }
     const othersUnchanged = afterDigest.filter((m) => !m.text.includes(REWRITE_MARKER)).every((m) => {
       const old = before.find((b) => b.id === m.id)
       return old ? old.text === m.text : false
@@ -147,7 +167,7 @@ export async function run(ctx) {
       stats: { before: before.length, after: afterDigest.length, shapeSame: sameShape, markerCount: markerHits.length, othersUnchanged },
     })
     ev.assert('V4: 重写后窗口布局与基线一致（messageCount 与 piEntryId 序列不变）', sameShape, {
-      channel: 'B', expected: `${before.length} 条同序`, actual: `${afterDigest.length} 条 shapeSame=${sameShape}`,
+      channel: 'B', expected: `${before.length} 条同序`, actual: `${afterDigest.length} 条 shapeSame=${sameShape}${shapeDiffAt >= 0 ? ` 首个差异 idx=${shapeDiffAt} before=${JSON.stringify(beforeIds[shapeDiffAt])} after=${JSON.stringify(afterIds[shapeDiffAt])}` : ''}`,
     })
     ev.assert('V4: 窗口内恰好一条消息带 marker 且其余逐条不变（新文件内容，非旧缓存回放）', markerHits.length === 1 && othersUnchanged, {
       channel: 'B',

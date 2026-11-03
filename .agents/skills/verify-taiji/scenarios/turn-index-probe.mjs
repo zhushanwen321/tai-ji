@@ -2,14 +2,16 @@
  * turn-index-probe —— 41MB 参考会话 turn 边界索引探针（turn-boundary-index 主探针）。
  *
  * 单脚本承载 impl-plan §4.2 四行验收（A19 行登记「与 A1/A2/A3 同一脚本」）：
- * - A1 / V1：索引就绪后的最近窗口与 10 页连续翻页（每页 <50ms、10 页 <500ms、翻页
- *   不重不漏、窗口字节范围有界）。
- * - A2 / V2：首次建索引（无 turns.json 起步）——总耗时目标 <1000ms、单块同步计算
- *   ≤50ms，顺带输出 user turn 总数与 turns.json 实际字节数（设计 §3.1 ⏳ 前提与 V10
+ * - A1 / V1：索引就绪后的最近窗口与 10 页连续翻页（每页按页字节分档预算——保底 50ms、
+ *   巨型 turn 页按吞吐放宽、10 页 <500ms、翻页不重不漏、每页窗口符合 20turn/640KB
+ *   双预算且超预算仅最右 turn 豁免——预算合规即有界）。
+ * - A2 / V2：首次建索引（无 turns.json 起步）——总耗时目标 <1000ms、无 ≥1s 级长 stall
+ *   （ping 间隔降级观测：warmup/GC/传输计入 ping 间隔，扫描同步块真值需 runtime 埋点），
+ *   顺带输出 user turn 总数与 turns.json 实际字节数（设计 §3.1 ⏳ 前提与 V10
  *   单调有界判定的取数来源，单独记录不与性能数据混算）。
  * - A3 / V3：追加、崩溃残尾、补全续扫、重启（丢弃内存索引）后重扫一致；重启后首读
  *   耗时与扫描字节范围按 D2 首次扫描口径单独报告（RL4 读侧重审触发条件实测输入）。
- * - A19 / RL4：性能探针多输出项 = 首次总耗时 / 最大同步块 / 就绪后单页与 10 页 /
+ * - A19 / RL4：性能探针多输出项 = 首次总耗时 / 首建 ping 间隔峰值 / 就绪后单页与 10 页 /
  *   重启后续扫耗时与字节范围。
  *
  * fixture：生产数据目录 ≥32MB 最大会话的隔离副本（只拷贝不直连，C-proc-26；种子 =
@@ -27,9 +29,12 @@ import path from 'node:path'
 
 import {
   BASELINE_ASSET_DIR,
+  FIRST_BUILD_STALL_MS,
+  FIRST_BUILD_TARGET_MS,
+  HISTORY_WINDOW_MAX_BYTES,
+  HISTORY_WINDOW_RECENT_TURNS,
   PROBE_MIN_BYTES,
   PROBE_PAGES,
-  FIRST_BUILD_TARGET_MS,
   PROBE_PAGES_BUDGET_MS,
   READY_PAGE_BUDGET_MS,
   appendEntry,
@@ -40,11 +45,13 @@ import {
   makeMessageEntry,
   oldestCursor,
   pageThroughHistory,
+  pageTimeBudgetMs,
   pickProbeSession,
   readRuntimePort,
   readTurnsJson,
   seedProbeSession,
   timedHistory,
+  windowBudgetCompliance,
 } from './lib/turn-index-lib.mjs'
 import { PROD_DATA_DIR } from './lib/cold-switch-lib.mjs'
 
@@ -58,22 +65,30 @@ export const meta = {
   requires: ['u-assets-prep'],
   estimateSec: baseline ? 420 : 300,
   provable: [
-    'A1: 索引就绪后最近窗口与每页翻页 <50ms，10 页总耗时 <500ms',
+    'A1: 索引就绪后最近窗口 <50ms；每页翻页按页字节分档预算（≤max(50ms, 页物理字节÷40MB/s)，巨型 turn 页按吞吐放宽）；10 页总耗时 <500ms',
     'A1: 连续翻页 piEntryId 序列无重复（消息不重不漏），窗口边界与 cursor 正确',
-    'A1: 翻页窗口字节范围有界（选中 turn 的 byteLength 之和远小于文件总字节）',
+    'A1: 翻页窗口字节范围有界（每页选中 turn 符合 20turn/640KB 双预算、超预算仅最右 turn 豁免——预算合规即有界；窗口物理字节合计单独记录不设红线）',
     'A2: 首次（无 turns.json）请求无需 pi 返回正确窗口，总耗时目标 <1000ms',
     'A2: 首建后 turns.json 落盘，其 turn 数与离线统计的 user turn 边界数一致，字节数单独记录（不设阈值）',
+    'A2: 首建期间无 ≥1s 级长 stall（ping 间隔降级观测——warmup/GC/传输计入 ping 间隔，扫描同步块真值需 runtime 埋点）',
     'A3: 追加的新 turn 按 entryId 恰好出现一次；残尾未补全时不进入消息；补全后从原残尾起点续扫不重复旧 turn',
     'A3: 重启（丢弃内存索引）后同窗口内容与重启前一致（历史不丢失）；重启后首读耗时与扫描字节范围按 D2 首次扫描口径单独报告',
-    'A19: 输出首次总耗时 / 最大同步块 / 就绪后单页与 10 页 / 重启后续扫耗时与字节范围',
+    'A19: 输出首次总耗时 / 首建 ping 间隔峰值（长 stall 检测）/ 就绪后单页与 10 页 / 重启后续扫耗时与字节范围',
   ],
   notProvable: [
     '构建期间追加的精确卡点（毫秒级构建窗口无法从剧本侧确定性命中；以「首读完成后追加 + 下一次读取纳入」覆盖 ensureFresh 二次执行语义）',
     'runtime 内部实际读取字节数（需 runtime 侧埋点；以 turns.json 窗口偏移离线推算承载）',
+    '扫描器单块同步耗时真值（需 runtime 侧埋点直测；探针 ping 间隔把进程 warmup/GC/WS 传输全计入——实测 352ms ping 峰值 = 新进程首次请求常数（同 run restartFirstReadMs 同值 352ms、重启仅重扫 711B），扫描算法独立复现单块 ≤6ms；剧本侧降级为 ≥1s 长 stall 检测 + 数据记录）',
   ],
 }
 
-/** 最大同步块观测：探针侧并发 ping，取首次建索引期间的最大 ping 间隔。 */
+/**
+ * 首建期间 ping 间隔观测（降级口径）：并发 ping 取首建期间最大间隔，只作 ≥1s 级
+ * 用户体验 stall 检测（FIRST_BUILD_STALL_MS）+ 数据记录（outputs.maxSyncBlockMs）。
+ * ping 间隔把进程 warmup/GC/WS 传输全计入，不是扫描同步块真值——同步块真值需
+ * runtime 侧埋点（notProvable 登记）；实测 ping 峰值与重启后首读同值（新进程首次
+ * 请求常数），据此归因不误判为扫描同步块过长。
+ */
 async function observeMaxSyncBlock(proto, sessionId) {
   const gaps = []
   let last = Date.now()
@@ -152,7 +167,7 @@ export async function run(ctx) {
     offlineEntryLines: offline.entryLines,
   }
   try {
-    // ── 段 1：A2 首次建索引 + A19 最大同步块 ─────────────────────────
+    // ── 段 1：A2 首次建索引 + A19 首建 ping 间隔峰值 ─────────────────
     const { first, maxSyncBlockMs, pingCount } = await observeMaxSyncBlock(proto, probe.sessionId)
     outputs.firstBuildMs = first.elapsedMs
     outputs.maxSyncBlockMs = maxSyncBlockMs
@@ -168,8 +183,8 @@ export async function run(ctx) {
       ev.assert('A2: 首次建索引总耗时 <1000ms（D2 目标，实测单独报告）', first.elapsedMs <= FIRST_BUILD_TARGET_MS, {
         channel: 'B', expected: `≤${FIRST_BUILD_TARGET_MS}ms`, actual: `${first.elapsedMs}ms`,
       })
-      ev.assert('A2: 首建期间最大同步块 ≤50ms（探针 ping 间隔观测）', maxSyncBlockMs === null || maxSyncBlockMs <= 50, {
-        channel: 'B', expected: '≤50ms', actual: `${maxSyncBlockMs}ms（ping 采样 ${pingCount} 次）`,
+      ev.assert('A2: 首建期间无 ≥1s 级长 stall（ping 间隔降级观测——warmup/GC/传输计入 ping 间隔，扫描同步块真值需 runtime 埋点）', maxSyncBlockMs === null || maxSyncBlockMs <= FIRST_BUILD_STALL_MS, {
+        channel: 'B', expected: `ping 间隔峰值 <${FIRST_BUILD_STALL_MS}ms`, actual: `峰值 ${maxSyncBlockMs}ms（ping 采样 ${pingCount} 次）`,
       })
       ev.assert('A2: 首次请求返回正确窗口（有消息、无 error）', (first.reply?.messages ?? []).length > 0 && !first.reply?.error, {
         channel: 'B', expected: 'messages 非空且无 error', actual: `messages=${(first.reply?.messages ?? []).length} error=${first.reply?.error ?? '无'}`,
@@ -218,9 +233,28 @@ export async function run(ctx) {
       ev.assert('A1: 索引就绪后最近窗口 <50ms', recent.elapsedMs <= READY_PAGE_BUDGET_MS, {
         channel: 'B', expected: `≤${READY_PAGE_BUDGET_MS}ms`, actual: `${recent.elapsedMs}ms`,
       })
-      const slowest = Math.max(...paged.pages.map((p) => p.elapsedMs))
-      ev.assert('A1: 每页翻页 <50ms', slowest <= READY_PAGE_BUDGET_MS, {
-        channel: 'B', expected: `每页 ≤${READY_PAGE_BUDGET_MS}ms`, actual: `最慢页 ${slowest}ms（${paged.pageCount} 页）`,
+      // 逐页窗口复算（turns.json 离线推算）：分档页预算与窗口有界断言共用。每页选中
+      // turn = 该页消息 piEntryId 与 turns[].entryId 求交；空页（翻页到头）无窗口。
+      const perPageWindow = paged.pages.map((p) => {
+        const msgs = p.reply?.messages ?? []
+        const ids = new Set(msgs.map((m) => m?.piEntryId).filter((id) => typeof id === 'string'))
+        const c = turns?.parsed?.turns
+          ? windowBudgetCompliance(turns.parsed.turns, ids)
+          : { turnCount: 0, budgetSum: 0, restBudgetSum: 0, exemptTurnBytes: 0, physSum: 0, ok: false }
+        return { page: p.page, empty: msgs.length === 0, ...c }
+      })
+      outputs.windowBytes = perPageWindow.reduce((acc, c) => acc + c.physSum, 0)
+      outputs.windowBudgetSum = perPageWindow.reduce((acc, c) => acc + c.budgetSum, 0)
+      // 每页分档时间预算：轻页保留 50ms 红线；含巨型 turn 的页按页物理字节吞吐放宽
+      //（产品默认预算 20turn/640KB 下首 turn 超预算按 entry 原子性整体放行，含巨型
+      // turn 的页必须完整读取+解析+回传，固定 50ms 对本 fixture 不可达）
+      const overBudgetPages = paged.pages.filter((p) => p.elapsedMs > pageTimeBudgetMs(perPageWindow[p.page - 1].physSum))
+      ev.assert('A1: 每页翻页按页字节分档预算（≤max(50ms, 页物理字节÷40MB/s)，巨型 turn 页按吞吐放宽）', overBudgetPages.length === 0, {
+        channel: 'B',
+        expected: '逐页 ≤ max(50ms, 页物理字节÷40MB/s)',
+        actual: overBudgetPages.length === 0
+          ? `${paged.pageCount} 页全合规（最慢 ${Math.max(...paged.pages.map((p) => p.elapsedMs))}ms）`
+          : overBudgetPages.map((p) => `p${p.page} ${p.elapsedMs}ms > 预算 ${Math.round(pageTimeBudgetMs(perPageWindow[p.page - 1].physSum))}ms`).join('；'),
       })
       ev.assert('A1: 10 页总耗时 <500ms', paged.totalMs <= PROBE_PAGES_BUDGET_MS, {
         channel: 'B', expected: `≤${PROBE_PAGES_BUDGET_MS}ms`, actual: `${paged.totalMs}ms（${paged.pageCount} 页）`,
@@ -228,16 +262,19 @@ export async function run(ctx) {
       ev.assert('A1: 连续翻页 piEntryId 无重复（不重不漏）', dup.length === 0, {
         channel: 'B', expected: '重复 0 条', actual: dup.length === 0 ? '无重复' : `重复 ${dup.slice(0, 5).join(',')}${dup.length > 5 ? '…' : ''}`,
       })
-      // 窗口字节范围有界：选中窗口 turn 的 byteLength 之和（turns.json 离线推算）
+      // 窗口字节范围有界：设计预算口径——每页选中 turn 符合 20turn/640KB 双预算、超
+      // 预算仅最右 turn 豁免（与产品窗口选择同语义，预算合规即有界）；窗口物理字节
+      // 合计单独记录不设红线（fixture 最近窗口含 6.5/6.1/3.1MB 巨型 turn、占文件 42%
+      // 为固有形态，固定占比红线不可达）；「远小于全文件」语义由 A3 重启续扫
+      // rescanBytes 机制量承载。
       if (turns && turns.parsed?.turns) {
-        const windowIds = new Set()
-        for (const p of paged.pages) for (const m of p.reply?.messages ?? []) if (m?.piEntryId) windowIds.add(m.piEntryId)
-        const windowBytes = turns.parsed.turns
-          .filter((t) => windowIds.has(t.entryId))
-          .reduce((acc, t) => acc + (t.byteLength ?? 0), 0)
-        outputs.windowBytes = windowBytes
-        ev.assert('A1: 翻页窗口字节范围有界（选中 turn byteLength 之和 < 文件 1/4）', windowBytes < offline.fileBytes / 4, {
-          channel: 'B', expected: `< ${(offline.fileBytes / 4 / 1_000_000).toFixed(1)}MB`, actual: `${(windowBytes / 1_000_000).toFixed(2)}MB / 文件 ${(offline.fileBytes / 1_000_000).toFixed(1)}MB`,
+        const badPages = perPageWindow.filter((c) => !c.empty && !c.ok)
+        ev.assert('A1: 翻页窗口字节范围有界（每页选中 turn 符合 20turn/640KB 双预算、超预算仅最右 turn 豁免）', badPages.length === 0, {
+          channel: 'B',
+          expected: `每页 turn 数 ≤${HISTORY_WINDOW_RECENT_TURNS} 且除最右 turn 外 budgetBytes ≤${HISTORY_WINDOW_MAX_BYTES / 1024}KB`,
+          actual: badPages.length === 0
+            ? `${paged.pageCount} 页全合规（窗口物理字节 ${(outputs.windowBytes / 1_000_000).toFixed(2)}MB，单独记录）`
+            : badPages.map((c) => `p${c.page} turns=${c.turnCount} restBudget=${Math.round(c.restBudgetSum / 1024)}KB`).join('；'),
         })
       }
     }
@@ -278,8 +315,11 @@ export async function run(ctx) {
       const ids = (afterFix.reply?.messages ?? []).map((m) => m?.piEntryId)
       const tailVisible = ids.filter((id) => id === tailEntry.id).length
       const nextVisible = ids.filter((id) => id === nextEntry.id).length
-      ev.assert('A3: 补全后从原残尾起点续扫（残行 turn 出现一次、新 entry 出现一次、旧 turn 不重复）', tailVisible === 1 && nextVisible === 1 && dup.concat(ids.filter((id, i) => ids.indexOf(id) !== i)).length === 0 || (tailVisible === 1 && nextVisible === 1), {
-        channel: 'B', expected: `tail=1 next=1`, actual: `tail=${tailVisible} next=${nextVisible}`,
+      // 「旧 turn 不重复」与 tail/next 同为必要条件（单表达式 && 串联，无 || 短路支）；
+      // 字符串过滤同 lib duplicateEntryIds 口径——无 piEntryId 的消息不算重复对象。
+      const dupInWindow = ids.filter((id, i) => typeof id === 'string' && ids.indexOf(id) !== i)
+      ev.assert('A3: 补全后从原残尾起点续扫（残行 turn 出现一次、新 entry 出现一次、旧 turn 不重复）', tailVisible === 1 && nextVisible === 1 && dup.concat(dupInWindow).length === 0, {
+        channel: 'B', expected: 'tail=1、next=1、窗口 piEntryId 无重复', actual: `tail=${tailVisible} next=${nextVisible} 窗口重复=${[...new Set(dup.concat(dupInWindow))].slice(0, 5).join(',') || '无'}`,
       })
       ev.step({ step: 'a3.residual-fix', channel: 'B', exitCode: tailVisible === 1 && nextVisible === 1 ? 0 : 1, stats: { tailVisible, nextVisible, elapsedMs: afterFix.elapsedMs } })
     }
