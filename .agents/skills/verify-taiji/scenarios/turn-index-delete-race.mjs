@@ -98,9 +98,12 @@ export const meta = {
   requires: ['faux', 'u-assets-prep'],
   estimateSec: 480,
   faux: {
-    responses: {
-      'faux/faux-1': [{ text: 'delete-race-faux-answer', stopReason: 'stop' }],
-    },
+    // force: 剧本段 0 stop→seed→二次 launch 会让 ensureFaux 二次执行——首次 launch 已种过
+    // settings.json，无 force 会被 seed-faux 的已存在拒绝拦住（幂等重写同内容，安全）。
+    force: true,
+    // 统一队列数组形态（faux-llm-ext loadScript：无 --model 的进程——btw 线 pi——
+    // 不能用 model-keyed 对象，统一队列对所有进程形态可用）。
+    responses: [{ text: 'delete-race-faux-answer', stopReason: 'stop' }],
   },
   provable: [
     'V7①: lifecycle.delete 覆盖在途构建——树面 ext-sessions/<sid>/ 整树回收、无 history-index 写回重建',
