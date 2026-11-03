@@ -32,20 +32,29 @@ const SUB_MODEL = 'mock-sub-a'
 const SUB_CANARY = 'GRANDCHILD_MOCK_CANARY_9c1d'
 const WF_CANARY_PREFIX = 'FANOUT_MEMBER_STEP_'
 
-/** 成员队 step0：段 A 的 canary 文本步；step1-4：段 B 的 [SO, SO, stop, stop] 奇偶形态。 */
+/** 成员队 step0：段 A 的 canary 文本步；step1-6：段 B 的 [SO, SO, stop, stop, stop, stop]
+ * 奇偶形态（每成员 3 请求：SO 轮 → stop 轮 → 收尾轮——成员引擎在干净 stop 后仍有
+ * 一轮收尾请求，2026-11-03 实测：队列只备 4 步时收尾轮命中耗尽 404，按收尾边沿判成败
+ * 语义成员被判 failed，canary 产出与 stop 轮全对也无效）。 */
 const memberQueue = [
   { text: SUB_CANARY, stopReason: 'stop' },
   // [2026-10-24 终态边沿语义] 成员轮成败判定只产自引擎收尾边沿（设计 §3.3.1 聚合
   // 不变量 2，output-collector.ts collectOutcome）——成员队列必须以 stop 步收尾：
   // 纯 toolUse 队列让成员引擎永不停轮、直到队列耗尽 404，收尾边沿=错误 → 成员
   // failed（parsedOutput 已产出也不豁免，旧「SO 边沿结算、收尾错误是噪音」形态
-  // 已废除）。[SO, SO, stop, stop] 奇偶形态：前 2 位置全 SO、后 2 位置全 stop，
-  // 两成员共享同一 per-model 游标时任意请求交错序下，每成员第 1 请求落 SO 位、
-  // 第 2 请求落 stop 位（引擎干净停 → success + engineStopReason=stop → delivered）。
+  // 已废除）。[SO, SO, stop, stop, stop, stop] 奇偶形态：两成员共享同一 per-model
+  // 游标时任意请求交错序下，每成员第 1 请求落 SO 位、第 2/3 请求落 stop 位
+  //（引擎干净停 → engineStopReason=stop → delivered；第 3 请求 = 收尾轮，2026-11-03
+  // 实测补步——缺失时收尾轮 404 即成员终局错误）。
   ...Array.from({ length: 2 }, (_, i) => ({
-    toolCalls: [{ name: 'structured-output', args: { summary: `${WF_CANARY_PREFIX}${i}_CANARY` } }],
+    // 工具名下划线形态（pi 工具名 snake_case 规范，e1e42d549）：成员 worker 注册表
+    // 里是 structured_output——连字符形态触发「Tool not found」→ 成员引擎 retry-reminder
+    // 循环到队列耗尽 404（2026-11-03 第六次现场实证：pi-subagent-*.jsonl L20）。
+    toolCalls: [{ name: 'structured_output', args: { summary: `${WF_CANARY_PREFIX}${i}_CANARY` } }],
     stopReason: 'toolUse',
   })),
+  { text: 'done', stopReason: 'stop' },
+  { text: 'done', stopReason: 'stop' },
   { text: 'done', stopReason: 'stop' },
   { text: 'done', stopReason: 'stop' },
 ]
@@ -214,6 +223,23 @@ export async function run(ctx) {
     expected: `engineDefaults.pi 含 ${SUB_MODEL}`,
     actual: subCfg.engineDefaults?.pi ?? '<缺>',
   })
+
+  // scoped-models 白名单扩展（2026-11-03 实测修正，a2-driver 同款）：e86cda257 起
+  // 显式派发模型（paramOverride）受 providers.json scopedModels 白名单校验，模板只含
+  // 用户真实 provider——不补白名单则 subagent_start / workflow_run 的显式 model 派发
+  // 被 toolResult isError 拒（「outside the scoped-models allowlist」），worker 永不
+  // spawn。把本剧本两个 mock 演员补进白名单（实例装配配置，非产品代码；每派发现读，
+  // launch 后 patch 即生效）。
+  const providersPath = path.join(dataDir, 'agent', 'config', 'providers.json')
+  try {
+    const providersRaw = JSON.parse(readTextFile(providersPath) || '{}')
+    const before = Array.isArray(providersRaw.scopedModels) ? providersRaw.scopedModels : []
+    providersRaw.scopedModels = [...new Set([...before, `mockllm/${MAIN_MODEL}`, `mockllm/${SUB_MODEL}`])]
+    fs.writeFileSync(providersPath, `${JSON.stringify(providersRaw, null, 2)}\n`)
+    log(`scopedModels patched: ${JSON.stringify(providersRaw.scopedModels)}`)
+  } catch (e) {
+    log(`scopedModels patch 失败：${e.message}`)
+  }
 
   // ══ 段 A：subagent 派发 ══════════════════════════════════════
   const createdA = await protocol.call('session.create', { cwd: repo, label: 'p0-subagent' }, { timeoutMs: 120_000 })
