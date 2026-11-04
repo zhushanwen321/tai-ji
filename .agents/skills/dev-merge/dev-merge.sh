@@ -35,6 +35,19 @@ set -euo pipefail
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
+# write_result <文件名> <JSON 字面量> — 结构化结果落盘（2026-11-04 断言结构化改造）：
+# 终态判定改为消费 .review/<文件名> 的 status 字段（JSON.parse），stdout 的 OK:/SKIP:/
+# CONFLICT: 前缀锚点形态退役（人读行文保留、锚前缀去除）。原子写（tmp+mv）防半写态
+# 被消费；失败路径（exit 1）不写 JSON——失败信号 = 退出码 + stderr（人读），cwd 可能
+# 不可用时写盘本身不可靠
+write_result() {
+  local file="$1" json="$2"
+  local dir=".review"
+  mkdir -p "$dir"
+  local tmp="$dir/$file.tmp.$$"
+  printf '{ "schemaVersion": 1, %s }\n' "$json" > "$tmp" && mv "$tmp" "$dir/$file"
+}
+
 # obs <start|end> <stage> <step> [附加 CLI 参数...] — 阶段边界事件（统一命令，不另造事件实现）
 OBS_CLI="$HOME/.agents/scripts/workflow-observe.mjs"
 obs() {
@@ -94,7 +107,7 @@ if [[ ! -d "$DEV_DIR" ]]; then
   DEVGIT="$(git -C "$CUR_DIR" rev-parse --git-common-dir)/worktrees/$DEV_BRANCH"
   git --git-dir="$DEVGIT" config --worktree core.bare false
   git --git-dir="$DEVGIT" config --worktree core.hooksPath "$DEVGIT/hooks"
-  echo "OK: worktree $DEV_DIR 已自动创建（分支 $DEV_BRANCH 基于 main）"
+  echo ">> worktree $DEV_DIR 已自动创建（分支 $DEV_BRANCH 基于 main）"
 fi
 
 # ── 公共预检：两边 worktree 都必须干净（tracked 改动）──
@@ -149,18 +162,22 @@ case "$SUBCMD" in
 
     obs start merge merge
     if is_merged; then
-      echo "SKIP: $CUR_BRANCH 已是 $DEV_BRANCH 的祖先（已合并过），无需重复 merge，可直接跑 cleanup"
+      write_result "merge-result.json" '"status": "already-merged", "branch": "'"$CUR_BRANCH"'", "devBranch": "'"$DEV_BRANCH"'"'
+      echo ">> $CUR_BRANCH 已是 $DEV_BRANCH 的祖先（已合并过），无需重复 merge，可直接跑 cleanup"
       obs end merge merge
       exit 0
     fi
 
     echo ">> git -C $DEV_DIR merge --no-ff $CUR_BRANCH"
     if git -C "$DEV_DIR" merge --no-ff "$CUR_BRANCH"; then
-      echo "OK: $CUR_BRANCH 已合并进 ${DEV_BRANCH}（--no-ff 保留分支历史）"
+      write_result "merge-result.json" '"status": "merged", "branch": "'"$CUR_BRANCH"'", "devBranch": "'"$DEV_BRANCH"'"'
+      echo ">> $CUR_BRANCH 已合并进 ${DEV_BRANCH}（--no-ff 保留分支历史）"
       echo "NEXT: 确认无误后运行 bash $0 cleanup $DEV_BRANCH 清理源 worktree"
       obs end merge merge
     else
-      echo "CONFLICT: 以下文件需要解决（在 $DEV_DIR 内处理）：" >&2
+      # 文件名先转义反斜杠与双引号再包引号（JSON 字符串安全；git 对含引号路径会原样输出）
+      write_result "merge-result.json" '"status": "conflict", "branch": "'"$CUR_BRANCH"'", "devBranch": "'"$DEV_BRANCH"'", "conflictFiles": ['"$(git -C "$DEV_DIR" diff --name-only --diff-filter=U | sed 's/\\/\\\\/g; s/"/\\"/g; s/^/"/; s/$/"/' | paste -sd ',' -)"']'
+      echo ">> 以下文件需要解决（在 $DEV_DIR 内处理）：" >&2
       git -C "$DEV_DIR" diff --name-only --diff-filter=U >&2 || true
       echo "HINT: 解决冲突后 cd $DEV_DIR && git add <files> && git commit 完成 merge，再跑 cleanup 子命令" >&2
       obs end merge merge
@@ -233,7 +250,9 @@ rm -rf $CUR_DIR && git -C $DEV_DIR worktree prune && git -C $DEV_DIR branch -D $
     # is_merged 闸门已证明合入 dev；-D 避免依赖 upstream/HEAD 校验的不确定性，已合并与否由 is_merged 闸门保证
     git branch -D "$CUR_BRANCH" \
       || die "分支 $CUR_BRANCH 删除失败。恢复命令：git -C $DEV_DIR branch -D $CUR_BRANCH"
-    echo "OK: worktree $CUR_DIR 与分支 $CUR_BRANCH 已清理"
+    # 落点 = 当前 cwd = dev worktree 的 .review/（feat 侧目录此刻已删；消费方按 SKILL 读 dev 侧路径）
+    write_result "cleanup-result.json" '"status": "cleaned", "branch": "'"$CUR_BRANCH"'", "worktree": "'"$CUR_DIR"'"'
+    echo ">> worktree $CUR_DIR 与分支 $CUR_BRANCH 已清理"
     obs end cleanup cleanup
     echo "NOTE: 原 worktree 目录已删除，会话默认 cwd 已悬空。手动终端：显式 cd 到 ${DEV_DIR} 继续；agent 会话：见 SKILL.md「bash 会话报废信号解码」，停止 bash 调用直接收尾"
     ;;

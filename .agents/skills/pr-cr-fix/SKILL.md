@@ -97,7 +97,7 @@ python3 <workspace 根>/.agents/skills/pr-cr-fix/scripts/validate-skill-yaml.py 
 
 - 强制检查项：frontmatter `name` 必填且与 skill 目录名完全一致——zcode skill 发现机制按目录名装载 skill，两者不一致时触发器与实际装载名脱节；`description` 必填非空且为双引号字符串或块标量（`>-` / `|`）——单引号是合法 YAML 但违反项目约定，计 error
 - `--fix` 自动修复 plain 与双引号转义两类问题（就地改写 SKILL.md，带写副作用，修后重跑校验确认）；单引号违规不自动修，须手工改为双引号或块标量
-- 退出码判读：exit 0 = 全部通过。exit 1 有两种成因共用同一退出码，按输出内容区分——输出含单独一行 `No files matched.` = glob 模式没匹配到任何 SKILL.md 文件（查路径与模式本身，与 skill 内容无关）；输出含 `ERROR:` 行 = 有文件挂了校验（逐条按错误内容修）
+- 退出码判读（程序化消费加 `--json`，2026-11-04 结构化）：exit 0 = 全部通过；exit 1 时按 stdout JSON 的 `kind` 字段区分成因——`no-match` = glob 模式没匹配到任何 SKILL.md 文件（查路径与模式本身，与 skill 内容无关）；`invalid` = 有文件挂了校验（按 `errors[]` 的 file+message 逐条修）。人读模式（不带 --json）的文本输出照旧：`No files matched.` 行 / `ERROR:` 行语义同上
 
 ## 阶段 1.5：度量快照 + Gate-1.5（硬门禁）[MANDATORY]
 

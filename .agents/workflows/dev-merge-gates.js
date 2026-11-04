@@ -728,27 +728,8 @@ const disclosedNonEvidence = new Set();
 // ── 身份对齐（对齐 review-fix-loop L1/L2）：L1 精确 id 命中（带标题检查防编号撞车）；
 //    L2 标题归一唯一命中（只折叠空白不剥标点——归一越激进误合并越高；过短标题
 //    <5 单位不参与，CJK 计 2）；非唯一/无命中 → 新条目 ──
-const TITLE_MATCH_MIN = 5;
-const titleUnits = (t) => {
-    let n = 0;
-    for (const ch of t)
-        n += /[\u4e00-\u9fa5]/.test(ch) ? 2 : 1;
-    return n;
-};
-/** 标题归一：只折叠空白（内部词形与标点均保留） */
 const normalizeTitle = (t) => String(t ?? "").toLowerCase().split(/\s+/).filter(Boolean).join(" ");
 /** 标题兼容（L1 检查）：归一后相等 → 同一问题；过短标题不参与前缀判定；前缀互含视为兼容 */
-const titlesCompatible = (a, b) => {
-    const na = normalizeTitle(a);
-    const nb = normalizeTitle(b);
-    if (na === "" || nb === "")
-        return false;
-    if (na === nb)
-        return true;
-    if (titleUnits(na) < TITLE_MATCH_MIN || titleUnits(nb) < TITLE_MATCH_MIN)
-        return false;
-    return na.startsWith(nb) || nb.startsWith(na);
-};
 // ── quality-gates --json 辅助（失败摘要按门组装：每个 FAIL 门一行状态 + detail 每门
 //    独立截断，全部 FAIL 门可见；解析失败回退原始输出尾部） ──
 function parseGatesJson(stdout) {
@@ -1817,13 +1798,13 @@ async function main() {
                 `输入：本轮全部维度报告在 ${runDir}/round-${round}/ 目录下（共 ${verdicts.length} 份：${verdicts.map((x) => `review-${x.dim}.md`).join("、")}）。逐份 Read——各维度的审查结果与修复指南（guidance）全部在文档里。`,
                 `各维度计数（校验用）：${JSON.stringify(verdicts.map((x) => ({ dimension: x.dim, mustFix: x.v.mustFix, suggestion: x.v.suggestion })))}`,
                 activeBefore.length > 0
-                    ? `上轮活跃问题清单（延续条目必须复用其 id）：${JSON.stringify(activeBefore.map((r) => ({ id: r.id, title: r.title, severity: r.severity })))}`
+                    ? `上轮活跃问题清单（延续条目必须复用其 id 且 files 保持与原条目一致——引擎按 id 等值 + 文件集交集双重核验，id 命中但文件集零交集会被判编号撞车按新条目处理）：${JSON.stringify(activeBefore.map((r) => ({ id: r.id, title: r.title, severity: r.severity, files: r.files })))}`
                     : "",
                 "",
                 "任务：",
                 "1. 跨维度合并同根因问题：保留最强证据与完整文件清单，guidance 合并为最具体的一句表述（合并后的修复指南会随 per-fixer 任务文档直达修复者）；每条列 sourceDims（来源维度清单，跨维度合并条目列全部来源维度、首个为主维度）。",
                 '2. 逐条证据裁决三档：有真实代码证据 → adjudication="evidence"；reviewer 未给实证 → "unverified"；臆测或纯风格指控 → "downgraded" + note。unverified/downgraded 同样写进聚合报告供人复核，但只有 evidence 条目进修复队列。',
-                round >= 2 ? "3. 跨轮身份对齐：延续上轮的条目必须复用问题清单条目 id；新条目不填 id（workflow 统一分配）。" : "3. 全部为新问题，不填 id（workflow 统一分配）。",
+                round >= 2 ? "3. 跨轮身份对齐（id 申报制）：延续上轮的条目必须复用问题清单条目 id（禁止漏填靠引擎猜——无 id 一律按新条目处理）；新条目不填 id（workflow 统一分配）。" : "3. 全部为新问题，不填 id（workflow 统一分配）。",
                 "4. 修复分组：把 evidence 条目按相关性和独立性分组——同文件/同模块/同根因归同组（一个 agent 修一组）；不同组的文件集必须不相交（组间可并行修复、互不冲突）；单条问题独立成组即可，无关联不强行合并。",
                 `5. 拦截前置消解检查（content 类 commit 拦截第一道防线，设计 §4.1）：亲跑只读门禁复现检查 node scripts/select-affected-e2e.mjs --check --base ${base}（e2e 资产防漏登记门禁）。若报出看护目录文件缺 rule 覆盖且该文件在本轮任一修复分组涉及文件中：把报错写明的恢复动作（按报错原文，如在 docs/testing/e2e-map.json 为该文件补 rule）并入涉及该文件的分组表最前一组（提交按分组表顺序执行）的对应条目 guidance，并注明该登记须与修复同批提交——拦截条件在提交时点被消解。报错与全部修复分组文件无关时不处理（既有欠账由补修链在该文件下次提交时承接）。`,
                 "",
@@ -1905,24 +1886,22 @@ async function main() {
                     log(`WARN: [branch-review] 聚合 evidence 条目「${nonEmptyStr(i.title) || "无标题"}」缺 files 或 severity 非法——跳过（下轮重报兜底）`);
                     continue;
                 }
-                // 身份对齐 L1：精确 id 命中（带标题检查防编号撞车——标题不兼容放弃沿用转 L2）
+                // 身份对齐（2026-11-04 结构化改造）：唯一判据 = 聚合条目申报的 id 等值命中
+                // （continuesId 语义——上轮活跃清单已注入聚合 prompt，延续必须复用原 id），
+                // 第二锚 = files 集合交集（机器可复算的结构化位置核验，替代旧标题前缀互含兼容
+                // 检查——旧判据对「不同问题标题相似」误合并、「同问题换措辞」双开两个方向都有
+                // 误判面）。id 命中但零文件交集 = 疑似编号撞车，拒绝沿用按新条目处理（WARN 呈
+                // 现，聚合器下轮申报修正）；旧 L2「无 id 按标题归一唯一命中自动合并」的猜通道
+                // 退役——无 id 申报一律新条目，猜错的两类代价（误合并漏修 / 双开拖收敛）都比
+                // 显式申报的成本高
                 const claimedId = nonEmptyStr(i.id);
-                let prev = claimedId !== "" ? records.find((p) => normIssueId(p.id) === claimedId) : undefined;
-                if (prev && nonEmptyStr(i.title) !== "" && prev.title !== "" && !titlesCompatible(prev.title, nonEmptyStr(i.title))) {
-                    log(`[branch-review] 身份对齐 L1 检查：${claimedId} 命中问题清单 ${prev.id} 但标题不兼容（${prev.title} ≁ ${nonEmptyStr(i.title)}），放弃编号沿用转 L2`);
+                let prev = claimedId !== "" ? records.find((p) => normIssueId(p.id) === normIssueId(claimedId)) : undefined;
+                if (prev && prev.files.filter((f) => files.includes(f)).length === 0 && prev.files.length > 0 && files.length > 0) {
+                    log(`[branch-review] 身份对齐：${claimedId} 命中问题清单 ${prev.id} 但文件集零交集（清单 [${prev.files.join("、")}] vs 本轮 [${files.join("、")}]）——疑似编号撞车，拒绝沿用按新条目处理`);
                     prev = undefined;
                 }
-                // 身份对齐 L2：标题归一唯一命中（完全相等；deferred 不参与——不经聚合重报复活）
-                if (!prev && nonEmptyStr(i.title) !== "" && titleUnits(nonEmptyStr(i.title)) >= TITLE_MATCH_MIN) {
-                    const key = normalizeTitle(nonEmptyStr(i.title));
-                    const hits = records.filter((p) => p.status !== "deferred" && normalizeTitle(p.title) === key);
-                    if (hits.length === 1) {
-                        prev = hits[0];
-                        log(`[branch-review] 身份对齐 L2：${claimedId !== "" ? claimedId : "（无 id）"} 按标题唯一命中沿用问题清单条目 ${prev.id}`);
-                    }
-                    else if (hits.length > 1) {
-                        log(`[branch-review] 身份对齐 L2：${claimedId !== "" ? claimedId : "（无 id）"} 标题命中 ${hits.length} 条（非唯一），按新条目处理`);
-                    }
+                if (prev !== undefined) {
+                    log(`[branch-review] 身份对齐：${claimedId} 沿用问题清单条目 ${prev.id}（id 等值 + 文件集交集第二锚通过）`);
                 }
                 if (prev !== undefined && next.includes(prev)) {
                     // 同一条目本轮已被并入（聚合器重复申报同 id / 同标题 L2 双命中）——跳过防问题清单双份

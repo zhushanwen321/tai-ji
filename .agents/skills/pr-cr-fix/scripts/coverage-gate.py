@@ -112,6 +112,30 @@ def sh(cmd: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
 
 
+def load_exempt_files(repo_root: Path) -> dict[str, str]:
+    """文件级门槛豁免清单（2026-11-04 manifest 化）：scripts/coverage-file-exempt.json
+    是唯一判定源——file 路径 → 理由映射。旧「文件头 2400 字符内 coverage-file-gate-exempt:
+    标记」检索退役（窗口截断漏识别与 fixture 引用误豁免同源消失）。清单缺失/畸形 =
+    空映射（无豁免，方向安全：不会把应豁免的误豁免，只会按违规拦——补登记后重跑）"""
+    manifest = repo_root / "scripts" / "coverage-file-exempt.json"
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        entries = data.get("entries")
+        if not isinstance(entries, list):
+            print(f"WARN: {manifest} entries 非数组——按无豁免处理", file=sys.stderr)
+            return {}
+        out: dict[str, str] = {}
+        for e in entries:
+            if isinstance(e, dict) and isinstance(e.get("file"), str) and isinstance(e.get("reason"), str):
+                out[e["file"]] = e["reason"]
+        return out
+    except FileNotFoundError:
+        return {}
+    except (json.JSONDecodeError, OSError) as exc:
+        print(f"WARN: {manifest} 读取失败（{exc}）——按无豁免处理", file=sys.stderr)
+        return {}
+
+
 def resolve_review_dirs(repo_root: Path) -> tuple[Path, Path | None]:
     """解析 gate 产物目录 → (旧 .review/ 目录, 新 pr-review 目录或 None)。
 
@@ -655,16 +679,12 @@ def main() -> None:
                           if f["executable"] >= min_file_lines and f["pct"] < min_file_pct]
         file_violations = []
         file_exempt = []
+        exempt_map = load_exempt_files(repo_root)
         for v in raw_violations:
-            abs_file = repo_root / v["file"]
-            try:
-                head = abs_file.read_text(encoding="utf-8", errors="replace")[:2400]
-            except OSError:
-                head = ""
-            m = re.search(r"coverage-file-gate-exempt:\s*(.+)", head)
-            if m:
+            reason = exempt_map.get(v["file"])
+            if reason is not None:
                 file_exempt.append({"file": v["file"], "pct": v["pct"],
-                                    "executable": v["executable"], "reason": m.group(1).strip()})
+                                    "executable": v["executable"], "reason": reason})
             else:
                 file_violations.append(v)
         summary_file = pkg_dir / "coverage" / "coverage-summary.json"

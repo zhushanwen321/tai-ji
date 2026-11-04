@@ -727,7 +727,21 @@ for (const s of skipSteps) {
 const skipSet = new Set(skipSteps);
 // ── 常量与脚本级状态 ──
 const MAX_GATE_ROUNDS = 3; // gate 修复子循环上限（同 zsw 版 MAX_GATE_ROUNDS）
-const PR_URL_RE = /^https:\/\/github\.com\/.+\/pull\/\d+$/;
+// pr-submit 结构化结果读取（2026-11-04 切 JSON：脚本终态写 .review/submit-result.json
+// {schemaVersion, prUrl}；旧「stdout 逐行 PR URL 正则过滤取最后一条」退役）。读不到/
+// 解析失败返回 null（fail 方向安全：调用方按缺失报错，不猜测）
+async function readSubmitResult() {
+    const r = await runNode(["-e", READ_FILE_QUIET, ".review/submit-result.json"]);
+    if (r.stdout.trim() === "")
+        return null;
+    try {
+        const j = JSON.parse(r.stdout);
+        return typeof j["prUrl"] === "string" && j["prUrl"] !== "" ? j["prUrl"] : null;
+    }
+    catch {
+        return null;
+    }
+}
 const REVIEWER_BATCH = 4; // review 分批并行（2026-09-20 用户指定）
 const FIXER_CONCURRENCY = 3; // fix 按组并行（同上）
 const STUCK_THRESHOLD = 3; // 连续 N 轮 must-fix 不降判 stuck
@@ -887,11 +901,38 @@ const commitShScript = (argv) => `PATH=${shq(nodeAbs.slice(0, nodeAbs.lastIndexO
  *  时裸 runSh("node") spawn ENOENT；2026-10-12 v-zcode 实测 fix 阶段 existsViaNode
  *  即此形态炸 fix-failure）。全部 node 调用统一走本助手。 */
 const runNode = (nodeArgs) => runSh("sh", ["-c", [shq(nodeAbs), ...nodeArgs.map(shq)].join(" ")]);
-// pre-merge marker（pr-pre-merge.sh 唯一写入方）：result="PASS" 形态
-async function readPremergeMarker() {
-    const r = await runNode(["-e", READ_FILE_QUIET, `${prReviewDir}/premerge-result`]);
-    const m = r.stdout.match(/result="([^"]+)"/);
-    return m?.[1] ?? null;
+// pre-merge 结构化结果（pr-pre-merge.sh 唯一写入方，2026-11-04 切 JSON：脚本同目录
+// 双写 premerge-result.json {schemaVersion, result, timestamp, headCommit, changeset}；
+// 旧文本 marker 的 result="..." 正则提值退役——pr-status.sh 仍读文本形态不受影响）。
+// 读不到/解析失败返回 null（fail 方向安全：调用方披露「未读到」不伪造 PASS）
+async function readPremergeResult() {
+    const r = await runNode(["-e", READ_FILE_QUIET, `${prReviewDir}/premerge-result.json`]);
+    if (r.stdout.trim() === "")
+        return null;
+    try {
+        const j = JSON.parse(r.stdout);
+        const result = typeof j["result"] === "string" ? j["result"] : "";
+        if (result === "")
+            return null;
+        // 新鲜度核验（2026-11-04 审查补强）：headCommit 与当前 HEAD 不等 = 上一 run 的陈旧产物
+        // （worktree 重建/切分支后脚本未重跑），按未读到处理（不采信陈旧结论）
+        {
+            const headNow = await runSh("git", ["rev-parse", "HEAD"]);
+            const recorded = typeof j["headCommit"] === "string" ? j["headCommit"] : "";
+            if (headNow.exitCode === 0 && recorded !== "" && headNow.stdout.trim() !== recorded) {
+                log(`[premerge] WARN: 结果文件为陈旧产物（headCommit ${recorded.slice(0, 10)} ≠ 当前 ${headNow.stdout.trim().slice(0, 10)}）——按未读到处理`);
+                return null;
+            }
+        }
+        const cs = j["changeset"];
+        const changeset = cs !== null && typeof cs === "object" && !Array.isArray(cs) && typeof cs.status === "string"
+            ? { status: String(cs.status), missing: Array.isArray(cs.missing) ? cs.missing.filter((x) => typeof x === "string") : [] }
+            : null;
+        return { result, changeset };
+    }
+    catch {
+        return null;
+    }
 }
 // ── step wrapper：skipSteps 命中记 skipped（先于 failure 检查——failed 终态也完整
 //    披露显式声明的 skip）；失败记 failure 短路后续 step。阶段边界由公共观测层
@@ -1084,34 +1125,19 @@ function countDiffPackages(files) {
     return pkgs.size;
 }
 // ── 跨轮身份对齐（L1 精确 id 带标题检查 + L2 标题归一唯一命中；与 saved 版同源） ──
-const TITLE_MATCH_MIN = 5;
-const titleUnits = (t) => {
-    let n = 0;
-    for (const ch of t)
-        n += /[\u4e00-\u9fa5]/.test(ch) ? 2 : 1;
-    return n;
-};
-const normalizeTitle = (t) => String(t ?? "").toLowerCase().split(/\s+/).filter(Boolean).join(" ");
-/** issue ID 归一化（对齐 pi 版 normIssueId）：小写 + 剥尾部 "(...)" 尾注——LLM 产出的
- *  ID 漂移形态（"mf-1"/"MF-1"/"MF-1 (fixed)"）经此归一后与清单键匹配，防 ES3 严格
- *  比较把漂移 ID 误判 must-fix 漏修（pi 版注释明言该形态曾真实发生）。空串返回 ""。 */
-const normIssueId = (s) => String(s ?? "").toLowerCase().replace(/\s*\([^)]*\)\s*$/, "").trim();
 /** 问题清单查找（精确优先，归一化兜底）——ES3 与 fix 后问题清单更新的共用键空间。 */
 const findIssue = (issues, rawId) => {
     const raw = typeof rawId === "string" ? rawId : "";
     return issues.find((i) => i.id === raw) ?? issues.find((i) => normIssueId(i.id) === normIssueId(raw));
 };
-const titlesCompatible = (a, b) => {
-    const na = normalizeTitle(a);
-    const nb = normalizeTitle(b);
-    if (!na || !nb)
-        return false;
-    if (na === nb)
-        return true;
-    if (titleUnits(na) < TITLE_MATCH_MIN || titleUnits(nb) < TITLE_MATCH_MIN)
-        return false;
-    return na.startsWith(nb) || nb.startsWith(na);
-};
+// 问题清单条目 id 归一（与 dev-merge-gates normIssueId 同源：小写 + 剥尾部括号尾注——
+// LLM 引用 id 的漂移形态归一到同一等值域；2026-11-04 审查修正：删除标题猜通道时误删了
+// 本定义，5 个使用点悬空）
+const normIssueId = (s2) => String(s2 ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s*\([^)]*\)\s*$/, "")
+    .trim();
 /** cr-fix 单次执行（一次完整 review→fix 循环至终态）。attempt 只影响 agent 命名段。 */
 async function runCrFixOnce(diffBase, batch1Paths, attempt) {
     const dims = batch1Paths.map((p) => ({ path: p, name: dimensionName(p) }));
@@ -1409,13 +1435,13 @@ async function runCrFixOnce(diffBase, batch1Paths, attempt) {
             `输入：本轮全部评审报告在 ${rDir}/ 目录下（review-<dimension>.md，共 ${ordered.length} 份：${ordered.map((d) => `review-${d.name}.md`).join("、")}）。逐份 Read——各维度的审查结果与修复指南（guidance）全部在文档里。`,
             `各维度计数（校验用）：${JSON.stringify(verdicts.map((v) => ({ dimension: v.dimension, mustFix: v.mustFix, suggestion: v.suggestion })))}`,
             round > 1 && activeBefore.length > 0
-                ? `上轮活跃问题清单（延续条目必须复用其 id）：${JSON.stringify(activeBefore.map((i) => ({ id: i.id, title: i.title, severity: i.severity })))}`
+                ? `上轮活跃问题清单（延续条目必须复用其 id 且 files 保持与原条目一致——引擎按 id 等值 + 文件集交集双重核验，id 命中但文件集零交集会被判编号撞车按新条目处理）：${JSON.stringify(activeBefore.map((i) => ({ id: i.id, title: i.title, severity: i.severity, files: i.files })))}`
                 : "",
             "",
             "任务：",
             "1. 跨维度合并同根因问题（保留最强证据与完整文件清单；guidance 合并为最具体的一句表述——合并后的修复指南会随 per-fixer 文档直达修复者）。",
             '2. 逐条证据裁决：有真实代码证据 → adjudication="evidence"；reviewer 未给实证 → "unverified"；臆测/纯风格指控 → "downgraded" + note。unverified/downgraded 同样写进聚合报告供人复核，但只有 evidence 条目会进修复队列。',
-            round > 1 ? `3. 延续条目复用问题清单 id；新条目分配 id，格式 MF-${round}-<序号>（如 MF-${round}-1）。` : "3. 全部为新问题，分配 id 格式 MF-1-<序号>（MF-1-1、MF-1-2…）。",
+            round > 1 ? `3. 延续条目复用问题清单 id（禁止漏填靠引擎猜——无 id 一律按新条目处理）；新条目分配 id，格式 MF-${round}-<序号>（如 MF-${round}-1）。` : "3. 全部为新问题，分配 id 格式 MF-1-<序号>（MF-1-1、MF-1-2…）。",
             "4. 修复分组：把 evidence 条目按相关性和独立性分组——同文件/同模块/同根因的问题归同组（一个 agent 修一组）；不同组的文件集必须不相交（组间可并行修复、互不冲突）。单条问题独立成组即可；问题间无关联时不要强行合并。",
             `5. 逐条申报来源 sourceRefs（分析用）：延续上轮的条目填 [{round: <原问题首见轮>, ref: "<原问题 id>"}]；由多份 reviewer 报告合并的条目为每个来源填一项（{round: ${round}, ref: "<来源报告锚点，如 review-<维度>#<序>"}）；本轮新发现填 []。`,
             "",
@@ -1480,23 +1506,18 @@ async function runCrFixOnce(diffBase, batch1Paths, attempt) {
         const nextIssues = (agg.issues ?? [])
             .filter((i) => i !== null && typeof i === "object" && i.adjudication === "evidence")
             .map((i) => {
-            let prev = i.id ? issues.find((p) => p.id === i.id) : undefined;
-            if (prev && i.title && prev.title && !titlesCompatible(prev.title, i.title)) {
-                log(`身份对齐 L1 检查：${i.id} 命中问题清单 ${prev.id} 但标题不兼容（${prev.title} ≁ ${i.title}），放弃编号沿用转 L2`);
+            // 身份对齐（2026-11-04 结构化改造，与 dev-merge-gates 同款）：唯一判据 = id 等值
+            // 命中（上轮活跃清单已注入聚合 prompt，延续必须复用原 id），第二锚 = files 集合
+            // 交集（替代旧标题前缀互含兼容检查）；id 命中但零文件交集 = 疑似编号撞车，拒绝
+            // 沿用按新条目处理。旧 L2「无 id 按标题归一唯一命中自动合并」的猜通道退役——
+            // 无 id 一律新条目（猜错的两类代价：误合并漏修 / 双开拖收敛，都比显式申报贵）
+            let prev = i.id ? issues.find((p) => normIssueId(p.id) === normIssueId(i.id)) : undefined;
+            if (prev && prev.files.filter((f) => i.files.includes(f)).length === 0 && prev.files.length > 0 && i.files.length > 0) {
+                log(`身份对齐：${i.id} 命中问题清单 ${prev.id} 但文件集零交集（清单 [${prev.files.join("、")}] vs 本轮 [${i.files.join("、")}]）——疑似编号撞车，拒绝沿用按新条目处理`);
                 prev = undefined;
             }
-            if (!prev && i.title && titleUnits(i.title) >= TITLE_MATCH_MIN) {
-                const key = normalizeTitle(i.title);
-                if (key) {
-                    const hits = issues.filter((p) => p.status !== "deferred" && normalizeTitle(p.title) === key);
-                    if (hits.length === 1) {
-                        prev = hits[0];
-                        log(`身份对齐 L2：${i.id ?? "(无 id)"} 按标题唯一命中沿用问题清单条目 ${prev.id}`);
-                    }
-                    else if (hits.length > 1) {
-                        log(`身份对齐 L2：${i.id ?? "(无 id)"} 标题命中 ${hits.length} 条（非唯一），按新条目处理`);
-                    }
-                }
+            if (prev !== undefined) {
+                log(`身份对齐：${i.id} 沿用问题清单条目 ${prev.id}（id 等值 + 文件集交集第二锚通过）`);
             }
             if (prev) {
                 prev.title = i.title;
@@ -2032,22 +2053,28 @@ let changesetWarnDetail = "";
 let staticGateSkipped = false;
 await step("static-gate", async () => {
     const out = await gateFixLoop("static-gate", "pr-pre-merge.sh --skip-tests", () => runSh("bash", ["scripts/pr-pre-merge.sh", "--skip-tests", "--quiet"], { timeoutMs: 7_200_000 }), (res) => res);
-    changesetWarn = /WARN changeset-check/.test(out.stdout);
-    // WARN 详情（缺 changeset 的包清单行 + 相邻列表项）注入 pr-meta prompt——agent 的
-    // 分类对象与 WARN 清单对齐，不再从全量 diff 自行推断哪些包缺（提取失败留空串，
-    // prompt 走"自行判断"降级分支，行为退化无害）
+    // changeset 复核信号（2026-11-04 切结构化载体）：从 pre-merge 落盘的
+    // premerge-result.json changeset 字段读（status + missing 包清单），旧「stdout
+    // WARN changeset-check 子串触发 + 相邻列表行收集」退役——子串在其他输出出现会误触发，
+    // 行收集随文案漂移失效。结果文件未落（存量脚本未升级）= unknown，只呈报不触发兜底起草
     {
-        const outLines = out.stdout.split("\n");
-        const detailLines = [];
-        for (let i = 0; i < outLines.length; i++) {
-            if (!/changeset-check/.test(outLines[i] ?? ""))
-                continue;
-            detailLines.push(outLines[i]);
-            for (let j = i + 1; j < outLines.length && /^\s+-\s/.test(outLines[j] ?? ""); j++) {
-                detailLines.push(outLines[j]);
+        const pr = await readPremergeResult();
+        if (pr !== null && pr.changeset !== null && pr.changeset.status === "warn") {
+            changesetWarn = true;
+            changesetWarnDetail = pr.changeset.missing.map((m) => `- ${m}`).join("\n");
+            log(`[static-gate] changeset WARN（结构化）：缺 changeset 包 ${pr.changeset.missing.length} 个`);
+        }
+        else {
+            // 结构化信号不可用（脚本未升级/旧分支 worktree 无 JSON）时的过渡期降级：回退 stdout
+            // 子串检测（2026-11-04 审查修正——脚本随分支传播而 .agents 实体即时全 worktree 生效，
+            // 空窗会让 changeset 兜底起草在旧脚本 worktree 上死亡；子串检测保留至全部活跃分支
+            // 升级后移除）。结构化字段可用但非 warn 时不再回退子串（避免双信号打架）
+            const legacyHit = pr !== null && pr.changeset === null ? /WARN changeset-check/.test(out.stdout) : false;
+            if (legacyHit) {
+                changesetWarn = true;
+                log("[static-gate] changeset WARN（旧脚本降级信号：premerge-result.json 缺 changeset 字段，回退 stdout 子串检测）");
             }
         }
-        changesetWarnDetail = detailLines.join("\n");
     }
     const names = await runSh("git", ["diff", `${baseHash}..HEAD`, "--name-only"]);
     if (names.exitCode !== 0) {
@@ -2059,9 +2086,25 @@ await step("static-gate", async () => {
         return;
     }
     const skillMd = [...new Set(skillFiles.map((f) => `.agents/skills/${f.slice(".agents/skills/".length).split("/")[0]}/SKILL.md`))];
-    const res = await runSh("python3", [".agents/skills/pr-cr-fix/scripts/validate-skill-yaml.py", ...skillMd]);
+    // --json 结构化消费（2026-11-04）：错误清单按 errors[] 字段直读（file+message），
+    // 旧「人读文本行尾 15 行」退役；脚本无匹配文件（no-match）也是 exit 1，按 kind 区分成因
+    const res = await runSh("python3", [".agents/skills/pr-cr-fix/scripts/validate-skill-yaml.py", "--json", ...skillMd]);
     if (res.exitCode !== 0) {
-        throw new Error(`skill YAML 校验失败（硬校验不修，不自动重试）：\n${tailLines(`${res.stdout}\n${res.stderr}`, 15)}\n按校验输出修复 SKILL.md 后重新发起`);
+        let detail = tailLines(`${res.stdout}\n${res.stderr}`, 15);
+        try {
+            const j = JSON.parse(res.stdout);
+            if (j.kind === "no-match") {
+                throw new Error(`skill YAML 校验：无匹配文件（${j.summary ?? "no-match"}）——核对 ${skillMd.length} 个传入路径后重新发起`);
+            }
+            const lines = (j.errors ?? []).map((e) => `- ${e.label ?? e.file}: ${e.message}`);
+            if (lines.length > 0)
+                detail = lines.join("\n");
+        }
+        catch (parseErr) {
+            if (parseErr instanceof Error && parseErr.message.startsWith("skill YAML 校验"))
+                throw parseErr;
+        }
+        throw new Error(`skill YAML 校验失败（硬校验不修，不自动重试）：\n${detail}\n按错误清单修复 SKILL.md 后重新发起`);
     }
     log(`[static-gate] skill-yaml 校验通过（${skillMd.length} 个 SKILL.md）`);
 });
@@ -2201,11 +2244,11 @@ await step("pr-submit", async () => {
         res = await runSubmit();
     }
     if (res.exitCode === 0) {
-        const urls = res.stdout.split("\n").map((s) => s.trim()).filter((l) => PR_URL_RE.test(l));
-        if (urls.length === 0) {
-            throw new Error(`pr-submit exit 0 但输出未解析到合法 pr_url。实际输出：\n${tailLines(res.stdout, 10)}`);
+        const url = await readSubmitResult();
+        if (url === null) {
+            throw new Error(`pr-submit exit 0 但 submit-result.json 未读到或无 prUrl 字段（脚本未升级或产物目录异常）。stdout 尾部：\n${tailLines(res.stdout, 10)}`);
         }
-        prUrl = urls[urls.length - 1];
+        prUrl = url;
         return;
     }
     const detail = `${res.stderr}\n${res.stdout}`;
@@ -2537,14 +2580,14 @@ await step("final-gates", async () => {
     }, async () => {
         const cov = (lastCovJson ??= await readCoverageJson());
         const met = await readJsonViaNode(`${prReviewDir}/metrics.json`, READ_METRICS_SLIM);
-        const marker = await readPremergeMarker();
+        const pr = await readPremergeResult();
         gates.coverage = cov?.verdict ?? "pass";
         gates.metrics = met?.verdict ?? "pass";
-        // marker 读取失败不推翻 gate 判定（pre-merge exit 0 才走到这里，是权威），但披露
+        // 结果文件读取失败不推翻 gate 判定（pre-merge exit 0 才走到这里，是权威），但披露
         // 不伪造 PASS——标注未读到；只有读到的真实非 PASS 值才拦
-        gates.premerge = marker !== null ? marker : "PASS（marker 未读到，以 pre-merge exit 0 为准）";
-        if (marker !== null && marker !== "PASS") {
-            throw new Error(`final-gates：pre-merge marker result=${marker}（非 PASS）`);
+        gates.premerge = pr !== null ? pr.result : "PASS（premerge-result.json 未读到，以 pre-merge exit 0 为准）";
+        if (pr !== null && pr.result !== "PASS") {
+            throw new Error(`final-gates：pre-merge result=${pr.result}（非 PASS，premerge-result.json）`);
         }
         const pct = coveragePctOf(cov);
         log(`[final-gates] coverage=${gates.coverage}${pct !== null ? `(${pct}%)` : ""} metrics=${gates.metrics} premerge=${gates.premerge}`);

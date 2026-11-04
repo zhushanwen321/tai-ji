@@ -29,8 +29,12 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const EXT_GROUPS = ["extensions/taiji", "extensions/universal"];
+// 宿主报错文案特征（适配器形态表唯一条目）：pi 本体（npm 第三方包）对 extension 加载
+// 失败的 stderr 输出。它只产 loadFailureHint 辅助归因字段，不参与判定（判定主据 = 退出
+// 码；2026-11-04 适配器化——文案命中不再触发 FAIL，pi 改文案只影响 hint 完整度）
 const FAIL_MARK = "Failed to load extension";
 const PI_TIMEOUT_MS = 120_000;
+let loadFailureHint = [];
 
 function collectEntries(root) {
   const entries = [];
@@ -102,14 +106,25 @@ function main() {
     } else if (res.error?.code === "ETIMEDOUT") {
       reason = `pi 启动超过 ${PI_TIMEOUT_MS / 1000}s 未退出（疑似 extension 挂起阻塞加载完成）`;
     } else {
+      // 判定主据 = 退出码（结构化信号；pi main.js 实装顺序 = extension 加载失败即 exit 1）
+      // ——2026-11-04 语义修正：旧形态 stderr 文案命中优先于退出码，被测代码自己打印含
+      // "Failed to load extension" 的日志即误 FAIL。宿主报错文案（npm 第三方包，半可控）
+      // 经适配器降为 loadFailureHint 辅助归因字段，不参与判定
       const stderr = res.stderr ?? "";
-      const errLines = stderr.split("\n").filter((l) => l.includes(FAIL_MARK));
-      if (errLines.length > 0) {
-        reason = `pi 报告 ${errLines.length} 条 extension 加载失败：\n${errLines.join("\n")}`;
-      } else if (res.status !== 0) {
-        reason = `pi 退出码 ${res.status}（无 extension 加载错误，但启动异常）：\n${(stderr || (res.stdout ?? "")).split("\n").slice(-15).join("\n")}`;
+      const hintLines = stderr.split("\n").filter((l) => l.includes(FAIL_MARK));
+      if (res.status !== 0) {
+        reason =
+          hintLines.length > 0
+            ? `pi 退出码 ${res.status}（extension 加载失败；宿主报错 ${hintLines.length} 条）：\n${hintLines.join("\n")}`
+            : `pi 退出码 ${res.status}（启动异常，无 extension 加载文案）：\n${(stderr || (res.stdout ?? "")).split("\n").slice(-15).join("\n")}`;
+        loadFailureHint = hintLines.slice(0, 10);
       } else {
         status = "pass";
+        if (hintLines.length > 0) {
+          // exit 0 但 stderr 含加载失败文案 = 形态认不出（unknown）：探针（退出码）结论
+          // 优先判 pass，hint 只辅助呈报不翻案
+          loadFailureHint = hintLines.slice(0, 10);
+        }
       }
     }
   }
@@ -122,6 +137,7 @@ function main() {
     entryCount: entries.length,
     skipped,
     failures,
+    ...(loadFailureHint.length > 0 ? { loadFailureHint } : {}),
   };
   if (jsonMode) {
     console.log(JSON.stringify(result, null, 2));

@@ -111,13 +111,13 @@ bash "$(git rev-parse --show-toplevel)/.agents/skills/dev-merge/dev-merge.sh" me
 
 脚本自动完成：目标 worktree 缺失时**自动创建**（复用全局 `worktree-manipulate` 的 create-worktree.sh：分支已存在则检出、不存在则基于 main 新建 dev 分支，并经项目 setup hook 完成 pnpm 依赖安装 + Electron/pi 缓存链接——耗时数分钟属正常，merge commit 的 pre-commit 检查依赖它们）→ 两侧干净预检 → 已合并短路 → `git merge --no-ff`（保留 feature 分支历史，与项目 PR 合并策略一致）。
 
-三种结果：
+三种结果（结构化消费：脚本终态写 `<cwd>/.review/merge-result.json`（原子写，schemaVersion 字段），按其 `status` 字段分支——stdout 人读行文不再承担判定职责；失败路径（exit 1）不写 JSON，信号 = 退出码 + stderr）：
 
-| 输出 | 含义 | 下一步 |
+| merge-result.json status | 含义 | 下一步 |
 |---|---|---|
-| `OK:` | 合并成功 | 直接进第 4 步 cleanup（默认自动清理） |
-| `SKIP:` | 已是祖先，无需重复合并 | 直接进第 4 步 |
-| exit 2 + `CONFLICT:` | 冲突，dev worktree 停在 merge 中间态 | 进第 3 步 |
+| `merged` | 合并成功 | 直接进第 4 步 cleanup（默认自动清理） |
+| `already-merged` | 已是祖先，无需重复合并 | 直接进第 4 步 |
+| `conflict`（exit 2，conflictFiles 数组） | 冲突，dev worktree 停在 merge 中间态 | 进第 3 步 |
 
 ### 第 3 步：解决冲突（exit 2 后）
 
@@ -149,21 +149,19 @@ bash "$(git rev-parse --show-toplevel)/.agents/skills/dev-merge/dev-merge.sh" cl
 
 **删除语义（显式两步）**：`rm -rf <feat 目录>` + `git worktree prune`，先删目录、后清登记。[HISTORICAL] 旧版用 `git worktree remove`，实验复现证实其内部**先删登记、后删目录**——目录删除失败时留下"登记已失、目录内 git 全废"的半删态，且旧脚本吞掉 stderr、硬编码诊断为"被 untracked 阻止"（空清单 + 不可执行的 clean -fd 指引），2026-09 事故后改为显式两步。中途失败情形：`rm -rf` 失败 → 登记与分支均未动，状态完好可排查重试；prune 失败/漏跑 → 目录已删、登记残留，prune 幂等可补跑，无破坏性。
 
-**`OK:` 输出 = 全部完成的权威证明**（worktree 与分支都已删）。此后不要再调用任何 bash——包括 `git worktree list` / `git log` 复核确认。直接输出合并总结收尾。
+**`<workspace>/<dev-branch>/.review/cleanup-result.json` 的 `status: "cleaned"` = 全部完成的权威证明**（落盘在 **dev worktree**——脚本删除 feat worktree 前已 cd 到 dev 侧，结果文件写在那里；feat 侧的 `.review/` 已随目录删除，不要去读已删除路径。stdout `>> worktree ... 已清理` 行文仅人读）。此后不要再调用任何 bash——包括 `git worktree list` / `git log` 复核确认。直接输出合并总结收尾。
 
-**[MANDATORY] bash 会话报废信号解码**：cleanup 之后（无论脚本输出 `OK:` 还是 `ERROR:`），若 bash 调用返回以下**工具层错误**（没有任何命令输出）：
+**[MANDATORY] bash 失败形态判定（cwd 探针主判据 + kind 分类，2026-11-04 适配器化）**：cleanup 之后 bash 调用失败时，**先跑存在性探针再分类**——判定依据是 cwd 目录的存在性（结构化事实，用不依赖 cwd 的通道查：`node -e "console.log(require('fs').existsSync('<feat-worktree 绝对路径>'))"` 这类绝对路径调用），不是工具报错文案的字面形态（宿主文案随时可变，字面匹配判定随文案漂移失效）。按探针 + 失败形态输出 kind 分支处置：
 
-```
-Working directory does not exist: <feat-worktree 路径>
-Cannot execute bash commands.
-```
+| kind | 判定依据（探针优先，报错文案只作辅助归因） | 处置 |
+|---|---|---|
+| `cwd-deleted` | 探针 false（cwd 目录已不存在）+ bash 返回工具层错误（如 `Working directory does not exist` / `Cannot execute bash commands`，无命令输出） | **命令没有被执行**（工具在 spawn 前拒绝，`cd <别处> &&` 救不了）；同时是 **worktree 删除已成功的证明**；会话级永久状态，立即停止一切 bash 调用，收尾用 read/write 类工具 |
+| `unknown` | 探针 true（cwd 还在）但 bash 仍工具层失败，或形态认不出 | 只呈报不触发强判定：把探针结果与报错原文写进总结交用户裁决，禁止按任何猜测分支处置 |
 
-1. **命令没有被执行**——工具在 spawn shell 前就因 cwd 目录不存在而拒绝，`cd <别处> &&` 前缀救不了（拒绝发生在命令文本被解释之前）。重试无意义，立即停止一切 bash 调用
-2. 它同时是 **worktree 删除已成功的证明**（目录已从磁盘消失），不是失败信号
-3. 这是**会话级永久状态**：本会话后续所有 bash 调用都会得到同样错误。收尾判断——脚本输出过 `OK:` → 全部完成，正常输出总结；脚本在删目录**之后**输出过 `ERROR: worktree 登记 prune 失败` → 唯一残留是登记，待执行命令 `git -C <workspace>/<dev-branch> worktree prune`；输出过 `ERROR: 分支 ... 删除失败` → 唯一残留是分支，待执行命令 `git -C <workspace>/<dev-branch> branch -D <feat-branch>`。两种残留都无破坏性，写进总结交给用户/下次会话
+cwd-deleted 确立后的收尾判断——`<workspace>/<dev-branch>/.review/cleanup-result.json` 存在且 status=cleaned → 全部完成，正常输出总结；脚本在删目录**之后**失败（stderr 报错含「worktree 登记 prune 失败」字样，作归因佐证不作判定依据）→ 唯一残留是登记，待执行命令 `git -C <workspace>/<dev-branch> worktree prune`；报错含「分支 ... 删除失败」→ 唯一残留是分支，待执行命令 `git -C <workspace>/<dev-branch> branch -D <feat-branch>`。两种残留都无破坏性，写进总结交给用户/下次会话。超时/权限/命令不存在等其他失败形态不属于会话报废——按普通失败处置后可重试。
 
 同类陷阱与反模式的完整记录见 merge skill 阶段 7。
 
 例外：脚本 exit 非 0 且**没看到工具层报废错误**（bash 正常返回了脚本输出）时，按失败点分两类——**删目录之前** die（门禁失败：未合并 / 脏 worktree / git 状态读取失败）：目录完好，按脚本输出处置后重跑 cleanup；**rm -rf 目录失败**（die 消息含"登记与分支均未动"）：git 登记与分支完好、dev 侧可诊断，但目录可能已部分残缺（`.git` 文件或不存，目录内 git 不可信、重跑 cleanup 未必可行），排查根因并解除后执行 die 消息里的单命令配方。不要把任何一类失败当成删除已完成。
 
-**半删态兜底**（现行脚本结构上不产生该状态；出现即手工操作或旧产物残留）：识别特征 = worktree 目录还在，但目录内一切 git 命令报 `fatal: not a git repository`，且 `.bare/worktrees/<name>/` 登记已消失（成因：`git worktree remove` 内部先删登记、目录删除中途失败）。处置：从**兄弟 worktree**（不是待删除的目录本身）执行单命令 `git -C <dev> merge-base --is-ancestor <feat-branch> <dev-branch> && git -C <dev> branch -D <feat-branch> && git -C <dev> worktree prune && rm -rf <feat 目录>`（is-ancestor 在链首，未合入即中止、不删任何东西；rm -rf 在链尾，失败即停时目录与分支状态可诊断）。agent 会话 cwd 若还在待删除的目录内，该命令执行后本会话 bash 报废——应作为最后一条 bash 命令，剩余收尾用 read/write 类工具。
+**半删态兜底**（现行脚本结构上不产生该状态；出现即手工操作或旧产物残留）：识别按存在性探针判定（不按报错文案）——worktree 目录存在（探针 true），但其 `.git` 文件不存在（探针 false，worktree 的 `.git` 是指向登记的指针文件），且 `.bare/worktrees/<name>/` 登记已消失（目录缺失探针 false）；辅助佐证 = 目录内 git 命令报 `fatal: not a git repository`（文案只作归因不作判定）。成因：`git worktree remove` 内部先删登记、目录删除中途失败。处置：从**兄弟 worktree**（不是待删除的目录本身）执行单命令 `git -C <dev> merge-base --is-ancestor <feat-branch> <dev-branch> && git -C <dev> branch -D <feat-branch> && git -C <dev> worktree prune && rm -rf <feat 目录>`（is-ancestor 在链首，未合入即中止、不删任何东西；rm -rf 在链尾，失败即停时目录与分支状态可诊断）。agent 会话 cwd 若还在待删除的目录内，该命令执行后本会话 bash 报废——应作为最后一条 bash 命令，剩余收尾用 read/write 类工具。

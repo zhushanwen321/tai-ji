@@ -29,6 +29,7 @@ import re
 import sys
 import yaml
 import glob
+import json
 import os
 import argparse
 
@@ -318,6 +319,9 @@ def main():
     parser = argparse.ArgumentParser(description='Validate SKILL.md YAML frontmatter')
     parser.add_argument('files', nargs='+', help='SKILL.md files to validate')
     parser.add_argument('--fix', action='store_true', help='Auto-fix problems in place')
+    parser.add_argument('--json', action='store_true', help='stdout 输出结构化 JSON（2026-11-04 断言结构化改造：'
+                        '{schemaVersion, ok, kind: "no-match"|"invalid"|"warning", errors[], warnings[], fixed[], summary}；'
+                        '程序化消费用 --json，人读文本照旧）')
     args = parser.parse_args()
 
     file_list = []
@@ -325,26 +329,42 @@ def main():
         file_list.extend(glob.glob(arg))
 
     if not file_list:
-        print('No files matched.')
+        if args.json:
+            print(json.dumps({
+                'schemaVersion': 1, 'ok': False, 'kind': 'no-match',
+                'errors': ['传入的 glob 无任何匹配文件——核对路径后重跑'], 'warnings': [], 'fixed': [],
+                'summary': f'0 files matched from {len(args.files)} glob(s)',
+            }, ensure_ascii=False))
+        else:
+            print('No files matched.')
         sys.exit(1)
 
     total_errors = 0
     total_warnings = 0
     total_fixed = 0
     ok = 0
+    json_errors = []
+    json_warnings = []
+    json_fixed = []
 
     for fpath in sorted(file_list):
         errors, warnings, was_fixed = validate_skill(fpath, fix=args.fix)
         label = os.path.basename(os.path.dirname(fpath))
 
         if was_fixed:
-            print(f'  FIXED: {label}')
+            json_fixed.append({'file': fpath, 'label': label})
             total_fixed += 1
+            if not args.json:
+                print(f'  FIXED: {label}')
 
         for err in errors:
-            print(f'  ERROR: {err}')
+            json_errors.append({'file': fpath, 'label': label, 'message': err})
+            if not args.json:
+                print(f'  ERROR: {err}')
         for warn in warnings:
-            print(f'  WARN:  {warn}')
+            json_warnings.append({'file': fpath, 'label': label, 'message': warn})
+            if not args.json:
+                print(f'  WARN:  {warn}')
 
         if errors:
             total_errors += len(errors)
@@ -354,13 +374,25 @@ def main():
         else:
             ok += 1
 
-    print(f'\n{ok}/{len(file_list)} files OK.')
-    if total_fixed:
-        print(f'{total_fixed} file(s) auto-fixed.')
-    if total_warnings:
-        print(f'{total_warnings} warning(s).')
+    summary = f'{ok}/{len(file_list)} files OK'
     if total_errors:
-        print(f'{total_errors} error(s) found.')
+        summary += f'; {total_errors} error(s)'
+    if total_warnings:
+        summary += f'; {total_warnings} warning(s)'
+    if total_fixed:
+        summary += f'; {total_fixed} auto-fixed'
+
+    if args.json:
+        kind = 'invalid' if total_errors else ('warning' if total_warnings else 'ok')
+        print(json.dumps({
+            'schemaVersion': 1, 'ok': total_errors == 0, 'kind': kind,
+            'errors': json_errors, 'warnings': json_warnings, 'fixed': json_fixed,
+            'summary': summary,
+        }, ensure_ascii=False))
+        sys.exit(1 if total_errors else 0)
+
+    print(f'\n{summary}.')
+    if total_errors:
         sys.exit(1)
     else:
         print('All good.')
