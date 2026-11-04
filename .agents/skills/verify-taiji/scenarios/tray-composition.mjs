@@ -158,6 +158,7 @@ export const meta = {
     'A1: 托盘无 probe-container-plugin 按钮（声明制过滤——无 [data-widget-key=probe-container-plugin.tab] 按钮、全托盘 aria-label 无 probe 字样、无 LayoutGrid 兜底图标按钮）',
     'A1: 托盘无 scheduler-manager 按钮（host.embed 非托盘位；aria-label 无 scheduler-manager 字样）',
     'A1: probe 的 drawer.tab 位照常在右抽屉标签条（「探针面板」）',
+    'A1: probe 抽屉树行可点（S3 导航行 = 原生 button——action.hostAction 嵌套位，2026-11-04 存量缺陷修复后锁定）',
     'A7: fixture 插件托盘按钮在场，title 属性/aria-label 为声明 title（非 viewId 裸标题）',
     'A7: 按钮角标 = meta.badge（3）、status=running 呼吸点在场（meta 动态信息渲染）',
     'A7: 按钮 icon 为声明 icon（clock → lucide-clock svg）',
@@ -307,6 +308,25 @@ export async function run(ctx) {
     expected: 'drawer-tab-*[title=探针面板] 可见',
     actual: String(probeTabVisible),
   })
+
+  // probe 抽屉树行可点（S3 双向导航——action.hostAction 嵌套位；2026-11-04 存量缺陷修复后
+  // 由本断言锁定：导航行渲染为原生 button，testid 仅可点行赋值）
+  let drawerRowClickable = false
+  try {
+    await probeTab.first().click()
+    await page
+      .locator('[data-testid^="gui-list-tree-action-"]')
+      .first()
+      .waitFor({ state: 'visible', timeout: 10_000 })
+    drawerRowClickable = true
+  } catch {
+    /* 不可达 = 行未渲染为可点（缺陷复发）→ 断言红 */
+  }
+  ev.assert(
+    'A1: probe 抽屉树行可点（导航行 = 原生 button——action.hostAction 嵌套位，存量缺陷修复锁定）',
+    drawerRowClickable,
+    { channel: 'A', expected: 'gui-list-tree-action-* 可见', actual: String(drawerRowClickable) },
+  )
   await page.keyboard.press('Escape')
 
   ev.step({
