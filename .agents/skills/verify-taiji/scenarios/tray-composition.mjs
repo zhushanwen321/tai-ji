@@ -82,14 +82,19 @@ const TREE = [
     },
   },
 ]
+let pushed = false
 export async function activate(ctx) {
   const api = ctx.api
-  api.sessions.onDidActivateSession(async (session) => {
-    try {
-      await api.views.update(VIEW_ID, TREE, { sessionId: session.id, meta: { badge: '3', status: 'running' } })
-    } catch (e) {
-      console.warn('[tray-fixture] views.update failed:', e)
-    }
+  // 焦点会话追踪（probe-container-plugin 同款挂点；实测依据 2026-11-04 diag3：sandbox
+  // 外部插件的 api.sessions.list() 不可达——60s 内零推帧，故不做 list 轮询兜底，推送
+  // 只由会话激活事件驱动；场景侧用真实焦点切换保证事件在 renderer 订阅就绪后触发）
+  api.sessions.onDidActivateSession((session) => {
+    void api.views
+      .update(VIEW_ID, TREE, { sessionId: session.id, meta: { badge: '3', status: 'running' } })
+      .then(() => {
+        pushed = true
+      })
+      .catch((e) => console.warn('[tray-fixture] views.update failed:', e))
   })
 }
 export async function deactivate() {}
@@ -101,6 +106,46 @@ fs.writeFileSync(
   path.join(dataDir0, 'plugins', 'permissions.json'),
   `${JSON.stringify({ [PLUGIN_ID]: ['plugin.views.update', 'sessions.readState'] }, null, 2)}\n`,
 )
+
+// 模型配置种子（session.create 前置——纯净实例无默认模型时 MODEL_NOT_CONFIGURED 拒绝建会话；
+// 本场景只建会话驱动插件推树、不发消息，provider baseUrl 无需可达，形状对齐 instance.mjs
+// mock-http 通道的 models.json/settings.json 写法）
+const agentDir0 = path.join(dataDir0, 'agent')
+fs.mkdirSync(agentDir0, { recursive: true })
+const modelsPath0 = path.join(agentDir0, 'models.json')
+let models0 = { providers: {} }
+try {
+  const parsed = JSON.parse(fs.readFileSync(modelsPath0, 'utf8'))
+  if (parsed && typeof parsed === 'object' && parsed.providers) models0 = parsed
+} catch {}
+models0.providers['mockllm'] = {
+  name: 'verify-taiji tray-composition placeholder (never dialed)',
+  api: 'openai-completions',
+  baseUrl: 'http://127.0.0.1:9/unreachable',
+  apiKey: 'not-needed',
+  models: [
+    {
+      id: 'mock-1',
+      name: 'mock-1',
+      reasoning: false,
+      input: ['text'],
+      contextWindow: 128000,
+      maxTokens: 16384,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    },
+  ],
+}
+fs.writeFileSync(modelsPath0, `${JSON.stringify(models0, null, 2)}\n`)
+const settingsPath0 = path.join(agentDir0, 'settings.json')
+let settings0 = {}
+try {
+  const parsed = JSON.parse(fs.readFileSync(settingsPath0, 'utf8'))
+  if (parsed && typeof parsed === 'object') settings0 = parsed
+} catch {}
+settings0.defaultProvider = 'mockllm'
+settings0.defaultModel = 'mock-1'
+settings0.enabledModels = ['mockllm/mock-1']
+fs.writeFileSync(settingsPath0, `${JSON.stringify(settings0, null, 2)}\n`)
 
 export const meta = {
   id: 'tray-composition',
@@ -137,15 +182,31 @@ export async function run(ctx) {
   await waitPluginActive(protocol, PLUGIN_ID)
   ev.assert('fixture 插件激活（sandbox fork + 预批权限，status=active）', true, { channel: 'C' })
 
-  // 建会话 → 焦点激活 → probe（drawer/overlay 两 view）与 fixture（composer.tray view）
-  // 都经 onDidActivateSession 向该会话推树
-  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tray-comp-proj-'))
-  await protocol.call(
-    'session.create',
-    { id: 'tray-comp-create', payload: { cwd: projectDir, label: 'tray-comp' } },
-    { replyType: 'session.created', timeoutMs: 30_000 },
-  )
-  ev.step({ step: 'session.create', channel: 'C', exitCode: 0, stats: { projectDir } })
+  // 真实用户路径建会话（实测依据 diag5/diag6：RPC session.create 建的会话不进 renderer
+  // 当前渲染的会话清单——应用停在 Landing 时侧栏不消费会话广播；Landing composer 首条
+  // 消息建会话走 renderer 同一路径，订阅与激活事件同源，推帧无竞态）
+  const composerBox = page.getByTestId('composer-box')
+  await composerBox.waitFor({ state: 'visible', timeout: 30_000 })
+  const composerInput = composerBox.getByRole('textbox')
+  await composerInput.click()
+  await composerInput.pressSequentially('tray-comp 托盘组成探针')
+  await composerInput.press('Enter')
+  ev.step({ step: 'session.create-ui', channel: 'C', exitCode: 0, stats: { via: 'Landing 首条消息' } })
+
+  const switchToSession = async (label) => {
+    const item = page.locator('.session-item').filter({ hasText: label }).first()
+    await item.waitFor({ state: 'visible', timeout: 30_000 })
+    await item.click()
+    await composerBox.waitFor({ state: 'visible', timeout: 30_000 })
+  }
+  await switchToSession('tray-comp')
+
+  // 回程重触发会话激活（新建任务 → 切回 A）：fixture 的激活事件在 renderer 已订阅 A 的
+  // 会话帧后才触发，推帧必达（sandbox 插件无 sessions.list 可用——diag3 实测 60s 零推帧，
+  // 推送只由 onDidActivateSession 驱动）
+  await page.getByTestId('default-project-new-task').click()
+  await switchToSession('tray-comp')
+  ev.step({ step: 'session.focus-switch', channel: 'C', exitCode: 0, stats: { via: '新建任务→切回 A' } })
 
   // ── A7：fixture 声明制渲染 ──────────────────────────────────────────
   const fixtureButton = page.locator('[data-testid="tray-widget-button"][data-widget-key="' + VIEW_ID + '"]')
@@ -227,14 +288,24 @@ export async function run(ctx) {
     { channel: 'A', expected: '无裸标题/无兜底图标', actual: `fallbackIcons=${fallbackIcons}` },
   )
 
-  // probe 声明的 drawer.tab 位照常（右抽屉标签条「探针面板」，验收用途不回退）
+  // probe 声明的 drawer.tab 位照常（右抽屉标签条「探针面板」，验收用途不回退）——
+  // 标签条形态 = 图标钮 + title=标签名（DrawerPanel.vue:62-63 drawer-tab-<key>）；waitFor 等帧落位
   await page.getByTestId('drawer-toggle').click()
-  const drawerArea = page.getByTestId('drawer-area')
-  await drawerArea.waitFor({ state: 'visible', timeout: 10_000 })
-  const probeTabVisible = await drawerArea.getByText('探针面板').first().isVisible()
+  await page.getByTestId('drawer-area').waitFor({ state: 'visible', timeout: 10_000 })
+  const probeTab = page.locator('[data-testid^="drawer-tab-"][title="探针面板"]')
+  let probeTabVisible = false
+  try {
+    await probeTab.first().waitFor({ state: 'visible', timeout: 10_000 })
+    probeTabVisible = true
+  } catch {
+    const shot = path.join('/tmp', `tray-comp-drawer-${Date.now()}.png`)
+    await page.screenshot({ path: shot }).catch(() => {})
+    ev.step({ step: 'diag.drawer-tab-absent', channel: 'C', exitCode: 1, stats: { shot } })
+  }
   ev.assert('A1: probe 的 drawer.tab 位照常（右抽屉「探针面板」标签）', probeTabVisible, {
     channel: 'A',
-    expected: 'drawer 内「探针面板」可见',
+    expected: 'drawer-tab-*[title=探针面板] 可见',
+    actual: String(probeTabVisible),
   })
   await page.keyboard.press('Escape')
 
