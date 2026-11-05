@@ -71,62 +71,62 @@
    "enum-check"
   ],
   [
-   1119,
+   1120,
    "if (!csDraftedFiles.includes(f)) csDraftedFiles.push(f);",
-   "path-set"
+   "enum-check"
   ],
   [
-   1123,
+   1124,
    "if (!csSkipReasons.includes(display)) csSkipReasons.push(display);",
    "enum-check"
   ],
   [
-   1159,
+   1160,
    "const isTestPath = (f: string): boolean => /(^|\\/)(__tests__|tests?)\\/|(\\.test\\.|\\.spec\\.)/.test(f);",
    "path-set"
   ],
   [
-   1160,
+   1161,
    "const sourceFiles = allFiles.filter((f) => !isTestPath(f) && !f.endsWith(\".md\"));",
    "path-set"
   ],
   [
-   1178,
+   1179,
    "if (allFiles.some((f) => rule.re.test(f))) dims.push(rule.dim);",
    "path-set"
   ],
   [
-   1216,
+   1217,
    "if (reportHome === \"\" || !/^.+-[0-9a-f]{8}$/.test(reportSlug)) {",
    "format-validation"
   ],
   [
-   1359,
+   1360,
    "if (!left.includes(f)) left.push(f);",
    "enum-check"
   ],
   [
-   1599,
+   1600,
    "if (prev && prev.files.filter((f) => files.includes(f)).length === 0 && prev.files.length > 0 && files.length > 0) {",
    "path-set"
   ],
   [
-   1606,
+   1607,
    "if (prev !== undefined && next.includes(prev)) {",
    "enum-check"
   ],
   [
-   1616,
+   1617,
    "const sd = strArr(i.sourceDims).filter((d) => !prev!.sourceDims.includes(d));",
    "enum-check"
   ],
   [
-   1784,
+   1785,
    "const groupRecsOf = (g: FixGroup): DmgRecord[] => records.filter((r) => g.issueIds.includes(r.id));",
    "enum-check"
   ],
   [
-   1889,
+   1890,
    "if (p !== \"\" && !tokens.includes(p)) tokens.push(p);",
    "enum-check"
   ]

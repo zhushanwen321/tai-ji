@@ -1410,6 +1410,7 @@ async function main() {
             // skipReasons 结构校验（pkg/reason 字段化——引擎按 pkg 对账 missing 清单，不从
             // 申报文本拆包名；格式不合规 fail-fast 回喂，pkg 缺失会让收敛判定空转满轮次）
             const roundSkips = (Array.isArray(v.skipReasons) ? v.skipReasons : []).map((r) => {
+                // 类型注解统一两分支（裸 {} 字面量分支上访问 .pkg 会被窄化为 {} 报编译错）
                 const rec = isRecord(r) ? r : {};
                 const pkg = typeof rec.pkg === "string" ? rec.pkg.trim() : "";
                 const reason = typeof rec.reason === "string" ? rec.reason.trim() : "";
