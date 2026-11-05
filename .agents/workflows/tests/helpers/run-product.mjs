@@ -36,7 +36,12 @@ export function makeMockWorldRun(captured, opts = {}) {
     if (script.includes("existsSync")) return res(1); // 不存在 → 检查失败
     return res(0);
   };
-  return async (cmd, argsArr, _opts) => {
+  const dispatch = async (cmd, argsArr, _opts) => {
+    // bash 包装形态（dev-merge-gates 的统一命令执行）：["-c", script, "bash", cmd, ...args]
+    // ——解包后按真实命令递归应答，git/sh/node 分支对包装内外一视同仁
+    if (cmd === "bash" && argsArr[0] === "-c" && argsArr[2] === "bash") {
+      return dispatch(String(argsArr[3] ?? ""), argsArr.slice(4), _opts);
+    }
     if (cmd === "node" && argsArr[0] === "-e") {
       // zcode 壳 obsAppend 形态：argv = ["-e", appendScript, filePath, eventJsonLine]
       //（filePath 含 workflow-observability 落盘目录；appendScript 本身不含路径字面）
@@ -54,9 +59,20 @@ export function makeMockWorldRun(captured, opts = {}) {
     }
     if (cmd === "sh") {
       const script = String(argsArr[1] ?? "");
-      // 环境预检 probes——返回真实 node 路径：消费方（dev-merge-gates 的统一 commit
-      // 前缀）会对返回值做 existsSync 核验，硬编码系统路径在本机无该文件时误判
-      // 「无法定位 node」fail-fast（nvm 安装位环境曾致观测套件 5 例红）
+      // pr-lifecycle 的 runNode 形态：sh -c '<nodeAbs> -e <探针>'——nodeAbs 含 nvm 时
+      // 整串命中下方 node 定位分支，node 路径被误当探针输出（skillDataDir home/slug
+      // 探针拿到 node 路径假输出）。探针内容特征优先判定，定位探针特征殿后。
+      const probeHit =
+        script.includes("homedir") ||
+        script.includes("realpathSync") ||
+        script.includes("new Date().toISOString") ||
+        script.includes("workflow-observability") ||
+        script.includes("existsSync") ||
+        script.includes("readFileSync");
+      if (probeHit) {
+        const a = answerProbe(script);
+        return a === "obs" ? res(0) : a;
+      }
       if (script.includes("command -v node") || script.includes("nvm")) return res(0, process.execPath);
       if (script.includes("workflow-observability")) return res(0); // 防御：观测不经 sh 路
       // runNode 形态：sh -c '<node> "-e" <探针>'——探针判定直接对整串做 includes
@@ -74,6 +90,7 @@ export function makeMockWorldRun(captured, opts = {}) {
     // gh / fallow / bash gate 脚本等一律失败 → preflight 前置条件未过 → 失败终态
     return res(1, "", "selftest-mock: 命令不可用");
   };
+  return dispatch;
 }
 
 // platform: "pi"（产物即 JS）| "zcode"（TS 产物先剥类型）
