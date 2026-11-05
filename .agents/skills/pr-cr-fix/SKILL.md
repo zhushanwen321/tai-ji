@@ -45,7 +45,7 @@ bash scripts/pr-pre-merge.sh --skip-tests --quiet
 
 **Gate-1a**（硬 gate）：exit 0（marker `result=PASS`）才继续。FAIL 按输出中失败步骤派对应工种 worker 修复后重跑（`typecheck:extensions` / `typecheck:runtime` / `typecheck:renderer` / `lint`）。
 
-**Gate-1a.5**（changeset 自动补全）：summary 出现 `WARN changeset-check`（改了 `extensions/**/src/` 但无 changeset，WARN 不 FAIL）→ **主 agent 按 diff 逐包分类后自动处理，不 AskUserQuestion**（判断所需信息全在 diff 里，弹窗把判断推给人的代价高于 PR 内审查；[HISTORICAL] 曾为弹窗模式，用户反馈每次执行都被打断、多数 WARN 是纯注释类噪声，2026-08-23 改为自动分类）：
+**Gate-1a.5**（changeset 自动补全）：`.review/premerge-result.json` 的 `changeset.status` 为 `"warn"`（改了 `extensions/**/src/` 但无 changeset，WARN 不 FAIL；旧脚本形态缺该文件或缺 changeset 字段时回退按 premerge 输出中的 `WARN changeset-check` 子串判定——降级通道与移除条件见 pr-lifecycle workflow 同名注释）→ **主 agent 按 diff 逐包分类后自动处理，不 AskUserQuestion**（判断所需信息全在 diff 里，弹窗把判断推给人的代价高于 PR 内审查；[HISTORICAL] 曾为弹窗模式，用户反馈每次执行都被打断、多数 WARN 是纯注释类噪声，2026-08-23 改为自动分类）：
 
 - **实质行为改动**（逻辑/接口/行为变化）→ 自动起草 `.changeset/<slug>.md`：type 初判按分支 conventional commits（feat→minor / fix→patch / BREAKING→major），body 英文写用户可感变化（进 CHANGELOG，遵守根 AGENTS.md changeset 准则）
 - **非发布改动**（纯注释/类型注解/测试/零行为差重构）→ 跳过，在阶段汇报中列明「包名 + 跳过原因 + 证据」

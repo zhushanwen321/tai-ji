@@ -670,11 +670,11 @@ def main() -> None:
         pct, covered, total, unc, no_lcov, file_details = incremental_pct(cov, pkg, added)
         # S4 文件级门槛：新增可执行行 ≥ min_file_lines 的文件，自身增量 < min_file_pct 即
         # 违规（包整体过线不能稀释单文件盲区）。违规不覆盖包级判定——两者独立，任一红即红。
-        # 豁免机制（登记式，与 taste-lint 行内登记同构）：文件头注释含
-        # `coverage-file-gate-exempt: <理由>` → 该文件退出文件级门槛（包级仍卡），
+        # 豁免机制（manifest 登记式）：scripts/coverage-file-exempt.json（路径→理由）
+        # 唯一判定源（load_exempt_files 装载）→ 该文件退出文件级门槛（包级仍卡），
         # 报告登记为 exempt（可见不静默）——适用面：组合根装配接线（单测不可达，
-        # 行为由 e2e/bundle 验证承载）、跨环境分支（本轨结构性不可达，另轨由
-        # 专项守卫覆盖）。
+        # 行为由 e2e/bundle 验证承载）、跨环境分支（本轨结构性不可达，另轨由专项守卫
+        # 覆盖）、workflow 构建产物（生成物不测）。
         raw_violations = [f for f in file_details
                           if f["executable"] >= min_file_lines and f["pct"] < min_file_pct]
         file_violations = []

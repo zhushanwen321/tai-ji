@@ -1,0 +1,278 @@
+{
+ ".agents/workflows/src/dev-merge-gates.shared.ts": [
+  [
+   450,
+   "if (fi.some((f) => fj.includes(f))) {",
+   "path-set"
+  ],
+  [
+   511,
+   "if (rawWorktree !== \"\" && !rawWorktree.startsWith(\"/\")) {",
+   "path-set"
+  ],
+  [
+   537,
+   "const arrow = p.indexOf(\" -> \");",
+   "protocol-parse"
+  ],
+  [
+   541,
+   ".filter((p) => !p.startsWith(\".review/\") && !p.startsWith(\".tmp/\"));",
+   "path-set"
+  ],
+  [
+   744,
+   "const undeclared = actualNew.filter((f) => !declared.includes(f));",
+   "path-set"
+  ],
+  [
+   752,
+   "for (const f of allRepaired) if (!repairedAll.includes(f)) repairedAll.push(f);",
+   "enum-check"
+  ],
+  [
+   754,
+   "for (const f of allRepaired) if (!groupAcc.includes(f)) groupAcc.push(f);",
+   "enum-check"
+  ],
+  [
+   765,
+   "const owner = plan.find((p) => p.group !== gid && planOf.get(p.group)!.files.includes(f));",
+   "path-set"
+  ],
+  [
+   768,
+   "if (!ownerFiles.includes(f)) ownerFiles.push(f);",
+   "enum-check"
+  ],
+  [
+   770,
+   "if (contentQueue.includes(owner.group) && owner.group !== gid) {",
+   "enum-check"
+  ],
+  [
+   776,
+   "if (reserved.includes(f)) {",
+   "path-set"
+  ],
+  [
+   778,
+   "if (cur.files.includes(f)) cur.files.splice(cur.files.indexOf(f), 1);",
+   "path-set"
+  ],
+  [
+   779,
+   "if (!reservedHits.includes(f)) reservedHits.push(f);",
+   "enum-check"
+  ],
+  [
+   783,
+   "if (!cur.files.includes(f)) cur.files.push(f);",
+   "enum-check"
+  ],
+  [
+   1119,
+   "if (!csDraftedFiles.includes(f)) csDraftedFiles.push(f);",
+   "path-set"
+  ],
+  [
+   1123,
+   "if (!csSkipReasons.includes(display)) csSkipReasons.push(display);",
+   "enum-check"
+  ],
+  [
+   1159,
+   "const isTestPath = (f: string): boolean => /(^|\\/)(__tests__|tests?)\\/|(\\.test\\.|\\.spec\\.)/.test(f);",
+   "path-set"
+  ],
+  [
+   1160,
+   "const sourceFiles = allFiles.filter((f) => !isTestPath(f) && !f.endsWith(\".md\"));",
+   "path-set"
+  ],
+  [
+   1178,
+   "if (allFiles.some((f) => rule.re.test(f))) dims.push(rule.dim);",
+   "path-set"
+  ],
+  [
+   1216,
+   "if (reportHome === \"\" || !/^.+-[0-9a-f]{8}$/.test(reportSlug)) {",
+   "format-validation"
+  ],
+  [
+   1359,
+   "if (!left.includes(f)) left.push(f);",
+   "enum-check"
+  ],
+  [
+   1599,
+   "if (prev && prev.files.filter((f) => files.includes(f)).length === 0 && prev.files.length > 0 && files.length > 0) {",
+   "path-set"
+  ],
+  [
+   1606,
+   "if (prev !== undefined && next.includes(prev)) {",
+   "enum-check"
+  ],
+  [
+   1616,
+   "const sd = strArr(i.sourceDims).filter((d) => !prev!.sourceDims.includes(d));",
+   "enum-check"
+  ],
+  [
+   1784,
+   "const groupRecsOf = (g: FixGroup): DmgRecord[] => records.filter((r) => g.issueIds.includes(r.id));",
+   "enum-check"
+  ],
+  [
+   1889,
+   "if (p !== \"\" && !tokens.includes(p)) tokens.push(p);",
+   "enum-check"
+  ]
+ ],
+ ".agents/workflows/src/pr-lifecycle.shared.ts": [
+  [
+   86,
+   "if (rawWorktree !== \"\" && !rawWorktree.startsWith(\"/\")) {",
+   "path-set"
+  ],
+  [
+   116,
+   "if (!(STEP_IDS as readonly string[]).includes(s)) {",
+   "enum-check"
+  ],
+  [
+   253,
+   "const arrow = p.indexOf(\" -> \");",
+   "protocol-parse"
+  ],
+  [
+   270,
+   "return !p.startsWith(\".review/\") && !p.startsWith(\".tmp/\");",
+   "path-set"
+  ],
+  [
+   610,
+   "if (fi.some((f) => fj.includes(f))) {",
+   "path-set"
+  ],
+  [
+   640,
+   "if (name.includes(\"monorepo-impact\")) return diffStats.pkgCount / SLOW_PKG_THRESHOLD;",
+   "enum-check"
+  ],
+  [
+   641,
+   "if (name.includes(\"business-logic\")) return diffStats.churnLines / SLOW_CHURN_THRESHOLD;",
+   "enum-check"
+  ],
+  [
+   655,
+   "if (typeof items[i]!.name === \"string\" && items[i]!.name.includes(k)) {",
+   "enum-check"
+  ],
+  [
+   679,
+   "const slowDrifter = batch1.find((it) => DRIFTER_POOL.some((k) => it.name.includes(k))) ?? null;",
+   "enum-check"
+  ],
+  [
+   690,
+   "const m = line.match(/^(\\d+|-)\\s+(\\d+|-)\\s+(.+)$/);",
+   "protocol-parse"
+  ],
+  [
+   1114,
+   "if (prev && prev.files.filter((f) => i.files.includes(f)).length === 0 && prev.files.length > 0 && i.files.length > 0) {",
+   "path-set"
+  ],
+  [
+   1269,
+   "const groupIssues = active.filter((it) => g.issueIds.includes(it.id));",
+   "enum-check"
+  ],
+  [
+   1391,
+   "if (p && !paths.includes(p)) paths.push(p);",
+   "enum-check"
+  ],
+  [
+   1507,
+   "const undeclared = actualNew.filter((f) => !declared.includes(f));",
+   "path-set"
+  ],
+  [
+   1512,
+   "for (const f of roundRepairFiles) if (!allRepairFiles.includes(f)) allRepairFiles.push(f);",
+   "enum-check"
+  ],
+  [
+   1600,
+   "if (p.startsWith(\"/\")) {",
+   "path-set"
+  ],
+  [
+   1626,
+   "if (home === \"\" || !/^.+-[0-9a-f]{8}$/.test(slug)) {",
+   "format-validation"
+  ],
+  [
+   1712,
+   "const legacyHit = pr === null || pr.changeset === null ? /WARN changeset-check/.test(out.stdout) : false;",
+   "legacy-fallback"
+  ],
+  [
+   1724,
+   "const skillFiles = names.stdout.split(\"\\n\").map((s) => s.trim()).filter((f) => f.startsWith(\".agents/skills/\"));",
+   "path-set"
+  ],
+  [
+   1743,
+   "if (parseErr instanceof Error && parseErr.message.startsWith(\"skill YAML 校验\")) throw parseErr;",
+   "enum-check"
+  ],
+  [
+   1766,
+   "const changesetFiles = names.stdout.split(\"\\n\").map((s) => s.trim()).filter((f) => /^\\.changeset\\/.+\\.md$/.test(f));",
+   "path-set"
+  ],
+  [
+   1835,
+   "const illegal = declared.filter((f) => !f.trim().startsWith(\".changeset/\"));",
+   "path-set"
+  ],
+  [
+   1936,
+   "return /(?:^|\\n)packages\\/shared\\/(?:.+\\/*\\/)?src\\//.test(`\\n${names.stdout}`)",
+   "path-set"
+  ],
+  [
+   2088,
+   "const relReviewers = (await runSh(\"sh\", [\"-c\", shq(nodeAbs) + \" -e \" + shq(\"const fs=require('fs'),d='.agents/skills/dev-merge/agents';try{process.stdout.write(",
+   "protocol-parse"
+  ],
+  [
+   2092,
+   "picked = relReviewers.filter((f) => reviewers.some((kw) => f.includes(kw)));",
+   "enum-check"
+  ],
+  [
+   2143,
+   "const reportRef = last.aggregatedFile && last.aggregatedFile.startsWith(last.runDir)",
+   "path-set"
+  ]
+ ],
+ ".agents/workflows/src/wait-until.shared.ts": [
+  [
+   89,
+   "if (!VALID_ARG_KEYS.has(k) && !k.startsWith(\"_\")) return k;",
+   "enum-check"
+  ],
+  [
+   157,
+   "const n = typeof v === \"number\" ? v : typeof v === \"string\" && /^\\d+$/.test(v.trim()) ? Number(v.trim()) : NaN;",
+   "format-validation"
+  ]
+ ]
+}

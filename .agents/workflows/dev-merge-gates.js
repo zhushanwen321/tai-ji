@@ -1393,7 +1393,7 @@ async function main() {
                 `对每个缺失包读该包在 git diff ${base}...HEAD 的改动后分类：`,
                 "1. 实质改动（对外语义变化：tool/command schema、导出面、行为、配置契约）→ 在 .changeset/ 起草（文件名用小写连字符短标识），frontmatter 列该包名 + 按语义选 patch/minor，正文一句面向用户的变化说明（即理由）；写完自行 commit：git add <显式路径> && git commit -m \"chore: draft changesets for dev-merge gates\"。",
                 "2. 非发布改动（纯注释/文档/无对外语义变化的内部整理）→ 不起草。",
-                "3. 全部起草或全部有跳过理由后返回严格 JSON：{ \"action\": \"draft\"|\"no-release\", \"files\": [本轮已 commit 的 .changeset/*.md 路径]（本轮有起草时）, \"skipReasons\": [\"包名: 原因 + 证据\"]（本轮跳过的包逐条列明） }。",
+                "3. 全部起草或全部有跳过理由后返回严格 JSON：{ \"action\": \"draft\"|\"no-release\", \"files\": [本轮已 commit 的 .changeset/*.md 路径]（本轮有起草时）, \"skipReasons\": [{\"pkg\": \"包名\", \"reason\": \"原因 + 证据\"}]（本轮跳过的包逐条列明；pkg 必须与缺失清单中的包名完全一致——引擎按它对账） }。",
                 "4. 禁止 git add -A / git add .。",
             ];
             if (round > 1) {
@@ -1407,7 +1407,17 @@ async function main() {
                 // draft 申报必须列已 commit 的 changeset 文件（no-release 不适用此校验）
                 throw new Error(`changeset 起草 agent 声称 draft 但未列任何文件——人工核对 .changeset/ 与 git log 后重新发起本 workflow`);
             }
-            const roundSkips = strArr(v.skipReasons);
+            // skipReasons 结构校验（pkg/reason 字段化——引擎按 pkg 对账 missing 清单，不从
+            // 申报文本拆包名；格式不合规 fail-fast 回喂，pkg 缺失会让收敛判定空转满轮次）
+            const roundSkips = (Array.isArray(v.skipReasons) ? v.skipReasons : []).map((r) => {
+                const rec = isRecord(r) ? r : {};
+                const pkg = typeof rec.pkg === "string" ? rec.pkg.trim() : "";
+                const reason = typeof rec.reason === "string" ? rec.reason.trim() : "";
+                if (pkg === "" || reason === "") {
+                    throw new Error(`changeset 起草 agent 的 skipReasons 条目非法（须为 {pkg, reason} 且均非空，pkg 与缺失清单包名一致）——人工核对后重新发起本 workflow`);
+                }
+                return { pkg, reason };
+            });
             if (v.action === "no-release" && roundSkips.length === 0) {
                 throw new Error(`changeset 起草 agent 声称 no-release 但未列任何跳过理由——非发布改动跳过必须列明理由（披露义务），人工补核后重新发起本 workflow`);
             }
@@ -1425,11 +1435,10 @@ async function main() {
                     csDraftedFiles.push(f);
             }
             for (const r of roundSkips) {
-                if (!csSkipReasons.includes(r))
-                    csSkipReasons.push(r);
-                const pkg = (r.split(/[：:]/)[0] ?? "").trim();
-                if (pkg !== "")
-                    csSkippedPkgs.add(pkg);
+                const display = `${r.pkg}: ${r.reason}`;
+                if (!csSkipReasons.includes(display))
+                    csSkipReasons.push(display);
+                csSkippedPkgs.add(r.pkg);
             }
             log(`[gates] changeset 第 ${round} 轮起草完成：起草 ${strArr(v.files).length} 文件、跳过 ${roundSkips.length} 包，下一轮重跑检查复核`);
         }

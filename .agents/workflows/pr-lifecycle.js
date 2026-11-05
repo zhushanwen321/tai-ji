@@ -2065,14 +2065,17 @@ await step("static-gate", async () => {
             log(`[static-gate] changeset WARN（结构化）：缺 changeset 包 ${pr.changeset.missing.length} 个`);
         }
         else {
-            // 结构化信号不可用（脚本未升级/旧分支 worktree 无 JSON）时的过渡期降级：回退 stdout
-            // 子串检测（2026-11-04 审查修正——脚本随分支传播而 .agents 实体即时全 worktree 生效，
-            // 空窗会让 changeset 兜底起草在旧脚本 worktree 上死亡；子串检测保留至全部活跃分支
-            // 升级后移除）。结构化字段可用但非 warn 时不再回退子串（避免双信号打架）
-            const legacyHit = pr !== null && pr.changeset === null ? /WARN changeset-check/.test(out.stdout) : false;
+            // 结构化信号不可用时的降级通道：premerge-result.json 整体缺失（pr === null，旧脚本
+            // worktree——最需要降级信号的形态）或缺 changeset 字段（中间形态），都回退 stdout
+            // 子串检测。结构化字段可用但非 warn 时不回退（避免双信号打架）。
+            // 移除条件：全部活跃分支的 pr-pre-merge.sh 均含 premerge-result.json 写点后删除本段
+            // （核查：对全部活跃分支跑 `git grep -L "premerge-result.json" -- '**/pr-pre-merge.sh'`
+            // 输出为空即可删；.agents 实体全 worktree 即时生效，不需要等脚本分发）
+            const legacyHit = pr === null || pr.changeset === null ? /WARN changeset-check/.test(out.stdout) : false;
             if (legacyHit) {
                 changesetWarn = true;
-                log("[static-gate] changeset WARN（旧脚本降级信号：premerge-result.json 缺 changeset 字段，回退 stdout 子串检测）");
+                const why = pr === null ? "premerge-result.json 整体缺失（旧脚本形态）" : "premerge-result.json 缺 changeset 字段（中间形态）";
+                log(`[static-gate] changeset WARN（降级信号：${why}，回退 stdout 子串检测）`);
             }
         }
     }

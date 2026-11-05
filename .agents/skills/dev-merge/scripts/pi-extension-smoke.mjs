@@ -14,8 +14,9 @@
 // pi extension 要求的 factory export，直接加载必报 invalid factory，2026-10-08 全组实测）。
 //
 // 用法（cwd 必须在待合并 feat worktree 根目录，对齐 dev-merge SKILL 调用约束）：
-//   node .agents/skills/dev-merge/scripts/pi-extension-smoke.mjs           # 人类可读输出
-//   node .agents/skills/dev-merge/scripts/pi-extension-smoke.mjs --json    # stdout 输出 JSON
+//   node .agents/skills/dev-merge/scripts/pi-extension-smoke.mjs                        # 人类可读输出
+//   node .agents/skills/dev-merge/scripts/pi-extension-smoke.mjs --json                 # stdout 输出 JSON
+//   node .agents/skills/dev-merge/scripts/pi-extension-smoke.mjs --json --out <path>    # 另原子写结果文件（tmp+rename；排障取证用，workflow 引擎消费走 stdout JSON）
 //
 // 退出码：
 //   0  全部入口加载成功（pass）；或 pi 未安装 / extension 包为 0（skip，理由见输出）
@@ -25,7 +26,7 @@
 // SKIP 语义：pi 未安装的宿主（如 CI）不阻塞流程，但必须显式披露，不静默跳过。
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const EXT_GROUPS = ["extensions/taiji", "extensions/universal"];
@@ -74,6 +75,12 @@ function collectEntries(root) {
 
 function main() {
   const jsonMode = process.argv.includes("--json");
+  const outIdx = process.argv.indexOf("--out");
+  const outPath = outIdx >= 0 ? process.argv[outIdx + 1] : undefined;
+  if (outIdx >= 0 && (outPath === undefined || outPath === "")) {
+    console.error("ERROR: --out 需要跟文件路径。用法：pi-extension-smoke.mjs --json --out <path>");
+    process.exit(2);
+  }
   const root = process.cwd();
   const say = (msg) => (jsonMode ? process.stderr : process.stdout).write(`${msg}\n`);
 
@@ -87,6 +94,7 @@ function main() {
 
   let status = "fail";
   let reason = "";
+  let entryProbe = null; // { entry, loaded, error? }[]——FAIL 时逐入口复跑明细
   if (failures.length > 0) {
     reason = "extension 包声明检查失败（main 指向缺失文件 / package.json 损坏）";
   } else if (entries.length === 0) {
@@ -118,6 +126,24 @@ function main() {
             ? `pi 退出码 ${res.status}（extension 加载失败；宿主报错 ${hintLines.length} 条）：\n${hintLines.join("\n")}`
             : `pi 退出码 ${res.status}（启动异常，无 extension 加载文案）：\n${(stderr || (res.stdout ?? "")).split("\n").slice(-15).join("\n")}`;
         loadFailureHint = hintLines.slice(0, 10);
+        // 整体加载 FAIL 时逐入口复跑定位（判定主据不变，仍为整体退出码——明细只服务
+        // 修复定位，哪个入口加载崩了直接可见，不必逐包二分排查）
+        say(`>> FAIL，逐入口复跑定位（${entries.length} 个）…`);
+        entryProbe = entries.map((e) => {
+          const one = spawnSync("pi", ["--mode", "rpc", "-ne", "-e", e.path], {
+            cwd: root,
+            stdio: ["ignore", "pipe", "pipe"],
+            timeout: PI_TIMEOUT_MS,
+            encoding: "utf8",
+          });
+          const loaded = one.status === 0;
+          const err = loaded
+            ? undefined
+            : (one.stderr ?? "").split("\n").filter((l) => l.includes(FAIL_MARK)).slice(0, 3).join("\n") ||
+              `退出码 ${one.status ?? "signal"}`;
+          say(`   ${loaded ? "OK " : "FAIL"} ${e.name}${loaded ? "" : `——${err}`}`);
+          return { entry: e.name, loaded, ...(err ? { error: err } : {}) };
+        });
       } else {
         status = "pass";
         if (hintLines.length > 0) {
@@ -132,13 +158,21 @@ function main() {
   // failures 恒为数组：包声明问题列明细；pi 运行期失败（非包声明问题）为空数组，
   // 具体报错看 reason，不虚构条目
   const result = {
+    schemaVersion: 1,
     status,
     reason: reason || undefined,
     entryCount: entries.length,
     skipped,
     failures,
+    ...(entryProbe ? { entries: entryProbe } : {}),
     ...(loadFailureHint.length > 0 ? { loadFailureHint } : {}),
   };
+  if (outPath !== undefined) {
+    // 原子写（tmp+rename，对齐 <step>-result.json 统一规范）；与 stdout JSON 双写一致
+    const tmp = `${outPath}.tmp`;
+    writeFileSync(tmp, `${JSON.stringify(result, null, 2)}\n`);
+    renameSync(tmp, outPath);
+  }
   if (jsonMode) {
     console.log(JSON.stringify(result, null, 2));
   }

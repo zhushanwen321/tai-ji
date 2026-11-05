@@ -54,7 +54,10 @@ export function makeMockWorldRun(captured, opts = {}) {
     }
     if (cmd === "sh") {
       const script = String(argsArr[1] ?? "");
-      if (script.includes("command -v node") || script.includes("nvm")) return res(0, "/usr/bin/node"); // 环境预检 probes
+      // 环境预检 probes——返回真实 node 路径：消费方（dev-merge-gates 的统一 commit
+      // 前缀）会对返回值做 existsSync 核验，硬编码系统路径在本机无该文件时误判
+      // 「无法定位 node」fail-fast（nvm 安装位环境曾致观测套件 5 例红）
+      if (script.includes("command -v node") || script.includes("nvm")) return res(0, process.execPath);
       if (script.includes("workflow-observability")) return res(0); // 防御：观测不经 sh 路
       // runNode 形态：sh -c '<node> "-e" <探针>'——探针判定直接对整串做 includes
       //（产物把 -e 一并 shq，形态为 '-e'，不能按裸 " -e " 切分）

@@ -47,11 +47,16 @@ const WF = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = join(WF, "src");
 // pr-lifecycle 的 zcode 产物保持既有调用路径（.agents/skills/pr-cr-fix/workflows/）
 const PRL_ZCODE_OUT = join(WF, "..", "skills", "pr-cr-fix", "workflows", "pr-lifecycle.dwf.ts");
-const NAMES = ["dev-merge-gates", "pr-lifecycle"];
+const NAMES = ["dev-merge-gates", "pr-lifecycle", "wait-until"];
 const OUTS = {
   "dev-merge-gates": { zcode: join(WF, "dev-merge-gates.dwf.ts"), pi: join(WF, "dev-merge-gates.js") },
   "pr-lifecycle": { zcode: PRL_ZCODE_OUT, pi: join(WF, "pr-lifecycle.js") },
+  "wait-until": { zcode: join(WF, "wait-until.dwf.ts"), pi: join(WF, "wait-until.js") },
 };
+// 显式登记公共体无 agent( 调用点的 workflow：纯机器检查型（参数化条件轮询，零 subagent），
+// GUI 泳道无 subagent 通道可显示，构建器「无 agent 调用点 = 切分错误」断言对其不适用。
+// 新增无 agent workflow 须在此登记并附理由，不静默豁免。
+const NO_AGENT = new Set(["wait-until"]);
 
 // ── O 区安装位（经 homedir() 动态推导，产物内无本机路径）──
 const OBS_LAYER_PATH = join(homedir(), ".agents", "scripts", "workflow-observability.shared.ts");
@@ -330,7 +335,9 @@ for (const name of NAMES) {
   const sharedFull = obsPatched ? `${obsLayer}\n${shared}` : shared;
 
   const rewritten = rewriteAgentCalls(shared);
-  if (rewritten.count === 0) throw new Error(`${name}: 公共体未发现 agent( 调用点——切分错误或调用点被遮蔽`);
+  if (rewritten.count === 0 && !NO_AGENT.has(name)) {
+    throw new Error(`${name}: 公共体未发现 agent( 调用点——切分错误或调用点被遮蔽（纯机器检查型 workflow 须在 NO_AGENT 显式登记）`);
+  }
   const rewrittenFull = rewriteAgentCalls(sharedFull);
   if (rewrittenFull.count !== rewritten.count) {
     throw new Error(`${name}: 观测层中出现 agent( 调用点（不应发生——观测层不派 agent）`);
@@ -372,4 +379,20 @@ for (const name of NAMES) {
 if (check && dirty > 0) {
   console.error(`\n${dirty} 个问题。恢复动作：node .agents/workflows/scripts/build-workflows.mjs`);
   process.exit(1);
+}
+
+// 文字匹配断言防回潮门禁（同 zsw-skills 仓同名脚本）：单源判定路径禁新增字面匹配，
+// 保留区命中以基线登记（含归类标签）。构建与 --check 任一入口都跑
+{
+  const { spawnSync } = await import("node:child_process");
+  const gate = spawnSync(process.execPath, [new URL("./check-no-text-assertion.mjs", import.meta.url).pathname], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+  process.stdout.write(gate.stdout ?? "");
+  if (gate.status !== 0) {
+    process.stderr.write(gate.stderr ?? "");
+    console.error("防回潮门禁未过（处置说明见上方输出）。");
+    process.exit(1);
+  }
 }
