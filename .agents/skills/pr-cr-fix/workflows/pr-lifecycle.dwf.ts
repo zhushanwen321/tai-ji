@@ -2008,7 +2008,7 @@ await step("static-gate", async () => {
   if (res.exitCode !== 0) {
     let detail = tailLines(`${res.stdout}\n${res.stderr}`, 15);
     try {
-      const j = JSON.parse(res.stdout) as { kind?: string; summary?: string; errors?: { label?: string; message?: string }[] };
+      const j = JSON.parse(res.stdout) as { kind?: string; summary?: string; errors?: { label?: string; message?: string; file?: string }[] };
       if (j.kind === "no-match") {
         throw new Error(`skill YAML 校验：无匹配文件（${j.summary ?? "no-match"}）——核对 ${skillMd.length} 个传入路径后重新发起`);
       }
