@@ -197,9 +197,10 @@ async function runCheck(spec: CheckSpec): Promise<CheckOutcome> {
     const expectAbsent = spec.type === "dir-absent";
     const r = await runIn(["test", "-d", String(spec.path)]);
     const exists = r.exitCode === 0;
+    const met = expectAbsent ? !exists : exists;
     return {
-      met: expectAbsent ? !exists : exists,
-      state: "met",
+      met,
+      state: met ? "met" : "unmet",
       evidence: "test -d " + spec.path + " 退出码 " + r.exitCode + "（" + (exists ? "目录存在" : "目录不存在") + "）",
     };
   }
@@ -207,17 +208,19 @@ async function runCheck(spec: CheckSpec): Promise<CheckOutcome> {
     const expectAbsent = spec.type === "file-absent";
     const r = await runIn(["test", "-f", String(spec.path)]);
     const exists = r.exitCode === 0;
+    const met = expectAbsent ? !exists : exists;
     return {
-      met: expectAbsent ? !exists : exists,
-      state: "met",
+      met,
+      state: met ? "met" : "unmet",
       evidence: "test -f " + spec.path + " 退出码 " + r.exitCode + "（" + (exists ? "文件存在" : "文件不存在") + "）",
     };
   }
   // file-contains：grep -F 固定串匹配（语义限定单行子串，多行 pattern 不支持）
   const r = await runIn(["grep", "-F", "-q", "--", String(spec.text), String(spec.path)]);
+  const containsMet = r.exitCode === 0;
   return {
-    met: r.exitCode === 0,
-    state: "met",
+    met: containsMet,
+    state: containsMet ? "met" : "unmet",
     evidence: "grep -F -q -- <text> " + spec.path + " 退出码 " + r.exitCode + (r.exitCode === 2 ? "（" + clip(r.stderr, 160) + "）" : ""),
   };
 }
@@ -235,57 +238,57 @@ function stateLabel(state: CheckOutcome["state"]): string {
 // ── 主流程 ──
 const badKey = unknownKey(Object.keys(args));
 if (badKey !== null) {
-  const report: WaitReport = {
+  const waitReport: WaitReport = {
     conclusion: "未知参数「" + badKey + "」——等待未启动。合法参数：" + [...VALID_ARG_KEYS].join("、") + "。修正参数后重新发起。",
     findings: [],
     verified: [],
     notCovered: ["轮询与条件判定全部未执行"],
   };
-  return report;
+  return waitReport;
 }
 
 const targetLabel = typeof args.targetLabel === "string" && args.targetLabel.trim() !== "" ? args.targetLabel.trim() : "";
 if (targetLabel === "") {
-  const report: WaitReport = {
+  const waitReport: WaitReport = {
     conclusion: "参数 targetLabel 缺失（等待目标的一句中文描述，进结论文案）——等待未启动。补上后重新发起。",
     findings: [],
     verified: [],
     notCovered: ["轮询与条件判定全部未执行"],
   };
-  return report;
+  return waitReport;
 }
 
 const checksParsed = parseChecks(args.checks);
 if (!checksParsed.ok) {
-  const report: WaitReport = {
+  const waitReport: WaitReport = {
     conclusion: "checks 参数非法——等待未启动。" + checksParsed.error,
     findings: [],
     verified: [],
     notCovered: ["轮询与条件判定全部未执行"],
   };
-  return report;
+  return waitReport;
 }
 const checks = checksParsed.checks;
 
 const pollParsed = parseNumberArg(args.pollSeconds, "pollSeconds", 5, 900);
 if (!pollParsed.ok) {
-  const report: WaitReport = {
+  const waitReport: WaitReport = {
     conclusion: pollParsed.error + "——等待未启动。修正后重新发起。",
     findings: [],
     verified: [],
     notCovered: ["轮询与条件判定全部未执行"],
   };
-  return report;
+  return waitReport;
 }
 const roundsParsed = parseNumberArg(args.maxRounds, "maxRounds", 1, 96);
 if (!roundsParsed.ok) {
-  const report: WaitReport = {
+  const waitReport: WaitReport = {
     conclusion: roundsParsed.error + "——等待未启动。修正后重新发起。",
     findings: [],
     verified: [],
     notCovered: ["轮询与条件判定全部未执行"],
   };
-  return report;
+  return waitReport;
 }
 const POLL_SECONDS = pollParsed.value;
 const MAX_ROUNDS = roundsParsed.value;
@@ -361,7 +364,8 @@ for (let i = 0; i < checks.length; i++) {
     what: "终态：" + stateLabel(outcome.state),
     evidence: outcome.evidence,
     status: outcome.state === "invalid" ? "unconfirmed" : "verified",
-    severity: outcome.state === "invalid" ? "medium" : "low",
+    // 超时停回场景下未满足的条件 = 阻塞后续流程，标 high；其余为记录性条目
+    severity: outcome.state === "invalid" ? "medium" : !done && !outcome.met ? "high" : "low",
   });
 }
 
@@ -371,7 +375,7 @@ const verified = [
 ];
 
 if (!done) {
-  const report: WaitReport = {
+  const waitReport: WaitReport = {
     conclusion: "等待「" + targetLabel + "」超时：轮询 " + round + " 轮（上限 " + MAX_ROUNDS + "，每轮 " + POLL_SECONDS + " 秒）后仍有条件未满足——" + finalBeat.detail + "。被等待方可能卡在需要人工裁决的环节（冲突 / 审查 contested / 进程挂起），停回用户处置，不自动进入后续流程。",
     findings,
     verified,
@@ -381,10 +385,10 @@ if (!done) {
       "被等待方是否正在等待人工输入未探测",
     ],
   };
-  return report;
+  return waitReport;
 }
 
-const report: WaitReport = {
+const waitReport: WaitReport = {
   conclusion: "等待「" + targetLabel + "」完成：全部 " + checks.length + " 项条件已满足（第 " + round + " 轮轮询后，每轮间隔 " + POLL_SECONDS + " 秒）——" + finalBeat.detail + "。外部状态已稳定，可进入后续流程。",
   findings,
   verified,
@@ -392,4 +396,4 @@ const report: WaitReport = {
     "被等待会话/进程的内部流程质量未验证（本 workflow 只判定参数化条件的落盘事实，不重复其内部门禁/审查）",
   ],
 };
-return report;
+return waitReport;
