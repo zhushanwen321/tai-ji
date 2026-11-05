@@ -16,7 +16,7 @@ parameters:
       description: 等待目标的一句中文描述（进结论文案与进度表标题；必填）
     checks:
       type: string
-      description: 检查条件的 JSON 数组（字符串或对象数组均可）。每项 {"type":"..."}：git-ancestor{branch,target,gitDir?}（分支头已并入目标 ref，或分支已随收尾删除均算满足）/ dir-absent{path} / dir-present{path} / file-absent{path} / file-present{path} / file-contains{path,text}（text 为单行固定子串）
+      description: 检查条件的 JSON 数组（字符串或对象数组均可）。每项 = type 原语名 + 必填参数：git-ancestor 需 branch 与 target（可选 gitDir，分支头已并入目标 ref 或分支已随收尾删除均算满足）；dir-absent / dir-present / file-absent / file-present 需 path；file-contains 需 path 与 text（text 为单行固定子串）
     pollSeconds:
       type: integer
       description: 轮询间隔秒数（≥5），默认 900 = 15 分钟

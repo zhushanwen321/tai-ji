@@ -21,6 +21,10 @@ const PRODUCTS = {
     zcode: join(WF, "..", "skills", "pr-cr-fix", "workflows", "pr-lifecycle.dwf.ts"),
     pi: join(WF, "pr-lifecycle.js"),
   },
+  "wait-until": {
+    zcode: join(WF, "wait-until.dwf.ts"),
+    pi: join(WF, "wait-until.js"),
+  },
 };
 
 // 临时测试 HOME：装观测层与 CLI 副本（安装契约形态）；typescript 经 env 显式传递
@@ -85,6 +89,34 @@ test("四个产物全部存在且非空", () => {
   }
 });
 
+// frontmatter YAML 可解析形态断言（CreateWorkflow / workflow 工具发起时才解析，
+// 构建与 vm 执行都不碰——wait-until 的 description 曾因含 {"type":...} 花括号被
+// YAML 当流式映射解析而 invalid_yaml 崩溃，真实发起才暴露）。零依赖结构断言：
+// zcode frontmatter（/* zcode-workflow */ 块）与 pi @pi-meta（/* @pi-meta */ 块）内
+// 的 description 行值不得以 { 开头（流式映射起点）或含 : {" 紧凑映射嵌套形态。
+test("frontmatter description 无流式映射形态（发起时 YAML 可解析）", () => {
+  const blocks = (src) => {
+    const out = [];
+    const re = /\/\* (?:zcode-workflow|@pi-meta)\n([\s\S]*?)\*\//g;
+    for (const m of src.matchAll(re)) out.push(m[1]);
+    return out;
+  };
+  for (const name of Object.keys(PRODUCTS)) {
+    for (const [, path] of Object.entries(PRODUCTS[name])) {
+      const src = readFileSync(path, "utf8");
+      for (const block of blocks(src)) {
+        for (const line of block.split("\n")) {
+          const m = /^(\s*(?:description|summary)\s*:\s*)(.*)$/.exec(line);
+          if (!m) continue;
+          const value = m[2];
+          assert.ok(!value.startsWith("{"), `${path} frontmatter description 值以 { 开头（YAML 流式映射，invalid_yaml）：${line.trim().slice(0, 80)}`);
+          assert.ok(!/:\s*\{"/.test(value), `${path} frontmatter description 含 : {" 紧凑映射嵌套（invalid_yaml）：${line.trim().slice(0, 80)}`);
+        }
+      }
+    }
+  }
+});
+
 test("--check 拦截产物篡改：改产物后 --check 失败，重建后恢复", () => {
   const { env } = makeTestHome();
   const p = PRODUCTS["dev-merge-gates"].pi;
@@ -105,8 +137,15 @@ test("--check 拦截产物篡改：改产物后 --check 失败，重建后恢复
 });
 
 test("pi 产物改写完整性：shared 调用点全部改写为 wfAgent(，壳 shim 保留唯一平台原生 agent 调用", () => {
+  // wait-until 是构建器 NO_AGENT 显式登记的零 agent workflow（纯机器检查），
+  // 无 wfAgent 改写点与壳原生 agent 调用，按登记例外
+  const NO_AGENT_WORKFLOWS = new Set(["wait-until"]);
   for (const name of Object.keys(PRODUCTS)) {
     const pi = readFileSync(PRODUCTS[name].pi, "utf8");
+    if (NO_AGENT_WORKFLOWS.has(name)) {
+      assert.equal((pi.match(/(?<![\w.$])wfAgent\(/g) ?? []).length, 0, `${name} 零 agent workflow 不应有 wfAgent(`);
+      continue;
+    }
     const wfCount = (pi.match(/(?<![\w.$])wfAgent\(/g) ?? []).length;
     assert.ok(wfCount >= 3, `${name} pi 产物 wfAgent( 调用点应来自 shared 改写（实际 ${wfCount}）`);
     const strayCallSpec = (pi.match(/(?<![\w.$])agent\(\{/g) ?? []).length;
@@ -150,7 +189,11 @@ test("产物不含本机绝对路径字面（workspace 约定）", () => {
 });
 
 test("公共观测层以单一来源拼入两侧产物（obsCtx/obsBegin 定义在业务正文之前；壳不含观测层副本）", () => {
+  // wait-until 是构建器显式登记的未接观测 workflow（零 agent 纯机器检查，无阶段归属），
+  // 不含观测层，按登记例外（构建器 checkObservationContract 同款跳过语义）
+  const OBS_EXEMPT = new Set(["wait-until"]);
   for (const name of Object.keys(PRODUCTS)) {
+    if (OBS_EXEMPT.has(name)) continue;
     for (const [, path] of Object.entries(PRODUCTS[name])) {
       const c = readFileSync(path, "utf8");
       const initPos = c.indexOf("function initObservation");

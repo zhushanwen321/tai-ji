@@ -13,7 +13,7 @@ args:
     description: 等待目标的一句中文描述（进结论文案与进度表标题；必填）
   checks:
     type: json
-    description: 检查条件数组（必填）。每项 {"type": "...", ...参数}，原语词表与必填参数：git-ancestor{branch,target,gitDir?}（分支头已并入目标 ref，或分支已随收尾删除均算满足）/ dir-absent{path} / dir-present{path} / file-absent{path} / file-present{path} / file-contains{path,text}（text 为单行固定子串）。gitDir 仅 git-ancestor 支持（bare repo 传 .bare 形态的相对值或绝对路径）
+    description: 检查条件数组（必填）。每项 = type 原语名 + 必填参数：git-ancestor 需 branch 与 target（可选 gitDir，分支头已并入目标 ref 或分支已随收尾删除均算满足）；dir-absent / dir-present / file-absent / file-present 需 path；file-contains 需 path 与 text（text 为单行固定子串）。gitDir 仅 git-ancestor 支持（bare repo 传相对值或绝对路径）
   pollSeconds:
     type: number
     description: 轮询间隔秒数（≥5；默认 900 = 15 分钟）
