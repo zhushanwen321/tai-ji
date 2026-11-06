@@ -246,6 +246,13 @@ const { groups, archiveCount } = await p.call('config.sessions', {}, { replyType
 3. **会话行无 per-session testid**：行根 = `.session-item`（`role=button`，`aria-label` = label，
    「已归档」标记时前缀改变），**没有 `data-session-id`**；同名 label 会双命中
    （建议补 `session-item-<sid>` / `data-session-id`，当前锚点缺口）。
+4. **协议建会话的行默认不可见（默认项目区默认收起）**：分组展开态默认全收起且 localStorage
+   持久化（`useProjectGroups.ts` 的 `DEFAULT_GROUP_PERSIST`，`defaultZone: false`；新实例
+   空集 = 全收起）——协议 `session.create` 的会话落在默认项目区，行不渲染，`.session-item`
+   选择器超时是「折叠」不是「列表没收到广播」。驱动：先读 `testid=default-project-anchor`
+   的 `aria-expanded`，非 `true` 时点击它展开（`DefaultProjectHead` 点行主体 = 父级按模式
+   翻转开合），再找行；行选择器用 `css=.session-item[aria-label="<label>"]` 精确形态。
+   （2026-11-07 agg-delete-lifecycle 首轮实测：跳过展开步骤直接找行 20s 超时，展开后即见。）
 
 ---
 
