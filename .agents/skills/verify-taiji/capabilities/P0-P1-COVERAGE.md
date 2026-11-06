@@ -37,6 +37,8 @@
 | 16 | provider-live-sync（包级 P0） | `model.live-sync`（v1.1 补登） | — | **`reuse-e2e`** | `node scripts/verify-provider-live-sync.mjs`（E2E-MODELS-02，L2.5，真实 pi + 本地 mock LLM，零外网）。**该脚本同时是 mock-http 通道的权威先例** |
 | 17 | 展示容器体系（右抽屉 / 底抽屉 / 浮层 + 键盘栈序） | `ui.container`（v1.1 补登）`workspace.drawer` `workspace.terminal` `workflow.overlay` | `p0-display-containers` ✅实跑（degraded） | **`scenario`（部分）** | **实测覆盖**（12 断言 0 失败 + 托盘区域 uncovered，2026-10-22）：模型弹层浮层「打开 → Esc → 关闭」最小回路。**修正（2026-10-22 对抗审查）**：托盘按钮渲染条件在源码注释明确（total===0 不渲染、聚合按钮 showAggregate 条件）= 设计内空态非缺口——剧本实测：前台 bash 轮不产托盘条目（托盘统计数据源 = subagent/workflow/后台 bash 记录，useTrayCounts），faux 实例制造路径受限 → 托盘回路条件化登记 uncovered（mock-http 执行域 record 是可行路径）。**仍不可达**：键盘栈序完整语义（空洞 #3）、终端/底抽屉零登记 |
 
+| 18 | 模型路由（provider 聚合，provider-aggregation 交付 2026-11-07） | `aggregation.saveRoute` `aggregation.getRouteView` `aggregation.deleteRoute` `model.list` `model.switch` `settings.provider` `subagent.model` | `agg-zero-config` `agg-time-window` `agg-view-orchestration` `agg-neighbor-surfaces` `agg-delete-lifecycle` `agg-extension-disabled` `agg-error-presentation` `agg-quota-condition` `agg-subagent-route` ✅实跑 | **`scenario`** | **实测覆盖**（430 断言全 pass，2026-11-07，mock-http/faux 双通道，verdict 证据 `~/.agents/skill-data/verify-taiji/feat-provider-routing/d3-dryrun/` 与 dev-flow 段 `provider-aggregation.verify/`）：零配置零痕迹零定时器（V8）；时间窗正反向/热生效/重开回放/simple 模式/特殊日期 include（V1/2/5/6/10/11）；路由卡序=选择器序=ctrl+p 循环序+截断警告+此刻预览（V9/V12）；邻居表面与隐式排除清单（V13）；运行中新建映射提示+删除行为链+resume 回落（V15/V14）；扩展禁用/启用往返含默认模型不悬空（V16）；凭据缺失结构化错误+恢复指引（V4）；额度耗尽自动切换（V3）；子会话路由与主会话行为一致（V7）。**未覆盖**：真实凭据冒烟（登记待验）、时间轴键盘/移动端涂抹（spec §13.2 待验证项）、各剧本 notProvable 明细见 inspect-summary/undecided.md |
+
 ## 二、P1（5 行）
 
 | # | 功能面 | capability id | 剧本 | 状态 | 备注 |
@@ -91,6 +93,15 @@
 | 12 | `p1-chat-revoke` | P1-4 | ✅ 15 断言 pass |
 | 13 | `p1-permission-approval` | P1-3 | ❌ 实测未通（fail 存档：激活链 + strict 配置契约两未知），矩阵保持 capability-only → **2026-10-24 更新**：两未知已由 `p1-permission-deny-flow` 实跑消解（配置 = session.create 前写入即可；激活链 = 环境抖动），approval 剧本待按 deny-flow 装配重写 |
 | 14 | `p0-stall-kill9-crash-baseline` | 停滞检测 V7（第 0 层回归对照，设计包 pi-stall-detection 新增功能行——停滞检测原不在矩阵） | ✅ 20 断言 pass（2026-10-31 D0 基线实跑 @fd7276351，runId=a7-d0-final）：kill -9 生成中 pi → session.exited.reason 人类可读 + occupancy full-reset 复位 + 宽限期无自动恢复广播/无新 pi + restore 后历史完整与新消息收发。停滞检测交付后本剧本必须保持绿（进程死亡形态收尾时序回归对照）；pi 定位 = ps 三锚定（`--mode rpc` + `mockllm/` + worktree 路径），restore 后 pi 在位以功能证据承载（restore spawn argv 形态与首建不同，ps 锚不适用） |
+| 15 | `agg-zero-config` | P0-18 V8 | ✅ 33 断言 pass |
+| 16 | `agg-time-window` | P0-18 V1/2/5/6/10/11 | ✅ 63 断言 pass |
+| 17 | `agg-view-orchestration` | P0-18 V9/V12 | ✅ 59 断言 pass |
+| 18 | `agg-neighbor-surfaces` | P0-18 V13 | ✅ 34 断言 pass |
+| 19 | `agg-delete-lifecycle` | P0-18 V14/V15 | ✅ 65 断言 pass |
+| 20 | `agg-extension-disabled` | P0-18 V16 | ✅ 56 断言 pass |
+| 21 | `agg-error-presentation` | P0-18 V4 | ✅ 54 断言 pass（首轮 fail=产品映射缺口，修复 commit 3234da436 前身批次后转绿） |
+| 22 | `agg-quota-condition` | P0-18 V3 | ✅ 32 断言 pass（首轮 fail=额度接线未实装，补 quota-cache-reader 后转绿） |
+| 23 | `agg-subagent-route` | P0-18 V7 | ✅ 34 断言 pass |
 
 **剩余工作**（后续排期，非本技能缺口）：`p0-settings-others`（五面抽样）、`p0-session-isolation-stream`（并发流式隔离）、P0-12 结构层 overlay UI 面、`p1-permission-approval` 待配置契约核实后重跑。
 
