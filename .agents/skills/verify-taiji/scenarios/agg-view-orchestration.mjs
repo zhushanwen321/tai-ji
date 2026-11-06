@@ -137,6 +137,8 @@ export async function run(ctx) {
   const uncovered = []
   const gotchas = [
     'config.setScopedModels 有 default 同步编排（model-message-handler.ts:139 scoped[0] → defaultModel）——剧本两个会话都显式 modelOverride，不依赖 default 值；default 被 V9 保存改写为聚合引用属产品正确行为（AS19 第一张卡=全局默认）',
+    '协议 session.create 不切换 UI 激活会话（2026-11-07 第 4 轮实测：composer 停留 landing 态，ctrl+p 走 landing pending 链、触发器变化但会话 getState 不变）——键盘循环验证前必须先经侧栏会话行点击把 composer 切到目标会话（已建态）',
+    'ctrl+p 循环会真实切换会话绑定模型（第 5 轮实测：循环后 sid9 绑定 r9-alpha，后续消息被路由端点 ep-r9a 消化、subagent_start 未执行）——白名单派发轮必须用独立会话（显式绑定 mock-1），负向断言配「主队步进 ≥2」计数排除「没派发」假绿',
     '路由页 unsaved-bar 是 v-show 显隐（RouteUnsavedBar.vue）——保存完成判定用「bar 不可见（offsetParent null）+ C 落盘轮询」双条件，禁 expectGone（detached 永不发生）',
     '绑定聚合条目的会话发消息会走路由命中端点、消耗端点演员队列（游标 per-model）——派发验证会话 sid9 显式绑定物理模型 mock-1，路由端点 ep-r9a/ep-r9b 与成员演员 ep-w 全部独立 id，互不串队',
     '白名单负向派发对象 mock-sub-a 无响应队列：若白名单失效产生请求将命中 404——断言「零 200 请求」在两种形态下都成立',
@@ -566,6 +568,25 @@ export async function run(ctx) {
   // ══ 8. V9 ④ ctrl+p 循环序：从 mock-1（idx=2）forward 三步 = ep-w → r9-beta → r9-alpha ═
   // 循环序源 = enabledModels（composer-shortcut-actions.ts:55「序 = scopedModels 显示序」）；
   // A 通道键盘驱动（composer-box 聚焦 + Control+p），B 通道 getState 权威读生效值。
+  // 前置：协议 session.create 不切换 UI 激活会话（2026-11-07 实测：composer 停留 landing
+  // 态，ctrl+p 走 landing pending 链不发 RPC——第 4 轮实测归因）——先经侧栏会话行点击
+  // 进入 sid9（真实用户路径），等 composer 转已建态（触发器显示会话绑定 mock-1）。
+  {
+    const rowSel = 'text=agg-view-v9'
+    try {
+      await ui.expectVisible(rowSel, { timeoutMs: 3_000 })
+    } catch {
+      await ui.click('text=默认项目') // 分组折叠时先展开
+      await ui.expectVisible(rowSel, { timeoutMs: 5_000 })
+    }
+    await ui.click(rowSel)
+    await ui.expectText('css=[title="切换模型"]', 'mock-1', { timeoutMs: 20_000 })
+    ev.assert('A: V9 ④ 侧栏切会话后 composer 转已建态（触发器显示会话绑定 mock-1）', true, {
+      channel: 'A',
+      expected: '触发器含 mock-1（已建态读会话真值）',
+      actual: '触发器已收敛',
+    })
+  }
   await ui.click('testid=composer-box')
   const expectedCycle = [`mockllm/${EP_W}`, `aggregation/${R9B}`, `aggregation/${R9A}`]
   const cycleActual = []
@@ -577,9 +598,9 @@ export async function run(ctx) {
     if (!ok) cycleOk = false
   }
   const triggerText = await ui.text('css=[title="切换模型"]')
-  ev.assert('A: V9 ④ composer 触发器文本与末次循环落点一致（ep-w）', triggerText.includes(EP_W), {
+  ev.assert('A: V9 ④ composer 触发器文本与末次循环落点一致（r9-alpha）', triggerText.includes(R9A), {
     channel: 'A',
-    expected: `触发器含 ${EP_W}`,
+    expected: `触发器含 ${R9A}（三次 forward 的末落点）`,
     actual: triggerText.slice(0, 120),
   })
   ev.assert('B: V9 ④ ctrl+p 循环序 = scopedModels 数组序循环（mock-1 → ep-w → r9-beta → r9-alpha）', cycleOk, {
@@ -591,11 +612,28 @@ export async function run(ctx) {
   ev.step({ step: 'v9.ctrlp-cycle', channel: 'A', exitCode: cycleOk ? 0 : 1, stats: { cycle: cycleActual.join('->') } })
 
   // ══ 9. V9 白名单行为：subagent 派发白名单（底层零变化回归的行为半边） ══════════════
+  // 独立派发会话（显式绑定 mock-1）：第 8 步循环已把 sid9 切到 r9-alpha——复用它会让
+  // 派发消息被路由端点消化（第 5 轮实测：ep-r9a 200/404、subagent_start 未执行、负向断言
+  // 假绿）。新会话绑定物理模型 mock-1，派发消息走主队剧本，与循环断言完全隔离。
+  const createdDisp = await protocol.call(
+    'session.create',
+    { cwd: repo, label: 'agg-view-v9-dispatch', modelOverride: `mockllm/${MAIN}` },
+    { timeoutMs: 120_000 },
+  )
+  const sidDisp = createdDisp.session?.id
+  ev.assert('B: V9 派发会话创建（绑定 mock-1）', Boolean(sidDisp), {
+    channel: 'B',
+    expected: 'session.id 非空',
+    actual: `sid=${sidDisp} model=${createdDisp.session?.modelId ?? '<n/a>'}`,
+  })
+  await pollStateModel(sidDisp, `mockllm/${MAIN}`, 'V9 派发会话绑定 mock-1')
+  await protocol.subscribe(sidDisp)
   // 9a 负向：显式指定白名单外 mock-sub-a → 拒绝，零孙进程请求
   {
+    const m1Before = instance.mockLlm.requests.filter((r) => r.model === MAIN && r.status === 200).length
     const since = protocol.events.length
-    await protocol.send(sid9, 'V9 白名单负向探针：显式指定白名单外模型')
-    const end = await protocol.waitTurnEnd(sid9, { since, timeoutMs: 180_000 })
+    await protocol.send(sidDisp, 'V9 白名单负向探针：显式指定白名单外模型')
+    const end = await protocol.waitTurnEnd(sidDisp, { since, timeoutMs: 180_000 })
     ev.assert('B: V9 负向派发主轮完成（toolResult isError 不炸轮）', end.type === 'message.complete' && end.ok, {
       channel: 'B',
       expected: 'message.complete 非 error',
@@ -603,21 +641,27 @@ export async function run(ctx) {
     })
     await new Promise((r) => setTimeout(r, 2_000)) // 拒绝路径无孙进程——短窗观察零新增请求即可
     const denyHits = instance.mockLlm.requests.filter((r) => r.model === SUB_DENY && r.status === 200)
+    const m1Consumed = instance.mockLlm.requests.filter((r) => r.model === MAIN && r.status === 200).length - m1Before
+    ev.assert('C: V9 负向——主队剧本真实消费（mock-1 步进 =2，排除「没派发」假绿）', m1Consumed >= 2, {
+      channel: 'C',
+      expected: 'mock-1 消费 ≥2 步（toolCall 步 + 收尾步）',
+      actual: `consumed=${m1Consumed}`,
+    })
     ev.assert('C: V9 负向——白名单外模型零孙进程请求（worker 未 spawn，白名单收紧行为在）', denyHits.length === 0, {
       channel: 'C',
       expected: 'mock-sub-a 零 200 请求',
       actual: `denyHits=${denyHits.length} allRequests=${instance.mockLlm.requests.length}`,
     })
-    const hist = await protocol.history(sid9, { limitTurns: 6 })
+    const hist = await protocol.history(sidDisp, { limitTurns: 6 })
     const histText = JSON.stringify(hist.messages ?? [])
     ev.attach('v9-deny-history-excerpt', histText.includes('scoped-models allowlist') ? 'history 含 outside the scoped-models allowlist（拒单文案）' : `history 无 allowlist 字样（截取 ${histText.length} 字节）`)
-    ev.step({ step: 'v9.allowlist-deny', channel: 'C', exitCode: denyHits.length === 0 ? 0 : 1, stats: {} })
+    ev.step({ step: 'v9.allowlist-deny', channel: 'C', exitCode: denyHits.length === 0 && m1Consumed >= 2 ? 0 : 1, stats: {} })
   }
   // 9b 正向：显式指定白名单内 ep-w → 放行，孙进程真打 mock + record 终态
   {
     const since = protocol.events.length
-    await protocol.send(sid9, 'V9 白名单正向探针：显式指定白名单内成员')
-    const end = await protocol.waitTurnEnd(sid9, { since, timeoutMs: 180_000 })
+    await protocol.send(sidDisp, 'V9 白名单正向探针：显式指定白名单内成员')
+    const end = await protocol.waitTurnEnd(sidDisp, { since, timeoutMs: 180_000 })
     ev.assert('B: V9 正向派发主轮完成', end.type === 'message.complete' && end.ok, {
       channel: 'B',
       expected: 'message.complete 非 error',
@@ -640,7 +684,7 @@ export async function run(ctx) {
     const recDeadline = Date.now() + 60_000
     let record = null
     while (Date.now() < recDeadline) {
-      const reply = await protocol.call('session.getSubagents', { sessionId: sid9 }, { timeoutMs: 60_000 })
+      const reply = await protocol.call('session.getSubagents', { sessionId: sidDisp }, { timeoutMs: 60_000 })
       record = (reply.subagents ?? []).find((r) => r.slug === 'v9-allow') ?? null
       if (record && ['done', 'idle', 'cancelled', 'error', 'failed'].includes(String(record.status))) break
       await new Promise((r) => setTimeout(r, 500))
