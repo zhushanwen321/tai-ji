@@ -33,7 +33,7 @@ export const meta = {
   faux: {
     tps: 6,
     responses: [
-      { thinking: 'AGG-THINK-1 先看目录结构再读入口文件，确认模块边界。', toolCalls: [{ name: 'ls', args: { path: '.' } }], stopReason: 'toolUse' },
+      { thinking: 'AGG-THINK-1 先看目录结构再读入口文件，确认模块边界。', text: 'AGG-LIVE-TEXT-1 开场正文，先看目录结构。', toolCalls: [{ name: 'ls', args: { path: '.' } }], stopReason: 'toolUse' },
       { toolCalls: [{ name: 'read', args: { path: 'package.json' } }], stopReason: 'toolUse' },
       { toolCalls: [{ name: 'read', args: { path: 'AGENTS.md' } }], stopReason: 'toolUse' },
       { toolCalls: [{ name: 'read', args: { path: 'docs/DESIGN.md' } }], stopReason: 'toolUse' },
@@ -96,6 +96,15 @@ export async function run(ctx) {
 
     // ── 段 1：发送 → 等首个聚合段（思考+工具）进入运行中 ──────────
     await protocol.send(sid, '开始聚合块运行中形态验证')
+    // ── 哨兵观察（发送后并发启动）：每个正文哨兵出现即命中——回合落成即折叠（D5），
+    //      串行等到 v1/v6 做完再 poll 会全部错过工作态窗口（agg-live-8 教训）
+    const sentinels = ['AGG-LIVE-TEXT-1', 'AGG-LIVE-TEXT-2', 'AGG-LIVE-TEXT-3', 'AGG-LIVE-TEXT-4']
+    const watches = sentinels.map((t) => ({
+      t,
+      p: pollBodyHtml(ui, (h) => h.includes(t), { timeoutMs: 120_000, intervalMs: 250 }).then((r) => r.ok),
+    }))
+
+
     const live = await pollBodyHtml(ui, (h) => h.includes('agg-live-windows'))
     ev.assert('A(V1): 运行中双窗容器在场（agg-live-windows）', live.ok, {
       channel: 'A', expected: '思考步骤开始后思考窗出现；首个工具步骤后聚合窗挂载', actual: `hit=${live.ok}`,
@@ -123,14 +132,17 @@ export async function run(ctx) {
     await new Promise((r) => setTimeout(r, 1500))
     const m2 = await measure()
     const inWindow = m2.container !== null
-    const thinkOk = m1.think !== null && Math.abs(m1.think - 92) <= 4
+    // m1 时点 = 工具段进行中（该段无思考）——D7 纯派生：思考窗隐藏（null）是正确形态；
+    // 思考窗 92px 的在场断言由段 1a（思考先行窗口）承担
     const aggOk = m1.agg !== null && Math.abs(m1.agg - 116) <= 4
-    const sumOk = m1.container !== null && m1.think !== null && m1.agg !== null
-      && Math.abs(m1.container - (m1.think + 10 + m1.agg)) <= 8
-    ev.assert('A(V1): 思考窗 92px（±4）', thinkOk, { channel: 'A', expected: '92±4', actual: String(m1.think) })
+    const thinkHiddenOk = m1.think === null
+    const containerOk = m1.container !== null && Math.abs(m1.container - 116) <= 4
+    ev.assert('A(V1): 工具段思考窗纯派生隐藏（该段无思考）', thinkHiddenOk, {
+      channel: 'A', expected: 'null（D7 可见性纯派生）', actual: String(m1.think),
+    })
     ev.assert('A(V1): 聚合窗 116px（±4）', aggOk, { channel: 'A', expected: '116±4', actual: String(m1.agg) })
-    ev.assert('A(V1): container = think+10+agg 常量和（±8）', sumOk, {
-      channel: 'A', expected: `${m1.think}+10+${m1.agg}±8`, actual: String(m1.container),
+    ev.assert('A(V1): container = 聚合窗独占（工具段无思考窗）', containerOk, {
+      channel: 'A', expected: '116±4', actual: String(m1.container),
     })
     ev.assert('A(V1): 占位不随步骤数增长（同段两观测点等高）', inWindow && m1.container === m2.container, {
       channel: 'A', expected: '两观测点等高', actual: `m1=${m1.container} m2=${m2.container}`,
@@ -138,7 +150,7 @@ export async function run(ctx) {
     ev.assert('A(V1): 聚合条行在场（strip 高亮瞬时性登记 notProvable，行在场为代理判据）', m1.stripRow || m1.stripCurrent, {
       channel: 'A', expected: '聚合条行（strip-row/group/current 任一）', actual: `row=${m1.stripRow} current=${m1.stripCurrent}`,
     })
-    ev.step({ step: 'v1.live.windows', channel: 'A', exitCode: thinkOk && aggOk && sumOk ? 0 : 1, stats: { ...m1, m2: m2.container } })
+    ev.step({ step: 'v1.live.windows', channel: 'A', exitCode: aggOk && thinkHiddenOk && containerOk ? 0 : 1, stats: { ...m1, m2: m2.container } })
 
     // ── 段 3：V6 窄屏三档（仍在工作态窗口内切 viewport）──────────
     for (const [w, et, ea] of [[900, 92, 116], [620, 92, 116], [390, 78, 96]]) {
@@ -155,34 +167,27 @@ export async function run(ctx) {
       })
       const noOverflow = m.overflow === false
       const stillLive = m.think !== null || m.agg !== null
+      // 工具段进行中：思考窗隐藏（D7 纯派生），断言聚合窗档位高度（390 档 78/96 中的 96）
       const dimsOk = !stillLive
-        ? true // 段在切档间隙落成（工作态窗口关闭），尺寸断言只在窗口内判
-        : w === 390
-          ? m.think !== null && Math.abs(m.think - et) <= 4 && m.agg !== null && Math.abs(m.agg - ea) <= 4
-          : true
+        ? true
+        : m.agg !== null && Math.abs(m.agg - ea) <= 4 && m.think === null
       ev.assert(`A(V6): ${w}px 无横向滚动`, noOverflow, { channel: 'A', expected: true, actual: m.overflow })
       if (stillLive) {
-        ev.assert(`A(V6): ${w}px 双窗高度（${et}/${ea}）`, dimsOk, {
-          channel: 'A', expected: `${et}/${ea}±4`, actual: `${m.think}/${m.agg}`,
+        ev.assert(`A(V6): ${w}px 聚合窗高度 ${ea}（思考窗该段无思考纯派生隐藏）`, dimsOk, {
+          channel: 'A', expected: `agg=${ea}±4 think=null`, actual: `${m.think}/${m.agg}`,
         })
       } else {
-        ev.step({ step: `v6.width.${w}.degraded`, channel: 'A', exitCode: 0, stats: { note: '段已落成，尺寸断言仅 390 档有窗口时判' } })
+        ev.step({ step: `v6.width.${w}.degraded`, channel: 'A', exitCode: 0, stats: { note: '段已落成，尺寸断言仅窗口内判' } })
       }
       ev.step({ step: `v6.width.${w}`, channel: 'A', exitCode: noOverflow ? 0 : 1, stats: m })
     }
     await page.setViewportSize({ width: 1280, height: 900 })
 
-    // ── 段 4：V4 工作态正文逐哨兵即时断言（工作态每条正文写出即渲染；
-    //      落成折叠后 DOM 只剩末位正文（D5 正确形态），末尾补抓必撞折叠边沿——
-    //      agg-live-7 教训：边沿后补抓 2/4 是折叠态 DOM 集合而非正文缺失）
-    for (const [sentinel, preds] of [
-      ['AGG-LIVE-TEXT-1', () => true],
-      ['AGG-LIVE-TEXT-2', () => true],
-      ['AGG-LIVE-TEXT-3', () => true],
-    ]) {
-      const hit = await pollBodyHtml(ui, (h) => h.includes(sentinel), { timeoutMs: 90_000 })
-      ev.assert(`A(V4): 工作态正文渲染即时在场（${sentinel}）`, hit.ok, {
-        channel: 'A', expected: `${sentinel} 写出即渲染`, actual: `hit=${hit.ok}`,
+    // ── 段 4 收割：哨兵命中断言 ────────────────────────────────
+    for (const w of watches) {
+      const ok = await w.p
+      ev.assert(`A(V4): 工作态正文渲染即时在场（${w.t}）`, ok, {
+        channel: 'A', expected: `${w.t} 写出即渲染（并发观察，工作态窗口内命中）`, actual: `hit=${ok}`,
       })
     }
 
@@ -199,13 +204,13 @@ export async function run(ctx) {
         unitCount: units.length,
       }
     })
-    ev.assert('A(V4): 折叠态 = 3 条摘要行（每段一行）', f.trace && f.summaries === 3, {
-      channel: 'A', expected: 'summaries=3', actual: `summaries=${f.summaries} units=${f.unitCount}`,
+    ev.assert('A(V4): 折叠态摘要行数 = 段数（thinking 首段 + 3 工具段 = 4）', f.trace && f.summaries === 4, {
+      channel: 'A', expected: 'summaries=4', actual: `summaries=${f.summaries} units=${f.unitCount}`,
     })
     ev.assert('A(V4): 末位正文殿后（trace-blk--text 为最后单元）', f.lastIsText === true, {
       channel: 'A', expected: true, actual: String(f.lastIsText),
     })
-    ev.step({ step: 'v4.folded', channel: 'A', exitCode: f.summaries === 3 && f.lastIsText ? 0 : 1, stats: f })
+    ev.step({ step: 'v4.folded', channel: 'A', exitCode: f.summaries === 4 && f.lastIsText ? 0 : 1, stats: f })
 
     return { uncovered: [], gotchas }
   } catch (e) {
