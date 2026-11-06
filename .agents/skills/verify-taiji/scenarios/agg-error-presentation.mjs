@@ -23,12 +23,14 @@
  *   实测 errorMessage 逐字命中）。流前 throw 不经 message_update 子事件 → 无 message.stream_error 帧，
  *   错误经 agent_end → message.complete(stopReason=error) + errorMessage 原文透传
  *  （packages/runtime/src/infra/pi/event-adapter.ts extractAgentEndFields:393）。
- * - runtime 映射（AX5 runtime 半边，U3）：词表前缀 `No API key`（packages/shared/src/provider.ts:274）
- *   → formatCredentialMissingPresentation（provider.ts:286-296）→ message.stream_error
- *   （event-adapter.ts:206-212）。**词表与 pi 实装文本不匹配（本验收的核心 finding）**：虚拟模型
- *   路由路径的凭据错误文本是 `Virtual model ... routed to ..., which has no credentials.`，
- *   非 'No API key' 前缀 → 映射不命中 → 呈现无恢复指引。设计范围裁断（provider.ts:280-284）
- *   明文「恢复指引随 A23/V4 真机验收观察真实文本后补」——本剧本观察到的真实文本即后补条件触发点。
+ * - runtime 映射（AX5 runtime 半边，U3）：凭据缺失两形态词表（packages/shared/src/provider.ts）——
+ *   形态一 `No API key` 前缀三变体（PI_CREDENTIAL_MISSING_PREFIX）+ 形态二虚拟模型路由
+ *   resolveModel 凭据拦截文本 `Virtual model ... routed to <端点复合串>, which has no credentials.`
+ *   （PI_VIRTUAL_ROUTE_NO_CREDENTIALS_PATTERN，2026-11-07 M2 增量按本剧本真机捕获文本补齐）→
+ *   formatCredentialMissingPresentation 结构化映射 → message.complete errorMessage
+ *   （event-adapter.ts extractAgentEndFields——流前 throw 不经 message_update 子事件，
+ *   本出口是该形态唯一到达对话流错误呈现的通路；映射修复前原文透传无恢复指引）。
+ *   映射文案 = `模型调用失败：<端点复合串> 的凭据缺失或已失效，请到设置页 Provider 分区更新该渠道的 API Key`。
  * - UI 呈现：message.complete stopReason=error → errorText=payload.errorMessage
  *   （packages/core/src/domain/chat/effects/registry.ts:261-265）→ assistant 消息 error 字段 →
  *   block-text-error danger 行（packages/ui/src/features/chat/TextRow.vue:26-29）。
@@ -68,12 +70,15 @@ const REF_ROUTE = `${AGG}/${ROUTE}`
 const ENDPOINT_REF = `${PROVIDER}/${EP_MODEL}`
 const MOCK_KEY = 'mock-key-not-needed'
 
-/** 实测错误文本锚段（第 1 轮 20261107-032757 errorMessage 逐字；源 model-runtime.js:749）。 */
-const ERR_ROUTED_ANCHOR = 'routed to'
-const ERR_ENDPOINT_ANCHOR = `routed to ${ENDPOINT_REF}` // 端点名完整复合串（比预期更精确）
-const ERR_REASON_ANCHOR = 'no credentials'
-/** 判据子项锚段（恢复指引）：实测 NOT 命中——映射词表未覆盖 resolveModel 凭据拦截文本。 */
-const GUIDE_ANCHORS = ['设置页', '更新凭据']
+/** 呈现锚段（M2 映射修复后形态；锚定 formatCredentialMissingPresentation 结构化文案，
+ * packages/shared/src/provider.ts credentialMissingPresentation——映射把 pi 原文
+ * `Virtual model ... routed to <端点复合串>, which has no credentials.` 替换为
+ * 「模型调用失败：<端点复合串> 的凭据缺失或已失效，请到设置页 … API Key」，端点名 =
+ * 完整端点复合串保真）。 */
+const ERR_ENDPOINT_ANCHOR = ENDPOINT_REF // 端点名完整复合串
+const ERR_REASON_ANCHOR = '凭据缺失或已失效' // 失败原因段
+/** 判据子项锚段（恢复指引段「到设置页 Provider 分区更新该渠道的 API Key」逐段锚定）。 */
+const GUIDE_ANCHORS = ['设置页', 'API Key']
 
 // ── mock 演员：主模型队列留破绽标记（命中 = 请求发往其他渠道 = 判据违反），端点模型 2 步 ──
 const step = (tag) => ({ text: tag, stopReason: 'stop' })
@@ -105,7 +110,7 @@ export const meta = {
     'V4 步骤 1：单端点路由会话正常对话一轮——命中唯一端点 ep-cred-a（mock 尾部裸 id + 会话 JSONL 助手消息物理模型记录）',
     'V4 步骤 2：config.setProvider（apiKey 空串 = 清除语义）后 agent/models.json 该 provider 无 apiKey 键（删 key 落盘）',
     '重开会话消费删除后配置：forceQuit+switch 后 pi 进程重开（runtime 日志 spawning pi 计数增加）+ 路由绑定保持（路由仍在，resume 不回落）',
-    'V4 步骤 3+4：再次发消息出现结构化错误——message.complete(stopReason=error) errorMessage 指明端点名与失败原因：「routed to mockllm/ep-cred-a」（完整端点复合串）+「no credentials」（pi resolveModel 凭据拦截，model-runtime.js:749，流前 throw 原文透传）',
+    'V4 步骤 3+4：再次发消息出现结构化错误——message.complete(stopReason=error) errorMessage 为结构化映射文案：端点名「mockllm/ep-cred-a」（完整端点复合串）+ 失败原因「凭据缺失或已失效」+ 恢复指引「到设置页 Provider 分区更新该渠道的 API Key」（pi resolveModel 凭据拦截 model-runtime.js:749 流前 throw → runtime formatCredentialMissingPresentation 映射，event-adapter extractAgentEndFields errorMessage 出口）',
     'V4 无假成功：该轮 message.complete stopReason=error（终态错误，非正常出话）',
     'V4 请求未发往任何其他渠道：失败轮 mock 请求记录（含全部 status）零新增——出站未发生；主模型 mock-1 队列零消费（破绽标记未命中）',
     'V4 无静默重试：settings.json retry.enabled=false 落盘 + 失败轮 mock 零请求 + 第二次发消息同形态结构化失败（稳定终态非重试耗尽）',
@@ -113,7 +118,6 @@ export const meta = {
     '恢复路径闭环：恢复 apiKey（同一写点）+ 重开后发消息正常出话命中 ep-cred-a（错误是凭据状态驱动，指引可操作）',
   ],
   notProvable: [
-    '**V4 判据子项「含恢复指引」实测不成立（fail 项，非证不了）**：pi resolveModel 凭据拦截文本（Virtual model ... routed to ..., which has no credentials.）不含恢复指引，且 runtime 映射词表（No API key 前缀，provider.ts:274）与该实装文本不匹配 → formatCredentialMissingPresentation 不命中 → 无「到设置页更新凭据」提示。设计范围裁断（provider.ts:280-284）明文「恢复指引随 A23/V4 真机验收观察真实文本后补」——本剧本即该观察：真实文本已捕获，词表需按 `routed to`/`which has no credentials` 形态扩充',
     '**对话流错误呈现的「事后重放态」缺口（实现缺口观察）**：会话切换后的 history 重放链对 error assistant 消息的 error 文本映射不稳定——第 3 轮实跑（20261107-033740）重放态 block-text-error 元素在但 innerText 空，第 4 轮（20261107-034043）元素不出现。本剧本 A 捕获已移到 live 窗口（失败轮 turn 结束即刻）规避该缺口；重放态的呈现缺口仍待修（用户切走再切回看不到错误文本）',
     '运行中会话（不重开 pi 进程）删 key 后立即发消息的形态：pi 模型快照按加载时同步机制消费配置（provider-live-sync src/index.ts:19-20，运行中热更新不提供），出站仍持旧凭据；mock server 不校验 Authorization（lib/mock-llm.mjs），该形态在本通道表现为出站成功（mock-http 特有假成功；真实世界 = 厂商拒绝旧凭据透传，厂商失败文本映射按设计范围裁断未实装）。本剧本证「pi 进程已消费删除后配置」的凭据缺失呈现（重开会话 = pi 加载时同步的真实用户路径）',
     '设置页 UI 表单删 key 的交互面（表单编辑/保存按钮链）：本剧本走 config.setProvider 协议写侧（与设置页保存同一写点 provider-message-handler.ts:156-168）；UI 表单交互归 p0-settings-provider/手工验收',
@@ -126,7 +130,7 @@ export async function run(ctx) {
   const uncovered = []
   const gotchas = [
     'pi 模型快照是加载时同步（provider-live-sync src/index.ts:19-20）：运行中删 key 不影响已运行 pi 进程的出站凭据；剧本在删 key 后 forceQuit+switch 重开会话，让新 pi 进程 session_start refresh 消费删除后的 models.json——「再次发消息」的凭据缺失错误在重开后的同一会话触发',
-    '凭据拦截点在 pi resolveModel（model-runtime.js:749，route 返回后、流启动前），错误文本 `Virtual model <p>/<route> routed to <endpoint>, which has no credentials.` 经 message.complete(stopReason=error) 透传——无 message.stream_error 帧，event-adapter 的 formatCredentialMissingPresentation（No API key 词表）不命中，呈现无恢复指引（V4 判据子项，如实 fail）',
+    '凭据拦截点在 pi resolveModel（model-runtime.js:749，route 返回后、流启动前），错误文本 `Virtual model <p>/<route> routed to <endpoint>, which has no credentials.` 经 message.complete(stopReason=error) 呈现——无 message.stream_error 帧；runtime 出站映射（formatCredentialMissingPresentation 第二形态 PI_VIRTUAL_ROUTE_NO_CREDENTIALS_PATTERN，挂 event-adapter extractAgentEndFields errorMessage 出口）把原文替换为含端点名/失败原因/恢复指引的结构化文案，剧本锚段按映射文案取（provider.ts credentialMissingPresentation）',
     'config.setProvider 删 key = apiKey 传空串（protocol.ts:532 空串清除语义）；⚠️ type 字段必须传 pi api 终值（applyTypeTranslation 透传，pi-config-store.ts:107-114——传「custom」会把 api 写坏成未知值，出站报「No API provider registered for api: custom」，第 2 轮实测）；其余字段从 models.json 现值保真回传',
     'mock 请求零新增断言按 requests 全量（含 status 404）计数：凭据拦截在客户端 throw，HTTP 请求不发出，mock 侧应零记录',
     '会话行 UI 定位锚 = basename(repo)（pi session name 缺省 = basename(cwd)，renderer 行 label 与 runtime config.sessions 的 summary.label 不同源——第 2 轮实测 summary.label=传入 label、行显示 basename）',
@@ -312,9 +316,10 @@ export async function run(ctx) {
 
   /**
    * 发消息并断言凭据缺失结构化失败全链（V4 步骤 3+4）：
-   * 终态 error + errorMessage 指明端点名与失败原因（pi resolveModel 凭据拦截透传）
+   * 终态 error + errorMessage 为结构化映射文案（端点名 + 失败原因 + 恢复指引，pi
+   * resolveModel 凭据拦截 → runtime formatCredentialMissingPresentation 映射）
    * + mock 记录零新增 + JSONL error entry（虚拟模型留在消息上）。
-   * 恢复指引断言独立成行（判据子项，实测不命中——映射词表与 pi 实装文本不匹配）。
+   * 恢复指引断言独立成行（判据子项）。
    * opts.uiCapture=true：turn 结束即刻做 A 通道 live 捕获（对话流已激活时）——
    * 判据「检查对话流错误呈现」的用户语义 = 发消息当下所见（live 入流；事后重放态的
    * error 文本映射有缺口，见 notProvable）。
@@ -376,13 +381,13 @@ export async function run(ctx) {
       presentation.includes(ERR_ENDPOINT_ANCHOR),
       {
         channel: 'B',
-        expected: `errorMessage 含「${ERR_ENDPOINT_ANCHOR}」（model-runtime.js:749 routed to <endpoint>）`,
+        expected: `errorMessage 含「${ERR_ENDPOINT_ANCHOR}」（映射文案端点名 = pi routed to <endpoint> 复合串保真，provider.ts credentialMissingPresentation）`,
         actual: `text=${presentation.slice(0, 400) || '<empty>'}`,
       },
     )
     ev.assert(`B: ${label} 错误指明失败原因（「${ERR_REASON_ANCHOR}」）`, presentation.includes(ERR_REASON_ANCHOR), {
       channel: 'B',
-      expected: `errorMessage 含「${ERR_REASON_ANCHOR}」（pi 凭据拦截原因）`,
+      expected: `errorMessage 含「${ERR_REASON_ANCHOR}」（映射文案失败原因段，pi 凭据拦截映射）`,
       actual: `text=${presentation.slice(0, 400) || '<empty>'}`,
     })
     const guideHit = GUIDE_ANCHORS.filter((a) => presentation.includes(a))
