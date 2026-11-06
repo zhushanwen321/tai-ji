@@ -109,12 +109,12 @@ export const meta = {
     'V4 无假成功：该轮 message.complete stopReason=error（终态错误，非正常出话）',
     'V4 请求未发往任何其他渠道：失败轮 mock 请求记录（含全部 status）零新增——出站未发生；主模型 mock-1 队列零消费（破绽标记未命中）',
     'V4 无静默重试：settings.json retry.enabled=false 落盘 + 失败轮 mock 零请求 + 第二次发消息同形态结构化失败（稳定终态非重试耗尽）',
-    'C 日志：会话 JSONL error assistant entry（provider=aggregation、model=路由 id——pi 契约「failed 路由把虚拟模型留在消息上」）',
-    'A UI：对话流 block-text-error 错误行呈现该错误文本（errorText = errorMessage，registry.ts:261-265）',
+    'A UI：对话流错误行 live 捕获（捕获时点 = 失败轮 turn 结束即刻，对话流已激活——判据语义「用户发消息当下所见」）：期望 block-text-error 文本含端点名与失败原因（live 收尾链 terminalMessagePatch mutations.ts:156-158 errorMessage||兜底保证非空）',
     '恢复路径闭环：恢复 apiKey（同一写点）+ 重开后发消息正常出话命中 ep-cred-a（错误是凭据状态驱动，指引可操作）',
   ],
   notProvable: [
     '**V4 判据子项「含恢复指引」实测不成立（fail 项，非证不了）**：pi resolveModel 凭据拦截文本（Virtual model ... routed to ..., which has no credentials.）不含恢复指引，且 runtime 映射词表（No API key 前缀，provider.ts:274）与该实装文本不匹配 → formatCredentialMissingPresentation 不命中 → 无「到设置页更新凭据」提示。设计范围裁断（provider.ts:280-284）明文「恢复指引随 A23/V4 真机验收观察真实文本后补」——本剧本即该观察：真实文本已捕获，词表需按 `routed to`/`which has no credentials` 形态扩充',
+    '**对话流错误呈现的「事后重放态」缺口（实现缺口观察）**：会话切换后的 history 重放链对 error assistant 消息的 error 文本映射不稳定——第 3 轮实跑（20261107-033740）重放态 block-text-error 元素在但 innerText 空，第 4 轮（20261107-034043）元素不出现。本剧本 A 捕获已移到 live 窗口（失败轮 turn 结束即刻）规避该缺口；重放态的呈现缺口仍待修（用户切走再切回看不到错误文本）',
     '运行中会话（不重开 pi 进程）删 key 后立即发消息的形态：pi 模型快照按加载时同步机制消费配置（provider-live-sync src/index.ts:19-20，运行中热更新不提供），出站仍持旧凭据；mock server 不校验 Authorization（lib/mock-llm.mjs），该形态在本通道表现为出站成功（mock-http 特有假成功；真实世界 = 厂商拒绝旧凭据透传，厂商失败文本映射按设计范围裁断未实装）。本剧本证「pi 进程已消费删除后配置」的凭据缺失呈现（重开会话 = pi 加载时同步的真实用户路径）',
     '设置页 UI 表单删 key 的交互面（表单编辑/保存按钮链）：本剧本走 config.setProvider 协议写侧（与设置页保存同一写点 provider-message-handler.ts:156-168）；UI 表单交互归 p0-settings-provider/手工验收',
     '真实厂商 401/429/5xx 文本的呈现形态：无统一形态，设计范围裁断不建映射词表（provider.ts:280-284），mock-http 通道无法模拟厂商侧凭据撤销',
@@ -127,9 +127,9 @@ export async function run(ctx) {
   const gotchas = [
     'pi 模型快照是加载时同步（provider-live-sync src/index.ts:19-20）：运行中删 key 不影响已运行 pi 进程的出站凭据；剧本在删 key 后 forceQuit+switch 重开会话，让新 pi 进程 session_start refresh 消费删除后的 models.json——「再次发消息」的凭据缺失错误在重开后的同一会话触发',
     '凭据拦截点在 pi resolveModel（model-runtime.js:749，route 返回后、流启动前），错误文本 `Virtual model <p>/<route> routed to <endpoint>, which has no credentials.` 经 message.complete(stopReason=error) 透传——无 message.stream_error 帧，event-adapter 的 formatCredentialMissingPresentation（No API key 词表）不命中，呈现无恢复指引（V4 判据子项，如实 fail）',
-    'config.setProvider 删 key = apiKey 传空串（protocol.ts:532 空串清除语义）；其余字段（name/api/baseUrl/models）从 models.json 现值保真回传，避免整条 provider 定义被部分覆写',
+    'config.setProvider 删 key = apiKey 传空串（protocol.ts:532 空串清除语义）；⚠️ type 字段必须传 pi api 终值（applyTypeTranslation 透传，pi-config-store.ts:107-114——传「custom」会把 api 写坏成未知值，出站报「No API provider registered for api: custom」，第 2 轮实测）；其余字段从 models.json 现值保真回传',
     'mock 请求零新增断言按 requests 全量（含 status 404）计数：凭据拦截在客户端 throw，HTTP 请求不发出，mock 侧应零记录',
-    '会话行 UI 定位用 config.sessions 返回的 summary.label 现值，不假设等于 session.create 传入的 label（label 持久化走 pi set_session_name，无 rename 时行显示 cwd basename——第 1 轮实测截图）',
+    '会话行 UI 定位锚 = basename(repo)（pi session name 缺省 = basename(cwd)，renderer 行 label 与 runtime config.sessions 的 summary.label 不同源——第 2 轮实测 summary.label=传入 label、行显示 basename）',
   ]
 
   const modelsJsonPath = path.join(dataDir, 'agent', 'models.json')
@@ -290,18 +290,70 @@ export async function run(ctx) {
     }
   }
 
+  /** A 通道 live 捕获：轮询等待错误行出现并取文本（15s 窗口）；失败时附对话流 dump 供归因。 */
+  async function uiExpectErrorLine() {
+    const ui = ctx.ui
+    try {
+      return await ui.expectText('testid=block-text-error', ERR_REASON_ANCHOR, { timeoutMs: 15_000 })
+    } catch (e) {
+      try {
+        const dump = await ui.text('css=body')
+        ev.attach('v4-chat-flow-dump', String(dump ?? '').slice(0, 20_000))
+      } catch {
+        /* dump 失败不掩盖原错 */
+      }
+      throw e
+    }
+  }
+
   /**
    * 发消息并断言凭据缺失结构化失败全链（V4 步骤 3+4）：
    * 终态 error + errorMessage 指明端点名与失败原因（pi resolveModel 凭据拦截透传）
    * + mock 记录零新增 + JSONL error entry（虚拟模型留在消息上）。
    * 恢复指引断言独立成行（判据子项，实测不命中——映射词表与 pi 实装文本不匹配）。
+   * opts.uiCapture=true：turn 结束即刻做 A 通道 live 捕获（对话流已激活时）——
+   * 判据「检查对话流错误呈现」的用户语义 = 发消息当下所见（live 入流；事后重放态的
+   * error 文本映射有缺口，见 notProvable）。
    */
-  async function sendTurnExpectCredentialError(sid, text, label, { sessionFile } = {}) {
+  async function sendTurnExpectCredentialError(sid, text, label, { sessionFile, uiCapture = false } = {}) {
     const since = protocol.events.length
     const countBefore = allRequests().length
     await protocol.send(sid, text)
     const end = await protocol.waitTurnEnd(sid, { since, timeoutMs: 120_000 })
     const endedAsError = end.type !== 'message.complete' || end.payload?.stopReason === 'error'
+
+    // ── A 通道 live 捕获（必须在任何协议断言之前——turn 刚结束，错误气泡在 live 流上） ──
+    let uiErrText = null
+    if (uiCapture) {
+      try {
+        uiErrText = await uiExpectErrorLine()
+        ev.assert('A: 对话流错误行（block-text-error）live 呈现凭据缺失错误文本', String(uiErrText).includes(ERR_ENDPOINT_ANCHOR) && String(uiErrText).includes(ERR_REASON_ANCHOR), {
+          channel: 'A',
+          expected: `block-text-error 含「${ERR_ENDPOINT_ANCHOR}」+「${ERR_REASON_ANCHOR}」（live 收尾链 mutations.ts:156-158 error = errorMessage||兜底）`,
+          actual: `text=${String(uiErrText).slice(0, 300) || '<empty>'}`,
+        })
+        const guideHitUi = GUIDE_ANCHORS.filter((a) => String(uiErrText).includes(a))
+        ev.assert('A: 判据子项：错误行含恢复指引（到设置页更新凭据）', guideHitUi.length >= 2, {
+          channel: 'A',
+          expected: `错误行含「${GUIDE_ANCHORS.join('」+「')}」（V4 判据「含恢复指引」）`,
+          actual: `命中=${guideHitUi.join(',') || '<none>'} text=${String(uiErrText).slice(0, 300)}`,
+        })
+        await ev.shot(await instance.page(), 'v4-error-bubble-live')
+      } catch (e) {
+        ev.assert('A: 对话流错误行（block-text-error）live 呈现凭据缺失错误文本', false, {
+          channel: 'A',
+          expected: 'live 窗口内 block-text-error 可见且含端点名与原因锚段',
+          actual: String(e?.message ?? e).slice(0, 400),
+        })
+        ev.attach('v4-ui-error', JSON.stringify({ message: e?.message, hint: e?.hint, evidence: e?.evidence }, null, 2).slice(0, 20_000))
+        try {
+          await ev.shot(await instance.page(), 'v4-ui-fail')
+        } catch {
+          /* 页面不可用时放弃截图 */
+        }
+      }
+    }
+
     ev.assert(`B: ${label} 该轮以错误终态结束（无假成功）`, endedAsError, {
       channel: 'B',
       expected: '非 message.complete 或 stopReason=error',
@@ -388,21 +440,29 @@ export async function run(ctx) {
     return { spawnsBefore, spawnsAfter }
   }
 
-  /** setProvider 保真回传（从 models.json 现值构造 payload，apiKey 按需置空/恢复）。 */
+  /** setProvider 保真回传（从 models.json 现值构造 payload，apiKey 按需置空/恢复）。
+   *  ⚠️ type 必须传 pi api 终值（现值 api）：applyTypeTranslation 是透传（pi-config-store.ts:107-114），
+   *  payload 的 type 字段会原样落 models.json 的 api——传 'custom' 会把 provider 写坏成
+   *  未知 api（出站报「No API provider registered for api: custom」，第 2 轮实测）。
+   *  SetProviderData 契约无 api 字段（protocol.ts:535，历史字段名 type 即 api 载体），不传 api。 */
   async function setProviderApiKey(apiKey, label) {
     const def = readModelsJson().providers?.[PROVIDER]
     const payload = {
       providerId: PROVIDER,
       name: def?.name ?? 'Mock LLM (verify-taiji local mock-http)',
-      type: 'custom',
-      api: def?.api ?? 'openai-completions',
+      type: def?.api ?? 'openai-completions',
       baseUrl: def?.baseUrl,
       apiKey,
       models: (def?.models ?? []).map((m) => ({ id: m.id, name: m.name })),
     }
     await protocol.call('config.setProvider', payload, { timeoutMs: 60_000 })
-    ev.step({ step: `config.setProvider.${label}`, channel: 'B', exitCode: 0, stats: { providerId: PROVIDER, apiKey: apiKey === '' ? '<cleared>' : '<set>' } })
+    ev.step({ step: `config.setProvider.${label}`, channel: 'B', exitCode: 0, stats: { providerId: PROVIDER, apiKey: apiKey === '' ? '<cleared>' : '<set>', apiType: payload.type } })
     const after = readModelsJson().providers?.[PROVIDER]
+    ev.assert(`C: ${label} 后 models.json 的 api 字段保持 openai-completions（type 透传正确）`, after?.api === (def?.api ?? 'openai-completions'), {
+      channel: 'C',
+      expected: `api=${def?.api ?? 'openai-completions'}`,
+      actual: `api=${after?.api ?? '<none>'}`,
+    })
     return after
   }
 
@@ -461,6 +521,36 @@ export async function run(ctx) {
     actual: `label=${sessionLabel || '<empty>'}（session.create 传入 label=${S_LABEL}；label 持久化走 pi set_session_name，现值可能为 cwd basename）`,
   })
   ev.attach('session-summary-label', `passedLabel=${S_LABEL} summaryLabel=${sessionLabel}`)
+
+  // A 通道提前激活会话面板（V4「检查对话流错误呈现」的用户语义 = 发消息当下所见：
+  // 激活后失败轮错误经 live 入流呈现；事后切会话的重放态 error 文本映射有缺口——第 3/4 轮实测）
+  const rowLabelText = path.basename(repo)
+  try {
+    const ui = ctx.ui
+    const zoneExpanded = await ui.attr('testid=default-project-anchor', 'aria-expanded')
+    if (zoneExpanded !== 'true') await ui.click('testid=default-project-anchor')
+    const rowSelector = `css=.session-item[aria-label="${rowLabelText.replace(/"/g, '\\"')}"]`
+    await ui.expectVisible(rowSelector, { timeoutMs: 20_000 })
+    await ui.click(rowSelector)
+    await ui.expectVisible('testid=panel-session-label', { timeoutMs: 20_000 })
+    ev.assert('A: 会话面板已激活（失败轮错误将 live 入流呈现）', true, {
+      channel: 'A',
+      expected: `点击行 ${rowLabelText} 后会话面板打开`,
+      actual: 'panel-session-label 可见',
+    })
+  } catch (e) {
+    ev.assert('A: 会话面板已激活（失败轮错误将 live 入流呈现）', false, {
+      channel: 'A',
+      expected: `行 ${rowLabelText} 可见 → 点击 → 面板打开`,
+      actual: String(e?.message ?? e).slice(0, 400),
+    })
+    ev.attach('v4-ui-activate-error', JSON.stringify({ message: e?.message, evidence: e?.evidence }, null, 2).slice(0, 20_000))
+    try {
+      await ev.shot(await instance.page(), 'v4-ui-activate-fail')
+    } catch {
+      /* 页面不可用时放弃截图 */
+    }
+  }
   const normalTurn = await sendTurn(sid, 'V4 步骤 1：单端点路由正常对话一轮', EP_MODEL, 'V4 正常轮', { sessionFile, expectAssistantCount: 1 })
   ev.step({ step: 'v4.normal-turn', channel: 'C', exitCode: normalTurn.tail?.model === EP_MODEL ? 0 : 1, stats: { model: normalTurn.tail?.model } })
 
@@ -477,52 +567,14 @@ export async function run(ctx) {
   const reopen1 = await reopenSession(sid, 'V4 重开 1')
   await pollBoundModelId(sid, REF_ROUTE, '重开后路由绑定保持（路由仍在盘，虚拟模型重新注册，resume 不回落）', { timeoutMs: 30_000 })
 
-  // ══ 5. V4 步骤 3+4：再次发消息 → 结构化错误呈现（两轮稳定形态） ═════════════
-  const fail1 = await sendTurnExpectCredentialError(sid, 'V4 步骤 3：删 key 后再次发消息，应显式失败', 'V4 失败轮 1', { sessionFile })
+  // ══ 5. V4 步骤 3+4：再次发消息 → 结构化错误呈现（两轮稳定形态；轮 1 附 A 通道 live 捕获） ══
+  const fail1 = await sendTurnExpectCredentialError(sid, 'V4 步骤 3：删 key 后再次发消息，应显式失败', 'V4 失败轮 1', { sessionFile, uiCapture: true })
   ev.step({ step: 'v4.credential-error-1', channel: 'B', exitCode: fail1.errs.sawCompleteError ? 0 : 1, stats: {} })
   const fail2 = await sendTurnExpectCredentialError(sid, 'V4 稳定性复验：再次发消息仍显式失败（非偶发非重试耗尽）', 'V4 失败轮 2', { sessionFile })
   ev.step({ step: 'v4.credential-error-2', channel: 'B', exitCode: fail2.errs.sawCompleteError ? 0 : 1, stats: {} })
 
-  // ══ 6. A 通道：对话流 block-text-error 错误行文本 ═══════════════════════════
-  // 行定位用 config.sessions 的 label 现值（不假设等于传入 label——第 1 轮实测行显示 cwd basename）
-  const ui = ctx.ui
-  try {
-    const zoneExpanded = await ui.attr('testid=default-project-anchor', 'aria-expanded')
-    if (zoneExpanded !== 'true') await ui.click('testid=default-project-anchor')
-    const rowSelector = `css=.session-item[aria-label="${sessionLabel.replace(/"/g, '\\"')}"]`
-    await ui.expectVisible(rowSelector, { timeoutMs: 20_000 })
-    await ui.click(rowSelector)
-    await ui.expectText('testid=panel-session-label', sessionLabel, { timeoutMs: 20_000 })
-    const errText = await ui.expectText('testid=block-text-error', ERR_REASON_ANCHOR, { timeoutMs: 15_000 })
-    ev.assert('A: 对话流错误行（block-text-error）呈现凭据缺失错误文本', errText.includes(ERR_ENDPOINT_ANCHOR) && errText.includes(ERR_REASON_ANCHOR), {
-      channel: 'A',
-      expected: `block-text-error 含「${ERR_ENDPOINT_ANCHOR}」+「${ERR_REASON_ANCHOR}」（TextRow.vue:26 msg.error = errorMessage）`,
-      actual: `text=${String(errText).slice(0, 300)}`,
-    })
-    const guideHitUi = GUIDE_ANCHORS.filter((a) => errText.includes(a))
-    ev.assert('A: 判据子项：错误行含恢复指引（到设置页更新凭据）', guideHitUi.length >= 2, {
-      channel: 'A',
-      expected: `错误行含「${GUIDE_ANCHORS.join('」+「')}」（V4 判据「含恢复指引」）`,
-      actual: `命中=${guideHitUi.join(',') || '<none>'} text=${String(errText).slice(0, 300)}`,
-    })
-    await ev.shot(await instance.page(), 'v4-error-bubble')
-    ev.step({ step: 'v4.ui-error-line', channel: 'A', exitCode: 0, stats: {} })
-  } catch (e) {
-    ev.assert('A: 对话流错误行（block-text-error）呈现凭据缺失错误文本', false, {
-      channel: 'A',
-      expected: 'block-text-error 可见且含端点名与原因锚段',
-      actual: String(e?.message ?? e).slice(0, 400),
-    })
-    ev.attach('v4-ui-error', JSON.stringify({ message: e?.message, hint: e?.hint, evidence: e?.evidence }, null, 2).slice(0, 20_000))
-    try {
-      await ev.shot(await instance.page(), 'v4-ui-fail')
-    } catch {
-      /* 页面不可用时放弃截图 */
-    }
-    ev.step({ step: 'v4.ui-error-line', channel: 'A', exitCode: 1, stats: {} })
-  }
-
-  // ══ 7. 恢复路径闭环：恢复 apiKey + 重开 + 正常出话（指引可操作性的证明） ════
+  // ══ 6. 恢复路径闭环：恢复 apiKey + 重开 + 正常出话（指引可操作性的证明） ════
+  // （A 通道 live 捕获已并入失败轮 1——会话面板在失败轮前激活，见步骤 2 的激活块）
   const defAfterRestore = await setProviderApiKey(MOCK_KEY, 'restore-key')
   ev.assert('C: 恢复 key 后 models.json apiKey 键回归原字面量', defAfterRestore?.apiKey === MOCK_KEY, {
     channel: 'C',
