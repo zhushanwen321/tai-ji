@@ -290,11 +290,15 @@ export async function run(ctx) {
     }
   }
 
-  /** A 通道 live 捕获：轮询等待错误行出现并取文本（15s 窗口）；失败时附对话流 dump 供归因。 */
+  /** A 通道 live 捕获：取最后一个 block-text-error（流上可能有 forceQuit 恢复的更早错误气泡，
+   *  第 8 轮实测 first 命中「用户强制退出」残留——失败轮气泡排在其后）；失败附 dump 供归因。 */
   async function uiExpectErrorLine() {
     const ui = ctx.ui
     try {
-      return await ui.expectText('testid=block-text-error', ERR_REASON_ANCHOR, { timeoutMs: 15_000 })
+      const page = await instance.page()
+      const loc = page.locator('[data-testid="block-text-error"]').last()
+      await loc.waitFor({ state: 'visible', timeout: 10_000 })
+      return String((await loc.innerText()) ?? '')
     } catch (e) {
       try {
         const dump = await ui.text('css=body')
@@ -524,24 +528,28 @@ export async function run(ctx) {
 
   // A 通道提前激活会话面板（V4「检查对话流错误呈现」的用户语义 = 发消息当下所见：
   // 激活后失败轮错误经 live 入流呈现；事后切会话的重放态 error 文本映射有缺口——第 3/4 轮实测）
-  const rowLabelText = path.basename(repo)
+  // 行 aria-label 实测时序（第 7 轮 attach 实证）：session.create 后行即渲染，aria-label =
+  // 传入 label（S_LABEL）；首轮对话后被 pi session_name 事件改写为 basename(cwd)。
+  // 激活时点在正常轮对话前 → 用传入 label 定位。
   try {
     const ui = ctx.ui
     const zoneExpanded = await ui.attr('testid=default-project-anchor', 'aria-expanded')
     if (zoneExpanded !== 'true') await ui.click('testid=default-project-anchor')
-    const rowSelector = `css=.session-item[aria-label="${rowLabelText.replace(/"/g, '\\"')}"]`
+    const rowAriaLabel = await ui.attr('css=.session-item', 'aria-label').catch(() => '<read-failed>')
+    ev.attach('session-row-aria-label', `first .session-item aria-label=${JSON.stringify(rowAriaLabel)} expect=${S_LABEL}`)
+    const rowSelector = `css=.session-item[aria-label="${S_LABEL.replace(/"/g, '\\"')}"]`
     await ui.expectVisible(rowSelector, { timeoutMs: 20_000 })
     await ui.click(rowSelector)
     await ui.expectVisible('testid=panel-session-label', { timeoutMs: 20_000 })
     ev.assert('A: 会话面板已激活（失败轮错误将 live 入流呈现）', true, {
       channel: 'A',
-      expected: `点击行 ${rowLabelText} 后会话面板打开`,
+      expected: `点击行（aria-label=${S_LABEL}）后会话面板打开`,
       actual: 'panel-session-label 可见',
     })
   } catch (e) {
     ev.assert('A: 会话面板已激活（失败轮错误将 live 入流呈现）', false, {
       channel: 'A',
-      expected: `行 ${rowLabelText} 可见 → 点击 → 面板打开`,
+      expected: `行（aria-label=${S_LABEL}）可见 → 点击 → 面板打开`,
       actual: String(e?.message ?? e).slice(0, 400),
     })
     ev.attach('v4-ui-activate-error', JSON.stringify({ message: e?.message, evidence: e?.evidence }, null, 2).slice(0, 20_000))
