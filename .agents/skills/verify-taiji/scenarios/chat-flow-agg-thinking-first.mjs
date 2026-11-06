@@ -23,8 +23,10 @@ export const meta = {
   faux: {
     tps: 6,
     responses: [
-      // 回合 1：思考先行（P1 同构）——thinking 拉长观察「只有思考窗」窗口
-      { thinking: 'AGG-TF-THINK-1 先确认目录结构，这一步要仔细看清楚再动手，避免遗漏关键入口。', text: 'AGG-TF-TEXT-1 开场。', toolCalls: [{ name: 'ls', args: { path: '.' } }], stopReason: 'toolUse' },
+      // 回合 1：思考先行（P1 同构）——thinking 与 ls 同轮（同段！text 会把 thinking 切出
+      // 段外，D7「思考结束停住保留至下一段思考」是段内语义，跨段无思考的工具段隐藏才是
+      // 纯派生正确形态——agg-tf-1 实测教训）
+      { thinking: 'AGG-TF-THINK-1 先确认目录结构，这一步要仔细看清楚再动手，避免遗漏关键入口。', toolCalls: [{ name: 'ls', args: { path: '.' } }], stopReason: 'toolUse' },
       { text: 'AGG-TF-TEXT-2 回合 1 收尾。', stopReason: 'stop' },
       // 回合 2：工具开场（P2 同构）——首轮纯工具
       { toolCalls: [{ name: 'bash', args: { command: 'echo AGG-TF-P2-OK' } }], stopReason: 'toolUse' },
@@ -109,8 +111,8 @@ export async function run(ctx) {
       think: !!document.querySelector('[data-testid="agg-think-window"]'),
       agg: !!document.querySelector('[data-testid="agg-window"]'),
     }))
-    ev.assert('A(V8): 首个工具步骤开始后聚合窗挂载（双窗齐备）', aggMounted.ok && phase2.agg && phase2.think, {
-      channel: 'A', expected: '双窗齐备', actual: JSON.stringify(phase2),
+    ev.assert('A(V8): 首个工具步骤开始后聚合窗挂载 + 段内思考窗停住保留（D7 双窗齐备）', aggMounted.ok && phase2.agg && phase2.think, {
+      channel: 'A', expected: '双窗齐备（think 停住保留，同段语义）', actual: JSON.stringify(phase2),
     })
     await protocol.waitTurnEnd(sid, { since: protocol.events.length - 30, timeoutMs: 180_000 }).catch(() => {})
     await pollBody(ui, (h) => h.includes('AGG-TF-TEXT-2'), { timeoutMs: 60_000 })
