@@ -614,7 +614,7 @@ async function obsCloseExecution(outcome) {
     await obsEmit("execution", null, "end", outcome);
 }
 const OBS_LAYER_SHA256 = "176ef8dfb549fe0d7e783035a9ede755e1d95b973914324958b6d13935244ee3"; // 构建注入：公共观测层安装位源（~/.agents/scripts/workflow-observability.shared.ts）内容 sha256，setup 首步现算比对
-const SKILL_VERSION = "pr-lifecycle-dea26a56"; // 构建注入：观测层 skill_version 溯源常量（taiji 无 frontmatter 版本源，取 shared 源 hash 前 8 位）
+const SKILL_VERSION = "pr-lifecycle-1e0e5601"; // 构建注入：观测层 skill_version 溯源常量（taiji 无 frontmatter 版本源，取 shared 源 hash 前 8 位）
 // pr-lifecycle — PR 全生命周期单 workflow 单源公共体（PR 全生命周期单脚本）
 // 本文件是共享源（.agents/workflows/src/pr-lifecycle.shared.ts），不直接发起；zcode 与
 // pi 两平台产物由 .agents/workflows/scripts/build-workflows.mjs 从本文件 + 各平台壳模板
@@ -669,12 +669,9 @@ const runSh = (cmd, a = [], opts) => {
         ? world.run("bash", bashArgs)
         : world.run("bash", bashArgs, opts);
 };
-// worktree 存在性探针（D-1；绝对路径直查，不经 runSh——runSh 会先 cd 进该路径，路径不
-// 存在时探针自身失真）：输出 dir（存在且是目录）/ file（存在但非目录）/ missing（不存在）
-const NODE_WT_PROBE = "const fs=require('fs');try{const s=fs.statSync(process.argv[1]);" +
-    "process.stdout.write(s.isDirectory()?'dir':'file')}catch{process.stdout.write('missing')}";
 // 观测层源 hash 探针（B-1 跨仓产物过期防线）：现算安装位观测层源文件 sha256 与构建器
-// 注入的 OBS_LAYER_SHA256 常量比对；源缺失同样报（重建时构建器会给安装恢复动作）。
+// 注入的 OBS_LAYER_SHA256 常量比对；源缺失报 "missing" 判定，node 未执行报空判定
+//（消费侧据此区分「源缺失」与「node 不可执行」两类恢复动作，见 setup 首步比对块）。
 // 本文件为线性顶层脚本，声明必须先于下方 B-1 检查块（const 暂时性死区）
 const NODE_OBS_HASH = "const fs=require('fs'),c=require('crypto'),p=require('path');" +
     "const f=p.join(require('os').homedir(),'.agents','scripts','workflow-observability.shared.ts');" +
@@ -708,12 +705,19 @@ async function failObs(kind, msg) {
 // OBS_LAYER_SHA256 常量比对，不一致即终止（重建后重新发起），不静默带旧层跑。
 {
     const r = await world.run("node", ["-e", NODE_OBS_HASH]);
-    const actual = r.exitCode === 0 ? r.stdout.trim() : "missing";
+    const actual = r.exitCode === 0 ? r.stdout.trim() : "";
+    if (actual === "") {
+        // 探针未产出判定（探针脚本全路径兜底，exit 非零且无输出 = node 未执行——引擎
+        // PATH 无 node 时 spawn ENOENT，2026-10-12 v-zcode 实测 existsViaNode 同族形态；
+        // 本段先于环境预检的 node 定位，故不能走 runNode）。报 node 不可执行，不落入
+        // 「观测层源缺失」误报——源在盘只是无从校验时同文案会带偏恢复方向
+        await failObs("setup-failure", `观测层源 hash 探针未产出判定（node exit ${r.exitCode}：${(r.stderr.trim() || "无 stderr").slice(0, 120)}）——引擎 PATH 无 node 时本探针必然如此。恢复：确认宿主 node 可用后重新发起`);
+    }
+    if (actual === "missing") {
+        await failObs("setup-failure", "观测层源文件缺失（安装位 ~/.agents/scripts/workflow-observability.shared.ts）——观测层源已更新而本 workflow 产物未重建。恢复：node .agents/workflows/scripts/build-workflows.mjs 后重新发起");
+    }
     if (actual !== OBS_LAYER_SHA256) {
-        const detail = actual === "missing"
-            ? "观测层源文件缺失（安装位 ~/.agents/scripts/workflow-observability.shared.ts）"
-            : `观测层源现算 sha256=${actual.slice(0, 12)}… ≠ 产物内嵌 ${OBS_LAYER_SHA256.slice(0, 12)}…`;
-        await failObs("setup-failure", `${detail}——观测层源已更新而本 workflow 产物未重建。恢复：node .agents/workflows/scripts/build-workflows.mjs 后重新发起`);
+        await failObs("setup-failure", `观测层源现算 sha256=${actual.slice(0, 12)}… ≠ 产物内嵌 ${OBS_LAYER_SHA256.slice(0, 12)}…——观测层源已更新而本 workflow 产物未重建。恢复：node .agents/workflows/scripts/build-workflows.mjs 后重新发起`);
     }
 }
 const VALID_ARG_KEYS = new Set(["base", "maxRounds", "worktree", "reviewers", "simplifyMode", "skipSteps", "taskId", "executionId", "sampleType"]);
@@ -728,11 +732,14 @@ if (rawWorktree !== "" && !rawWorktree.startsWith("/")) {
 }
 wt = rawWorktree;
 // 存在性探针（D-1 前移）：前缀合法但路径不存在/不是目录的参数，原本要到首个 git 调用
-// 才以 cd 失败爆出且 stderr 归因模糊——在参数校验段直接 fail-fast。探针经绝对路径
-// 直查（不经 runSh，理由见 NODE_WT_PROBE 注释）；未传 worktree（空串）不探
+// 才以 cd 失败爆出且 stderr 归因模糊——在参数校验段直接 fail-fast。bash test 直查不
+// 依赖 node（本段先于环境预检的 node 定位，node 未就绪时探针仍须可判定）；不经
+// runSh——runSh 会先 cd 进该路径，路径不存在时探针自身失真。路径经 shellQuote 内嵌
+// （参数来自 args，引号闭合后无注入面）；未传 worktree（空串）不探
 if (rawWorktree !== "") {
-    const p = await world.run("node", ["-e", NODE_WT_PROBE, rawWorktree]);
-    const shape = p.exitCode === 0 ? p.stdout.trim() : "missing";
+    const probeScript = `if [ -d ${shellQuote(rawWorktree)} ]; then echo dir; elif [ -e ${shellQuote(rawWorktree)} ]; then echo file; else echo missing; fi`;
+    const p = await world.run("bash", ["-c", probeScript]);
+    const shape = p.exitCode === 0 ? p.stdout.trim() : "";
     if (shape === "missing") {
         await failObs("invalid-args", `worktree 参数指向不存在的路径：${rawWorktree}（常见成因：路径写错 / 该 worktree 已被 cleanup）。恢复：ls <workspace 根> 核对后重新发起`);
     }
