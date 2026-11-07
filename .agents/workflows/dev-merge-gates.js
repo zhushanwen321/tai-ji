@@ -391,7 +391,11 @@ async function obsAppend(filePath, line) {
 // 事件契约（改字段须同步 scripts/build-workflows.mjs 的 OBS_EVENT_FIELDS 与
 // scripts/workflow-observe.mjs）：
 //   {execution_id, task_id, skill, stage, step, round, attempt, event, timestamp,
-//    sample_type[, outcome]}
+//    sample_type[, skill_version][, outcome]}
+// skill_version（增量可选字段，D6）：恒取构建器注入的 SKILL_VERSION 常量——事件回答
+// 「谁在执行」，执行存量产物（产物无版本字段）时也记引擎当前版本，不记 unknown
+//（unknown 仅用于 stats 的 estimated 口径归因桶）；本层只经构建器拼接消费，单独执行
+// 时无该常量属拼接契约破坏（失败出声，不做静默兜底）。
 // 落点 ~/.agents/skill-data/workflow-observability/<task-id>/<execution-id>.jsonl——
 // 每次执行独立文件，并发执行互不干扰。
 // 启用条件 = args.taskId 与 args.executionId 同时提供；都不传 = 观测关闭（可选兼容，
@@ -485,6 +489,7 @@ async function obsEmit(step, round, event, outcome) {
         event,
         timestamp,
         sample_type: c.sampleType,
+        skill_version: SKILL_VERSION,
     };
     if (outcome !== null)
         rec.outcome = outcome;
