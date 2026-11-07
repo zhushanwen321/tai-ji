@@ -26,12 +26,16 @@ function loadTypescript() {
 // - opts.gitStatus 覆盖 git status --porcelain 输出（dev-merge-gates 的发起前预检走脏区
 //   fail-fast 路径用：非空输出 = 预检 failure）
 // - opts.obsLayerHash 应答 B-1 观测层源 hash 探针（模拟「源与构建一致」的自洽环境；
-//   传 productObsLayerHash(产物) 的提取值——mock 不读真实文件，保持确定性应答）
+//   传 productObsLayerHash(产物) 的提取值——mock 不读真实文件，保持确定性应答；传
+//   任意其他 hex 值 = 驱动不一致终止分支，setup-guards.test.mjs 用）
+// - opts.wtShape 应答 D-1 worktree 存在性探针三态（dir/missing/file，默认 dir——
+//   missing/file 驱动两类拒启分支）
+// - opts.gitTopLevelStderr 覆盖 git rev-parse --show-toplevel 为 exit 128 + 该 stderr
+//   （D-1 git 根失败归因拆分分支驱动）
 export function makeMockWorldRun(captured, opts = {}) {
   const res = (exitCode, stdout = "", stderr = "") => ({ exitCode, stdout, stderr });
   const gitStatusOut = opts.gitStatus ?? "";
   const answerProbe = (script) => {
-    if (script.includes("isDirectory")) return res(0, "dir"); // worktree 存在性探针（D-1）：存在且是目录
     if (script.includes("workflow-observability")) return "obs";
     if (script.includes("realpathSync")) return res(0, "fake-proj-12345678");
     if (script.includes("homedir")) return res(0, "/tmp/prl-selftest-home");
@@ -44,6 +48,15 @@ export function makeMockWorldRun(captured, opts = {}) {
     // ——解包后按真实命令递归应答，git/sh/node 分支对包装内外一视同仁
     if (cmd === "bash" && argsArr[0] === "-c" && argsArr[2] === "bash") {
       return dispatch(String(argsArr[3] ?? ""), argsArr.slice(4), _opts);
+    }
+    // bash -c 直发探针（D-1 worktree 存在性：["-c", script] 无 "bash" 尾参，与上方
+    // runSh 包装形态区分）：按 opts.wtShape 三态应答
+    if (cmd === "bash" && argsArr[0] === "-c") {
+      const script = String(argsArr[1] ?? "");
+      if (script.includes("echo dir") && script.includes("echo missing")) {
+        return res(0, opts.wtShape ?? "dir");
+      }
+      return res(1, "", "selftest-mock: 未登记的 bash -c 脚本");
     }
     if (cmd === "node" && argsArr[0] === "-e") {
       // zcode 壳 obsAppend 形态：argv = ["-e", appendScript, filePath, eventJsonLine]
@@ -94,7 +107,10 @@ export function makeMockWorldRun(captured, opts = {}) {
     }
     if (cmd === "git") {
       const sub = argsArr[0] ?? "";
-      if (sub === "rev-parse" && argsArr[1] === "--show-toplevel") return res(0, "/tmp/prl-selftest-wt\n");
+      if (sub === "rev-parse" && argsArr[1] === "--show-toplevel") {
+        if (opts.gitTopLevelStderr) return res(128, "", opts.gitTopLevelStderr); // D-1 归因拆分分支驱动
+        return res(0, "/tmp/prl-selftest-wt\n");
+      }
       if (sub === "rev-parse") return res(0, "fakebasehash0000\n");
       if (sub === "status") return res(0, gitStatusOut);
       return res(0, "");
