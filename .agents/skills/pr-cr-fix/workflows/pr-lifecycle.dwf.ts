@@ -279,7 +279,7 @@ async function obsCloseExecution(outcome: string): Promise<void> {
 }
 
 const OBS_LAYER_SHA256 = "176ef8dfb549fe0d7e783035a9ede755e1d95b973914324958b6d13935244ee3"; // 构建注入：公共观测层安装位源（~/.agents/scripts/workflow-observability.shared.ts）内容 sha256，setup 首步现算比对
-const SKILL_VERSION = "pr-lifecycle-1e0e5601"; // 构建注入：观测层 skill_version 溯源常量（taiji 无 frontmatter 版本源，取 shared 源 hash 前 8 位）
+const SKILL_VERSION = "pr-lifecycle-2049482c"; // 构建注入：观测层 skill_version 溯源常量（taiji 无 frontmatter 版本源，取 shared 源 hash 前 8 位）
 
 // pr-lifecycle — PR 全生命周期单 workflow 单源公共体（PR 全生命周期单脚本）
 // 本文件是共享源（.agents/workflows/src/pr-lifecycle.shared.ts），不直接发起；zcode 与
@@ -2511,12 +2511,14 @@ await step("simplify", async () => {
   }
   const apply = simplifyMode === "apply";
   const contractPath = ".agents/skills/pr-cr-fix/agents/simplify-apply.md";
-  let contract: string;
-  try {
-    contract = await files.read(contractPath);
-  } catch (e) {
-    throw new Error(`simplify 契约文件缺失：${contractPath}（${String(e)}）。恢复：确认该文件存在于当前 worktree 后重新发起`);
+  // 不走宿主 files.read——`.agents`（workspace 根共享实体经 worktree symlink 形态）
+  // 下引擎读取失败（同族已知坑：files.glob 不跟随 symlink 目录）；经 runSh cat 在
+  // worktree cwd 下读取（与 cr-fix 维度清单 readdirSync 同模式），exitCode 判定。
+  const contractRead = await runSh("cat", [contractPath]);
+  if (contractRead.exitCode !== 0) {
+    throw new Error(`simplify 契约文件读取失败：${contractPath}（cat exit=${contractRead.exitCode}）。恢复：确认该文件存在于当前 worktree 后重新发起`);
   }
+  const contract = contractRead.stdout;
   const reportPath = `${prReviewDir}/pr-workflow/simplify-report.md`;
   const v = await agent(
     "simplify-apply",

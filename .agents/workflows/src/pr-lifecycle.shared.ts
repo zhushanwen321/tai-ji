@@ -2229,12 +2229,14 @@ await step("simplify", async () => {
   }
   const apply = simplifyMode === "apply";
   const contractPath = ".agents/skills/pr-cr-fix/agents/simplify-apply.md";
-  let contract: string;
-  try {
-    contract = await files.read(contractPath);
-  } catch (e) {
-    throw new Error(`simplify 契约文件缺失：${contractPath}（${String(e)}）。恢复：确认该文件存在于当前 worktree 后重新发起`);
+  // 不走宿主 files.read——`.agents`（workspace 根共享实体经 worktree symlink 形态）
+  // 下引擎读取失败（同族已知坑：files.glob 不跟随 symlink 目录）；经 runSh cat 在
+  // worktree cwd 下读取（与 cr-fix 维度清单 readdirSync 同模式），exitCode 判定。
+  const contractRead = await runSh("cat", [contractPath]);
+  if (contractRead.exitCode !== 0) {
+    throw new Error(`simplify 契约文件读取失败：${contractPath}（cat exit=${contractRead.exitCode}）。恢复：确认该文件存在于当前 worktree 后重新发起`);
   }
+  const contract = contractRead.stdout;
   const reportPath = `${prReviewDir}/pr-workflow/simplify-report.md`;
   const v = await agent(
     "simplify-apply",
