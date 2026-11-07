@@ -517,13 +517,16 @@ def parse_argv(args: list[str]) -> None:
 
     主解析按 `args.index(flag) + 1` 精确取值，无法感知拼错 / 等号写法 / 缺值：
     这些错误要么静默回落默认值，要么在 flag 位于末尾时抛裸 IndexError。本预检
-    只诊断不改写取值——成功路径的解析逻辑完全不变。
+    只诊断不改写取值——成功路径的解析逻辑完全不变。孤立位置参数（典型 = 布尔
+    flag 的空格假值形态 `--allow-same-commit false`）同样按未识别参数报错——
+    静默忽略会让显式假值意图反转成 flag 生效。
     """
     usage = ("用法：python3 coverage-gate.py [--base main] [--min-incremental 80] "
              "[--min-file-incremental 60] [--file-gate-min-lines 8] "
              "[--packages a,b] [--extra-packages a,b] [--allow-same-commit] [--debug]"
              "（等号写法 --flag=value 不支持，请用空格分隔取值）")
     i = 0
+    prev_flag = ""
     while i < len(args):
         arg = args[i]
         if arg.startswith("--"):
@@ -532,14 +535,26 @@ def parse_argv(args: list[str]) -> None:
                     print(f"ERROR: {arg} 缺少参数值。{usage}", file=sys.stderr)
                     sys.exit(2)
                 i += 2
+                prev_flag = arg
                 continue
             if arg in BOOL_FLAGS:
                 i += 1
+                prev_flag = arg
                 continue
             print(f"ERROR: 未识别的参数 {arg}。已知参数：{', '.join(VALUE_FLAGS + BOOL_FLAGS)}。"
                   f"{usage}", file=sys.stderr)
             sys.exit(2)
-        i += 1
+        # 走到这里的非 `--` token 必是孤立位置参数（VALUE_FLAGS 的取值已被 i += 2
+        # 消费，不会落进本轮迭代）——前一个 flag 是布尔项时大概率是空格假值形态
+        # （静默忽略会把显式假值意图反转成 flag 生效），否则是误粘的裸 token；
+        # 两种都按未识别参数 fail-fast，括注按上下文给
+        hint = (f"（前一个参数 {prev_flag} 是布尔 flag：不接受空格取值，出现即生效、"
+                f"无 false 写法——需要开关只写 flag 本身，不需要则不传）"
+                if prev_flag in BOOL_FLAGS else "（本脚本不接受位置参数——核对参数拼写）")
+        print(f"ERROR: 未识别的参数 {arg}{hint}。"
+              f"已知参数：{', '.join(VALUE_FLAGS + BOOL_FLAGS)}。"
+              f"{usage}", file=sys.stderr)
+        sys.exit(2)
 
 
 def main() -> None:

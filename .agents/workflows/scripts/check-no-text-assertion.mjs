@@ -27,6 +27,11 @@ import { fileURLToPath } from "node:url";
 // scripts/ → workspace 实体根——测试的临时 HOME/cwd 场景、以及经构建器从任意目录发起时，
 // 扫到的都是同一实体 shared.ts，结果一致）。基线与脚本同目录（.agents 实体内）
 const scriptDir = dirname(fileURLToPath(import.meta.url));
+const TARGETS = [
+  ".agents/workflows/src/dev-merge-gates.shared.ts",
+  ".agents/workflows/src/pr-lifecycle.shared.ts",
+  ".agents/workflows/src/wait-until.shared.ts",
+];
 const scanRootCandidates = [
   process.cwd(),
   join(scriptDir, "..", "..", ".."),
@@ -35,16 +40,16 @@ const scanRoot = scanRootCandidates.find((root) => {
   try {
     readFileSync(join(root, TARGETS[0]), "utf8");
     return true;
-  } catch {
-    return false;
+  } catch (err) {
+    // 探测语义 = 目标文件存在性：只吞 ENOENT / ENOTDIR（目标不存在的预期形态）；
+    // 其余异常（权限等真实故障）报错退出，不静默吞成「候选不命中」——裸抛 stack
+    // trace 会与门禁基线违规同码（exit 1）且难归因，故打印 ERROR + 恢复动作
+    if (err.code === "ENOENT" || err.code === "ENOTDIR") return false;
+    console.error(`ERROR: 扫描根探测读文件失败（${join(root, TARGETS[0])}）：${err.message}。恢复：核对该路径权限后重跑本检查`);
+    process.exit(1);
   }
 }) ?? scanRootCandidates[scanRootCandidates.length - 1];
 const BASELINE = join(scriptDir, "text-assertion-baseline.json");
-const TARGETS = [
-  ".agents/workflows/src/dev-merge-gates.shared.ts",
-  ".agents/workflows/src/pr-lifecycle.shared.ts",
-  ".agents/workflows/src/wait-until.shared.ts",
-];
 // 覆盖六类字面匹配 API（2026-11-04 审查缺陷 7 修正：只扫三类会漏 .match/.exec/
 // startsWith/endsWith 回潮——本次退役的判定点恰有 /词表符号.../.exec 与 startsWith("[process]") 形态）
 const API_RE = /\.includes\(|\.test\(|\.indexOf\(|\.match\(|\.exec\(|\.startsWith\(|\.endsWith\(/;

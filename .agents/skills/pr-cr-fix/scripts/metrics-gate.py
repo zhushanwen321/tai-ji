@@ -314,7 +314,13 @@ def parse_argv(args: list[str]) -> None:
             print(f"ERROR: 未识别的参数 {arg}。已知参数：{', '.join(VALUE_FLAGS + BOOL_FLAGS)}。"
                   f"{usage}", file=sys.stderr)
             sys.exit(2)
-        i += 1
+        # 非 `--` 的孤立位置参数（VALUE_FLAGS 取值已被 i += 2 消费）——本脚本
+        # BOOL_FLAGS 为空、不存在空格假值反转形态，静默忽略同样危险（调用方
+        # 误传参数被吞），对齐 coverage-gate 按未识别参数 fail-fast
+        print(f"ERROR: 未识别的参数 {arg}（本脚本不接受位置参数——核对参数拼写）。"
+              f"已知参数：{', '.join(VALUE_FLAGS + BOOL_FLAGS)}。"
+              f"{usage}", file=sys.stderr)
+        sys.exit(2)
 
 
 def main() -> None:
