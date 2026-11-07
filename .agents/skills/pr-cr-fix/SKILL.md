@@ -143,7 +143,7 @@ python3 .agents/skills/pr-cr-fix/scripts/metrics-gate.py --base "$PR_BASE"
 
 ### 执行（主 agent 直接跑）
 
-**运行位置必须是 feature worktree 根目录**：repo 根按当前 cwd 解析，在 main worktree（HEAD=base）本脚本得到的空 diff 会伪装成「无带 src/ 改动的 vitest 包」的 pass。脚本侧守卫默认拦截：HEAD 与 base 指向同一 commit 时按工具错误 exit 2 终止（报错含跑错位置归因——常见成因：在 main worktree 跑 / worktree 参数传错——与恢复指引「核对执行位置后重跑」）；确属同 commit 口径自检时显式传 `--allow-same-commit` 放行（放行后保留 WARN 不静默）。
+**运行位置必须是 feature worktree 根目录**：repo 根按当前 cwd 解析，在 main worktree（HEAD=base）本脚本得到的空 diff 会伪装成「无带 src/ 改动的 vitest 包」的 pass。脚本侧检查默认拦截：HEAD 与 base 指向同一 commit 时按工具错误 exit 2 终止（报错含跑错位置归因——常见成因：在 main worktree 跑 / worktree 参数传错——与恢复指引「核对执行位置后重跑」）；确属同 commit 口径自检时显式传 `--allow-same-commit` 放行（放行后保留 WARN 不静默）。
 
 ```bash
 python3 .agents/skills/pr-cr-fix/scripts/coverage-gate.py --base "$PR_BASE"
@@ -374,7 +374,7 @@ Pi Extension 接口契约 checklist（SDK 签名核对 / spec 偏差记录 / sch
 
 ### 3a — 终局三道 gate（主 agent 直接按序跑）
 
-阶段 2 修复会改代码，1.5/1.6 初跑读数已过期。**顺序固定 coverage → metrics → pre-merge**（coverage 的 files 节供 metrics 分流，见 1.6；pre-merge 注入值来自 coverage-gate 测试判定）。**① 同样必须在 feature worktree 根目录运行**——repo 根按当前 cwd 解析，HEAD 与 base 同一 commit（main worktree）时脚本按工具错误 exit 2 拦截（跑错位置的空报告假 pass 守卫，见 1.6 运行位置警示）：
+阶段 2 修复会改代码，1.5/1.6 初跑读数已过期。**顺序固定 coverage → metrics → pre-merge**（coverage 的 files 节供 metrics 分流，见 1.6；pre-merge 注入值来自 coverage-gate 测试判定）。**① 同样必须在 feature worktree 根目录运行**——repo 根按当前 cwd 解析，HEAD 与 base 同一 commit（main worktree）时脚本按工具错误 exit 2 拦截（防止跑错位置产出空报告假 pass，见 1.6 运行位置警示）：
 
 ```bash
 # ① coverage-gate：测试第 2 遍（插桩口径）+ 覆盖率终值；diff 含 shared src 时同样传 --extra-packages（见 1.6；extension 下游自动传播无需传参）
