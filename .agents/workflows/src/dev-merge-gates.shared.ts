@@ -87,6 +87,18 @@ const NODE_PROJECT_SLUG =
   "const h=require('crypto').createHash('sha256').update(p).digest('hex').slice(0,8);" +
   "process.stdout.write(p.split('/').filter(Boolean).pop()+'-'+h)";
 const NODE_HOME = "process.stdout.write(require('os').homedir())";
+// worktree 存在性探针（绝对路径直查，不经 runSh——runSh 会先 cd 进该路径，路径不存在时
+// 探针自身失真）：输出 dir（存在且是目录）/ file（存在但非目录）/ missing（不存在）
+const NODE_WT_PROBE =
+  "const fs=require('fs');try{const s=fs.statSync(process.argv[1]);" +
+  "process.stdout.write(s.isDirectory()?'dir':'file')}catch{process.stdout.write('missing')}";
+// 观测层源 hash 探针（B-1 跨仓产物过期防线）：现算安装位观测层源文件 sha256 与产物内嵌
+// 常量比对；源缺失同样报（重建时构建器会给安装恢复动作）
+const NODE_OBS_HASH =
+  "const fs=require('fs'),c=require('crypto'),p=require('path');" +
+  "const f=p.join(require('os').homedir(),'.agents','scripts','workflow-observability.shared.ts');" +
+  "try{process.stdout.write(c.createHash('sha256').update(fs.readFileSync(f)).digest('hex'))}" +
+  "catch{process.stdout.write('missing')}";
 // ISO 时间探针（run.json startedAt/endedAt 用；workflows 禁 argless new Date()——无参 Date
 // 每次求值不同破坏 journal 重放确定性，经 world.run 走 journal 后重放值稳定）
 const NODE_ISO_NOW = "process.stdout.write(new Date().toISOString())";
@@ -489,6 +501,22 @@ async function main(): Promise<Record<string, unknown>> {
   }
   await obsEmit("execution", null, "start", null);
 
+  // B-1 跨仓产物过期防线（setup 首步）：公共观测层（~/.agents/scripts/
+  // workflow-observability.shared.ts，zsw 仓安装 symlink）在构建期全文拼入产物——源更新
+  // 而产物未重建时，产物内嵌的还是旧观测层语义。现算源 sha256 与构建器注入的
+  // OBS_LAYER_SHA256 常量比对，不一致即终止（重建后重新发起），不静默带旧层跑。
+  {
+    const r = await world.run("node", ["-e", NODE_OBS_HASH]);
+    const actual = r.exitCode === 0 ? r.stdout.trim() : "missing";
+    if (actual !== OBS_LAYER_SHA256) {
+      const detail = actual === "missing"
+        ? "观测层源文件缺失（安装位 ~/.agents/scripts/workflow-observability.shared.ts）"
+        : `观测层源现算 sha256=${actual.slice(0, 12)}… ≠ 产物内嵌 ${OBS_LAYER_SHA256.slice(0, 12)}…`;
+      log(`[setup] ${detail}——观测层源已更新而本 workflow 产物未重建。恢复：node .agents/workflows/scripts/build-workflows.mjs 后重新发起`);
+      await failObs("setup-failure", `${detail}——观测层源已更新而本 workflow 产物未重建。恢复：node .agents/workflows/scripts/build-workflows.mjs 后重新发起`);
+    }
+  }
+
   // ── 参数窄化 + 白名单（fail-fast；自顶层移入——failObs 需 await，return main() 形态
   //    的顶层不可 await）──
   for (const key of Object.keys(args)) {
@@ -512,6 +540,19 @@ async function main(): Promise<Record<string, unknown>> {
     await failObs("invalid-args", `参数 worktree 非法：${rawWorktree}（应为 feat worktree 绝对路径；宿主会话目录不是该 worktree 时必传）`);
   }
   wt = rawWorktree;
+  // 存在性探针（D-1 前移）：前缀合法但路径不存在/不是目录的参数，原本要到首个 git 调用
+  // 才以 cd 失败爆出且 stderr 归因模糊——在参数校验段直接 fail-fast。探针经绝对路径
+  // 直查（不经 runSh，理由见 NODE_WT_PROBE 注释）；未传 worktree（空串）不探
+  if (rawWorktree !== "") {
+    const p = await world.run("node", ["-e", NODE_WT_PROBE, rawWorktree]);
+    const shape = p.exitCode === 0 ? p.stdout.trim() : "missing";
+    if (shape === "missing") {
+      await failObs("invalid-args", `worktree 参数指向不存在的路径：${rawWorktree}（常见成因：路径写错 / 该 worktree 已被 cleanup）。恢复：ls <workspace 根> 核对后重新发起`);
+    }
+    if (shape === "file") {
+      await failObs("invalid-args", `参数 worktree 指向的路径不是目录：${rawWorktree}（应为 feat worktree 目录路径）。恢复：ls <workspace 根> 核对后重新发起`);
+    }
+  }
 
   report({ stage: "start", base: args.base ?? "auto(merge-base github/main HEAD)" });
 
@@ -861,7 +902,7 @@ async function main(): Promise<Record<string, unknown>> {
     if (!(await existsViaNode(GATES_SCRIPT))) {
       gatesStatus = "skipped";
       disclosures.push({ item: "gates", reason: "quality-gates 脚本不存在（该分支未含 U1 commit），本轮跳过 gates 并披露" });
-      log(`[gates] quality-gates 脚本不存在（该分支未含 U1 commit），本轮跳过 gates 并披露；恢复通道：源 worktree git merge dev-0.10.5 主动吸收后重跑`);
+      log(`[gates] quality-gates 脚本不存在（该分支未含 U1 commit），本轮跳过 gates 并披露；恢复通道：源 worktree git merge <当前活跃 dev 集成线或 main> 主动吸收后重跑`);
       return;
     }
 
@@ -1208,6 +1249,13 @@ async function main(): Promise<Record<string, unknown>> {
     // realpath 由 slug 探针内部规范化，解析失败报错不静默）
     const reportTopRes = await runSh("git", ["rev-parse", "--show-toplevel"]);
     if (reportTopRes.exitCode !== 0 || reportTopRes.stdout.trim() === "") {
+      // 归因拆分（D-1）：worktree 未传且 git 报「not a git repository」= 宿主会话目录绑
+      // workspace 根（bare 容器非 git 仓库）且漏传参数——与「cwd 在仓库内但解析失败」
+      // 根因与恢复动作都不同，报错拆开写（基线登记归类：git 工具 stderr 错误信号归因，
+      // format-validation，非 agent 输出证据搜索）
+      if (wt === "" && /not a git repository/i.test(reportTopRes.stderr)) {
+        throw new Error("宿主会话目录不是 git 仓库（workspace 根形态）且未传 worktree 参数。恢复：CreateWorkflow args.worktree = <feat worktree 绝对路径> 后重新发起（pi 宿主对应 workflow run --args worktree=<feat worktree 绝对路径>）");
+      }
       throw new Error(`无法解析项目根（git rev-parse --show-toplevel 失败，exit ${reportTopRes.exitCode}）：${reportTopRes.stderr.trim() || "无 stderr"}；确认在 worktree 根发起后重新发起`);
     }
     const reportHomeRes = await runSh("node", ["-e", NODE_HOME]);

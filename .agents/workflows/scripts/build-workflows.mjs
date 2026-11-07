@@ -38,6 +38,7 @@
 //   阶段词表必须三处同步。
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
@@ -332,7 +333,20 @@ for (const name of NAMES) {
 
   // O 区观测层拼接：shared 正文含 initObservation 调用点 → 观测层全文前置
   const obsPatched = /initObservation\(/.test(shared);
-  const sharedFull = obsPatched ? `${obsLayer}\n${shared}` : shared;
+  // 观测层常量注入（B-1 跨仓产物过期防线 + 观测层拼接契约；obsPatched 的 workflow 才注入）：
+  //   OBS_LAYER_SHA256 = 观测层源内容 sha256——产物 setup 首步运行时现算安装位源文件
+  //   hash 与之比对，不一致终止（观测层源已更新而产物未重建的守卫；报错与恢复动作在
+  //   业务 shared 文案）；
+  //   SKILL_VERSION = 观测层 obsEmit 消费的溯源常量（拼接契约：观测层只经构建器消费，
+  //   产物缺该常量 = 观测启用即 ReferenceError）。zsw 侧构建器取所属技能 frontmatter
+  //   version；taiji 侧 workflow 无版本次权威源，取 <workflow 名>-<shared 源 sha256
+  //   前 8 位> 作产物溯源标记（确定性，源变则值变）。行内不放反引号/插值，pi 词法改写
+  //   与 TS 剥离均按普通代码行透传
+  const injectLines = obsPatched
+    ? `const OBS_LAYER_SHA256 = "${createHash("sha256").update(obsLayer).digest("hex")}"; // 构建注入：公共观测层安装位源（~/.agents/scripts/workflow-observability.shared.ts）内容 sha256，setup 首步现算比对\n` +
+      `const SKILL_VERSION = "${name}-${createHash("sha256").update(shared).digest("hex").slice(0, 8)}"; // 构建注入：观测层 skill_version 溯源常量（taiji 无 frontmatter 版本源，取 shared 源 hash 前 8 位）\n`
+    : "";
+  const sharedFull = obsPatched ? `${obsLayer}\n${injectLines}${shared}` : shared;
 
   const rewritten = rewriteAgentCalls(shared);
   if (rewritten.count === 0 && !NO_AGENT.has(name)) {

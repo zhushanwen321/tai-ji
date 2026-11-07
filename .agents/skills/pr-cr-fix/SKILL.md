@@ -143,7 +143,7 @@ python3 .agents/skills/pr-cr-fix/scripts/metrics-gate.py --base "$PR_BASE"
 
 ### 执行（主 agent 直接跑）
 
-**运行位置必须是 feature worktree 根目录**：repo 根按当前 cwd 解析，在 main worktree（HEAD=base）本脚本得到空 diff，会按「无带 src/ 改动的 vitest 包」打印 pass 并覆写 pr-review 产物目录的 coverage.json 为空报告（exit 0 静默假 pass）。脚本侧有守卫：HEAD 与 base 指向同一 commit 时打印 WARN 提示可能跑错 worktree。
+**运行位置必须是 feature worktree 根目录**：repo 根按当前 cwd 解析，在 main worktree（HEAD=base）本脚本得到的空 diff 会伪装成「无带 src/ 改动的 vitest 包」的 pass。脚本侧守卫默认拦截：HEAD 与 base 指向同一 commit 时按工具错误 exit 2 终止（报错含跑错位置归因——常见成因：在 main worktree 跑 / worktree 参数传错——与恢复指引「核对执行位置后重跑」）；确属同 commit 口径自检时显式传 `--allow-same-commit` 放行（放行后保留 WARN 不静默）。
 
 ```bash
 python3 .agents/skills/pr-cr-fix/scripts/coverage-gate.py --base "$PR_BASE"
@@ -153,7 +153,7 @@ python3 .agents/skills/pr-cr-fix/scripts/coverage-gate.py --base "$PR_BASE" --ex
 
 - 参数按空格分隔取值（`--flag value`）；等号写法（`--base=develop`）与未识别参数会 fail-fast exit 2，`--flag` 缺值同样 exit 2 并给出用法
 - 自动检测 base...HEAD 改动过 `src/` 的 vitest 包（含 `extensions/shared/<lib>` 三层目录），逐包跑 `vitest run --coverage`（lcov），解析 lcov DA 行命中 × git diff 新增行号（精确路径匹配），算**可执行新增行覆盖率**
-- **判定**：任一被 gate 包增量 < 80%（默认）、**文件级增量门槛违规**（新增可执行行 ≥8 的单文件自身覆盖率 < 60%，防单文件盲区被包百分比稀释；可调 `--min-file-incremental` / `--file-gate-min-lines`）或测试失败 → `verdict=fail` exit 1；**登记式豁免**：文件头注释 `coverage-file-gate-exempt: <理由>`（组合根装配面/跨环境分支等单轨不可达形态）退出文件级门槛（包级仍卡），报告 file_gate.exempt 可见不静默；记账不闭合 / all-SKIP / git 瞬态异常 → exit 2（工具错误，修复后重跑）；产出 pr-review 产物目录的 coverage.json（packages 增量口径 + file_gate 违规/豁免清单 + files 全文件级真实覆盖率 + files_without_lcov 盲区清单 + headCommit 锚——记录生成时的 HEAD hash，供 pr-pre-merge 校验读数未过期）。SKIP 语义：按 package.json **声明**判定（非 node 解析），出现 SKIP 即配置漂移，按报告内指引补声明
+- **判定**：任一被 gate 包增量 < 80%（默认）、**文件级增量门槛违规**（新增可执行行 ≥8 的单文件自身覆盖率 < 60%，防单文件盲区被包百分比稀释；可调 `--min-file-incremental` / `--file-gate-min-lines`）或测试失败 → `verdict=fail` exit 1；**登记式豁免**：文件头注释 `coverage-file-gate-exempt: <理由>`（组合根装配面/跨环境分支等单轨不可达形态）退出文件级门槛（包级仍卡），报告 file_gate.exempt 可见不静默；记账不闭合 / all-SKIP / git 瞬态异常 / HEAD==base 跑错位置且未显式传 `--allow-same-commit` → exit 2（工具错误，修复后重跑）；产出 pr-review 产物目录的 coverage.json（packages 增量口径 + file_gate 违规/豁免清单 + files 全文件级真实覆盖率 + files_without_lcov 盲区清单 + headCommit 锚——记录生成时的 HEAD hash，供 pr-pre-merge 校验读数未过期）。SKIP 语义：按 package.json **声明**判定（非 node 解析），出现 SKIP 即配置漂移，按报告内指引补声明
 - **下游传播（两种机制，互补）**：
   - **shared 手工传播**：包选择只收自身有 `src/` 改动的包，shared 改动不传播下游；diff 含 `packages/shared/**/src/**` 时传 `--extra-packages packages/runtime,packages/renderer`——实跑两包全量插桩测试，作为 shared 改动的下游兜底。**连带效应**：renderer vitest.config 内的全量 thresholds（CI 强制口径）随之生效，thresholds breach 视同测试失败走 FAIL 路径（与本次改动无关的全量退化同样拦截；该失败输出与 uncovered_files 增量口径不同源，排障注意区分）
   - **extension 下游自动传播**（2026-10-16 增；数据源 = 仓库根 `extension-dependencies.json` 反向映射，与 check-extension-dependencies.mjs 同源）：diff 含被 extensions 依赖的 `packages/*/src/**` 时，依赖方 extension 目录**自动**并入包集实跑测试，无需传参——下游包无 src/ 改动、增量口径恒过（total=0 → 100%），价值在测试执行：依赖方测试失败即 FAIL。当前映射：`packages/extension-protocol` → 10 个 extension；`packages/subagent-core` → notify-ledger-host / canvas / session-manager / subagent-workflow；`packages/session-core`、`packages/zcode-session-source` → session-reader；`packages/session-delivery`、`packages/zcode-subagent-cli`、`packages/pi-subagent-cli` → subagent-workflow。**背景**：#42 subagent-core 重构（dormant 复活即迁出）破坏 subagent-workflow 的 B6 e2e 旧断言，PR 阶段零可见、靠 merge 前全量套件兜住（595a02acb 补救）——本机制把该盲区前移到 PR 门禁。**边界**：传播源只含 `packages/*`（extension→extension 不传播）；一跳不递归；`--packages` 探针模式不自动传播（探针 = 定向读数）；stdout 打 `DOWNSTREAM` 行、报告包条目带 `downstream_of` 字段，不静默
@@ -374,7 +374,7 @@ Pi Extension 接口契约 checklist（SDK 签名核对 / spec 偏差记录 / sch
 
 ### 3a — 终局三道 gate（主 agent 直接按序跑）
 
-阶段 2 修复会改代码，1.5/1.6 初跑读数已过期。**顺序固定 coverage → metrics → pre-merge**（coverage 的 files 节供 metrics 分流，见 1.6；pre-merge 注入值来自 coverage-gate 测试判定）。**① 同样必须在 feature worktree 根目录运行**——repo 根按当前 cwd 解析，HEAD 与 base 同一 commit（main worktree）时空 diff 会被判 pass 并覆写 pr-review 产物目录的 coverage.json，跑错位置会让终值变成空报告假 pass（见 1.6 运行位置警示）：
+阶段 2 修复会改代码，1.5/1.6 初跑读数已过期。**顺序固定 coverage → metrics → pre-merge**（coverage 的 files 节供 metrics 分流，见 1.6；pre-merge 注入值来自 coverage-gate 测试判定）。**① 同样必须在 feature worktree 根目录运行**——repo 根按当前 cwd 解析，HEAD 与 base 同一 commit（main worktree）时脚本按工具错误 exit 2 拦截（跑错位置的空报告假 pass 守卫，见 1.6 运行位置警示）：
 
 ```bash
 # ① coverage-gate：测试第 2 遍（插桩口径）+ 覆盖率终值；diff 含 shared src 时同样传 --extra-packages（见 1.6；extension 下游自动传播无需传参）

@@ -613,6 +613,8 @@ async function obsCloseExecution(outcome) {
         await obsEmit(open.step, open.round, "end", outcome);
     await obsEmit("execution", null, "end", outcome);
 }
+const OBS_LAYER_SHA256 = "176ef8dfb549fe0d7e783035a9ede755e1d95b973914324958b6d13935244ee3"; // 构建注入：公共观测层安装位源（~/.agents/scripts/workflow-observability.shared.ts）内容 sha256，setup 首步现算比对
+const SKILL_VERSION = "pr-lifecycle-dea26a56"; // 构建注入：观测层 skill_version 溯源常量（taiji 无 frontmatter 版本源，取 shared 源 hash 前 8 位）
 // pr-lifecycle — PR 全生命周期单 workflow 单源公共体（PR 全生命周期单脚本）
 // 本文件是共享源（.agents/workflows/src/pr-lifecycle.shared.ts），不直接发起；zcode 与
 // pi 两平台产物由 .agents/workflows/scripts/build-workflows.mjs 从本文件 + 各平台壳模板
@@ -667,6 +669,17 @@ const runSh = (cmd, a = [], opts) => {
         ? world.run("bash", bashArgs)
         : world.run("bash", bashArgs, opts);
 };
+// worktree 存在性探针（D-1；绝对路径直查，不经 runSh——runSh 会先 cd 进该路径，路径不
+// 存在时探针自身失真）：输出 dir（存在且是目录）/ file（存在但非目录）/ missing（不存在）
+const NODE_WT_PROBE = "const fs=require('fs');try{const s=fs.statSync(process.argv[1]);" +
+    "process.stdout.write(s.isDirectory()?'dir':'file')}catch{process.stdout.write('missing')}";
+// 观测层源 hash 探针（B-1 跨仓产物过期防线）：现算安装位观测层源文件 sha256 与构建器
+// 注入的 OBS_LAYER_SHA256 常量比对；源缺失同样报（重建时构建器会给安装恢复动作）。
+// 本文件为线性顶层脚本，声明必须先于下方 B-1 检查块（const 暂时性死区）
+const NODE_OBS_HASH = "const fs=require('fs'),c=require('crypto'),p=require('path');" +
+    "const f=p.join(require('os').homedir(),'.agents','scripts','workflow-observability.shared.ts');" +
+    "try{process.stdout.write(c.createHash('sha256').update(fs.readFileSync(f)).digest('hex'))}" +
+    "catch{process.stdout.write('missing')}";
 // ── 参数窄化 + 白名单（拼错键静默回落默认值比报错危险，fail-fast） ──
 // taskId/executionId/sampleType 是阶段观测参数（O 区公共观测层消费）：可选，缺省不启用
 // 观测（旧调用零变化）；合法性校验（两 id 同给、路径安全、sampleType 词表）在公共层
@@ -689,6 +702,20 @@ async function failObs(kind, msg) {
     await obsCloseExecution(kind);
     throw new Error(msg);
 }
+// B-1 跨仓产物过期防线（setup 首步）：公共观测层（~/.agents/scripts/
+// workflow-observability.shared.ts，zsw 仓安装 symlink）在构建期全文拼入产物——源更新
+// 而产物未重建时，产物内嵌的还是旧观测层语义。现算源 sha256 与构建器注入的
+// OBS_LAYER_SHA256 常量比对，不一致即终止（重建后重新发起），不静默带旧层跑。
+{
+    const r = await world.run("node", ["-e", NODE_OBS_HASH]);
+    const actual = r.exitCode === 0 ? r.stdout.trim() : "missing";
+    if (actual !== OBS_LAYER_SHA256) {
+        const detail = actual === "missing"
+            ? "观测层源文件缺失（安装位 ~/.agents/scripts/workflow-observability.shared.ts）"
+            : `观测层源现算 sha256=${actual.slice(0, 12)}… ≠ 产物内嵌 ${OBS_LAYER_SHA256.slice(0, 12)}…`;
+        await failObs("setup-failure", `${detail}——观测层源已更新而本 workflow 产物未重建。恢复：node .agents/workflows/scripts/build-workflows.mjs 后重新发起`);
+    }
+}
 const VALID_ARG_KEYS = new Set(["base", "maxRounds", "worktree", "reviewers", "simplifyMode", "skipSteps", "taskId", "executionId", "sampleType"]);
 for (const key of Object.keys(args)) {
     if (!VALID_ARG_KEYS.has(key)) {
@@ -700,7 +727,26 @@ if (rawWorktree !== "" && !rawWorktree.startsWith("/")) {
     await failObs("invalid-args", `参数 worktree 非法：${rawWorktree}（应为 feature worktree 绝对路径；宿主会话目录不是该 worktree 时必传）`);
 }
 wt = rawWorktree;
-const base = typeof args.base === "string" && args.base.trim() !== "" ? args.base.trim() : "main"; // 默认 main 仅适用 dev→main 终局 PR；feature→dev 的 PR 调用方必须传 args.base=<目标 dev 分支>（pr-cr-fix SKILL 的 PR_BASE 约定）
+// 存在性探针（D-1 前移）：前缀合法但路径不存在/不是目录的参数，原本要到首个 git 调用
+// 才以 cd 失败爆出且 stderr 归因模糊——在参数校验段直接 fail-fast。探针经绝对路径
+// 直查（不经 runSh，理由见 NODE_WT_PROBE 注释）；未传 worktree（空串）不探
+if (rawWorktree !== "") {
+    const p = await world.run("node", ["-e", NODE_WT_PROBE, rawWorktree]);
+    const shape = p.exitCode === 0 ? p.stdout.trim() : "missing";
+    if (shape === "missing") {
+        await failObs("invalid-args", `worktree 参数指向不存在的路径：${rawWorktree}（常见成因：路径写错 / 该 worktree 已被 cleanup）。恢复：ls <workspace 根> 核对后重新发起`);
+    }
+    if (shape === "file") {
+        await failObs("invalid-args", `参数 worktree 指向的路径不是目录：${rawWorktree}（应为 feature worktree 目录路径）。恢复：ls <workspace 根> 核对后重新发起`);
+    }
+}
+const baseRaw = typeof args.base === "string" ? args.base.trim() : "";
+const base = baseRaw !== "" ? baseRaw : "main"; // 默认 main 仅适用 dev→main 终局 PR；feature→dev 的 PR 调用方必须传 args.base=<目标 dev 分支>（pr-cr-fix SKILL 的 PR_BASE 约定）
+// base 缺省披露（不改行为）：feature→dev 的 PR 忘传 base 时增量口径静默含整条 dev 线
+// 未发布内容（coverage/metrics/changeset 全部按错口径出数），至少在日志出声让发起方知情
+if (baseRaw === "") {
+    log("[args] base=main 为缺省值；若本分支目标为 dev 集成线，增量口径含整条 dev 线未发布内容——显式传 args.base=<目标 dev 分支> 可修正");
+}
 // 上界 50：每轮 cr-fix 产生 ~2 条 report（逐轮 + 每 attempt 汇总），引擎 256 条/run
 // 上限会在 maxRounds ≥ ~126 时中途击穿整 run；50 已远超实际收敛轮数（stuck 阈值 3）。
 // 显式非法值（非数字/<1）fail-fast 不静默回落默认——与拼错键 fail-fast 同姿态
@@ -1988,6 +2034,13 @@ log(`node 可执行：${nodeAbs}`);
     // execution end 均可落盘）
     const topRes = await runSh("git", ["rev-parse", "--show-toplevel"]);
     if (topRes.exitCode !== 0 || topRes.stdout.trim() === "") {
+        // 归因拆分（D-1）：worktree 未传且 git 报「not a git repository」= 宿主会话目录绑
+        // workspace 根（bare 容器非 git 仓库）且漏传参数——与「cwd 在仓库内但解析失败」根因
+        // 与恢复动作都不同，报错拆开写（基线登记归类：git 工具 stderr 错误信号归因，
+        // format-validation，非 agent 输出证据搜索）
+        if (wt === "" && /not a git repository/i.test(topRes.stderr)) {
+            await failObs("setup-failure", "宿主会话目录不是 git 仓库（workspace 根形态）且未传 worktree 参数。恢复：CreateWorkflow args.worktree = <feature worktree 绝对路径> 后重新发起（pi 宿主对应 workflow run --args worktree=<feature worktree 绝对路径>）");
+        }
         await failObs("setup-failure", `无法解析项目根（git rev-parse --show-toplevel 失败，exit ${topRes.exitCode}）：${topRes.stderr.trim() || "无 stderr"}；确认在仓库根发起后重新发起`);
     }
     const homeRes = await runNode(["-e", NODE_HOME]);

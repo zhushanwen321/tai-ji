@@ -25,6 +25,10 @@
    改为向上探测最近含 package.json 的祖先（深度不再硬编码）、resources/plugins/
    前缀纳入 PKG_PREFIXES（builtin 插件包根平铺布局走 flat 档 include）、前缀内
    缺装配的目录记 unmeasured 显式登记（stderr + coverage.json），静默路径清零。
+7. [HISTORICAL 2026-11-07] HEAD==base 跑错位置（main worktree / worktree 参数传错）
+   曾只 WARN + exit 0 并覆写 coverage.json 为空报告——静默假 pass 与本脚本防假
+   pass 的设计意图相悖。升格：默认 exit 2 拦截并给出跑错位置归因与恢复指引；
+   确需同 commit 口径自检时显式传 --allow-same-commit（旧行为）。
 
 对 base...HEAD 改动过 src/ 的 workspace 包跑 `vitest run --coverage`（lcov），
 解析 lcov 的 DA 行命中数据 + git diff 新增行号，计算**可执行新增行的覆盖率**。
@@ -42,7 +46,7 @@
 node 解析，原因见上 [HISTORICAL] #3）。未声明的包记 SKIP 并给出启用指引。
 
 用法：python3 coverage-gate.py [--base main] [--min-incremental 80] [--packages a,b]
-      [--extra-packages a,b] [--debug]
+      [--extra-packages a,b] [--allow-same-commit] [--debug]
       --packages：交集过滤器，只收窄 changed_packages() 结果（无 src/ 改动的包不在
       集合内，任何参数值都加不进去）。
       --extra-packages：追加器，无条件并入包集合（不要求该包有 src/ 改动；典型用途：
@@ -55,7 +59,7 @@ node 解析，原因见上 [HISTORICAL] #3）。未声明的包记 SKIP 并给�
       subagent-workflow B6 e2e、PR 门禁零可见的盲区，由此在 PR 阶段兜住）。--packages
       探针模式不自动传播。报告包条目带 downstream_of 字段标明联动来源。
 退出码：0 = pass；1 = fail（增量不足或测试失败）；2 = 工具错误（git 异常 / 记账不闭合 /
-      all-SKIP 配置错误 / argv 参数错误）
+      all-SKIP 配置错误 / argv 参数错误 / HEAD==base 跑错位置且未显式传 --allow-same-commit）
 产出：coverage.json（packages 增量口径 + files 全文件级真实覆盖率，后者供
       metrics-gate.py 替换 fallow 静态估算消费）。产物目录迁移过渡期（design.md §7
       风险 2）双写：新根 `~/.agents/skill-data/pr-review/<project-slug>/`（经
@@ -205,24 +209,31 @@ def git_diff_names(repo_root: Path, base: str) -> list[str]:
     sys.exit(2)
 
 
-def warn_if_head_equals_base(repo_root: Path, base: str) -> None:
-    """HEAD 与 base 指向同一 commit 时打印 WARN（只警告，不改变判定与退出码）。
+def head_equals_base_guard(repo_root: Path, base: str, allow_same_commit: bool) -> None:
+    """HEAD 与 base 指向同一 commit 时的跑错位置守卫（默认 exit 2 拦截）。
 
     repo 根按当前 cwd 解析（git rev-parse --show-toplevel）；在 main worktree
     （HEAD=base）里跑时 git diff 恒空，脚本会按「无带 src/ 改动的 vitest 包」
     判 pass 并覆写 coverage.json 产物为空报告——静默假 pass 与该脚本防假
-    pass 的设计意图相悖。此处比较 rev-parse 出的 SHA（不同 ref 名指向同一
-    commit 时同样命中）；base ref 解析失败时不 warn（后续 git diff 会以
-    exit 2 正常报错），不改任何正常路径行为。
+    pass 的设计意图相悖，故默认按工具错误 exit 2 拦截并给出归因与恢复指引。
+    此处比较 rev-parse 出的 SHA（不同 ref 名指向同一 commit 时同样命中）；
+    base ref 解析失败时不拦（后续 git diff 会以 exit 2 正常报错）。
+    --allow-same-commit 是显式逃生舱（确需同 commit 口径自检时传），放行后
+    保留 WARN 提示不静默。
     """
     head = sh(["git", "rev-parse", "HEAD"], repo_root)
     tip = sh(["git", "rev-parse", base], repo_root)
     head_sha = head.stdout.strip()
-    if head.returncode == 0 and tip.returncode == 0 and head_sha and head_sha == tip.stdout.strip():
-        print(f"WARN: HEAD 与 base={base} 指向同一 commit，git diff 恒为空。若当前目录是 "
-              f"main worktree（或任何 HEAD=={base} 的 worktree）属跑错位置：空 diff 会被判 "
-              f"pass 并覆写 coverage.json 产物；请到 feature worktree 根目录重跑本脚本。"
-              f"确属有意在 {base} 上自检时忽略本警告", file=sys.stderr)
+    if not (head.returncode == 0 and tip.returncode == 0 and head_sha and head_sha == tip.stdout.strip()):
+        return
+    if not allow_same_commit:
+        print(f"ERROR: HEAD 与 base={base} 相同（指向同一 commit）——gate 跑错位置"
+              f"（常见：在 main worktree 跑 / worktree 参数传错）。核对执行位置"
+              f"（应为 feature worktree 根）后重跑；确需同 commit 口径显式传"
+              f" --allow-same-commit", file=sys.stderr)
+        sys.exit(2)
+    print(f"WARN: HEAD 与 base={base} 指向同一 commit（--allow-same-commit 显式放行），"
+          f"git diff 恒为空，本 run 按「无带 src/ 改动的 vitest 包」口径判定", file=sys.stderr)
 
 
 def pkg_dir_of(repo_root: Path, repo_file: str) -> str | None:
@@ -498,7 +509,7 @@ def incremental_pct(coverage: dict[str, dict[int, int]], pkg: str,
 # （eg: --base=develop 回落默认 main，跑出来一切正常但基线是错的）。
 VALUE_FLAGS = ("--base", "--min-incremental", "--min-file-incremental",
                "--file-gate-min-lines", "--packages", "--extra-packages")
-BOOL_FLAGS = ("--debug",)
+BOOL_FLAGS = ("--debug", "--allow-same-commit")
 
 
 def parse_argv(args: list[str]) -> None:
@@ -510,7 +521,7 @@ def parse_argv(args: list[str]) -> None:
     """
     usage = ("用法：python3 coverage-gate.py [--base main] [--min-incremental 80] "
              "[--min-file-incremental 60] [--file-gate-min-lines 8] "
-             "[--packages a,b] [--extra-packages a,b] [--debug]"
+             "[--packages a,b] [--extra-packages a,b] [--allow-same-commit] [--debug]"
              "（等号写法 --flag=value 不支持，请用空格分隔取值）")
     i = 0
     while i < len(args):
@@ -548,6 +559,7 @@ def main() -> None:
     # 包集合，见文件头 docstring）
     only = args[args.index("--packages") + 1].split(",") if "--packages" in args else None
     extra_arg = args[args.index("--extra-packages") + 1] if "--extra-packages" in args else None
+    allow_same = "--allow-same-commit" in args
     DEBUG = "--debug" in args
 
     # repo 根按当前 cwd 解析：cwd 不在 git 仓库内（典型 = 会话目录绑在 workspace 根，
@@ -568,7 +580,7 @@ def main() -> None:
     # worktree 删除重建可复用同一 project-slug，base 相同 ≠ 产物新鲜；解析失败写空串，
     # 读方按缺失处理（视为不匹配并拦截）
     head_commit = sh(["git", "rev-parse", "HEAD"], repo_root).stdout.strip()
-    warn_if_head_equals_base(repo_root, base)
+    head_equals_base_guard(repo_root, base, allow_same)
     pkgs, unmeasured = changed_packages(repo_root, base)
     if only:
         pkgs = {k: v for k, v in pkgs.items() if k in only}

@@ -25,10 +25,13 @@ function loadTypescript() {
 // - git/sh/node -e 常规探针返回无害成功值，放流程走到第一个 step 的观测边界
 // - opts.gitStatus 覆盖 git status --porcelain 输出（dev-merge-gates 的发起前预检走脏区
 //   fail-fast 路径用：非空输出 = 预检 failure）
+// - opts.obsLayerHash 应答 B-1 观测层源 hash 探针（模拟「源与构建一致」的自洽环境；
+//   传 productObsLayerHash(产物) 的提取值——mock 不读真实文件，保持确定性应答）
 export function makeMockWorldRun(captured, opts = {}) {
   const res = (exitCode, stdout = "", stderr = "") => ({ exitCode, stdout, stderr });
   const gitStatusOut = opts.gitStatus ?? "";
   const answerProbe = (script) => {
+    if (script.includes("isDirectory")) return res(0, "dir"); // worktree 存在性探针（D-1）：存在且是目录
     if (script.includes("workflow-observability")) return "obs";
     if (script.includes("realpathSync")) return res(0, "fake-proj-12345678");
     if (script.includes("homedir")) return res(0, "/tmp/prl-selftest-home");
@@ -49,7 +52,16 @@ export function makeMockWorldRun(captured, opts = {}) {
         if (captured) captured.push(argsArr[3] ?? "");
         return res(0);
       }
-      const a = answerProbe(String(argsArr[1] ?? ""));
+      const probeScript = String(argsArr[1] ?? "");
+      // B-1 观测层源 hash 探针（脚本同样含 workflow-observability 字面，须先于下方
+      // answerProbe 的 "obs" 捕获分支区分——它是读探针不是写事件）：应答产物内嵌 hash
+      if (probeScript.includes("createHash") && probeScript.includes("workflow-observability")) {
+        if (!opts.obsLayerHash) {
+          return res(1, "", "selftest-mock: obs hash 探针缺 opts.obsLayerHash——夹具未传产物内嵌值");
+        }
+        return res(0, opts.obsLayerHash);
+      }
+      const a = answerProbe(probeScript);
       if (a === "obs") {
         // 防御：公共层不经 node -e 直传事件
         if (captured) captured.push(argsArr[3] ?? "");
@@ -91,6 +103,14 @@ export function makeMockWorldRun(captured, opts = {}) {
     return res(1, "", "selftest-mock: 命令不可用");
   };
   return dispatch;
+}
+
+// 产物内嵌 OBS_LAYER_SHA256 提取（B-1 探针 mock 应答值 = 产物构建期注入值——自洽，
+// 不依赖本机观测层安装状态）。产物缺注入行 = 构建器注入契约破坏或产物过期，显性报错
+export function productObsLayerHash(productPath) {
+  const m = readFileSync(productPath, "utf8").match(/const OBS_LAYER_SHA256 = "([0-9a-f]{64})"/);
+  if (!m) throw new Error(`产物未含 OBS_LAYER_SHA256 注入行（${productPath}）——构建器注入契约破坏或产物过期，恢复：node .agents/workflows/scripts/build-workflows.mjs 后重跑测试`);
+  return m[1];
 }
 
 // platform: "pi"（产物即 JS）| "zcode"（TS 产物先剥类型）
