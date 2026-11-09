@@ -31,6 +31,7 @@ const TARGETS = [
   ".agents/workflows/src/dev-merge-gates.shared.ts",
   ".agents/workflows/src/pr-lifecycle.shared.ts",
   ".agents/workflows/src/wait-until.shared.ts",
+  ".agents/workflows/src/merge.shared.ts",
 ];
 const scanRootCandidates = [
   process.cwd(),

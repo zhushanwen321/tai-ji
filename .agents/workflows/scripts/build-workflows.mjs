@@ -48,11 +48,12 @@ const WF = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = join(WF, "src");
 // pr-lifecycle 的 zcode 产物保持既有调用路径（.agents/skills/pr-cr-fix/workflows/）
 const PRL_ZCODE_OUT = join(WF, "..", "skills", "pr-cr-fix", "workflows", "pr-lifecycle.dwf.ts");
-const NAMES = ["dev-merge-gates", "pr-lifecycle", "wait-until"];
+const NAMES = ["dev-merge-gates", "pr-lifecycle", "wait-until", "merge"];
 const OUTS = {
   "dev-merge-gates": { zcode: join(WF, "dev-merge-gates.dwf.ts"), pi: join(WF, "dev-merge-gates.js") },
   "pr-lifecycle": { zcode: PRL_ZCODE_OUT, pi: join(WF, "pr-lifecycle.js") },
   "wait-until": { zcode: join(WF, "wait-until.dwf.ts"), pi: join(WF, "wait-until.js") },
+  merge: { zcode: join(WF, "merge.dwf.ts"), pi: join(WF, "merge.js") },
 };
 // 显式登记公共体无 agent( 调用点的 workflow：纯机器检查型（参数化条件轮询，零 subagent），
 // GUI 泳道无 subagent 通道可显示，构建器「无 agent 调用点 = 切分错误」断言对其不适用。
@@ -69,13 +70,17 @@ const OBS_EVENT_FIELDS = ["execution_id", "task_id", "skill", "stage", "step", "
 // skill = 业务所属 skill 名；stage = 业务所属流程阶段名（gates+branch-review =
 // dev-merge-gates 承载的 dev-merge 两个流程阶段的连接标识；pr-lifecycle = pr-cr-fix 的
 // 全链阶段）
-const OBS_SKILLS = new Set(["dev-merge", "pr-cr-fix"]);
-const OBS_STAGES = new Set(["gates+branch-review", "pr-lifecycle"]);
-// step 词表 = 串行步骤名（execution = 执行级边界事件；round 为直发轮次边界，不占打开槽）
+const OBS_SKILLS = new Set(["dev-merge", "pr-cr-fix", "merge"]);
+const OBS_STAGES = new Set(["gates+branch-review", "pr-lifecycle", "release"]);
+// step 词表 = 串行步骤名（execution = 执行级边界事件；round 为直发轮次边界，不占打开槽；
+// fix 在 merge 中同样以直发事件使用——rescue 轮次边界，避免与 withStage 的打开槽嵌套）
 const OBS_STEPS = new Set([
   "execution", "gates", "branch-review", "review", "aggregate", "fix", "round",
   "preflight", "static-gate", "pr-meta", "pr-submit", "constraints",
   "gate-suite", "cr-fix", "simplify", "final-gates",
+  "init", "squash-check", "premerge", "prune-devlink", "pr-merge",
+  "post-merge-ci", "version-check", "e2e-select", "bump-release", "npm-detect",
+  "notes", "verify", "gitcode-sync", "cleanup",
 ]);
 
 // typescript 从安装环境解析（env 覆盖 → node 解析链 → ~/Code/zsw-skills node_modules）

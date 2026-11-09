@@ -26,8 +26,12 @@ description: >-
    阶段 3a（终局三道 gate）→ 阶段 3b（push）。终点 = push 完成、远端 ref 与
    本地 HEAD 一致。zcode 环境走路径 2（CreateWorkflow + pr-lifecycle.dwf.ts）；
    pi 环境走路径 1（pi 版 pr-lifecycle 单 workflow）。
-2. **第二段 merge**：第一段终点即 merge 前置条件（feature 分支已有 PR）。按
-   `../merge/SKILL.md` 从阶段 0 开始完整执行，`<worktree-dir>` = 当前 feature
+2. **第二段 merge**：第一段终点即 merge 前置条件（feature 分支已有 PR）。zcode 环境走
+   CreateWorkflow + `<workspace>/.agents/workflows/merge.dwf.ts`（`args.worktree` = 当前
+   feature worktree 绝对路径），终态 `released` 后主 agent 承接 4N 人工段（若终态
+   npmHandoff.detected = true）、3.7 真机 e2e 定夺与三节合并总结；`failed` /
+   `needs-squash-approval` / `needs-human` 按终态 recovery 指引处置后恢复。
+   pi 环境按 `../merge/SKILL.md` 从阶段 0 开始完整执行，`<worktree-dir>` = 当前 feature
    worktree 目录名（basename）。终点 = 阶段 7 清理完成 + 合并总结报告。
 
 ## 衔接约定

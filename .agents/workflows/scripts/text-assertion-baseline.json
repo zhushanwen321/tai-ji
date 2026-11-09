@@ -1,288 +1,330 @@
 {
- ".agents/workflows/src/dev-merge-gates.shared.ts": [
-  [
-   458,
-   "if (fi.some((f) => fj.includes(f))) {",
-   "path-set"
+  ".agents/workflows/src/dev-merge-gates.shared.ts": [
+    [
+      458,
+      "if (fi.some((f) => fj.includes(f))) {",
+      "path-set"
+    ],
+    [
+      546,
+      "if (rawWorktree !== \"\" && !rawWorktree.startsWith(\"/\")) {",
+      "path-set"
+    ],
+    [
+      588,
+      "const arrow = p.indexOf(\" -> \");",
+      "protocol-parse"
+    ],
+    [
+      592,
+      ".filter((p) => !p.startsWith(\".review/\") && !p.startsWith(\".tmp/\"));",
+      "path-set"
+    ],
+    [
+      795,
+      "const undeclared = actualNew.filter((f) => !declared.includes(f));",
+      "path-set"
+    ],
+    [
+      803,
+      "for (const f of allRepaired) if (!repairedAll.includes(f)) repairedAll.push(f);",
+      "enum-check"
+    ],
+    [
+      805,
+      "for (const f of allRepaired) if (!groupAcc.includes(f)) groupAcc.push(f);",
+      "enum-check"
+    ],
+    [
+      816,
+      "const owner = plan.find((p) => p.group !== gid && planOf.get(p.group)!.files.includes(f));",
+      "path-set"
+    ],
+    [
+      819,
+      "if (!ownerFiles.includes(f)) ownerFiles.push(f);",
+      "enum-check"
+    ],
+    [
+      821,
+      "if (contentQueue.includes(owner.group) && owner.group !== gid) {",
+      "enum-check"
+    ],
+    [
+      827,
+      "if (reserved.includes(f)) {",
+      "path-set"
+    ],
+    [
+      829,
+      "if (cur.files.includes(f)) cur.files.splice(cur.files.indexOf(f), 1);",
+      "path-set"
+    ],
+    [
+      830,
+      "if (!reservedHits.includes(f)) reservedHits.push(f);",
+      "enum-check"
+    ],
+    [
+      834,
+      "if (!cur.files.includes(f)) cur.files.push(f);",
+      "enum-check"
+    ],
+    [
+      1171,
+      "if (!csDraftedFiles.includes(f)) csDraftedFiles.push(f);",
+      "enum-check"
+    ],
+    [
+      1175,
+      "if (!csSkipReasons.includes(display)) csSkipReasons.push(display);",
+      "enum-check"
+    ],
+    [
+      1211,
+      "const isTestPath = (f: string): boolean => /(^|\\/)(__tests__|tests?)\\/|(\\.test\\.|\\.spec\\.)/.test(f);",
+      "path-set"
+    ],
+    [
+      1212,
+      "const sourceFiles = allFiles.filter((f) => !isTestPath(f) && !f.endsWith(\".md\"));",
+      "path-set"
+    ],
+    [
+      1230,
+      "if (allFiles.some((f) => rule.re.test(f))) dims.push(rule.dim);",
+      "path-set"
+    ],
+    [
+      1266,
+      "if (wt === \"\" && /not a git repository/i.test(reportTopRes.stderr)) {",
+      "format-validation"
+    ],
+    [
+      1275,
+      "if (reportHome === \"\" || !/^.+-[0-9a-f]{8}$/.test(reportSlug)) {",
+      "format-validation"
+    ],
+    [
+      1418,
+      "if (!left.includes(f)) left.push(f);",
+      "enum-check"
+    ],
+    [
+      1658,
+      "if (prev && prev.files.filter((f) => files.includes(f)).length === 0 && prev.files.length > 0 && files.length > 0) {",
+      "path-set"
+    ],
+    [
+      1665,
+      "if (prev !== undefined && next.includes(prev)) {",
+      "enum-check"
+    ],
+    [
+      1675,
+      "const sd = strArr(i.sourceDims).filter((d) => !prev!.sourceDims.includes(d));",
+      "enum-check"
+    ],
+    [
+      1843,
+      "const groupRecsOf = (g: FixGroup): DmgRecord[] => records.filter((r) => g.issueIds.includes(r.id));",
+      "enum-check"
+    ],
+    [
+      1948,
+      "if (p !== \"\" && !tokens.includes(p)) tokens.push(p);",
+      "enum-check"
+    ]
   ],
-  [
-   546,
-   "if (rawWorktree !== \"\" && !rawWorktree.startsWith(\"/\")) {",
-   "path-set"
+  ".agents/workflows/src/pr-lifecycle.shared.ts": [
+    [
+      117,
+      "if (rawWorktree !== \"\" && !rawWorktree.startsWith(\"/\")) {",
+      "path-set"
+    ],
+    [
+      169,
+      "if (!(STEP_IDS as readonly string[]).includes(s)) {",
+      "enum-check"
+    ],
+    [
+      306,
+      "const arrow = p.indexOf(\" -> \");",
+      "protocol-parse"
+    ],
+    [
+      323,
+      "return !p.startsWith(\".review/\") && !p.startsWith(\".tmp/\");",
+      "path-set"
+    ],
+    [
+      663,
+      "if (fi.some((f) => fj.includes(f))) {",
+      "path-set"
+    ],
+    [
+      693,
+      "if (name.includes(\"monorepo-impact\")) return diffStats.pkgCount / SLOW_PKG_THRESHOLD;",
+      "enum-check"
+    ],
+    [
+      694,
+      "if (name.includes(\"business-logic\")) return diffStats.churnLines / SLOW_CHURN_THRESHOLD;",
+      "enum-check"
+    ],
+    [
+      708,
+      "if (typeof items[i]!.name === \"string\" && items[i]!.name.includes(k)) {",
+      "enum-check"
+    ],
+    [
+      732,
+      "const slowDrifter = batch1.find((it) => DRIFTER_POOL.some((k) => it.name.includes(k))) ?? null;",
+      "enum-check"
+    ],
+    [
+      743,
+      "const m = line.match(/^(\\d+|-)\\s+(\\d+|-)\\s+(.+)$/);",
+      "protocol-parse"
+    ],
+    [
+      1167,
+      "if (prev && prev.files.filter((f) => i.files.includes(f)).length === 0 && prev.files.length > 0 && i.files.length > 0) {",
+      "path-set"
+    ],
+    [
+      1322,
+      "const groupIssues = active.filter((it) => g.issueIds.includes(it.id));",
+      "enum-check"
+    ],
+    [
+      1444,
+      "if (p && !paths.includes(p)) paths.push(p);",
+      "enum-check"
+    ],
+    [
+      1560,
+      "const undeclared = actualNew.filter((f) => !declared.includes(f));",
+      "path-set"
+    ],
+    [
+      1565,
+      "for (const f of roundRepairFiles) if (!allRepairFiles.includes(f)) allRepairFiles.push(f);",
+      "enum-check"
+    ],
+    [
+      1653,
+      "if (p.startsWith(\"/\")) {",
+      "path-set"
+    ],
+    [
+      1677,
+      "if (wt === \"\" && /not a git repository/i.test(topRes.stderr)) {",
+      "format-validation"
+    ],
+    [
+      1686,
+      "if (home === \"\" || !/^.+-[0-9a-f]{8}$/.test(slug)) {",
+      "format-validation"
+    ],
+    [
+      1772,
+      "const legacyHit = pr === null || pr.changeset === null ? /WARN changeset-check/.test(out.stdout) : false;",
+      "legacy-fallback"
+    ],
+    [
+      1784,
+      "const skillFiles = names.stdout.split(\"\\n\").map((s) => s.trim()).filter((f) => f.startsWith(\".agents/skills/\"));",
+      "path-set"
+    ],
+    [
+      1803,
+      "if (parseErr instanceof Error && parseErr.message.startsWith(\"skill YAML 校验\")) throw parseErr;",
+      "enum-check"
+    ],
+    [
+      1826,
+      "const changesetFiles = names.stdout.split(\"\\n\").map((s) => s.trim()).filter((f) => /^\\.changeset\\/.+\\.md$/.test(f));",
+      "path-set"
+    ],
+    [
+      1895,
+      "const illegal = declared.filter((f) => !f.trim().startsWith(\".changeset/\"));",
+      "path-set"
+    ],
+    [
+      1996,
+      "return /(?:^|\\n)packages\\/shared\\/(?:.+\\/*\\/)?src\\//.test(`\\n${names.stdout}`)",
+      "path-set"
+    ],
+    [
+      2148,
+      "const relReviewers = (await runSh(\"sh\", [\"-c\", shq(nodeAbs) + \" -e \" + shq(\"const fs=require('fs'),d='.agents/skills/dev-merge/agents';try{process.stdout.write(",
+      "protocol-parse"
+    ],
+    [
+      2152,
+      "picked = relReviewers.filter((f) => reviewers.some((kw) => f.includes(kw)));",
+      "enum-check"
+    ],
+    [
+      2203,
+      "const reportRef = last.aggregatedFile && last.aggregatedFile.startsWith(last.runDir)",
+      "path-set"
+    ]
   ],
-  [
-   588,
-   "const arrow = p.indexOf(\" -> \");",
-   "protocol-parse"
+  ".agents/workflows/src/wait-until.shared.ts": [
+    [
+      89,
+      "if (!VALID_ARG_KEYS.has(k) && !k.startsWith(\"_\")) return k;",
+      "enum-check"
+    ],
+    [
+      157,
+      "const n = typeof v === \"number\" ? v : typeof v === \"string\" && /^\\d+$/.test(v.trim()) ? Number(v.trim()) : NaN;",
+      "format-validation"
+    ]
   ],
-  [
-   592,
-   ".filter((p) => !p.startsWith(\".review/\") && !p.startsWith(\".tmp/\"));",
-   "path-set"
-  ],
-  [
-   795,
-   "const undeclared = actualNew.filter((f) => !declared.includes(f));",
-   "path-set"
-  ],
-  [
-   803,
-   "for (const f of allRepaired) if (!repairedAll.includes(f)) repairedAll.push(f);",
-   "enum-check"
-  ],
-  [
-   805,
-   "for (const f of allRepaired) if (!groupAcc.includes(f)) groupAcc.push(f);",
-   "enum-check"
-  ],
-  [
-   816,
-   "const owner = plan.find((p) => p.group !== gid && planOf.get(p.group)!.files.includes(f));",
-   "path-set"
-  ],
-  [
-   819,
-   "if (!ownerFiles.includes(f)) ownerFiles.push(f);",
-   "enum-check"
-  ],
-  [
-   821,
-   "if (contentQueue.includes(owner.group) && owner.group !== gid) {",
-   "enum-check"
-  ],
-  [
-   827,
-   "if (reserved.includes(f)) {",
-   "path-set"
-  ],
-  [
-   829,
-   "if (cur.files.includes(f)) cur.files.splice(cur.files.indexOf(f), 1);",
-   "path-set"
-  ],
-  [
-   830,
-   "if (!reservedHits.includes(f)) reservedHits.push(f);",
-   "enum-check"
-  ],
-  [
-   834,
-   "if (!cur.files.includes(f)) cur.files.push(f);",
-   "enum-check"
-  ],
-  [
-   1171,
-   "if (!csDraftedFiles.includes(f)) csDraftedFiles.push(f);",
-   "enum-check"
-  ],
-  [
-   1175,
-   "if (!csSkipReasons.includes(display)) csSkipReasons.push(display);",
-   "enum-check"
-  ],
-  [
-   1211,
-   "const isTestPath = (f: string): boolean => /(^|\\/)(__tests__|tests?)\\/|(\\.test\\.|\\.spec\\.)/.test(f);",
-   "path-set"
-  ],
-  [
-   1212,
-   "const sourceFiles = allFiles.filter((f) => !isTestPath(f) && !f.endsWith(\".md\"));",
-   "path-set"
-  ],
-  [
-   1230,
-   "if (allFiles.some((f) => rule.re.test(f))) dims.push(rule.dim);",
-   "path-set"
-  ],
-  [
-   1266,
-   "if (wt === \"\" && /not a git repository/i.test(reportTopRes.stderr)) {",
-   "format-validation"
-  ],
-  [
-   1275,
-   "if (reportHome === \"\" || !/^.+-[0-9a-f]{8}$/.test(reportSlug)) {",
-   "format-validation"
-  ],
-  [
-   1418,
-   "if (!left.includes(f)) left.push(f);",
-   "enum-check"
-  ],
-  [
-   1658,
-   "if (prev && prev.files.filter((f) => files.includes(f)).length === 0 && prev.files.length > 0 && files.length > 0) {",
-   "path-set"
-  ],
-  [
-   1665,
-   "if (prev !== undefined && next.includes(prev)) {",
-   "enum-check"
-  ],
-  [
-   1675,
-   "const sd = strArr(i.sourceDims).filter((d) => !prev!.sourceDims.includes(d));",
-   "enum-check"
-  ],
-  [
-   1843,
-   "const groupRecsOf = (g: FixGroup): DmgRecord[] => records.filter((r) => g.issueIds.includes(r.id));",
-   "enum-check"
-  ],
-  [
-   1948,
-   "if (p !== \"\" && !tokens.includes(p)) tokens.push(p);",
-   "enum-check"
+  ".agents/workflows/src/merge.shared.ts": [
+    [
+      136,
+      "if (rawWorktree === \"\" || !rawWorktree.startsWith(\"/\")) {",
+      "format-validation"
+    ],
+    [
+      170,
+      "if (typeof s !== \"string\" || !(STEP_IDS as readonly string[]).includes(s)) {",
+      "enum-check"
+    ],
+    [
+      194,
+      "if (p.startsWith(\"/\")) {",
+      "format-validation"
+    ],
+    [
+      369,
+      "const route = table.routes.find((x) => r.text.includes(x.match)) ?? null;",
+      "protocol-parse"
+    ],
+    [
+      541,
+      "const prMatch = /^PR_NUMBER=(\\d+)$/m.exec(r.text);",
+      "protocol-parse"
+    ],
+    [
+      775,
+      "const touched = files.filter((f) => f.startsWith(\"extensions/\"));",
+      "path-set"
+    ],
+    [
+      840,
+      "if (!body.includes(\"<!-- LANG:en -->\")) missing.push(\"<!-- LANG:en -->\");",
+      "format-validation"
+    ],
+    [
+      841,
+      "if (!body.includes(\"<!-- LANG:zh -->\")) missing.push(\"<!-- LANG:zh -->\");",
+      "format-validation"
+    ]
   ]
- ],
- ".agents/workflows/src/pr-lifecycle.shared.ts": [
-  [
-   117,
-   "if (rawWorktree !== \"\" && !rawWorktree.startsWith(\"/\")) {",
-   "path-set"
-  ],
-  [
-   169,
-   "if (!(STEP_IDS as readonly string[]).includes(s)) {",
-   "enum-check"
-  ],
-  [
-   306,
-   "const arrow = p.indexOf(\" -> \");",
-   "protocol-parse"
-  ],
-  [
-   323,
-   "return !p.startsWith(\".review/\") && !p.startsWith(\".tmp/\");",
-   "path-set"
-  ],
-  [
-   663,
-   "if (fi.some((f) => fj.includes(f))) {",
-   "path-set"
-  ],
-  [
-   693,
-   "if (name.includes(\"monorepo-impact\")) return diffStats.pkgCount / SLOW_PKG_THRESHOLD;",
-   "enum-check"
-  ],
-  [
-   694,
-   "if (name.includes(\"business-logic\")) return diffStats.churnLines / SLOW_CHURN_THRESHOLD;",
-   "enum-check"
-  ],
-  [
-   708,
-   "if (typeof items[i]!.name === \"string\" && items[i]!.name.includes(k)) {",
-   "enum-check"
-  ],
-  [
-   732,
-   "const slowDrifter = batch1.find((it) => DRIFTER_POOL.some((k) => it.name.includes(k))) ?? null;",
-   "enum-check"
-  ],
-  [
-   743,
-   "const m = line.match(/^(\\d+|-)\\s+(\\d+|-)\\s+(.+)$/);",
-   "protocol-parse"
-  ],
-  [
-   1167,
-   "if (prev && prev.files.filter((f) => i.files.includes(f)).length === 0 && prev.files.length > 0 && i.files.length > 0) {",
-   "path-set"
-  ],
-  [
-   1322,
-   "const groupIssues = active.filter((it) => g.issueIds.includes(it.id));",
-   "enum-check"
-  ],
-  [
-   1444,
-   "if (p && !paths.includes(p)) paths.push(p);",
-   "enum-check"
-  ],
-  [
-   1560,
-   "const undeclared = actualNew.filter((f) => !declared.includes(f));",
-   "path-set"
-  ],
-  [
-   1565,
-   "for (const f of roundRepairFiles) if (!allRepairFiles.includes(f)) allRepairFiles.push(f);",
-   "enum-check"
-  ],
-  [
-   1653,
-   "if (p.startsWith(\"/\")) {",
-   "path-set"
-  ],
-  [
-   1677,
-   "if (wt === \"\" && /not a git repository/i.test(topRes.stderr)) {",
-   "format-validation"
-  ],
-  [
-   1686,
-   "if (home === \"\" || !/^.+-[0-9a-f]{8}$/.test(slug)) {",
-   "format-validation"
-  ],
-  [
-   1772,
-   "const legacyHit = pr === null || pr.changeset === null ? /WARN changeset-check/.test(out.stdout) : false;",
-   "legacy-fallback"
-  ],
-  [
-   1784,
-   "const skillFiles = names.stdout.split(\"\\n\").map((s) => s.trim()).filter((f) => f.startsWith(\".agents/skills/\"));",
-   "path-set"
-  ],
-  [
-   1803,
-   "if (parseErr instanceof Error && parseErr.message.startsWith(\"skill YAML 校验\")) throw parseErr;",
-   "enum-check"
-  ],
-  [
-   1826,
-   "const changesetFiles = names.stdout.split(\"\\n\").map((s) => s.trim()).filter((f) => /^\\.changeset\\/.+\\.md$/.test(f));",
-   "path-set"
-  ],
-  [
-   1895,
-   "const illegal = declared.filter((f) => !f.trim().startsWith(\".changeset/\"));",
-   "path-set"
-  ],
-  [
-   1996,
-   "return /(?:^|\\n)packages\\/shared\\/(?:.+\\/*\\/)?src\\//.test(`\\n${names.stdout}`)",
-   "path-set"
-  ],
-  [
-   2148,
-   "const relReviewers = (await runSh(\"sh\", [\"-c\", shq(nodeAbs) + \" -e \" + shq(\"const fs=require('fs'),d='.agents/skills/dev-merge/agents';try{process.stdout.write(",
-   "protocol-parse"
-  ],
-  [
-   2152,
-   "picked = relReviewers.filter((f) => reviewers.some((kw) => f.includes(kw)));",
-   "enum-check"
-  ],
-  [
-   2203,
-   "const reportRef = last.aggregatedFile && last.aggregatedFile.startsWith(last.runDir)",
-   "path-set"
-  ]
- ],
- ".agents/workflows/src/wait-until.shared.ts": [
-  [
-   89,
-   "if (!VALID_ARG_KEYS.has(k) && !k.startsWith(\"_\")) return k;",
-   "enum-check"
-  ],
-  [
-   157,
-   "const n = typeof v === \"number\" ? v : typeof v === \"string\" && /^\\d+$/.test(v.trim()) ? Number(v.trim()) : NaN;",
-   "format-validation"
-  ]
- ]
 }

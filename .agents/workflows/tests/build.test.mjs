@@ -25,6 +25,10 @@ const PRODUCTS = {
     zcode: join(WF, "wait-until.dwf.ts"),
     pi: join(WF, "wait-until.js"),
   },
+  merge: {
+    zcode: join(WF, "merge.dwf.ts"),
+    pi: join(WF, "merge.js"),
+  },
 };
 
 // 临时测试 HOME：装观测层与 CLI 副本（安装契约形态）；typescript 经 env 显式传递
