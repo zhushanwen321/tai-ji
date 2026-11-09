@@ -99,6 +99,7 @@ export function makeMockWorldRun(captured, opts = {}) {
         return a === "obs" ? res(0) : a;
       }
       if (script.includes("command -v node") || script.includes("nvm")) return res(0, process.execPath);
+      if (script.includes("command -v pnpm")) return res(0, "/fake/pnpm/bin/pnpm");
       if (script.includes("workflow-observability")) return res(0); // 防御：观测不经 sh 路
       // runNode 形态：sh -c '<node> "-e" <探针>'——探针判定直接对整串做 includes
       //（产物把 -e 一并 shq，形态为 '-e'，不能按裸 " -e " 切分）

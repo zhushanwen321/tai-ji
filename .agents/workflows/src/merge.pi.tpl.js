@@ -7,7 +7,7 @@ description: >-
   重建入口 node .agents/workflows/scripts/build-workflows.mjs）
 when: zcode 之外的 pi 主 agent 执行 merge skill（含 pr-cr-fix-merge 第二段）的合并发布流程
 notFor: 纯分支合并不发布、npm 预发布（prerelease skill 线）、非 taiji 仓库
-phases: ['发起前检查', '初始化', 'commit 整理判定', '本地验证', 'Dev-Link 清理', 'PR CI 与合并', 'Post-merge CI', '版本校验', 'e2e 圈定', '版本 bump 与发布', 'npm 发布检测移交', 'Release Notes', '交付物复核', 'GitCode 镜像', '清理']
+phases: ['环境预检', '发起前检查', '初始化与 PR 发现', 'commit 整理判定', '本地验证', 'Dev-Link 清理', 'PR CI 与合并', 'Post-merge CI', '版本校验', 'e2e 圈定', '版本 bump 与发布', 'npm 发布检测', 'Release Notes 撰写', '交付物复核', 'GitCode 镜像同步', '清理 worktree']
 parameters:
   type: object
   properties:
@@ -135,12 +135,14 @@ function wfAgent(name, persona) {
       if (hasSchema) callSpec.schema = SCHEMA_BY_KEY[typeKeyOrPrompt];
       const raw = await agent(callSpec);
       if (raw && typeof raw === "object" && raw.error) {
-        throw new Error(name + " 调用失败： " + raw.error);
+        // 调用层失败同样不抛：传回 __invalidAsk 标记对象，由公共体校验器识别后回喂
+        // 重试（与 zcode 侧「校验失败把错误清单发回同一 agent 重试」行为对齐）
+        return { __invalidAsk: name + " 调用失败：" + raw.error };
       }
       const parsed = parseResult(raw && typeof raw === "object" && "value" in raw ? raw.value : raw);
       if (!parsed) {
-        throw new Error(name + " 返回无效（无法解析为结构化对象）： " +
-          String(typeof raw === "object" ? JSON.stringify(raw.value ?? raw) : raw).slice(0, 200));
+        return { __invalidAsk: name + " 返回无效（无法解析为结构化对象）：" +
+          String(typeof raw === "object" ? JSON.stringify(raw.value ?? raw) : raw).slice(0, 200) };
       }
       return parsed;
     },

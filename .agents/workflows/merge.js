@@ -7,7 +7,7 @@ description: >-
   重建入口 node .agents/workflows/scripts/build-workflows.mjs）
 when: zcode 之外的 pi 主 agent 执行 merge skill（含 pr-cr-fix-merge 第二段）的合并发布流程
 notFor: 纯分支合并不发布、npm 预发布（prerelease skill 线）、非 taiji 仓库
-phases: ['发起前检查', '初始化', 'commit 整理判定', '本地验证', 'Dev-Link 清理', 'PR CI 与合并', 'Post-merge CI', '版本校验', 'e2e 圈定', '版本 bump 与发布', 'npm 发布检测移交', 'Release Notes', '交付物复核', 'GitCode 镜像', '清理']
+phases: ['环境预检', '发起前检查', '初始化与 PR 发现', 'commit 整理判定', '本地验证', 'Dev-Link 清理', 'PR CI 与合并', 'Post-merge CI', '版本校验', 'e2e 圈定', '版本 bump 与发布', 'npm 发布检测', 'Release Notes 撰写', '交付物复核', 'GitCode 镜像同步', '清理 worktree']
 parameters:
   type: object
   properties:
@@ -135,12 +135,14 @@ function wfAgent(name, persona) {
       if (hasSchema) callSpec.schema = SCHEMA_BY_KEY[typeKeyOrPrompt];
       const raw = await agent(callSpec);
       if (raw && typeof raw === "object" && raw.error) {
-        throw new Error(name + " 调用失败： " + raw.error);
+        // 调用层失败同样不抛：传回 __invalidAsk 标记对象，由公共体校验器识别后回喂
+        // 重试（与 zcode 侧「校验失败把错误清单发回同一 agent 重试」行为对齐）
+        return { __invalidAsk: name + " 调用失败：" + raw.error };
       }
       const parsed = parseResult(raw && typeof raw === "object" && "value" in raw ? raw.value : raw);
       if (!parsed) {
-        throw new Error(name + " 返回无效（无法解析为结构化对象）： " +
-          String(typeof raw === "object" ? JSON.stringify(raw.value ?? raw) : raw).slice(0, 200));
+        return { __invalidAsk: name + " 返回无效（无法解析为结构化对象）：" +
+          String(typeof raw === "object" ? JSON.stringify(raw.value ?? raw) : raw).slice(0, 200) };
       }
       return parsed;
     },
@@ -457,7 +459,7 @@ async function obsCloseExecution(outcome) {
     await obsEmit("execution", null, "end", outcome);
 }
 const OBS_LAYER_SHA256 = "176ef8dfb549fe0d7e783035a9ede755e1d95b973914324958b6d13935244ee3"; // 构建注入：公共观测层安装位源（~/.agents/scripts/workflow-observability.shared.ts）内容 sha256，setup 首步现算比对
-const SKILL_VERSION = "merge-0b5a920d"; // 构建注入：观测层 skill_version 溯源常量（taiji 无 frontmatter 版本源，取 shared 源 hash 前 8 位）
+const SKILL_VERSION = "merge-15ec5d22"; // 构建注入：观测层 skill_version 溯源常量（taiji 无 frontmatter 版本源，取 shared 源 hash 前 8 位）
 // merge.shared.ts — merge skill 九阶段合并发布流程的单 workflow 公共体（zcode+pi 双平台单源）
 // 本文件由 .agents/workflows/scripts/build-workflows.mjs 拼进两壳生成产物：
 //   zcode = .agents/workflows/merge.dwf.ts；pi = .agents/workflows/merge.js（勿手工维护产物）。
@@ -479,8 +481,12 @@ const SKILL_VERSION = "merge-0b5a920d"; // 构建注入：观测层 skill_versio
 //
 // 安全与恢复：
 // - 失败终态一律 return 不 throw（throw 的 errored run 不可 resume 且丢结构化 error）。
-// - 阶段 4 幂等预检：远端 tag 已存在 = bump+push 已完成 → 直接进 verify（非幂等段可重跑）。
-// - 阶段 3 no-runs 放行补验：exit 0 后 gh run list 独立复核，无 run 放行仅作披露。
+// - 阶段 4 幂等预检：远端 tag 已存在 = bump+push 已完成 → 直接进 verify（非幂等段可重跑）；
+//   基线查询失败（ls-remote/gh）停回，不在基线未知时盲目续跑。
+// - 阶段 3 no-runs 放行补验：wait-for-ci 以「未检测到 CI workflow」放行时 gh run list
+//   独立复核——真无 run 披露放行；查到 run（放行判定与事实不符）停回。
+// - 状态机闭环：verify 通过后落 .merge-state 终态 released（对齐人工路径 release 阶段，
+//   终态不再参与 12h 发布互斥；写失败仅告警）。
 // - 阶段 7 零未决失败机器门禁：skipSteps 接管过非 squash-check 的 step = 该环节未在流程
 //   内验证 → needs-human 保留现场，绝不带病清理（SKILL 阶段 7 门禁 [MANDATORY]）。
 // - 全程 world.run + worktree 包装（bash -c 'cd <wt> && exec "$@"'），免会话 bash 依赖；
@@ -501,7 +507,15 @@ const shq = (s) => `'${s.replace(/'/g, "'\\''")}'`;
 const runSh = (cmd, a = [], opts) => {
     const bashArgs = ["-c", wt === "" ? `exec "$@"` : `cd ${shq(wt)} && exec "$@"`, "bash", cmd, ...a];
     // opts 省略时不得显式传 undefined 第三参（引擎规范化为 null 后拒绝）
-    return opts === undefined ? world.run("bash", bashArgs) : world.run("bash", bashArgs, opts);
+    const r = opts === undefined ? world.run("bash", bashArgs) : world.run("bash", bashArgs, opts);
+    // world.run 仅在「spawn 失败 / 超时」时 reject（平台契约）——归一为 exit 码形态，
+    // 与 pi 壳 runCmd 的「超时 124 / 命令缺失非 0」同构，FAILURE_ROUTES 分类与
+    // rerunHint 对两平台一致可用（reject 直接穿透会丢失路由分类）
+    return r.catch((e) => {
+        const msg = String(e instanceof Error ? e.message : e);
+        const timedOut = /timed?[- ]?out|timeout|超时/i.test(msg);
+        return { exitCode: timedOut ? 124 : 127, stdout: "", stderr: `[${timedOut ? "timeout" : "spawn-failed"}] ${msg}` };
+    });
 };
 function tailLines(text, n) {
     const lines = String(text || "").trimEnd().split("\n");
@@ -511,22 +525,21 @@ function tailLines(text, n) {
 // runNode 闭包引用，调用时恒已赋值。node/pnpm/git 写操作统一经绝对路径或 PATH 前缀，
 // 结构性不依赖引擎默认 PATH（pre-commit 钩子子进程需要可用的 node/npx/pnpm）。
 let nodeAbs = "";
-const runNode = (nodeArgs, opts) => runSh("sh", ["-c", [shq(nodeAbs), ...nodeArgs.map(shq)].join(" ")], opts);
+// cwd 显式给定时不吃全局 wt 残留值（skipSteps 大面积跳步时 wt 可能停留在 feature
+// 目录——相对路径脚本调用必须固定在预期 worktree）
+const runNode = (nodeArgs, opts) => {
+    if (opts?.cwd !== undefined)
+        wt = opts.cwd === "main" ? mainWt : featWt;
+    return runSh("sh", ["-c", [shq(nodeAbs), ...nodeArgs.map(shq)].join(" ")], opts);
+};
 const nodeBinDir = () => nodeAbs.slice(0, nodeAbs.lastIndexOf("/"));
 const PATH_PREFIX = () => `PATH=${shq(nodeBinDir())}:"$HOME"/Library/pnpm:"$PATH" `;
-// 文件读写探针（大输出一律落日志文件 + 尾部回读——world.run stdout 256KB 捕获上限，
+// 文件读探针（大输出一律落日志文件 + 尾部回读——world.run stdout 256KB 捕获上限，
 // 超限 reject；pr-lifecycle 实测 284940 bytes 炸过）
-const WRITE_FILE = "require('fs').mkdirSync(require('path').dirname(process.argv[1]),{recursive:true});" +
-    "require('fs').writeFileSync(process.argv[1],process.argv[2])";
 const READ_TAIL = "try{const t=require('fs').readFileSync(process.argv[1],'utf-8').trimEnd();" +
     "const n=Number(process.argv[2]||'80');const ls=t.split('\\n');" +
     "process.stdout.write(ls.length<=n?t:ls.slice(-n).join('\\n'))}catch(e){process.stdout.write('')}";
 const READ_FILE_QUIET = "try{process.stdout.write(require('fs').readFileSync(process.argv[1],'utf-8'))}catch(e){process.stdout.write('')}";
-async function writeViaNode(path, body) {
-    const r = await runNode(["-e", WRITE_FILE, path, body]);
-    if (r.exitCode !== 0)
-        throw new Error(`写盘失败（${path}，exit ${r.exitCode}）：${r.stderr.trim() || r.stdout.trim()}`);
-}
 async function readTailViaNode(path, n) {
     const r = await runNode(["-e", READ_TAIL, path, String(n)]);
     return r.exitCode === 0 ? r.stdout.trimEnd() : "";
@@ -664,6 +677,9 @@ let releaseTag = "";
 let releaseUrl = "";
 let squashNote = "（未执行）";
 let e2eNote = "（未执行）";
+// SKILL 6.5.2「人工过目 git diff」在 workflow 形态的等价物：diff 摘要入终态报告披露
+// （空串 = 未产生：README 已是目标版本或未执行到 6.5.2）
+let readmeDiffNote = "";
 let npmHandoff = { detected: false, detail: "（未执行）" };
 const prUrl = () => (prNumber > 0 ? `https://github.com/zhushanwen321/tai-ji/pull/${prNumber}` : "");
 async function execCmd(spec) {
@@ -678,7 +694,7 @@ async function execCmd(spec) {
 const FAILURE_ROUTES = {
     init: {
         routes: [
-            { match: "BUSY", action: "escalate", hint: "检测到进行中的发布管线占用 .merge-state/current.json——不得自动删状态文件。三查确认上一轮已收官（gh release view 最近两版 + git ls-remote 双 tag 均在远端）后，人工删除该文件再重跑" },
+            { match: "检测到疑似进行中的发布管线", action: "escalate", hint: "进行中的发布管线占用 .merge-state/current.json——不得自动删状态文件。三查确认上一轮已收官（gh release view 最近两版 + git ls-remote 双 tag 均在远端）后，人工删除该文件再重跑" },
         ],
         defaultAction: "escalate",
     },
@@ -690,8 +706,8 @@ const FAILURE_ROUTES = {
             { match: "PR CI 有失败项", action: "escalate", hint: "PR CI 红——回开发线修复后重走发布，不得在发布线修代码" },
             { match: "30 秒内未检测到", action: "escalate", hint: "未检测到 CI run——确认是否纯 docs 改动（ci.yml 路径过滤），人工确认后方可合并" },
             { match: "疑似进行中的发布管线", action: "escalate", hint: "发布管线互斥——按 init 的三查指引处置" },
-            { match: "ahead-guard", action: "escalate", hint: "本地 main 领先远端——人工核查未推送 commit，不得自动 reset" },
-            { match: "dirty-tree", action: "escalate", hint: "main 工作区有未提交变更——人工处置后重跑，不得自动清理" },
+            { match: "本地 main 领先", action: "escalate", hint: "本地 main 领先远端（疑似发布在途：阶段 4 bump / 阶段 5 notes 已 commit 未 push）——人工核查未推送 commit，不得自动 reset" },
+            { match: "有未提交的 tracked 改动", action: "escalate", hint: "main 工作区有未提交变更（疑似阶段 4 中途崩溃半成品或人工改动）——人工处置后重跑，不得自动清理" },
             { match: "PR 状态为", action: "escalate" },
         ],
         defaultAction: "escalate",
@@ -770,10 +786,16 @@ async function runRouted(spec) {
         if (action === "rescue" && spec.rescueStage !== undefined && rescueRound < maxRescueRounds) {
             rescueRound++;
             log(`[${spec.routeKey}] 失败路由=rescue（第 ${rescueRound}/${maxRescueRounds} 轮兜底修复）`);
-            // 直发事件（不占打开槽——withStage(step) 的 openStep 不被嵌套打断）
+            // 直发事件（不占打开槽——withStage(step) 的 openStep 不被嵌套打断）；
+            // finally 补 end——rescueOnce 两次无效返回抛出时 JSONL 事件仍配对完整
             await obsEmit("fix", rescueRound, "start", null);
-            const report = await rescueOnce(spec.rescueStage, rescueRound, r.text, spec.rerunHint);
-            await obsEmit("fix", rescueRound, "end", null);
+            let report;
+            try {
+                report = await rescueOnce(spec.rescueStage, rescueRound, r.text, spec.rerunHint);
+            }
+            finally {
+                await obsEmit("fix", rescueRound, "end", null);
+            }
             rescueLog.push({ step: spec.routeKey, round: rescueRound, action: report.action, summary: report.summary, filesChanged: report.filesChanged, residualRisk: report.residualRisk });
             rescueNotes.push(`r${rescueRound}: ${report.summary}`);
             if (report.action === "escalate") {
@@ -815,23 +837,34 @@ ${tailLines(failureText, 40)}
     }
     return `${head}
 场景：阶段 4 版本 bump 的原子 commit 被 pre-commit 拦截。工作目录 = ${mainWt}。
-允许动作：按钩子报错原文修复其点名的文件（如文档词表、格式问题），修复后单独 commit（message 用 fix/docs 类英文 conventional 风格，命令前缀 TAIJI_ALLOW_MAIN_COMMIT=1，正常走 pre-commit）；不得把修复文件并入 bump commit（bump commit 只含两个 package.json 的原子语义不得破坏）；不得 push（流程统一推送）。
+允许动作：按钩子报错原文修复其点名的文件（如文档词表、格式问题），修复后单独 commit——必须 pathspec 限定提交：TAIJI_ALLOW_MAIN_COMMIT=1 git commit -m "<fix/docs 类英文 conventional message>" -- <修复文件路径…>（此刻暂存区滞留着两个 package.json 的 bump 改动，裸 git commit 会把它们卷入修复 commit、破坏 bump commit 只含两个 package.json 的原子语义；正常走 pre-commit）；不得 push（流程统一推送）。
 修复完成后流程会重跑原子 bump commit。
 失败输出尾部（commit 日志）：
 ${tailLines(failureText, 60)}
 返回 RescueReport：action=fixed（已修复并单独 commit）/ retry / escalate；summary/filesChanged/residualRisk 同上。`;
 }
+// pi 壳 wfAgent 解析失败时的传回形态（zcode 侧不产生）：识别为无效返回走回喂重试，
+// 不让平台差异中断流程
+const invalidAskNote = (v) => {
+    const inv = v?.__invalidAsk;
+    return typeof inv === "string" && inv !== "" ? `平台层返回无效（pi 壳解析失败）：${inv}` : "";
+};
 async function rescueOnce(stage, round, failureText, rerunHint) {
     const prompt = rescuePrompt(stage, round, failureText);
     const validate = (v) => {
         if (v === null || typeof v !== "object")
             return "返回不是对象";
+        const inv = invalidAskNote(v);
+        if (inv !== "")
+            return inv;
         if (v.action !== "fixed" && v.action !== "retry" && v.action !== "escalate")
             return `action 非法：${JSON.stringify(v.action)}（合法值 fixed/retry/escalate）`;
         if (typeof v.summary !== "string" || v.summary.trim() === "")
             return "summary 为空";
         if (!Array.isArray(v.filesChanged))
             return "filesChanged 不是数组";
+        if (typeof v.residualRisk !== "string")
+            return "residualRisk 不是字符串（无残留风险填空串）";
         return "";
     };
     let lastErr = "";
@@ -906,11 +939,17 @@ await step("preflight", async () => {
     if (gh.exitCode !== 0) {
         throw new Escalation(`gh 未认证或不可用：${tailLines(gh.text, 10)}\n恢复：gh auth login 后重新发起`);
     }
+    // pnpm 按脚本实际执行形态检查（argv 形态不加 PATH 前缀、走引擎 PATH）——缺位时
+    // premerge 的 install/lint/build 与 pr-merge 的 pnpm 调用会全部 127，提前拦截
+    const pnpm = await execCmd({ cwd: "main", argv: ["sh", "-c", "command -v pnpm"], timeoutMs: 30_000 });
+    if (pnpm.exitCode !== 0 || pnpm.text.trim() === "") {
+        throw new Escalation(`pnpm 不在 PATH（command -v pnpm 无命中）——后续 pre-merge-check.sh 的 install/lint/build 与 pr-merge 的 pnpm 调用将全部失败。恢复：把 pnpm 所在目录（如 ~/Library/pnpm）暴露到发起环境 PATH 后重新发起`);
+    }
     const br = await execCmd({ cwd: "main", argv: ["git", "rev-parse", "--abbrev-ref", "HEAD"], timeoutMs: 60_000 });
     if (br.exitCode !== 0) {
         throw new Escalation(`main worktree 不可用（${mainWt}）：${tailLines(br.text, 10)}\n恢复：核对 workspace 布局（worktree list）后重新发起`);
     }
-    log(`preflight 通过：gh 已认证；main worktree 当前分支=${br.text.trim().split("\n").pop() ?? "?"}`);
+    log(`preflight 通过：gh 已认证；pnpm=${pnpm.text.trim().split("\n").pop() ?? "?"}；main worktree 当前分支=${br.text.trim().split("\n").pop() ?? "?"}`);
 });
 phase("初始化与 PR 发现");
 await step("init", async () => {
@@ -920,13 +959,16 @@ await step("init", async () => {
         timeoutMs: 180_000,
         rerunHint: `cd ${mainWt} && bash .agents/skills/merge/scripts/init.sh ${branchName}（merge-state 占用时先按三查指引处置）`,
     });
-    // 解析脚本结构化输出（WS_ROOT=/BRANCH_NAME=/PR_NUMBER= 三行，init.sh 固定打印）
-    const prMatch = /^PR_NUMBER=(\d+)$/m.exec(r.text);
+    // 解析脚本结构化输出（WS_ROOT=/BRANCH_NAME=/PR_NUMBER= 三行，init.sh 固定打印；
+    // 行首有两空格缩进是脚本真实格式——正则容错行首行尾空白，mock 测试按脚本原文对齐）
+    const prMatch = /^[ \t]*PR_NUMBER=(\d+)[ \t]*$/m.exec(r.text);
     const discovered = prMatch !== null ? Number(prMatch[1]) : 0;
-    if (prNumber === 0 && discovered === 0) {
-        throw new Escalation(`init.sh 成功但未解析到 PR_NUMBER——输出尾部：\n${tailLines(r.text, 20)}\n恢复：核对 feature 分支 PR 存在（gh pr view）后重新发起`);
+    if (discovered === 0) {
+        // 协议异常 fail-fast：入参带了 prNumber 也不据此覆写——init 输出与协议不符时
+        // 其余输出（PR 状态等）同样不可信
+        throw new Escalation(`init.sh 成功但未解析到 PR_NUMBER${prNumber > 0 ? `（入参 prNumber=${prNumber} 不作依据）` : ""}——输出尾部：\n${tailLines(r.text, 20)}\n恢复：核对 feature 分支 PR 存在（gh pr view）后重新发起`);
     }
-    if (prNumber > 0 && discovered > 0 && prNumber !== discovered) {
+    if (prNumber > 0 && prNumber !== discovered) {
         throw new Escalation(`参数 prNumber=${prNumber} 与 init.sh 实测 PR_NUMBER=${discovered} 不一致——调用方意图不清，fail-fast。恢复：核对后重新发起`);
     }
     prNumber = discovered;
@@ -944,12 +986,14 @@ await step("squash-check", async () => {
     if (baseR.exitCode !== 0)
         throw new Escalation(`git merge-base 失败：${tailLines(baseR.text, 10)}`);
     let base = baseR.text.trim().split("\n")[0] ?? "";
-    // 硬约束 7：区间内 merge commit 不碰——从最后一个 merge commit 之后重划整理起点
+    // 硬约束 7：区间内 merge commit 不碰——重划整理起点到最新一笔 merge commit 之后
+    // （git log 新→旧：首行才是最新 merge；取末行=最旧 merge 会漏掉更晚的 merge，
+    //   区间内残留 merge 时人工照计划整理会改写 merge 结构）
     const merges = await execCmd({ cwd: "feature", argv: ["git", "log", "--merges", "--format=%H %s", `${base}..HEAD`], timeoutMs: 60_000 });
     const mergeLines = merges.text.trim().split("\n").filter(Boolean);
     if (mergeLines.length > 0) {
-        base = (mergeLines[mergeLines.length - 1] ?? "").split(" ")[0] ?? base;
-        log(`[squash-check] 区间内存在 ${mergeLines.length} 笔 merge commit——整理起点重划到最后 merge commit 之后（硬约束 7）`);
+        base = (mergeLines[0] ?? "").split(" ")[0] ?? base;
+        log(`[squash-check] 区间内存在 ${mergeLines.length} 笔 merge commit——整理起点重划到最新一笔 merge commit 之后（硬约束 7）`);
     }
     const logR = await execCmd({ cwd: "feature", argv: ["git", "log", "--no-merges", "--format=%h%x09%an%x09%s", `${base}..HEAD`], timeoutMs: 60_000 });
     const commits = logR.text.trim().split("\n").filter(Boolean);
@@ -975,8 +1019,38 @@ ${commits.join("\n")}
 
 返回 SquashVerdict：action=no-need（粒度已合理，直接放行）/ needs-squash（确需整理，plan 填完整重组计划表）/ uncertain（拿不准——流程按无需整理放行并披露你的理由）；reason=一句判定理由；plan=no-need/uncertain 时填空串。`;
     const a = wfAgent("squash-plan", "merge 发布流程的 commit 粒度判定 agent，只判不执行，拿不准一律倾向保留。");
-    const verdict = await a.ask("SquashVerdict", prompt);
-    if (verdict.action === "needs-squash" && verdict.plan.trim() !== "") {
+    // 校验失败回喂一次（畸形返回不得静默按无需整理放行）
+    const validateVerdict = (v) => {
+        if (v === null || typeof v !== "object")
+            return "返回不是对象";
+        const inv = invalidAskNote(v);
+        if (inv !== "")
+            return inv;
+        if (v.action !== "no-need" && v.action !== "needs-squash" && v.action !== "uncertain")
+            return `action 非法：${JSON.stringify(v.action)}（合法值 no-need/needs-squash/uncertain）`;
+        if (typeof v.reason !== "string" || v.reason.trim() === "")
+            return "reason 为空";
+        if (typeof v.plan !== "string")
+            return "plan 不是字符串（no-need/uncertain 填空串）";
+        if (v.action === "needs-squash" && v.plan.trim() === "")
+            return "action=needs-squash 但 plan 为空——须填完整重组计划表，拿不准应返回 uncertain";
+        return "";
+    };
+    let verdict = null;
+    let vErr = "";
+    for (let attempt = 1; attempt <= 2; attempt++) {
+        const v = await a.ask("SquashVerdict", attempt === 1 ? prompt : `${prompt}\n\n上一次返回被判为无效（原因：${vErr}）。重新输出有效 JSON。`);
+        const err = validateVerdict(v);
+        if (err === "") {
+            verdict = v;
+            break;
+        }
+        vErr = err;
+    }
+    if (verdict === null) {
+        throw new Escalation(`squash-plan 两次返回均无效：${vErr}\n恢复：人工按 SKILL 阶段 0.5 判定清单完成整理判定后重新发起（无需整理用 squashMode=skip；已人工整理则 skipSteps 含 squash-check）`);
+    }
+    if (verdict.action === "needs-squash") {
         squashNote = `需整理：${verdict.reason}`;
         failure = {
             step: "squash-check",
@@ -1032,17 +1106,21 @@ await step("post-merge-ci", async () => {
         extended: { argv: ["bash", ".agents/skills/merge/scripts/wait-for-ci.sh", mergeSha, "--timeout", "3600"], timeoutMs: 4_200_000 },
         logName: "post-merge-ci", timeoutMs: 2_700_000,
         rerunHint: `cd ${mainWt} && bash .agents/skills/merge/scripts/wait-for-ci.sh ${mergeSha}（超时可加 --timeout 3600；日志 ${runLogDir}/post-merge-ci.log）`,
-        passCheck: async () => {
-            // no-runs 放行补验：wait-for-ci 的 exit 0 含「无 CI 放行」语义（ci.yml 路径过滤），
-            // 独立 gh 查询复核——真无 run 仅披露；有 run 属正常通过。gh 查询失败不放行
-            const runs = await execCmd({ cwd: "main", argv: ["gh", "run", "list", "--commit", mergeSha, "--repo", "zhushanwen321/tai-ji", "--limit", "10", "--json", "databaseId,conclusion"], timeoutMs: 60_000 });
+        passCheck: async (r) => {
+            // no-runs 放行补验（仅当 wait-for-ci 以「未检测到 CI workflow」语义放行时触发；
+            // 正常 CI 通过路径不做额外查询）：独立 gh 复核——真无 run 仅披露放行；查到 run
+            // = 放行判定与事实不符（CI 可能晚于 30s 轮询窗口触发），停回人工判定 run 结论
+            if (!r.text.includes("未检测到 CI workflow"))
+                return;
+            const runs = await execCmd({ cwd: "main", argv: ["gh", "run", "list", "--commit", mergeSha, "--repo", "zhushanwen321/tai-ji", "--limit", "10", "--json", "databaseId,status,conclusion"], timeoutMs: 60_000 });
             if (runs.exitCode !== 0) {
-                throw new Escalation(`post-merge-ci 已通过，但放行补验的 gh run list 查询失败（网络/限流/登录态）：${tailLines(runs.text, 10)}\n恢复：人工 gh run list --commit ${mergeSha} --repo zhushanwen321/tai-ji 核查后重跑本 step`);
+                throw new Escalation(`wait-for-ci 以「未检测到 CI」放行，但补验的 gh run list 查询失败（网络/限流/登录态）——无法确认放行成立：${tailLines(runs.text, 10)}\n恢复：人工 gh run list --commit ${mergeSha} --repo zhushanwen321/tai-ji 核查后重跑本 step`);
             }
             const trimmed = runs.text.trim();
-            if (trimmed === "[]" || trimmed === "") {
-                log(`[post-merge-ci] 补验：该 commit 无任何 CI run——按「无 CI 放行」披露（ci.yml 路径过滤预期内，如纯 docs 改动），不等同于 CI 通过`);
+            if (trimmed !== "[]" && trimmed !== "") {
+                throw new Escalation(`wait-for-ci 以「未检测到 CI」放行，但 gh 复核发现该 commit 存在 CI run——放行判定与事实不符（CI 可能晚于 30s 轮询窗口触发）：\n${tailLines(runs.text, 20)}\n恢复：gh run view <id> 核查结论——绿则重跑本 step，红则回开发线修复`);
             }
+            log(`[post-merge-ci] 补验：该 commit 无任何 CI run——按「无 CI 放行」披露（ci.yml 路径过滤预期内，如纯 docs 改动），不等同于 CI 通过`);
         },
     });
     log(`post-merge CI 通过（${mergeSha.slice(0, 10)}）`);
@@ -1059,7 +1137,7 @@ await step("version-check", async () => {
 });
 phase("e2e 圈定");
 await step("e2e-select", async () => {
-    const r = await runNode(["scripts/select-affected-e2e.mjs", "--release"], { timeoutMs: 120_000 });
+    const r = await runNode(["scripts/select-affected-e2e.mjs", "--release"], { timeoutMs: 120_000, cwd: "main" });
     if (r.exitCode !== 0) {
         throw new Escalation(`select-affected-e2e.mjs --release 失败（发布触发清单圈定失败，不得静默跳过）：\n${tailLines(`${r.stdout}\n${r.stderr}`, 20)}\n恢复：cd ${mainWt} && node scripts/select-affected-e2e.mjs --release 排查后重跑`);
     }
@@ -1069,11 +1147,20 @@ await step("e2e-select", async () => {
 phase("版本 bump 与发布");
 await step("bump-release", async () => {
     const v0 = await readVersion();
-    // 幂等预检：远端 tag 已存在 = bump+push 已完成（上次 run 在 verify 或之后中断）→ 直接 verify
+    // 幂等预检：远端 tag 已存在 = bump+push 已完成（上次 run 在 verify 或之后中断）→ 直接 verify。
+    // 基线查询 fail-closed：任一通道查询失败都不许在基线未知时盲目续跑（apply/bump 非幂等，
+    // 盲跑会产生双 bump 污染 main 历史）；「release not found」= 仓库尚无任何正式 release
+    // （首次发布场景），属正常无基线——与 check-version-bump.sh 的同类语义一致
     const remoteTag = await execCmd({ cwd: "main", argv: ["git", "ls-remote", "github", `refs/tags/v${v0}`], timeoutMs: 60_000 });
-    const tagExists = remoteTag.exitCode === 0 && remoteTag.text.trim() !== "";
+    if (remoteTag.exitCode !== 0) {
+        throw new Escalation(`幂等预检：远端 tag 查询失败（git ls-remote），无法判定 bump+push 是否已完成：\n${tailLines(remoteTag.text, 10)}\n恢复：网络恢复后重跑本 step（自查：cd ${mainWt} && git ls-remote github refs/tags/v${v0}）`);
+    }
+    const tagExists = remoteTag.text.trim() !== "";
     if (!tagExists) {
         const latest = await execCmd({ cwd: "main", argv: ["gh", "release", "view", "--repo", "zhushanwen321/tai-ji", "--json", "tagName", "-q", ".tagName"], timeoutMs: 60_000 });
+        if (latest.exitCode !== 0 && !latest.text.includes("release not found")) {
+            throw new Escalation(`幂等预检：最新 release 基线查询失败（gh，网络/限流/登录态），无法判定版本中间态：\n${tailLines(latest.text, 10)}\n恢复：gh 恢复后重跑本 step（自查：cd ${mainWt} && gh release view --repo zhushanwen321/tai-ji --json tagName -q .tagName）`);
+        }
         const latestTag = latest.exitCode === 0 ? latest.text.trim() : "";
         if (latestTag !== "" && latestTag !== `v${v0}`) {
             throw new Escalation(`版本中间态：main 当前版本 ${v0} ≠ 最新正式 release ${latestTag}，且远端无 v${v0} tag——可能是上次 bump 到一半（commit 未 push / tag 未打）。禁止盲目续跑（apply/bump 非幂等）。恢复：cd ${mainWt} && git log --oneline -3 && git status，人工判定续跑或还原后重新发起`);
@@ -1104,11 +1191,11 @@ await step("bump-release", async () => {
             logName: "bump-commit", timeoutMs: 7_200_000,
             rerunHint: `cd ${mainWt} && git add package.json apps/electron/package.json && TAIJI_ALLOW_MAIN_COMMIT=1 git commit -m "chore: bump version to ${version}"（日志 ${runLogDir}/bump-commit.log）`,
         });
-        const tagR = await execCmd({ cwd: "main", rawScript: `git tag v${version}`, timeoutMs: 60_000 });
+        const tagR = await execCmd({ cwd: "main", rawScript: `git tag ${shq(`v${version}`)}`, timeoutMs: 60_000 });
         if (tagR.exitCode !== 0)
             throw new Escalation(`git tag v${version} 失败：${tailLines(tagR.text, 10)}`);
         // tag 指向 push 前核对（本地拦截坏 tag，不等 push 后 CI 兜底）
-        const check = await execCmd({ cwd: "main", rawScript: `[ "$(git rev-parse v${version}^{commit})" = "$(git rev-parse HEAD)" ]`, timeoutMs: 60_000 });
+        const check = await execCmd({ cwd: "main", rawScript: `[ "$(git rev-parse ${shq(`v${version}^{commit}`)})" = "$(git rev-parse HEAD)" ]`, timeoutMs: 60_000 });
         if (check.exitCode !== 0)
             throw new Escalation(`tag v${version} 未指向 HEAD——禁止 push（SKILL 阶段 4 硬约束）。恢复：人工核对 tag 与 HEAD`);
         releaseTag = `v${version}`;
@@ -1118,7 +1205,7 @@ await step("bump-release", async () => {
             rerunHint: `cd ${mainWt} && git push github HEAD（日志 ${runLogDir}/push-main.log）`,
         });
         await runRouted({
-            routeKey: "push", cwd: "main", rawScript: `git push github ${releaseTag}`,
+            routeKey: "push", cwd: "main", rawScript: `git push github ${shq(releaseTag)}`,
             logName: "push-tag", timeoutMs: 600_000,
             rerunHint: `cd ${mainWt} && git push github ${releaseTag}（日志 ${runLogDir}/push-tag.log）`,
         });
@@ -1131,7 +1218,7 @@ await step("bump-release", async () => {
     await runRouted({
         routeKey: "verify-release", cwd: "main",
         argv: ["bash", "scripts/verify-ci-release.sh", releaseTag],
-        extended: { argv: ["bash", "scripts/verify-ci-release.sh", releaseTag], timeoutMs: 2_700_000 },
+        extended: { argv: ["bash", "scripts/verify-ci-release.sh", releaseTag, "--ci-timeout", "60"], timeoutMs: 4_500_000 },
         logName: "verify-release", timeoutMs: 2_700_000,
         rerunHint: `cd ${mainWt} && bash scripts/verify-ci-release.sh ${releaseTag}（日志 ${runLogDir}/verify-release.log；禁止重打同版本 tag）`,
     });
@@ -1196,11 +1283,16 @@ await step("notes", async () => {
 ${commits}
 
 完成后返回 NotesDraft：filePath=写入的文件绝对路径（必须为 ${notesFile}）；summary=一句内容摘要。`;
-    const a = wfAgent("notes-draft", "merge 发布流程的 Release Notes 撰写 agent，严格按两级规范写中英双语 notes。");
+    const a = agent("notes-draft", "merge 发布流程的 Release Notes 撰写 agent，严格按两级规范写中英双语 notes。");
     let lastErr = "";
     let drafted = false;
     for (let attempt = 1; attempt <= 3; attempt++) {
         const draft = await a.ask("NotesDraft", attempt === 1 ? prompt : `${prompt}\n\n上一次产出未通过机器校验（原因：${lastErr}）。修正后重写同一文件并返回。`);
+        const draftInv = invalidAskNote(draft);
+        if (draftInv !== "") {
+            lastErr = draftInv;
+            continue;
+        }
         if (draft.filePath !== notesFile) {
             lastErr = `filePath 不符（${draft.filePath}）`;
             continue;
@@ -1246,11 +1338,25 @@ await step("verify", async () => {
     await runRouted({
         routeKey: "verify-release", cwd: "main",
         argv: ["bash", "scripts/verify-ci-release.sh", `v${version}`],
-        extended: { argv: ["bash", "scripts/verify-ci-release.sh", `v${version}`], timeoutMs: 2_700_000 },
+        extended: { argv: ["bash", "scripts/verify-ci-release.sh", `v${version}`, "--ci-timeout", "60"], timeoutMs: 4_500_000 },
         logName: "verify-final", timeoutMs: 2_700_000,
         rerunHint: `cd ${mainWt} && bash scripts/verify-ci-release.sh v${version}`,
     });
     log("阶段 6 交付物复核通过");
+    // 状态机终态落盘（对齐人工路径 release 阶段的 released 写入：终态后不再参与 12h
+    // 发布互斥，否则每次发布后 12h 内下一轮 init 必 BUSY 需人工解锁；辅助通道——
+    // 写失败仅告警不阻塞，同 state.mjs 语义）
+    const ws = await runNode([
+        "--input-type=module", "-e",
+        "const{pathToFileURL}=await import(\"node:url\");const a=process.argv.slice(1);const{writeMergeState}=await import(pathToFileURL(a[0]).href);const p={tag:a[2],stage:\"released\",releasedAt:new Date().toISOString()};if(a[3])p.releaseUrl=a[3];process.exit(writeMergeState(a[1],p)===null?1:0)",
+        `${mainWt}/scripts/merge/lib/state.mjs`, wsRoot, `v${version}`, releaseUrl,
+    ], { timeoutMs: 60_000 });
+    if (ws.exitCode !== 0) {
+        log(`[verify] WARN: merge-state 终态写入失败（不阻塞；12h 内下一轮 init 会 BUSY，届时确认收官后人工删 ${wsRoot}/.merge-state/current.json）：${tailLines(`${ws.stdout}\n${ws.stderr}`, 5)}`);
+    }
+    else {
+        log("merge-state 终态落盘：stage=released（下一轮发布互斥解除）");
+    }
 });
 phase("GitCode 镜像同步");
 await step("gitcode-sync", async () => {
@@ -1262,10 +1368,10 @@ await step("gitcode-sync", async () => {
         routeKey: "gitcode-sync", cwd: "main", maxRetries: 1,
         argv: syncArgv(`sync-from-github ${tag}`),
         logName: "gitcode-assets", timeoutMs: 3_600_000,
-        rerunHint: `cd ${mainWt} && GITCODE_REPO=qq_18433817/tai-ji node scripts/gitcode-release-sync.mjs sync-from-github ${tag}（断点续传幂等；日志 ${runLogDir}/gitcode-assets.log）`,
+        rerunHint: `cd ${mainWt} && GITCODE_REPO=qq_18433817/tai-ji node scripts/gitcode-release-sync.mjs sync-from-github ${tag}（断点续传幂等；GITCODE_TOKEN 仅 zsh 交互式配置链可见——在 zsh -ic '…' 同款链内执行或先 export；日志 ${runLogDir}/gitcode-assets.log）`,
     });
     log("GitCode 附件镜像完成");
-    const readme = await runNode([".agents/skills/merge/scripts/update-readme-install.mjs", version], { timeoutMs: 60_000 });
+    const readme = await runNode([".agents/skills/merge/scripts/update-readme-install.mjs", version], { timeoutMs: 60_000, cwd: "main" });
     if (readme.exitCode !== 0) {
         throw new Escalation(`README 安装版本更新失败：\n${tailLines(`${readme.stdout}\n${readme.stderr}`, 15)}\n恢复：cd ${mainWt} && node .agents/skills/merge/scripts/update-readme-install.mjs ${version}`);
     }
@@ -1274,20 +1380,30 @@ await step("gitcode-sync", async () => {
         log("README 已是该版本（无变化，跳过 commit/push）");
     }
     else {
-        // 「人工过目 git diff」在 workflow 形态 = diff 记入终态报告披露（流程偏离登记）
-        log(`README 版本 diff（披露代人工过目）：\n${tailLines(diff.text, 40)}`);
+        // 「人工过目 git diff」在 workflow 形态 = diff 摘要入终态报告披露（流程偏离登记）
+        readmeDiffNote = tailLines(diff.text, 40);
+        log(`README 版本 diff（披露代人工过目）：\n${readmeDiffNote}`);
+        // commit 与 push 分两段：commit 非幂等（重跑撞 nothing to commit）不挂 retry，
+        // push 单独挂网络类 retry——commit 成功 + push 网络失败后重试只重推不重建 commit
+        const readmeCommit = await execCmd({
+            cwd: "main",
+            rawScript: `git add README.md README_EN.md && TAIJI_ALLOW_MAIN_COMMIT=1 git commit -m ${shq(`docs: bump install version to v${version} in README`)}`,
+            logName: "readme-commit", timeoutMs: 7_200_000,
+        });
+        if (readmeCommit.exitCode !== 0) {
+            throw new Escalation(`README 版本更新 commit 失败：\n${tailLines(readmeCommit.text, 20)}\n恢复：cd ${mainWt} && git add README.md README_EN.md && TAIJI_ALLOW_MAIN_COMMIT=1 git commit -m "docs: bump install version to v${version} in README"（日志 ${runLogDir}/readme-commit.log）`);
+        }
         await runRouted({
-            routeKey: "push", cwd: "main",
-            rawScript: `git add README.md README_EN.md && TAIJI_ALLOW_MAIN_COMMIT=1 git commit -m ${shq(`docs: bump install version to v${version} in README`)} && git push github HEAD:main`,
-            logName: "readme-push", timeoutMs: 7_200_000,
-            rerunHint: `cd ${mainWt} && git add README.md README_EN.md && TAIJI_ALLOW_MAIN_COMMIT=1 git commit -m "docs: bump install version to v${version} in README" && git push github HEAD:main`,
+            routeKey: "push", cwd: "main", rawScript: "git push github HEAD:main",
+            logName: "readme-push", timeoutMs: 600_000,
+            rerunHint: `cd ${mainWt} && git push github HEAD:main（commit 已完成只差推送；日志 ${runLogDir}/readme-push.log）`,
         });
     }
     await runRouted({
         routeKey: "gitcode-sync", cwd: "main", maxRetries: 1,
         argv: syncArgv("push-repo --ref-source github"),
         logName: "gitcode-repo", timeoutMs: 3_600_000,
-        rerunHint: `cd ${mainWt} && GITCODE_REPO=qq_18433817/tai-ji node scripts/gitcode-release-sync.mjs push-repo --ref-source github（--ref-source 本地必传；日志 ${runLogDir}/gitcode-repo.log）`,
+        rerunHint: `cd ${mainWt} && GITCODE_REPO=qq_18433817/tai-ji node scripts/gitcode-release-sync.mjs push-repo --ref-source github（--ref-source 本地必传；GITCODE_TOKEN 仅 zsh 交互式配置链可见——在 zsh -ic '…' 同款链内执行或先 export；日志 ${runLogDir}/gitcode-repo.log）`,
     });
     log("GitCode 仓库镜像完成（引用集逐条比对由脚本保证）");
     // 终端用户视角匿名下载链路冒烟（302→CDN→Range 206）
@@ -1318,8 +1434,15 @@ await step("cleanup", async () => {
     for (const b of backups.text.trim().split("\n").filter(Boolean)) {
         const ahead = await execCmd({ cwd: "main", argv: ["git", "rev-list", "--count", `main..${b}`], timeoutMs: 60_000 });
         if (ahead.text.trim() === "0") {
-            await execCmd({ cwd: "main", argv: ["git", "branch", "-D", b], timeoutMs: 60_000 });
-            log(`已删备份分支 ${b}（ahead=0，全历史已在 main）`);
+            const del = await execCmd({ cwd: "main", argv: ["git", "branch", "-D", b], timeoutMs: 60_000 });
+            if (del.exitCode === 0) {
+                log(`已删备份分支 ${b}（ahead=0，全历史已在 main）`);
+            }
+            else {
+                // 删除失败如实呈报并保留——成功日志不得先行于事实
+                kept.push(b);
+                log(`备份分支 ${b} 删除失败（保留；exit ${del.exitCode}）：${tailLines(del.text, 5)}`);
+            }
         }
         else {
             kept.push(b);
@@ -1346,6 +1469,7 @@ const summaryLines = [
     `- commit 整理：${squashNote}`,
     `- e2e 圈定：真机未执行（默认语义，主 agent 定夺）${e2eNote !== "（未执行）" ? `\n${e2eNote}` : ""}`,
     `- 4N npm 发布线：${npmHandoff.detected ? "移交主 agent 人工段" : npmHandoff.detail}${npmHandoff.detected ? `\n${npmHandoff.detail}` : ""}`,
+    readmeDiffNote !== "" ? `- README 版本 diff（披露代人工过目，SKILL 6.5.2 等价物）：\n${readmeDiffNote}` : "- README 版本 diff: 未产生（已是目标版本或未执行到 6.5.2）",
     skippedSteps.length > 0 ? `- skippedSteps:\n${skippedSteps.map((s) => `  - ${s.step}: ${s.reason}`).join("\n")}` : "- skippedSteps: 无",
     rescueLog.length > 0 ? `- rescue 记录：\n${rescueLog.map((r) => `  - ${r.step} r${r.round}: [${r.action}] ${r.summary}${r.residualRisk !== "" ? `（残留风险：${r.residualRisk}）` : ""}`).join("\n")}` : "- rescue 记录：无",
     "",

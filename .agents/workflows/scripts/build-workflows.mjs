@@ -260,8 +260,15 @@ function checkObservationContract(name, shared, obsLayer, zcOut, piOut, obsCli, 
   for (const m of stageHits) {
     if (!OBS_SKILLS.has(m[1])) errors.push(`${name}: 观测 skill「${m[1]}」不在词表（合法：${[...OBS_SKILLS].join("/")}）——skill=业务所属 skill 名，不是引擎/workflow 名`);
   }
-  const stepExtractor = (text) =>
-    [...text.matchAll(/\b(?:obsBegin|withStage)\("([A-Za-z0-9-]+)"/g)].map((m) => m[1]).sort();
+  // 字面提取优先；字面为零且源内定义 STEP_IDS 字面数组（step wrapper 统一
+  // withStage(id, ...) 变量透传形态）时回退解析该数组——观测步骤词表核对不空转
+  const stepExtractor = (text) => {
+    const literal = [...text.matchAll(/\b(?:obsBegin|withStage)\("([A-Za-z0-9-]+)"/g)].map((m) => m[1]);
+    if (literal.length > 0) return literal.sort();
+    const arr = text.match(/const STEP_IDS = \[([^\]]*)\]/);
+    if (arr !== null) return [...arr[1].matchAll(/"([A-Za-z0-9-]+)"/g)].map((m) => m[1]).sort();
+    return [];
+  };
   const sharedSteps = stepExtractor(shared);
   for (const st of stageSet) {
     if (!OBS_STAGES.has(st)) errors.push(`${name}: 观测 stage「${st}」不在词表（合法：${[...OBS_STAGES].join("/")}）——新阶段先登记 OBS_STAGES`);
