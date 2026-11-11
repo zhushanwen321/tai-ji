@@ -287,57 +287,62 @@
   ],
   ".agents/workflows/src/merge.shared.ts": [
     [
-      55,
+      61,
       "const timedOut = /timed?[- ]?out|timeout|超时/i.test(msg);",
       "protocol-parse"
     ],
     [
-      145,
+      151,
       "if (rawWorktree === \"\" || !rawWorktree.startsWith(\"/\")) {",
       "format-validation"
     ],
     [
       179,
+      "const devVerMatch = /^dev-(\\d+\\.\\d+\\.\\d+)$/.exec(branchName);",
+      "format-validation"
+    ],
+    [
+      198,
       "if (typeof s !== \"string\" || !(STEP_IDS as readonly string[]).includes(s)) {",
       "enum-check"
     ],
     [
-      203,
+      222,
       "if (p.startsWith(\"/\")) {",
-      "format-validation"
+      "path-set"
     ],
     [
-      381,
+      400,
       "const route = table.routes.find((x) => r.text.includes(x.match)) ?? null;",
       "protocol-parse"
     ],
     [
-      575,
+      602,
       "const prMatch = /^[ \\t]*PR_NUMBER=(\\d+)[ \\t]*$/m.exec(r.text);",
       "protocol-parse"
     ],
     [
-      723,
+      750,
       "if (!r.text.includes(\"未检测到 CI workflow\")) return;",
       "protocol-parse"
     ],
     [
-      773,
+      813,
       "if (latest.exitCode !== 0 && !latest.text.includes(\"release not found\")) {",
       "protocol-parse"
     ],
     [
-      846,
+      895,
       "const touched = files.filter((f) => f.startsWith(\"extensions/\"));",
       "path-set"
     ],
     [
-      916,
+      965,
       "if (!body.includes(\"<!-- LANG:en -->\")) missing.push(\"<!-- LANG:en -->\");",
       "format-validation"
     ],
     [
-      917,
+      966,
       "if (!body.includes(\"<!-- LANG:zh -->\")) missing.push(\"<!-- LANG:zh -->\");",
       "format-validation"
     ]

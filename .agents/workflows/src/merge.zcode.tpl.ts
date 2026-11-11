@@ -2,7 +2,7 @@
 description: merge skill 的九阶段合并发布单 workflow（15 step）：preflight → init（阶段 0）
   → squash-check（0.5，agent 粒度判定，需整理停回批准）→ premerge（1）→ prune-devlink（1.5）
   → pr-merge（2）→ post-merge-ci（3，no-runs 放行补验）→ version-check（3.5）→ e2e-select
-  （3.7，只圈清单不跑真机）→ bump-release（4，幂等预检 + 原子 bump + tag/push + verify）
+  （3.7，只圈清单不跑真机）→ bump-release（4，目标版本锚定幂等预检 + 原子 bump + tag/push + verify）
   → npm-detect（4N 检测移交主 agent）→ notes（5，agent 写双语 + 机器校验）→ verify（6）
   → gitcode-sync（6.5 四子步）→ cleanup（7，零未决失败机器门禁）。异常三层 = 脚本内韧性
   复用 + FAILURE_ROUTES 机器分类路由（retry/retry-extended/rescue/escalate）+ rescue 兜底

@@ -3,7 +3,9 @@
 // maxRescueRounds / skipSteps 词表与 init 联动）、init 输出协议解析失败的终态形态、
 // premerge 失败 → rescue 兜底 agent 全链路（路由 → agent 修复 → 重跑判定 → 后续 step 短路）、
 // squash 需整理停回 / 多作者停回 / 区间重划取最新 merge、幂等预检五分支（tag 已存在跳过 /
-// 版本中间态 / ls-remote 故障 / gh 故障 / 正常 bump 路径随全链）、no-runs 补验三态
+// 版本中间态 / ls-remote 故障 / gh 故障 / 正常 bump 路径随全链）、dev-* 命名目标版本锚定
+//（远端只有旧 tag 必须执行 bump / 目标 tag 已存在跳过 / double-bump 前置拦截 / bump 后
+// 校验不等停回 / skipSteps 含 init 锚点不丢——v0.12.10 伪 pass 事故回归）、no-runs 补验三态
 //（正常通过不查询 / 真无 run 披露放行 / 查到 run 停回）、清理门禁 needs-human、
 // rescue 轮次耗尽与无效返回回喂、notes 回喂、gitcode 网络类 retry、终态 released 全链。
 import { test } from "node:test";
@@ -368,6 +370,95 @@ test("幂等预检 ls-remote 故障 → 停回（无法判定 tag 存在性）",
   assert.equal(result.status, "failed");
   assert.equal(result.failedStep, "bump-release");
   assert.match(result.error, /远端 tag 查询失败/);
+});
+
+// ══ dev-* 命名目标版本锚定（v0.12.10 伪 pass 事故回归）══
+// 场景基线 = 2026-11-11 v0.12.10 首跑：main=0.12.9（上一发布）、worktree=dev-0.12.10、
+// 远端有 v0.12.9 无 v0.12.10。旧行为查 v0.12.9 命中 → 误判「bump 已完成」→ 11 阶段对
+// 旧 tag 伪 pass。新行为查目标版本 v0.12.10 不命中 → 执行 bump 到 0.12.10。
+
+const DEV_WT = "/tmp/merge-selftest-ws/dev-0.12.10";
+
+test("dev 命名 + 远端只有旧 tag → 必须执行 bump 到目标版本，不得按旧 tag 误判跳过", async () => {
+  const { result, st } = await runChain(
+    { worktree: DEV_WT, squashMode: "skip" },
+    { version: "0.12.9", overrides: [
+      // 真实 git 行为：ls-remote 按 pattern 过滤——查 v0.12.10 无命中返回空；查旧 tag
+      // （若代码错误回退旧行为）返回非空，用于暴露「回退到旧判定」的回归
+      [(s) => s.includes("'ls-remote'") && s.includes("v0.12.10"), () => ({ exitCode: 0, stdout: "", stderr: "" })],
+      [(s) => s.includes("'ls-remote'"), () => ({ exitCode: 0, stdout: "abc123def\trefs/tags/v0.12.9\n", stderr: "" })],
+    ] },
+  );
+  assert.equal(result.status, "released");
+  assert.equal(result.tag, "v0.12.10", "发布 tag 必须是分支名推导的目标版本");
+  assert.equal(st.pnpmVersionCalls, 2, "旧 tag 存在不得误判 bump 已完成——必须执行 bump");
+  assert.ok(st.verifyScripts.some((s) => s.includes("'v0.12.10'")), "verify 对目标版本 tag 复核");
+  assert.ok(st.stateWrites.length === 1 && st.stateWrites[0].includes("'v0.12.10'"), "merge-state 终态落目标版本");
+});
+
+test("dev 命名幂等预检命中：远端已有目标版本 tag → 跳过 bump 直达 verify（中断续跑形态）", async () => {
+  const { result, st } = await runChain(
+    { worktree: DEV_WT, squashMode: "skip" },
+    { version: "0.12.9", overrides: [
+      [(s) => s.includes("'ls-remote'"), () => ({ exitCode: 0, stdout: "abc123def\trefs/tags/v0.12.10\n", stderr: "" })],
+    ] },
+  );
+  assert.equal(result.status, "released");
+  assert.equal(result.tag, "v0.12.10");
+  assert.equal(st.pnpmVersionCalls, 0, "目标版本 tag 已在远端 = bump+push 已完成，不得再 bump");
+  assert.ok(st.verifyScripts.some((s) => s.includes("'v0.12.10'")), "verify 锚目标版本而非 main 当前版本");
+});
+
+test("dev 命名 double-bump 前置拦截：main 已等于目标版本且远端无 tag → 停回不 bump", async () => {
+  const { result, st } = await runChain(
+    { worktree: DEV_WT, squashMode: "skip" },
+    { version: "0.12.10", overrides: [
+      [(s) => s.includes("'ls-remote'"), () => ({ exitCode: 0, stdout: "", stderr: "" })],
+    ] },
+  );
+  assert.equal(result.status, "failed");
+  assert.equal(result.failedStep, "bump-release");
+  assert.match(result.error, /版本中间态/);
+  assert.match(result.error, /double-bump/);
+  assert.equal(st.pnpmVersionCalls, 0, "前置拦截必须发生在 pnpm version 之前");
+});
+
+test("dev 命名 bump 后校验：bump 结果 ≠ 目标版本 → 停回不 commit/tag/push", async () => {
+  const { result, st } = await runChain(
+    { worktree: DEV_WT, squashMode: "skip" },
+    { version: "0.12.9", overrides: (st) => [
+      [(s) => s.includes("'ls-remote'"), () => ({ exitCode: 0, stdout: "", stderr: "" })],
+      // 模拟 double-bump / 手动改版本污染：patch 后 main 版本落到 0.12.11 ≠ 目标 0.12.10
+      [(s) => s.includes("pnpm version patch"), (s) => {
+        st.pnpmVersionCalls++;
+        if (!s.includes("apps/electron")) st.version = "0.12.11";
+        return { exitCode: 0, stdout: "", stderr: "" };
+      }],
+    ] },
+  );
+  assert.equal(result.status, "failed");
+  assert.equal(result.failedStep, "bump-release");
+  assert.match(result.error, /bump 结果 ≠ 目标版本/);
+  assert.match(result.error, /0\.12\.11/);
+  assert.equal(st.pnpmVersionCalls, 2);
+});
+
+test("dev 命名 + skipSteps 含 init → 目标版本锚点不依赖 init 产物，发布主链锚定 0.12.10", async () => {
+  const { result, st } = await runChain(
+    { worktree: DEV_WT, squashMode: "skip", skipSteps: ["init"], prNumber: 71 },
+    { version: "0.12.9", overrides: [
+      [(s) => s.includes("'ls-remote'") && s.includes("v0.12.10"), () => ({ exitCode: 0, stdout: "", stderr: "" })],
+      [(s) => s.includes("'ls-remote'"), () => ({ exitCode: 0, stdout: "abc123def\trefs/tags/v0.12.9\n", stderr: "" })],
+    ] },
+  );
+  // init 被人工接管跳过 → 清理门禁 needs-human（设计内：环节未在流程内验证，禁止带病
+  // 清理）；断言重点 = init 缺席下 bump/notes/verify/gitcode 全链仍锚定目标版本跑完
+  assert.equal(result.status, "needs-human");
+  assert.equal(result.stages.init, "skipped");
+  assert.equal(result.stages.cleanup, "needs-human");
+  assert.equal(result.tag, "v0.12.10");
+  assert.equal(st.pnpmVersionCalls, 2);
+  assert.ok(st.stateWrites.length === 1 && st.stateWrites[0].includes("'v0.12.10'"), "verify 通过后 merge-state 落目标版本");
 });
 
 // ══ no-runs 放行补验三态 ══

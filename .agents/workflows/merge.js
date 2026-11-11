@@ -459,7 +459,7 @@ async function obsCloseExecution(outcome) {
     await obsEmit("execution", null, "end", outcome);
 }
 const OBS_LAYER_SHA256 = "176ef8dfb549fe0d7e783035a9ede755e1d95b973914324958b6d13935244ee3"; // 构建注入：公共观测层安装位源（~/.agents/scripts/workflow-observability.shared.ts）内容 sha256，setup 首步现算比对
-const SKILL_VERSION = "merge-15ec5d22"; // 构建注入：观测层 skill_version 溯源常量（taiji 无 frontmatter 版本源，取 shared 源 hash 前 8 位）
+const SKILL_VERSION = "merge-7149dd01"; // 构建注入：观测层 skill_version 溯源常量（taiji 无 frontmatter 版本源，取 shared 源 hash 前 8 位）
 // merge.shared.ts — merge skill 九阶段合并发布流程的单 workflow 公共体（zcode+pi 双平台单源）
 // 本文件由 .agents/workflows/scripts/build-workflows.mjs 拼进两壳生成产物：
 //   zcode = .agents/workflows/merge.dwf.ts；pi = .agents/workflows/merge.js（勿手工维护产物）。
@@ -481,8 +481,14 @@ const SKILL_VERSION = "merge-15ec5d22"; // 构建注入：观测层 skill_versio
 //
 // 安全与恢复：
 // - 失败终态一律 return 不 throw（throw 的 errored run 不可 resume 且丢结构化 error）。
-// - 阶段 4 幂等预检：远端 tag 已存在 = bump+push 已完成 → 直接进 verify（非幂等段可重跑）；
-//   基线查询失败（ls-remote/gh）停回，不在基线未知时盲目续跑。
+// - 阶段 4 幂等预检（DEV-WORKFLOW §4 目标版本锚定）：dev-* 命名 worktree（目录名=dev
+//   分支名=发布目标版本）以「远端目标版本 tag 是否存在」判 bump+push 是否已完成——存在 =
+//   已完成 → 直接进 verify（非幂等段可重跑），不存在 = 执行 bump 到目标版本。判定不得用
+//   main 当前版本的 tag：标准流程下 main 恒为上一发布版本（DEV-WORKFLOW §4「dev 期间
+//   package.json 不动」），其 tag 恒在远端，拿它判「已完成」常态性误判（v0.12.10 首跑
+//   事故根因：11 阶段对旧 tag v0.12.9 伪 pass）。基线查询失败（ls-remote）停回，不在
+//   基线未知时盲目续跑；非 dev-* 命名无推导依据，回退 main 当前版本形态（历史行为）并
+//   WARN 披露。notes/verify/gitcode 同锚目标版本——skipSteps 跳过 init/bump 不丢锚点。
 // - 阶段 3 no-runs 放行补验：wait-for-ci 以「未检测到 CI workflow」放行时 gh run list
 //   独立复核——真无 run 披露放行；查到 run（放行判定与事实不符）停回。
 // - 状态机闭环：verify 通过后落 .merge-state 终态 released（对齐人工路径 release 阶段，
@@ -615,6 +621,19 @@ const branchName = featWt.slice(featWt.lastIndexOf("/") + 1);
 const mainWt = `${wsRoot}/main`;
 if (branchName === "main") {
     await failObs("invalid-args", "worktree 参数不得指向 main worktree——阶段 7 会删除传入的 worktree，传 main 会删主工作区（SKILL 阶段 0 关键警告）");
+}
+// 发布目标版本锚点（DEV-WORKFLOW §4：dev 分支的版本号只体现在分支名——dev 期间
+// package.json 保持上一发布版本，发布时 bump 到目标版本）：worktree 目录名 dev-X.Y.Z
+// → 目标版本 X.Y.Z。dev-* 命名下幂等预检 / bump / notes / verify / gitcode 的版本判定
+// 全部锚定目标版本——main 当前版本在标准流程下恒等于上一发布版本（其 tag 必然已在
+// 远端），不能作为「本轮 bump 已完成」的判定依据。推导只依赖目录名，不依赖 init 产物
+// 与 merge-state——skipSteps 含 init / bump-release 重发时锚点不丢。非 dev-* 命名无
+// 推导依据，回退 main 当前版本形态（历史行为），WARN 披露该场景无伪 pass 防线
+const devVerMatch = /^dev-(\d+\.\d+\.\d+)$/.exec(branchName);
+const targetVersion = devVerMatch !== null ? devVerMatch[1] : "";
+const targetTag = `v${targetVersion}`;
+if (targetVersion === "") {
+    log(`[version-anchor] WARN: worktree 目录名 ${branchName} 非 dev-X.Y.Z 命名，无法推导发布目标版本——幂等预检与 bump 回退 main 当前版本形态（DEV-WORKFLOW §4 命名约定外场景，无伪 pass 防线）`);
 }
 const squashModeRaw = typeof args.squashMode === "string" ? args.squashMode.trim() : "";
 const squashMode = squashModeRaw === "" ? "auto" : squashModeRaw;
@@ -932,6 +951,13 @@ async function readVersion() {
         throw new Escalation(`无法读取 main worktree 版本号（${mainWt}/package.json）：${r.stderr.trim()}。恢复：确认 main worktree 存在且 package.json 完好后重新发起`);
     return v;
 }
+// 发布版本锚点取值（bump-release 之后各 step 统一入口）：dev-* 命名恒用目标版本——
+// bump 前读 main 当前版本会把发布链后半段（notes/verify/gitcode）锚到上一发布版本，
+// 对旧 tag 空转伪 pass（v0.12.10 事故形态）；非 dev 命名回退 main 当前版本（历史行为）。
+// 目标版本从 worktree 目录名推导，skipSteps 跳过 init/bump 不影响
+async function releaseVersion() {
+    return targetVersion !== "" ? targetVersion : await readVersion();
+}
 // ══ 15 step 主流程 ══
 phase("发起前检查");
 await step("preflight", async () => {
@@ -1147,23 +1173,38 @@ await step("e2e-select", async () => {
 phase("版本 bump 与发布");
 await step("bump-release", async () => {
     const v0 = await readVersion();
-    // 幂等预检：远端 tag 已存在 = bump+push 已完成（上次 run 在 verify 或之后中断）→ 直接 verify。
-    // 基线查询 fail-closed：任一通道查询失败都不许在基线未知时盲目续跑（apply/bump 非幂等，
-    // 盲跑会产生双 bump 污染 main 历史）；「release not found」= 仓库尚无任何正式 release
-    // （首次发布场景），属正常无基线——与 check-version-bump.sh 的同类语义一致
-    const remoteTag = await execCmd({ cwd: "main", argv: ["git", "ls-remote", "github", `refs/tags/v${v0}`], timeoutMs: 60_000 });
+    // 幂等预检目标：dev-* 命名锚定目标版本 tag（存在 = 本轮 bump+push 已完成——上次 run
+    // 在 verify 或之后中断的续跑形态 → 直接 verify；不存在 = 执行 bump 到目标版本）；非
+    // dev-* 命名回退历史形态（main 当前版本 tag——该判定在标准流程恒真、常态性误跳 bump，
+    // 仅限参数区已 WARN 披露的命名约定外场景）。
+    // 基线查询 fail-closed：查询失败不许在基线未知时盲目续跑（apply/bump 非幂等，盲跑会
+    // 产生双 bump 污染 main 历史）
+    const anchorTag = targetVersion !== "" ? targetTag : `v${v0}`;
+    const remoteTag = await execCmd({ cwd: "main", argv: ["git", "ls-remote", "github", `refs/tags/${anchorTag}`], timeoutMs: 60_000 });
     if (remoteTag.exitCode !== 0) {
-        throw new Escalation(`幂等预检：远端 tag 查询失败（git ls-remote），无法判定 bump+push 是否已完成：\n${tailLines(remoteTag.text, 10)}\n恢复：网络恢复后重跑本 step（自查：cd ${mainWt} && git ls-remote github refs/tags/v${v0}）`);
+        throw new Escalation(`幂等预检：远端 tag 查询失败（git ls-remote），无法判定 bump+push 是否已完成：\n${tailLines(remoteTag.text, 10)}\n恢复：网络恢复后重跑本 step（自查：cd ${mainWt} && git ls-remote github refs/tags/${anchorTag}）`);
     }
     const tagExists = remoteTag.text.trim() !== "";
     if (!tagExists) {
-        const latest = await execCmd({ cwd: "main", argv: ["gh", "release", "view", "--repo", "zhushanwen321/tai-ji", "--json", "tagName", "-q", ".tagName"], timeoutMs: 60_000 });
-        if (latest.exitCode !== 0 && !latest.text.includes("release not found")) {
-            throw new Escalation(`幂等预检：最新 release 基线查询失败（gh，网络/限流/登录态），无法判定版本中间态：\n${tailLines(latest.text, 10)}\n恢复：gh 恢复后重跑本 step（自查：cd ${mainWt} && gh release view --repo zhushanwen321/tai-ji --json tagName -q .tagName）`);
+        if (targetVersion !== "") {
+            // double-bump 前置拦截：main 已等于目标版本而远端无目标 tag = 上次 bump 到一半
+            // （commit 未 push / tag 未打）——再 patch 会跳到目标+1 污染历史，交人工判定
+            if (v0 === targetVersion) {
+                throw new Escalation(`版本中间态：main 当前版本已等于目标版本 ${targetVersion}，但远端无 ${targetTag} tag——上次 bump 可能 commit 未 push / tag 未打。禁止再 bump（会产生 double-bump 污染）。恢复：cd ${mainWt} && git log --oneline -3 && git status，人工判定补推或还原后重新发起`);
+            }
         }
-        const latestTag = latest.exitCode === 0 ? latest.text.trim() : "";
-        if (latestTag !== "" && latestTag !== `v${v0}`) {
-            throw new Escalation(`版本中间态：main 当前版本 ${v0} ≠ 最新正式 release ${latestTag}，且远端无 v${v0} tag——可能是上次 bump 到一半（commit 未 push / tag 未打）。禁止盲目续跑（apply/bump 非幂等）。恢复：cd ${mainWt} && git log --oneline -3 && git status，人工判定续跑或还原后重新发起`);
+        else {
+            // 历史形态中间态检查（非 dev 命名回退路径保持原语义）；「release not found」=
+            // 仓库尚无任何正式 release（首次发布场景），属正常无基线——与 check-version-bump.sh
+            // 的同类语义一致
+            const latest = await execCmd({ cwd: "main", argv: ["gh", "release", "view", "--repo", "zhushanwen321/tai-ji", "--json", "tagName", "-q", ".tagName"], timeoutMs: 60_000 });
+            if (latest.exitCode !== 0 && !latest.text.includes("release not found")) {
+                throw new Escalation(`幂等预检：最新 release 基线查询失败（gh，网络/限流/登录态），无法判定版本中间态：\n${tailLines(latest.text, 10)}\n恢复：gh 恢复后重跑本 step（自查：cd ${mainWt} && gh release view --repo zhushanwen321/tai-ji --json tagName -q .tagName）`);
+            }
+            const latestTag = latest.exitCode === 0 ? latest.text.trim() : "";
+            if (latestTag !== "" && latestTag !== `v${v0}`) {
+                throw new Escalation(`版本中间态：main 当前版本 ${v0} ≠ 最新正式 release ${latestTag}，且远端无 v${v0} tag——可能是上次 bump 到一半（commit 未 push / tag 未打）。禁止盲目续跑（apply/bump 非幂等）。恢复：cd ${mainWt} && git log --oneline -3 && git status，人工判定续跑或还原后重新发起`);
+            }
         }
         const br = await execCmd({ cwd: "main", argv: ["git", "branch", "--show-current"], timeoutMs: 60_000 });
         if (br.text.trim() !== "main") {
@@ -1179,8 +1220,17 @@ await step("bump-release", async () => {
         if (bumpApp.exitCode !== 0)
             throw new Escalation(`apps/electron 版本 bump 失败：\n${tailLines(bumpApp.text, 20)}`);
         const version = await readVersion();
-        if (version === v0)
-            throw new Escalation(`版本 bump 未生效（仍 ${v0}）——人工核查 pnpm version 输出`);
+        if (targetVersion !== "") {
+            // bump 结果必须精确等于目标版本（=分支名推导）：不等 = double-bump / 手动改版本等
+            // 中间态，tag/release 一旦锚错版本整条发布链污染——commit/tag/push 前 fail-fast
+            if (version !== targetVersion) {
+                throw new Escalation(`bump 结果 ≠ 目标版本：main ${v0} → bump 后 ${version}，期望 ${targetVersion}（分支名 dev-${targetVersion} 推导）。禁止 commit/tag/push（防 double-bump 污染）。恢复：cd ${mainWt} && git checkout -- package.json apps/electron/package.json && git status 核对后重新发起`);
+            }
+        }
+        else {
+            if (version === v0)
+                throw new Escalation(`版本 bump 未生效（仍 ${v0}）——人工核查 pnpm version 输出`);
+        }
         // 原子提交：两个 package.json 同一 commit（--no-git-tag-version 的意义所在）
         const add = await execCmd({ cwd: "main", rawScript: "git add package.json apps/electron/package.json", timeoutMs: 60_000 });
         if (add.exitCode !== 0)
@@ -1212,8 +1262,8 @@ await step("bump-release", async () => {
         log(`bump+push 完成：${releaseTag}`);
     }
     else {
-        releaseTag = `v${v0}`;
-        log(`[bump-release] 幂等预检命中：远端已存在 ${releaseTag}——bump+push 已完成，直接进 verify`);
+        releaseTag = anchorTag;
+        log(`[bump-release] 幂等预检命中：远端已存在 ${releaseTag}${targetVersion !== "" ? `（目标版本=分支名 dev-${targetVersion}）` : ""}——bump+push 已完成，直接进 verify`);
     }
     await runRouted({
         routeKey: "verify-release", cwd: "main",
@@ -1259,7 +1309,7 @@ await step("npm-detect", async () => {
 });
 phase("Release Notes 撰写");
 await step("notes", async () => {
-    const version = await readVersion();
+    const version = await releaseVersion();
     const tag = `v${version}`;
     // 素材机器取数（agent 只写文）：上一版本 tag（--match 过滤 npm-* tag 空间污染）+ commit 清单
     const prev = await execCmd({ cwd: "main", argv: ["git", "describe", "--tags", "--match", "v[0-9]*", "--abbrev=0", `${tag}^`], timeoutMs: 60_000 });
@@ -1333,7 +1383,7 @@ ${commits}
 });
 phase("交付物复核");
 await step("verify", async () => {
-    const version = await readVersion();
+    const version = await releaseVersion();
     // 阶段 6 独立复核（SKILL 硬门禁「不可跳过」——bump-release 内已验一次，此处为终局确认）
     await runRouted({
         routeKey: "verify-release", cwd: "main",
@@ -1360,7 +1410,7 @@ await step("verify", async () => {
 });
 phase("GitCode 镜像同步");
 await step("gitcode-sync", async () => {
-    const version = await readVersion();
+    const version = await releaseVersion();
     const tag = `v${version}`;
     // GITCODE_TOKEN 经 zsh 交互式配置链可见（v0.11.4 实测：直接 bash 载荷 exit 2 无日志）
     const syncArgv = (sub) => ["zsh", "-ic", `cd ${shq(mainWt)} && GITCODE_REPO=qq_18433817/tai-ji node scripts/gitcode-release-sync.mjs ${sub}`];
