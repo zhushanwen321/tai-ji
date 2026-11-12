@@ -690,7 +690,7 @@ ${commits.join("\n")}
     failure = {
       step: "squash-check",
       status: "needs-squash-approval",
-      error: `commit 整理计划待批准（${verdict.reason}）：\n${verdict.plan}\n\n批准路径：主 agent 按 SKILL 阶段 0.5 人工段执行整理（路线 A reset --soft / 路线 B 非交互 rebase，机械校验全过），完成后重新发起本 workflow 并在 args.skipSteps 中含 squash-check`,
+      error: `commit 整理计划待批准（${verdict.reason}）：\n${verdict.plan}\n\n批准路径：主 agent 按 SKILL 阶段 0.5 人工段执行整理（路线 A reset --soft / 路线 B 非交互 rebase，机械校验全过），完成后重新发起本 workflow 并在 args.skipSteps 中含 squash-check。rebase 实操提示：① 起点用清单标注的整理起点（最后 merge commit 之后），不要改用 merge-base——git rebase -i 会线性化区间内 merge commit，破坏合并历史；② 非交互 todo 行形态为 pick <hash> # <subject>（hash 后带 # 注释符），sed 改写模式须兼容`,
     };
     stages["squash-check"] = "needs-approval";
     return;

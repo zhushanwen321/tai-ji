@@ -459,7 +459,7 @@ async function obsCloseExecution(outcome) {
     await obsEmit("execution", null, "end", outcome);
 }
 const OBS_LAYER_SHA256 = "176ef8dfb549fe0d7e783035a9ede755e1d95b973914324958b6d13935244ee3"; // 构建注入：公共观测层安装位源（~/.agents/scripts/workflow-observability.shared.ts）内容 sha256，setup 首步现算比对
-const SKILL_VERSION = "merge-7149dd01"; // 构建注入：观测层 skill_version 溯源常量（taiji 无 frontmatter 版本源，取 shared 源 hash 前 8 位）
+const SKILL_VERSION = "merge-79ba4c95"; // 构建注入：观测层 skill_version 溯源常量（taiji 无 frontmatter 版本源，取 shared 源 hash 前 8 位）
 // merge.shared.ts — merge skill 九阶段合并发布流程的单 workflow 公共体（zcode+pi 双平台单源）
 // 本文件由 .agents/workflows/scripts/build-workflows.mjs 拼进两壳生成产物：
 //   zcode = .agents/workflows/merge.dwf.ts；pi = .agents/workflows/merge.js（勿手工维护产物）。
@@ -1081,7 +1081,7 @@ ${commits.join("\n")}
         failure = {
             step: "squash-check",
             status: "needs-squash-approval",
-            error: `commit 整理计划待批准（${verdict.reason}）：\n${verdict.plan}\n\n批准路径：主 agent 按 SKILL 阶段 0.5 人工段执行整理（路线 A reset --soft / 路线 B 非交互 rebase，机械校验全过），完成后重新发起本 workflow 并在 args.skipSteps 中含 squash-check`,
+            error: `commit 整理计划待批准（${verdict.reason}）：\n${verdict.plan}\n\n批准路径：主 agent 按 SKILL 阶段 0.5 人工段执行整理（路线 A reset --soft / 路线 B 非交互 rebase，机械校验全过），完成后重新发起本 workflow 并在 args.skipSteps 中含 squash-check。rebase 实操提示：① 起点用清单标注的整理起点（最后 merge commit 之后），不要改用 merge-base——git rebase -i 会线性化区间内 merge commit，破坏合并历史；② 非交互 todo 行形态为 pick <hash> # <subject>（hash 后带 # 注释符），sed 改写模式须兼容`,
         };
         stages["squash-check"] = "needs-approval";
         return;

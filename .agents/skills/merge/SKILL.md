@@ -25,7 +25,7 @@ description: >-
 
 ## 执行路径
 
-**zcode 环境首选路径 2（workflow）**：CreateWorkflow `path` 指向 `<workspace>/.agents/workflows/merge.dwf.ts`，`args.worktree` = feature worktree 绝对路径（必传，不得为 main）。workflow 承载阶段 0→7 的 Electron 发布主链（15 step 串行，全部命令经 `world.run` + worktree 包装执行，不依赖会话 bash）；可选参数 `prNumber`（缺省由 init.sh 取）、`squashMode`（auto|skip）、`maxRescueRounds`（默认 2）、`skipSteps`（人工接管逃生舱）。
+**zcode 环境首选路径 2（workflow）**：CreateWorkflow `path` 指向 `<workspace>/.agents/workflows/merge.dwf.ts`，`args.worktree` = feature worktree 绝对路径（必传，不得为 main）。workflow 承载阶段 0→7 的 Electron 发布主链（15 step 串行，全部命令经 `world.run` + worktree 包装执行，不依赖会话 bash）；可选参数 `prNumber`（缺省由 init.sh 取）、`squashMode`（auto|skip）、`maxRescueRounds`（默认 2）、`skipSteps`（人工接管逃生舱）。发布链建议同时传观测两参 `taskId=merge` + `executionId=v<目标版本>-<YYYYMMDD-HHmmss>`（字母数字开头，仅字母/数字/`-`/`.`）——15 个 step 的边界事件落 `~/.agents/skill-data/workflow-observability/merge/<executionId>.jsonl`，供事后发布审计对账（含 failed 事故回溯）；缺省不传零行为差异。
 
 - 异常处置三层：脚本内既有韧性 → `FAILURE_ROUTES` 机器分类路由（幂等网络类 retry、CI 等待超时 retry-extended、白名单 rescue、其余 escalate 停回）→ rescue 兜底 agent（仅阶段 1 本地验证 / 3.5 版本校验 / 4 bump commit 三个白名单场景，修复后由流程重跑原脚本判定，不信 agent 自报成功）
 - 阶段语义与本 SKILL 的差异（已裁决）：0.5 = agent 判定无需整理放行、需整理停回出计划（`needs-squash-approval`，主 agent 按阶段 0.5 人工段整理后重新发起 + skipSteps 含 squash-check）；3.7 = 只圈清单不跑真机（同本 SKILL 默认语义）；4N = 检测到 extensions 改动时主链继续、`npmHandoff` 移交主 agent 人工段；5 = agent 撰写双语 notes + `gh release edit`（即本 SKILL 阶段 5 建议的手写覆盖路径）；6.5.2 的「人工过目 git diff」= diff 记入终态报告披露
